@@ -38,3 +38,7 @@ func ResourceCounts(pod *corev1.Pod, resourceName corev1.ResourceName) (counts [
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
     return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
+
+func IdPodCreated(pod *corev1.Pod) bool {
+    return len(pod.Status.ContainerStatuses) > 0
+}

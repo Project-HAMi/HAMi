@@ -79,7 +79,7 @@ func (m *PodManager) getCandidatePods(resourceCounts []int) (*corev1.Pod, error)
     var resPod *corev1.Pod
     assignedTime := int64(0)
     for _, pod := range pods {
-        if len(pod.Status.ContainerStatuses) > 0 {
+        if k8sutil.IdPodCreated(pod) {
             continue
         }
         assgnedTimeStr, ok := pod.Annotations[util.AssignedTimeAnnotations]

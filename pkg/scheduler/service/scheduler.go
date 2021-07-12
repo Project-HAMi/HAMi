@@ -49,7 +49,8 @@ type DeviceUsage struct {
 type DeviceUsageList []*DeviceUsage
 
 type NodeUsage struct {
-    devices DeviceUsageList
+    devices  DeviceUsageList
+    creating bool
 }
 
 type NodeScore struct {
@@ -61,10 +62,11 @@ type NodeScore struct {
 type NodeScoreList []*NodeScore
 
 type podInfo struct {
-    name    string
-    uid     k8stypes.UID
-    nodeID  string
-    devices [][]string
+    name     string
+    uid      k8stypes.UID
+    nodeID   string
+    devices  [][]string
+    creating bool
 }
 
 type Scheduler struct {
@@ -103,7 +105,7 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-    return l[i].count - l[i].used < l[j].count - l[j].used
+    return l[i].count-l[i].used < l[j].count-l[j].used
 }
 
 func (l NodeScoreList) Len() int {
@@ -136,6 +138,7 @@ func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices [][]string) {
     }
     pi.nodeID = nodeID
     pi.devices = devices
+    pi.creating = !k8sutil.IdPodCreated(pod)
 }
 
 func (s *Scheduler) delPod(pod *corev1.Pod) {
@@ -259,6 +262,9 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
         if !ok {
             continue
         }
+        if p.creating {
+            node.creating = true
+        }
         for _, ds := range p.devices {
             for _, deviceID := range ds {
                 for _, d := range node.devices {
@@ -276,6 +282,9 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
 func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, error) {
     res := make(NodeScoreList, 0, len(*nodes))
     for nodeID, node := range *nodes {
+        if node.creating {
+            continue
+        }
         dn := len(node.devices)
         score := NodeScore{nodeID: nodeID, score: 0}
         for _, n := range counts {
