@@ -22,9 +22,11 @@ import (
     "fmt"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     k8stypes "k8s.io/apimachinery/pkg/types"
+    "k8s.io/client-go/tools/cache"
     "sort"
     "strconv"
     "strings"
+    "sync"
     "time"
 
     "4pd.io/k8s-vgpu/pkg/k8sutil"
@@ -58,13 +60,22 @@ type NodeScore struct {
 
 type NodeScoreList []*NodeScore
 
+type podInfo struct {
+    name    string
+    uid     k8stypes.UID
+    nodeID  string
+    devices [][]string
+}
+
 type Scheduler struct {
     //nodes map[string]NodeUsage
     //mutex sync.Mutex
+    pods  map[k8stypes.UID]*podInfo
+    mutex sync.Mutex
 
     stopCh     chan struct{}
     kubeClient kubernetes.Interface
-    podLister  listerscorev1.PodLister
+    //podLister  listerscorev1.PodLister
     nodeLister listerscorev1.NodeLister
 
     deviceService *DeviceService
@@ -72,7 +83,7 @@ type Scheduler struct {
 
 func NewScheduler(deviceService *DeviceService) *Scheduler {
     return &Scheduler{
-        stopCh: make(chan struct{}),
+        stopCh:        make(chan struct{}),
         deviceService: deviceService,
     }
 }
@@ -92,7 +103,7 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-    return l[i].used < l[j].used
+    return l[i].count - l[i].used < l[j].count - l[j].used
 }
 
 func (l NodeScoreList) Len() int {
@@ -111,13 +122,85 @@ func (l NodeScoreList) Less(i, j int) bool {
 //    return s.name.String()
 //}
 
+func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices [][]string) {
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+    if k8sutil.IsPodInTerminatedState(pod) {
+        delete(s.pods, pod.UID)
+        return
+    }
+    pi, ok := s.pods[pod.UID]
+    if !ok {
+        pi = &podInfo{name: pod.Name, uid: pod.UID}
+        s.pods[pod.UID] = pi
+    }
+    pi.nodeID = nodeID
+    pi.devices = devices
+}
+
+func (s *Scheduler) delPod(pod *corev1.Pod) {
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+    delete(s.pods, pod.UID)
+}
+
+func (s *Scheduler) onAddPod(pod *corev1.Pod) {
+    nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+    if !ok {
+        return
+    }
+    ids, ok := pod.Annotations[util.AssignedIDsAnnotations]
+    if !ok {
+        return
+    }
+    var devices [][]string
+    for _, c := range strings.Split(ids, ";") {
+        devices = append(devices, strings.Split(c, ","))
+    }
+    s.addPod(pod, nodeID, devices)
+}
+
+func (s *Scheduler) onDelPod(pod *corev1.Pod) {
+    _, ok := pod.Annotations[util.AssignedNodeAnnotations]
+    if !ok {
+        return
+    }
+    s.delPod(pod)
+}
+
 func (s *Scheduler) Start() {
     kubeClient, err := k8sutil.NewClient()
     check(err)
     s.kubeClient = kubeClient
     informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
-    s.podLister = informerFactory.Core().V1().Pods().Lister()
-    s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+    //s.podLister = informerFactory.Core().V1().Pods().Lister()
+    //s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+    s.pods = make(map[k8stypes.UID]*podInfo)
+    informer := informerFactory.Core().V1().Pods().Informer()
+    informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+        AddFunc: func(obj interface{}) {
+            if pod, ok := obj.(*corev1.Pod); ok {
+                s.onAddPod(pod)
+            } else {
+                klog.Errorf("unknown obj")
+            }
+        },
+        UpdateFunc: func(oldObj, newObj interface{}) {
+            if pod, ok := newObj.(*corev1.Pod); ok {
+                s.onAddPod(pod)
+            } else {
+                klog.Errorf("unknown obj")
+            }
+        },
+        DeleteFunc: func(obj interface{}) {
+            if pod, ok := obj.(*corev1.Pod); ok {
+                s.onDelPod(pod)
+            } else {
+                klog.Errorf("unknown obj")
+            }
+        },
+    })
 
     informerFactory.Start(s.stopCh)
     informerFactory.WaitForCacheSync(s.stopCh)
@@ -154,30 +237,30 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
         }
         nodeMap[nodeID] = nodeInfo
     }
-    podList, err := s.kubeClient.CoreV1().Pods(corev1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
-    //pods, err := s.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
-    if err != nil {
-        klog.Errorf("list pods error, %v", err)
-        return nil, err
-    }
-    for _, p := range podList.Items {
-        if k8sutil.IsPodInTerminatedState(&p) {
-            continue
-        }
-        nodeID, ok := p.ObjectMeta.Annotations[util.AssignedNodeAnnotations]
+    //podList, err := s.kubeClient.CoreV1().Pods(corev1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+    ////pods, err := s.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
+    //if err != nil {
+    //    klog.Errorf("list pods error, %v", err)
+    //    return nil, err
+    //}
+    for _, p := range s.pods {
+        //if k8sutil.IsPodInTerminatedState(p) {
+        //    continue
+        //}
+        //nodeID, ok := p.Annotations[util.AssignedNodeAnnotations]
+        //if !ok {
+        //    continue
+        //}
+        //ids, ok := p.Annotations[util.AssignedIDsAnnotations]
+        //if !ok {
+        //    continue
+        //}
+        node, ok := nodeMap[p.nodeID]
         if !ok {
             continue
         }
-        ids, ok := p.ObjectMeta.Annotations[util.AssignedIDsAnnotations]
-        if !ok {
-            continue
-        }
-        node, ok := nodeMap[nodeID]
-        if !ok {
-            continue
-        }
-        for _, cs := range strings.Split(ids, ";") {
-            for _, deviceID := range strings.Split(cs, ",") {
+        for _, ds := range p.devices {
+            for _, deviceID := range ds {
                 for _, d := range node.devices {
                     if d.id == deviceID {
                         d.used++
@@ -185,7 +268,7 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
                 }
             }
         }
-        klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, nodeID, ids)
+        klog.V(5).Infof("usage: pod %v assigned %v %v", p.name, p.nodeID, p.devices)
     }
     return &nodeMap, nil
 }
@@ -200,10 +283,13 @@ func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, erro
                 break
             }
             sort.Sort(node.devices)
+            if node.devices[dn-n].count <= node.devices[dn-n].used {
+                continue
+            }
             total := int32(0)
             free := int32(0)
             devs := make([]string, 0, n)
-            for i := len(node.devices)-1; i >= 0; i-- {
+            for i := len(node.devices) - 1; i >= 0; i-- {
                 total += node.devices[i].count
                 free += node.devices[i].count - node.devices[i].used
                 if n > 0 {
@@ -273,6 +359,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
     if err != nil {
         return nil, err
     }
+    s.addPod(args.Pod, m.nodeID, m.devices)
     res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.nodeID}}
     return &res, nil
 }
