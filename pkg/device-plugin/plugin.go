@@ -268,6 +268,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
         reqCounts = append(reqCounts, len(req.DevicesIDs))
     }
     klog.V(3).Infof("allocate for device %v", reqCounts)
+
     pod, err := m.podManager.getCandidatePods(reqCounts)
     if err != nil {
         klog.Errorf("get candidate pod error, %v", err)
@@ -275,7 +276,9 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
     }
     if pod == nil {
         err = fmt.Errorf("not find candidate pod")
-        return nil, err
+        klog.Errorf("%v", err)
+        //return nil, err
+        return &pluginapi.AllocateResponse{}, nil
     }
     klog.V(3).Infof("get candidate pod %v", pod.Name)
     devRequests := getDevices(pod)

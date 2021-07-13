@@ -25,7 +25,7 @@ import (
 
 const (
     //ResourceName = "nvidia.com/gpu"
-    ResourceName = "4pd.io/vgpu"
+    //ResourceName = "4pd.io/vgpu"
     AssignedTimeAnnotations = "4pd.io/vgpu-time"
     AssignedIDsAnnotations = "4pd.io/vgpu-ids"
     AssignedNodeAnnotations = "4pd.io/vgpu-node"
@@ -33,8 +33,13 @@ const (
     TimeLayout = "ANSIC"
 )
 
+var (
+    ResourceName string
+)
+
 func GlobalFlagSet() *flag.FlagSet {
     fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+    fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
     klog.InitFlags(fs)
     return fs
 }

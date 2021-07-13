@@ -135,9 +135,9 @@ func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices [][]string) {
     if !ok {
         pi = &podInfo{name: pod.Name, uid: pod.UID}
         s.pods[pod.UID] = pi
+        pi.nodeID = nodeID
+        pi.devices = devices
     }
-    pi.nodeID = nodeID
-    pi.devices = devices
     pi.creating = !k8sutil.IdPodCreated(pod)
 }
 
@@ -320,7 +320,7 @@ func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, erro
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
     klog.Infof("schedule pod %v[%v]", args.Pod.Name, args.Pod.UID)
-    counts := k8sutil.ResourceCounts(args.Pod, util.ResourceName)
+    counts := k8sutil.ResourceCounts(args.Pod, corev1.ResourceName(util.ResourceName))
     if len(counts) < 1 {
         klog.Infof("pod %v not find resource %v", args.Pod.Name, util.ResourceName)
         return &extenderv1.ExtenderFilterResult{
@@ -345,6 +345,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
         return nil, err
     }
     if len(*nodeScores) == 0 {
+        klog.Infof("no suitable vgpu node")
         failedNodes := make(map[string]string)
         for _, v := range *args.NodeNames {
             failedNodes[v] = fmt.Sprintf("no suitable vgpu")
@@ -364,11 +365,12 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
         strs = append(strs, strings.Join(v, ","))
     }
     annotations[util.AssignedIDsAnnotations] = strings.Join(strs, ";")
+    s.addPod(args.Pod, m.nodeID, m.devices)
     err = s.patchPodAnnotations(args.Pod, annotations)
     if err != nil {
+        s.delPod(args.Pod)
         return nil, err
     }
-    s.addPod(args.Pod, m.nodeID, m.devices)
     res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.nodeID}}
     return &res, nil
 }

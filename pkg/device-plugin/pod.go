@@ -20,10 +20,10 @@ import (
     "4pd.io/k8s-vgpu/pkg/device-plugin/config"
     "4pd.io/k8s-vgpu/pkg/k8sutil"
     "4pd.io/k8s-vgpu/pkg/util"
+    "context"
     corev1 "k8s.io/api/core/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     "k8s.io/apimachinery/pkg/fields"
-    "k8s.io/apimachinery/pkg/labels"
     "k8s.io/client-go/informers"
     "k8s.io/client-go/kubernetes"
     listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -72,13 +72,18 @@ func resourceEqual(a, b []int) bool {
 }
 
 func (m *PodManager) getCandidatePods(resourceCounts []int) (*corev1.Pod, error) {
-    pods, err := m.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
+    //pods, err := m.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
+    selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": config.NodeName, "status.phase": "Pending"})
+    pods, err := m.kubeClient.CoreV1().Pods(corev1.NamespaceAll).List(context.Background(), metav1.ListOptions{
+       FieldSelector:        selector.String(),
+    })
     if err != nil {
         return nil, err
     }
-    var resPod *corev1.Pod
+    var resPod *corev1.Pod = nil
     assignedTime := int64(0)
-    for _, pod := range pods {
+    for _, p := range pods.Items {
+        pod := &p
         if k8sutil.IdPodCreated(pod) {
             continue
         }
@@ -86,7 +91,7 @@ func (m *PodManager) getCandidatePods(resourceCounts []int) (*corev1.Pod, error)
         if !ok {
             continue
         }
-        counts := k8sutil.ResourceCounts(pod, util.ResourceName)
+        counts := k8sutil.ResourceCounts(pod, corev1.ResourceName(util.ResourceName))
         if !resourceEqual(counts, resourceCounts) {
             continue
         }
