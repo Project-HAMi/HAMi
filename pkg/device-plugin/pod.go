@@ -17,6 +17,7 @@
 package device_plugin
 
 import (
+    "4pd.io/k8s-vgpu/pkg/device-plugin/checkpoint"
     "4pd.io/k8s-vgpu/pkg/device-plugin/config"
     "4pd.io/k8s-vgpu/pkg/k8sutil"
     "4pd.io/k8s-vgpu/pkg/util"
@@ -24,19 +25,21 @@ import (
     corev1 "k8s.io/api/core/v1"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     "k8s.io/apimachinery/pkg/fields"
+    "k8s.io/apimachinery/pkg/labels"
+    k8stypes "k8s.io/apimachinery/pkg/types"
     "k8s.io/client-go/informers"
     "k8s.io/client-go/kubernetes"
     listerscorev1 "k8s.io/client-go/listers/core/v1"
     "k8s.io/klog/v2"
-    "strconv"
-    "strings"
     "time"
 )
 
 type PodManager struct {
     kubeClient kubernetes.Interface
     podLister  listerscorev1.PodLister
-    stopCh chan struct{}
+    stopCh     chan struct{}
+
+    cp *checkpoint.Checkpoint
 }
 
 func (m *PodManager) Start() {
@@ -44,7 +47,8 @@ func (m *PodManager) Start() {
     kubeClient, err := k8sutil.NewClient()
     check(err)
     m.kubeClient = kubeClient
-    selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": config.NodeName, "status.phase": "Pending"})
+    //selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": config.NodeName, "status.phase": "Pending"})
+    selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": config.NodeName})
     informerFactory := informers.NewSharedInformerFactoryWithOptions(
         m.kubeClient,
         time.Hour*1,
@@ -53,68 +57,142 @@ func (m *PodManager) Start() {
         }))
     m.podLister = informerFactory.Core().V1().Pods().Lister()
     informerFactory.Start(m.stopCh)
+    m.cp, err = checkpoint.NewCheckpoint()
+    check(err)
 }
 
 func (m *PodManager) Stop() {
     close(m.stopCh)
+    m.cp = nil
 }
 
-func resourceEqual(a, b []int) bool {
-    if len(a) != len(b) {
-        return false
-    }
-    for i := 0; i < len(a); i++ {
-        if a[i] != b[i] {
-            return false
-        }
-    }
-    return true
-}
+//func resourceEqual(a, b []int) bool {
+//    if len(a) != len(b) {
+//        return false
+//    }
+//    for i := 0; i < len(a); i++ {
+//        if a[i] != b[i] {
+//            return false
+//        }
+//    }
+//    return true
+//}
 
-func (m *PodManager) getCandidatePods(resourceCounts []int) (*corev1.Pod, error) {
+func (m *PodManager) getCandidatePods() ([]*corev1.Pod, error) {
     //pods, err := m.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
     selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": config.NodeName, "status.phase": "Pending"})
     pods, err := m.kubeClient.CoreV1().Pods(corev1.NamespaceAll).List(context.Background(), metav1.ListOptions{
-       FieldSelector:        selector.String(),
+        FieldSelector: selector.String(),
     })
     if err != nil {
         return nil, err
     }
-    var resPod *corev1.Pod = nil
-    assignedTime := int64(0)
-    for _, p := range pods.Items {
-        pod := &p
-        if k8sutil.IdPodCreated(pod) {
+
+    var pendingPods []*corev1.Pod
+    for _, pod := range pods.Items {
+        if k8sutil.AllContainersCreated(&pod) {
             continue
         }
-        assgnedTimeStr, ok := pod.Annotations[util.AssignedTimeAnnotations]
+        _, ok := pod.Annotations[util.AssignedTimeAnnotations]
         if !ok {
             continue
         }
-        counts := k8sutil.ResourceCounts(pod, corev1.ResourceName(util.ResourceName))
-        if !resourceEqual(counts, resourceCounts) {
-            continue
-        }
-        t, err := strconv.ParseInt(assgnedTimeStr, 10, 64)
-        if err != nil {
-            klog.Errorf("parse assigned time error, %v", assgnedTimeStr)
-            t = time.Now().Unix()
-        }
-        klog.V(3).Infof("candidate pod %v", pod.Name)
-        if resPod != nil && assignedTime < t {
-            continue
-        }
-        assignedTime = t
-        resPod = pod
+        pendingPods = append(pendingPods, pod.DeepCopy())
     }
-    return resPod, nil
+    if len(pendingPods) > 1 {
+        klog.Warningf("pending pods > 1")
+    } else if len(pendingPods) == 0 {
+        klog.Errorf("not found any pending pod")
+        return nil, nil
+    }
+    return pendingPods, nil
 }
 
-func getDevices(pod *corev1.Pod) [][]string {
-    var res [][]string
-    devStr := pod.Annotations[util.AssignedIDsAnnotations]
-    for _, v := range strings.Split(devStr, ";") {
-        res = append(res, strings.Split(v, ","))
+func (m *PodManager) getDevices(resourceNums []int) ([][]string, error) {
+    pending, err := m.getCandidatePods()
+    if err != nil {
+        return nil, err
     }
-    return res
+    cps, err := m.cp.GetCheckpoint()
+    if err != nil {
+        return nil, err
+    }
+    m.debugCheckpoint(cps)
+
+    for _, pod := range pending {
+        ids, ok := pod.Annotations[util.AssignedIDsAnnotations]
+        if !ok {
+            continue
+        }
+        pd := util.DecodePodDevices(ids)
+        if len(pd) != len(pod.Spec.Containers) {
+            klog.Errorf("pod %v/%v annotations mismatch", pod.Namespace, pod.Name)
+            continue
+        }
+        var unused []int
+        containers, assigned := cps[pod.UID]
+        for i, c := range pod.Spec.Containers {
+            if assigned {
+                _, ok := containers[c.Name]
+                if ok {
+                    // TODO: check pd[i] == xxx
+                    klog.Infof("container %v already assigned, skip", c.Name)
+                    continue
+                }
+            }
+            unused = append(unused, i)
+        }
+
+        var res [][]string
+        for _, n := range resourceNums {
+            for k, i := range unused {
+                if n == len(pd[i]) {
+                    res = append(res, pd[i])
+                    unused = append(unused[:k], unused[k+1:]...)
+                    break
+                }
+            }
+        }
+        if len(res) == len(resourceNums) {
+            return res, nil
+        }
+    }
+    return nil, nil
+}
+
+func (m *PodManager) debugCheckpoint(cps map[k8stypes.UID]map[string]util.ContainerDevices) {
+    if !util.DebugMode {
+        return
+    }
+    pods, _ := m.podLister.List(labels.Everything())
+    for _, pod := range pods {
+        podCP, ok := cps[pod.UID]
+        if !ok {
+            continue
+        }
+        ids, ok := pod.Annotations[util.AssignedIDsAnnotations]
+        if !ok {
+            continue
+        }
+        podDev := util.DecodePodDevices(ids)
+        if len(podDev) != len(pod.Spec.Containers) {
+            klog.Errorf("pod %v/%v annotations mismatch", pod.Namespace, pod.Name)
+            continue
+        }
+        for i := 0; i < len(podDev); i++ {
+            contDev, ok := podCP[pod.Spec.Containers[i].Name]
+            if !ok {
+                continue
+            }
+            if len(contDev) != len(podDev[i]) {
+                klog.Errorf("pod %v/%v container %v mismatch", pod.Namespace, pod.Name, pod.Spec.Containers[i].Name)
+                continue
+            }
+            for j := 0; j < len(contDev); j++ {
+                if contDev[j] != podDev[i][j] {
+                    klog.Errorf("pod %v/%v container %v mismatch", pod.Namespace, pod.Name, pod.Spec.Containers[i].Name)
+                }
+            }
+        }
+    }
 }

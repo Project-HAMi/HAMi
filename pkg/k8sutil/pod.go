@@ -20,15 +20,16 @@ import (
     corev1 "k8s.io/api/core/v1"
 )
 
-func ResourceCounts(pod *corev1.Pod, resourceName corev1.ResourceName) (counts []int) {
-    for _, c := range pod.Spec.Containers {
-        v, ok := c.Resources.Limits[resourceName]
+func ResourceNums(pod *corev1.Pod, resourceName corev1.ResourceName) (counts []int) {
+    counts = make([]int, len(pod.Spec.Containers))
+    for i := 0; i < len(pod.Spec.Containers); i++ {
+        v, ok := pod.Spec.Containers[i].Resources.Limits[resourceName]
         if !ok {
-            v, ok = c.Resources.Requests[resourceName]
+            v, ok = pod.Spec.Containers[i].Resources.Requests[resourceName]
         }
         if ok {
             if n, ok := v.AsInt64(); ok {
-                counts = append(counts, int(n))
+                counts[i] = int(n)
             }
         }
     }
@@ -39,6 +40,6 @@ func IsPodInTerminatedState(pod *corev1.Pod) bool {
     return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 
-func IdPodCreated(pod *corev1.Pod) bool {
-    return len(pod.Status.ContainerStatuses) > 0
+func AllContainersCreated(pod *corev1.Pod) bool {
+    return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }

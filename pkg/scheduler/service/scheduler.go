@@ -22,10 +22,10 @@ import (
     "fmt"
     metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
     k8stypes "k8s.io/apimachinery/pkg/types"
+    "k8s.io/apimachinery/pkg/util/wait"
     "k8s.io/client-go/tools/cache"
     "sort"
     "strconv"
-    "strings"
     "sync"
     "time"
 
@@ -49,14 +49,16 @@ type DeviceUsage struct {
 type DeviceUsageList []*DeviceUsage
 
 type NodeUsage struct {
-    devices  DeviceUsageList
-    creating bool
+    devices     DeviceUsageList
+    pendingPods []k8stypes.UID
 }
 
 type NodeScore struct {
     nodeID  string
-    devices [][]string
+    devices util.PodDevices
     score   float32
+    pendingPods []k8stypes.UID
+    //pending bool
 }
 
 type NodeScoreList []*NodeScore
@@ -65,13 +67,11 @@ type podInfo struct {
     name     string
     uid      k8stypes.UID
     nodeID   string
-    devices  [][]string
+    devices  util.PodDevices
     creating bool
 }
 
 type Scheduler struct {
-    //nodes map[string]NodeUsage
-    //mutex sync.Mutex
     pods  map[k8stypes.UID]*podInfo
     mutex sync.Mutex
 
@@ -120,17 +120,9 @@ func (l NodeScoreList) Less(i, j int) bool {
     return l[i].score < l[j].score
 }
 
-//func (s *Scheduler) Name() string {
-//    return s.name.String()
-//}
-
-func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices [][]string) {
+func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevices) {
     s.mutex.Lock()
     defer s.mutex.Unlock()
-    if k8sutil.IsPodInTerminatedState(pod) {
-        delete(s.pods, pod.UID)
-        return
-    }
     pi, ok := s.pods[pod.UID]
     if !ok {
         pi = &podInfo{name: pod.Name, uid: pod.UID}
@@ -138,7 +130,7 @@ func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices [][]string) {
         pi.nodeID = nodeID
         pi.devices = devices
     }
-    pi.creating = !k8sutil.IdPodCreated(pod)
+    pi.creating = !k8sutil.AllContainersCreated(pod)
 }
 
 func (s *Scheduler) delPod(pod *corev1.Pod) {
@@ -147,7 +139,12 @@ func (s *Scheduler) delPod(pod *corev1.Pod) {
     delete(s.pods, pod.UID)
 }
 
-func (s *Scheduler) onAddPod(pod *corev1.Pod) {
+func (s *Scheduler) onAddPod(obj interface{}) {
+    pod, ok := obj.(*corev1.Pod)
+    if !ok {
+        klog.Errorf("unknown add object type")
+        return
+    }
     nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
     if !ok {
         return
@@ -156,15 +153,25 @@ func (s *Scheduler) onAddPod(pod *corev1.Pod) {
     if !ok {
         return
     }
-    var devices [][]string
-    for _, c := range strings.Split(ids, ";") {
-        devices = append(devices, strings.Split(c, ","))
+    if k8sutil.IsPodInTerminatedState(pod) {
+        s.delPod(pod)
+        return
     }
-    s.addPod(pod, nodeID, devices)
+    podDev := util.DecodePodDevices(ids)
+    s.addPod(pod, nodeID, podDev)
 }
 
-func (s *Scheduler) onDelPod(pod *corev1.Pod) {
-    _, ok := pod.Annotations[util.AssignedNodeAnnotations]
+func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
+    s.onAddPod(newObj)
+}
+
+func (s *Scheduler) onDelPod(obj interface{}) {
+    pod, ok := obj.(*corev1.Pod)
+    if !ok {
+        klog.Errorf("unknown add object type")
+        return
+    }
+    _, ok = pod.Annotations[util.AssignedNodeAnnotations]
     if !ok {
         return
     }
@@ -177,32 +184,14 @@ func (s *Scheduler) Start() {
     s.kubeClient = kubeClient
     informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
     //s.podLister = informerFactory.Core().V1().Pods().Lister()
-    //s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+    s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 
     s.pods = make(map[k8stypes.UID]*podInfo)
     informer := informerFactory.Core().V1().Pods().Informer()
     informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-        AddFunc: func(obj interface{}) {
-            if pod, ok := obj.(*corev1.Pod); ok {
-                s.onAddPod(pod)
-            } else {
-                klog.Errorf("unknown obj")
-            }
-        },
-        UpdateFunc: func(oldObj, newObj interface{}) {
-            if pod, ok := newObj.(*corev1.Pod); ok {
-                s.onAddPod(pod)
-            } else {
-                klog.Errorf("unknown obj")
-            }
-        },
-        DeleteFunc: func(obj interface{}) {
-            if pod, ok := obj.(*corev1.Pod); ok {
-                s.onDelPod(pod)
-            } else {
-                klog.Errorf("unknown obj")
-            }
-        },
+        AddFunc:    s.onAddPod,
+        UpdateFunc: s.onUpdatePod,
+        DeleteFunc: s.onDelPod,
     })
 
     informerFactory.Start(s.stopCh)
@@ -220,7 +209,7 @@ func (s *Scheduler) assignedNode(pod *corev1.Pod) string {
     return ""
 }
 
-func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
+func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
     nodeMap := make(map[string]*NodeUsage)
     for _, nodeID := range *nodes {
         node, err := s.deviceService.GetNode(nodeID)
@@ -240,30 +229,13 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
         }
         nodeMap[nodeID] = nodeInfo
     }
-    //podList, err := s.kubeClient.CoreV1().Pods(corev1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
-    ////pods, err := s.podLister.Pods(corev1.NamespaceAll).List(labels.Everything())
-    //if err != nil {
-    //    klog.Errorf("list pods error, %v", err)
-    //    return nil, err
-    //}
     for _, p := range s.pods {
-        //if k8sutil.IsPodInTerminatedState(p) {
-        //    continue
-        //}
-        //nodeID, ok := p.Annotations[util.AssignedNodeAnnotations]
-        //if !ok {
-        //    continue
-        //}
-        //ids, ok := p.Annotations[util.AssignedIDsAnnotations]
-        //if !ok {
-        //    continue
-        //}
         node, ok := nodeMap[p.nodeID]
         if !ok {
             continue
         }
         if p.creating {
-            node.creating = true
+            node.pendingPods = append(node.pendingPods, p.uid)
         }
         for _, ds := range p.devices {
             for _, deviceID := range ds {
@@ -279,15 +251,19 @@ func (s *Scheduler) getUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
     return &nodeMap, nil
 }
 
-func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, error) {
+func calcScore(nodes *map[string]*NodeUsage, nums []int) (*NodeScoreList, error) {
     res := make(NodeScoreList, 0, len(*nodes))
     for nodeID, node := range *nodes {
-        if node.creating {
-            continue
-        }
+        //if len(node.pendingPods) > 0 {
+        //    continue
+        //}
         dn := len(node.devices)
-        score := NodeScore{nodeID: nodeID, score: 0}
-        for _, n := range counts {
+        score := NodeScore{nodeID: nodeID, score: 0, pendingPods: node.pendingPods}
+        for _, n := range nums {
+            if n == 0 {
+                score.devices = append(score.devices, []string{})
+                continue
+            }
             if n > dn {
                 break
             }
@@ -311,7 +287,7 @@ func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, erro
             score.score += float32(free) / float32(total)
             score.score += float32(dn - n)
         }
-        if len(score.devices) == len(counts) {
+        if len(score.devices) == len(nums) {
             res = append(res, &score)
         }
     }
@@ -319,9 +295,13 @@ func calcScore(nodes *map[string]*NodeUsage, counts []int) (*NodeScoreList, erro
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
-    klog.Infof("schedule pod %v[%v]", args.Pod.Name, args.Pod.UID)
-    counts := k8sutil.ResourceCounts(args.Pod, corev1.ResourceName(util.ResourceName))
-    if len(counts) < 1 {
+    klog.Infof("schedule pod %v/%v[%v]", args.Pod.Namespace, args.Pod.Name, args.Pod.UID)
+    nums := k8sutil.ResourceNums(args.Pod, corev1.ResourceName(util.ResourceName))
+    total := int(0)
+    for _, n := range nums {
+        total += n
+    }
+    if total == 1 {
         klog.Infof("pod %v not find resource %v", args.Pod.Name, util.ResourceName)
         return &extenderv1.ExtenderFilterResult{
             NodeNames:   args.NodeNames,
@@ -329,18 +309,12 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
             Error:       "",
         }, nil
     }
-    //pod, err := s.podLister.Pods(args.Pod.Namespace).Get(args.Pod.Name)
-    //if err != nil {
-    //    return nil, err
-    //}
-    //if pod.UID != args.Pod.UID {
-    //    return nil, fmt.Errorf("pod %v uid not match", pod.Name)
-    //}
-    nodeUsage, err := s.getUsage(args.NodeNames)
+    s.delPod(args.Pod)
+    nodeUsage, err := s.getNodesUsage(args.NodeNames)
     if err != nil {
         return nil, err
     }
-    nodeScores, err := calcScore(nodeUsage, counts)
+    nodeScores, err := calcScore(nodeUsage, nums)
     if err != nil {
         return nil, err
     }
@@ -356,15 +330,27 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
     }
     sort.Sort(nodeScores)
     m := (*nodeScores)[len(*nodeScores)-1]
-    klog.Infof("schedule %v to %v %v", args.Pod.Name, m.nodeID, m.devices)
+    err = wait.PollImmediate(time.Microsecond * 500, time.Second * 3, func() (bool, error) {
+        return s.isPendingDone(m.pendingPods), nil
+    })
+    if err != nil {
+        m = nil
+        for i := len(*nodeScores) - 1; i >=0; i-- {
+            if s.isPendingDone((*nodeScores)[i].pendingPods) {
+                m = (*nodeScores)[i]
+                break
+            }
+        }
+        if m == nil {
+            return nil, err
+        }
+    }
+
+    klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.nodeID, m.devices)
     annotations := make(map[string]string)
     annotations[util.AssignedNodeAnnotations] = m.nodeID
     annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
-    strs := make([]string, 0, len(m.devices))
-    for _, v := range m.devices {
-        strs = append(strs, strings.Join(v, ","))
-    }
-    annotations[util.AssignedIDsAnnotations] = strings.Join(strs, ";")
+    annotations[util.AssignedIDsAnnotations] = util.EncodePodDevices(m.devices)
     s.addPod(args.Pod, m.nodeID, m.devices)
     err = s.patchPodAnnotations(args.Pod, annotations)
     if err != nil {
@@ -397,4 +383,19 @@ func (s *Scheduler) patchPodAnnotations(pod *corev1.Pod, annotations map[string]
         klog.Infof("patch pod %v failed, %v", pod.Name, err)
     }
     return err
+}
+
+func (s *Scheduler) isPendingDone(uids []k8stypes.UID) bool {
+    s.mutex.Lock()
+    defer s.mutex.Unlock()
+    for _, uid := range uids {
+        pod, ok := s.pods[uid]
+        if !ok {
+            continue
+        }
+        if pod.creating {
+            return false
+        }
+    }
+    return true
 }

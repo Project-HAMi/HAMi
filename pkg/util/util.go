@@ -19,27 +19,46 @@ package util
 import (
     "flag"
     "os"
+    "strings"
 
     "k8s.io/klog/v2"
-)
-
-const (
-    //ResourceName = "nvidia.com/gpu"
-    //ResourceName = "4pd.io/vgpu"
-    AssignedTimeAnnotations = "4pd.io/vgpu-time"
-    AssignedIDsAnnotations = "4pd.io/vgpu-ids"
-    AssignedNodeAnnotations = "4pd.io/vgpu-node"
-
-    TimeLayout = "ANSIC"
-)
-
-var (
-    ResourceName string
 )
 
 func GlobalFlagSet() *flag.FlagSet {
     fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
     fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
+    fs.BoolVar(&DebugMode, "debug", false, "debug mode")
     klog.InitFlags(fs)
     return fs
+}
+
+func EncodeContainerDevices(cd ContainerDevices) string {
+    return strings.Join(cd, ",")
+}
+
+func EncodePodDevices(pd PodDevices) string {
+    var ss []string
+    for _, cd := range pd {
+        ss = append(ss, EncodeContainerDevices(cd))
+    }
+    return strings.Join(ss, ";")
+}
+
+func DecodeContainerDevices(str string) ContainerDevices {
+    if len(str) == 0 {
+        return ContainerDevices{}
+    }
+    return strings.Split(str, ",")
+}
+
+func DecodePodDevices(str string) PodDevices {
+    if len(str) == 0 {
+        return PodDevices{}
+    }
+    var pd PodDevices
+    for _, s := range strings.Split(str, ";") {
+        cd := DecodeContainerDevices(s)
+        pd = append(pd, cd)
+    }
+    return pd
 }

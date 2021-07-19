@@ -18,6 +18,7 @@ package device_plugin
 
 import (
     "4pd.io/k8s-vgpu/pkg/device-plugin/config"
+    "4pd.io/k8s-vgpu/pkg/util"
     "fmt"
     "k8s.io/apimachinery/pkg/util/uuid"
     "k8s.io/klog/v2"
@@ -92,6 +93,7 @@ func NewNvidiaDevicePlugin(resourceName string, resourceManager ResourceManager,
 }
 
 func (m *NvidiaDevicePlugin) initialize() {
+    var err error
     m.cachedDevices = m.Devices()
     m.server = grpc.NewServer([]grpc.ServerOption{}...)
     m.health = make(chan *Device)
@@ -99,6 +101,7 @@ func (m *NvidiaDevicePlugin) initialize() {
     m.changed = make(chan struct{})
     m.devRegister = NewDeviceRegister(m.changed, m.ResourceManager)
     m.podManager = &PodManager{}
+    check(err)
 }
 
 func (m *NvidiaDevicePlugin) cleanup() {
@@ -263,25 +266,22 @@ func (m *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *plug
 
 // Allocate which return list of devices.
 func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-    reqCounts := make([]int, 0, len(reqs.ContainerRequests))
+    reqNums := make([]int, 0, len(reqs.ContainerRequests))
     for _, req := range reqs.ContainerRequests {
-        reqCounts = append(reqCounts, len(req.DevicesIDs))
+        reqNums = append(reqNums, len(req.DevicesIDs))
     }
-    klog.V(3).Infof("allocate for device %v", reqCounts)
+    klog.V(3).Infof("allocate for device %v", reqNums)
 
-    pod, err := m.podManager.getCandidatePods(reqCounts)
+    devRequests, err := m.podManager.getDevices(reqNums)
     if err != nil {
-        klog.Errorf("get candidate pod error, %v", err)
+        klog.Errorf("get device request error, %v", err)
         return nil, err
     }
-    if pod == nil {
-        err = fmt.Errorf("not find candidate pod")
+    if devRequests == nil {
+        err = fmt.Errorf("get device request empty")
         klog.Errorf("%v", err)
-        //return nil, err
-        return &pluginapi.AllocateResponse{}, nil
+        return nil, err
     }
-    klog.V(3).Infof("get candidate pod %v", pod.Name)
-    devRequests := getDevices(pod)
     responses := pluginapi.AllocateResponse{}
     for _, reqDeviceIDs := range devRequests {
         devs, err := m.getDevices(reqDeviceIDs)
@@ -298,11 +298,12 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
             response.Envs[limitKey] = fmt.Sprintf("%vm", config.DeviceMemoryScaling*float64(dev.Memory)/float64(config.DeviceSplitCount))
             //mapEnvs = append(mapEnvs, fmt.Sprintf("%v:%v", i, vd.dev.ID))
         }
+        response.Annotations = map[string]string{util.AssignedIDsAnnotations: util.EncodeContainerDevices(reqDeviceIDs)}
         response.Envs["CUDA_DEVICE_SM_LIMIT"] = strconv.Itoa(int(100 * config.DeviceCoresScaling / float64(config.DeviceSplitCount)))
         //response.Envs["NVIDIA_DEVICE_MAP"] = strings.Join(mapEnvs, " ")
         response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/%v.cache", uuid.NewUUID())
         if config.DeviceMemoryScaling > 1 {
-           response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+            response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
         }
         response.Mounts = append(response.Mounts,
             &pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
@@ -311,7 +312,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
                 HostPath: "/usr/local/vgpu/ld.so.preload", ReadOnly: true})
         responses.ContainerResponses = append(responses.ContainerResponses, &response)
     }
-
+    time.Sleep(time.Second * 20)
     return &responses, nil
 }
 
