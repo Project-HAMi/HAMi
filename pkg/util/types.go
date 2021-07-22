@@ -23,6 +23,9 @@ const (
     AssignedIDsAnnotations = "4pd.io/vgpu-ids"
     AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
+    AssignedUID = "VGPU_4PD_UID"
+    VGPUSocket = "VGPU_4PD_SOCKET"
+
     TimeLayout = "ANSIC"
 )
 

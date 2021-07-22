@@ -72,3 +72,13 @@ func PredicateRoute(s *service.Scheduler) httprouter.Handle {
         }
     }
 }
+
+func WebHookRoute() httprouter.Handle {
+    h, err := service.NewWebHook()
+    if err != nil {
+        klog.Fatalf("new web hook error, %v", err)
+    }
+    return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+        h.ServeHTTP(w, r)
+    }
+}

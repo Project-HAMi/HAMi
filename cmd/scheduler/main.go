@@ -33,6 +33,8 @@ import (
 //var version string
 
 var (
+    tlsKeyFile string
+    tlsCertFile string
     rootCmd = &cobra.Command{
         Use:   "scheduler",
         Short: "kubernetes vgpu scheduler",
@@ -42,8 +44,13 @@ var (
     }
 )
 func init() {
-    rootCmd.Flags().StringVar(&config.HttpBind, "http_bind", "127.0.0.1:8080", "http server bind address")
+    rootCmd.Flags().SortFlags = false
+    rootCmd.PersistentFlags().SortFlags = false
+
     rootCmd.Flags().StringVar(&config.GrpcBind, "grpc_bind", "127.0.0.1:9090", "grpc server bind address")
+    rootCmd.Flags().StringVar(&config.HttpBind, "http_bind", "127.0.0.1:8080", "http server bind address")
+    rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
+    rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 
     rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
 }
@@ -69,9 +76,16 @@ func start()  {
     // start http server
     router := httprouter.New()
     router.POST("/filter", routes.PredicateRoute(scheduler))
+    router.POST("/webhook", routes.WebHookRoute())
     klog.Info("listen on ", config.HttpBind)
-    if err := http.ListenAndServe(config.HttpBind, router); err != nil {
-        klog.Fatal("Listen and Serve error, ", err)
+    if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
+        if err := http.ListenAndServe(config.HttpBind, router); err != nil {
+            klog.Fatal("Listen and Serve error, ", err)
+        }
+    } else {
+        if err := http.ListenAndServeTLS(config.HttpBind, tlsCertFile, tlsKeyFile, router); err != nil {
+            klog.Fatal("Listen and Serve error, ", err)
+        }
     }
 }
 

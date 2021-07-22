@@ -1,0 +1,17 @@
+syntax = "proto3";
+package api;
+
+service VGPURuntime {
+  rpc VGPUGetDevice (VGPURuntimeRequest) returns (VGPURuntimeReply) {}
+}
+
+message VGPURuntimeRequest {
+  string ctruuid = 1;
+}
+
+message VGPURuntimeReply {
+  string devlist = 1;
+  string pod_namespace = 2;
+  string pod_id = 3;
+  string ctr_name = 4;
+}

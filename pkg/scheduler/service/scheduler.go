@@ -20,10 +20,6 @@ import (
     "context"
     "encoding/json"
     "fmt"
-    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-    k8stypes "k8s.io/apimachinery/pkg/types"
-    "k8s.io/apimachinery/pkg/util/wait"
-    "k8s.io/client-go/tools/cache"
     "sort"
     "strconv"
     "sync"
@@ -32,9 +28,12 @@ import (
     "4pd.io/k8s-vgpu/pkg/k8sutil"
     "4pd.io/k8s-vgpu/pkg/util"
     corev1 "k8s.io/api/core/v1"
+    metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    k8stypes "k8s.io/apimachinery/pkg/types"
     "k8s.io/client-go/informers"
     "k8s.io/client-go/kubernetes"
     listerscorev1 "k8s.io/client-go/listers/core/v1"
+    "k8s.io/client-go/tools/cache"
     "k8s.io/klog/v2"
     extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
@@ -50,15 +49,12 @@ type DeviceUsageList []*DeviceUsage
 
 type NodeUsage struct {
     devices     DeviceUsageList
-    pendingPods []k8stypes.UID
 }
 
 type NodeScore struct {
-    nodeID  string
-    devices util.PodDevices
-    score   float32
-    pendingPods []k8stypes.UID
-    //pending bool
+    nodeID      string
+    devices     util.PodDevices
+    score       float32
 }
 
 type NodeScoreList []*NodeScore
@@ -68,7 +64,6 @@ type podInfo struct {
     uid      k8stypes.UID
     nodeID   string
     devices  util.PodDevices
-    creating bool
 }
 
 type Scheduler struct {
@@ -84,10 +79,11 @@ type Scheduler struct {
 }
 
 func NewScheduler(deviceService *DeviceService) *Scheduler {
-    return &Scheduler{
+    s := &Scheduler{
         stopCh:        make(chan struct{}),
         deviceService: deviceService,
     }
+    return s
 }
 
 func check(err error) {
@@ -130,7 +126,6 @@ func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevic
         pi.nodeID = nodeID
         pi.devices = devices
     }
-    pi.creating = !k8sutil.AllContainersCreated(pod)
 }
 
 func (s *Scheduler) delPod(pod *corev1.Pod) {
@@ -234,9 +229,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, erro
         if !ok {
             continue
         }
-        if p.creating {
-            node.pendingPods = append(node.pendingPods, p.uid)
-        }
         for _, ds := range p.devices {
             for _, deviceID := range ds {
                 for _, d := range node.devices {
@@ -258,7 +250,7 @@ func calcScore(nodes *map[string]*NodeUsage, nums []int) (*NodeScoreList, error)
         //    continue
         //}
         dn := len(node.devices)
-        score := NodeScore{nodeID: nodeID, score: 0, pendingPods: node.pendingPods}
+        score := NodeScore{nodeID: nodeID, score: 0}
         for _, n := range nums {
             if n == 0 {
                 score.devices = append(score.devices, []string{})
@@ -330,22 +322,6 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
     }
     sort.Sort(nodeScores)
     m := (*nodeScores)[len(*nodeScores)-1]
-    err = wait.PollImmediate(time.Microsecond * 500, time.Second * 3, func() (bool, error) {
-        return s.isPendingDone(m.pendingPods), nil
-    })
-    if err != nil {
-        m = nil
-        for i := len(*nodeScores) - 1; i >=0; i-- {
-            if s.isPendingDone((*nodeScores)[i].pendingPods) {
-                m = (*nodeScores)[i]
-                break
-            }
-        }
-        if m == nil {
-            return nil, err
-        }
-    }
-
     klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.nodeID, m.devices)
     annotations := make(map[string]string)
     annotations[util.AssignedNodeAnnotations] = m.nodeID
@@ -383,19 +359,4 @@ func (s *Scheduler) patchPodAnnotations(pod *corev1.Pod, annotations map[string]
         klog.Infof("patch pod %v failed, %v", pod.Name, err)
     }
     return err
-}
-
-func (s *Scheduler) isPendingDone(uids []k8stypes.UID) bool {
-    s.mutex.Lock()
-    defer s.mutex.Unlock()
-    for _, uid := range uids {
-        pod, ok := s.pods[uid]
-        if !ok {
-            continue
-        }
-        if pod.creating {
-            return false
-        }
-    }
-    return true
 }

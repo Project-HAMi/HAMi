@@ -6,18 +6,13 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.2.1
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52
 	github.com/fsnotify/fsnotify v1.4.9
-	github.com/golang/protobuf v1.4.3
-	github.com/google/go-cmp v0.5.5 // indirect
-	github.com/json-iterator/go v1.1.11 // indirect
-	github.com/julienschmidt/httprouter v1.2.0
+	github.com/golang/protobuf v1.5.2
+	github.com/julienschmidt/httprouter v1.3.0
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/viper v1.7.0
-	github.com/stretchr/testify v1.7.0 // indirect
-	golang.org/x/net v0.0.0-20210405180319-a5a99cb37ef4
-	golang.org/x/text v0.3.5 // indirect
+	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
 	google.golang.org/grpc v1.27.1
-	gopkg.in/yaml.v3 v3.0.0-20210107192922-496545a6307b // indirect
-	gotest.tools/v3 v3.0.3 // indirect
+	gotest.tools/v3 v3.0.3
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
 	k8s.io/client-go v0.21.2
@@ -25,6 +20,7 @@ require (
 	k8s.io/kube-scheduler v0.21.2
 	k8s.io/kubelet v0.21.2
 	k8s.io/kubernetes v1.21.2
+	sigs.k8s.io/controller-runtime v0.9.3
 )
 
 replace (
