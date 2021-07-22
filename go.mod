@@ -3,15 +3,15 @@ module 4pd.io/k8s-vgpu
 go 1.16
 
 require (
+	4pd.io/k8s-vgpu/pkg/api v0.0.0
 	github.com/NVIDIA/go-gpuallocator v0.2.1
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52
 	github.com/fsnotify/fsnotify v1.4.9
-	github.com/golang/protobuf v1.5.2
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/viper v1.7.0
 	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
-	google.golang.org/grpc v1.27.1
+	google.golang.org/grpc v1.39.0
 	gotest.tools/v3 v3.0.3
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2
@@ -24,6 +24,7 @@ require (
 )
 
 replace (
+	4pd.io/k8s-vgpu/pkg/api => ./pkg/api
 	k8s.io/api => k8s.io/api v0.21.2
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.21.2
 	k8s.io/apimachinery => k8s.io/apimachinery v0.21.2
