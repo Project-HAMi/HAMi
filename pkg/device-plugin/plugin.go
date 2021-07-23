@@ -24,9 +24,7 @@ import (
     "net"
     "os"
     "path"
-    "path/filepath"
     "strconv"
-    "strings"
     "time"
 
     "github.com/NVIDIA/go-gpuallocator/gpuallocator"
@@ -55,60 +53,52 @@ const (
 
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
-    ResourceManager
+    //ResourceManager
+    //resourceManager  *ResourceManager
+    deviceCache      *DeviceCache
     resourceName     string
-    deviceListEnvvar string
+    //deviceListEnvvar string
     allocatePolicy   gpuallocator.Policy
     socket           string
 
-    server        *grpc.Server
-    cachedDevices []*Device
-    health        chan *Device
-    stop          chan interface{}
-    changed       chan struct{}
-    devRegister   *DeviceRegister
+    server *grpc.Server
+    //cachedDevices []*Device
+    health chan *Device
+    stop   chan interface{}
+    //changed       chan struct{}
+    //devRegister   *DeviceRegister
     //podManager    *PodManager
 }
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
-func NewNvidiaDevicePlugin(resourceName string, resourceManager ResourceManager, deviceListEnvvar string, allocatePolicy gpuallocator.Policy, socket string) *NvidiaDevicePlugin {
+func NewNvidiaDevicePlugin(resourceName string, deviceCache *DeviceCache, allocatePolicy gpuallocator.Policy, socket string) *NvidiaDevicePlugin {
     return &NvidiaDevicePlugin{
-        ResourceManager:  resourceManager,
+        deviceCache:      deviceCache,
         resourceName:     resourceName,
-        deviceListEnvvar: deviceListEnvvar,
         allocatePolicy:   allocatePolicy,
         socket:           socket,
 
         // These will be reinitialized every
         // time the plugin server is restarted.
-        cachedDevices: nil,
-        server:        nil,
-        health:        nil,
-        stop:          nil,
-        changed:       nil,
-        devRegister:   nil,
+        server: nil,
+        health: nil,
+        stop:   nil,
     }
 }
 
 func (m *NvidiaDevicePlugin) initialize() {
     var err error
-    m.cachedDevices = m.Devices()
     m.server = grpc.NewServer([]grpc.ServerOption{}...)
     m.health = make(chan *Device)
     m.stop = make(chan interface{})
-    m.changed = make(chan struct{}, 1)
-    m.devRegister = NewDeviceRegister(m.changed, m.Devices)
-    //m.podManager = &PodManager{}
     check(err)
 }
 
 func (m *NvidiaDevicePlugin) cleanup() {
     close(m.stop)
-    m.cachedDevices = nil
     m.server = nil
     m.health = nil
     m.stop = nil
-    m.devRegister = nil
     //m.podManager = nil
 }
 
@@ -133,10 +123,7 @@ func (m *NvidiaDevicePlugin) Start() error {
     }
     log.Printf("Registered device plugin for '%s' with Kubelet", m.resourceName)
 
-    go m.CheckHealth(m.stop, m.cachedDevices, m.health)
-
-    //m.podManager.Start()
-    m.devRegister.Start()
+    m.deviceCache.AddNotifyChannel("plugin", m.health)
     return nil
 }
 
@@ -146,9 +133,8 @@ func (m *NvidiaDevicePlugin) Stop() error {
         return nil
     }
     log.Printf("Stopping to serve '%s' on %s", m.resourceName, m.socket)
-    m.devRegister.Stop()
+    m.deviceCache.RemoveNotifyChannel("plugin")
     m.server.Stop()
-    //m.podManager.Stop()
     if err := os.Remove(m.socket); err != nil && !os.IsNotExist(err) {
         return err
     }
@@ -242,17 +228,15 @@ func (m *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.
 // ListAndWatch lists devices and update that list according to the health status
 func (m *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
     _ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
-    m.changed <- struct{}{}
     for {
         select {
         case <-m.stop:
             return nil
         case d := <-m.health:
             // FIXME: there is no way to recover from the Unhealthy state.
-            d.Health = pluginapi.Unhealthy
+            //d.Health = pluginapi.Unhealthy
             log.Printf("'%s' device marked unhealthy: %s", m.resourceName, d.ID)
             _ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
-            m.changed <- struct{}{}
         }
     }
 }
@@ -338,32 +322,36 @@ func (m *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Duration) 
     return c, nil
 }
 
-func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
-    for _, d := range m.cachedDevices {
-        if d.ID == id {
-            return true
-        }
-    }
-    return false
+func (m *NvidiaDevicePlugin) Devices() []*Device {
+    return m.deviceCache.GetCache()
 }
 
-func (m *NvidiaDevicePlugin) getDevices(ids []string) ([]*Device, error) {
-    var res []*Device
-    for _, id := range ids {
-        found := false
-        for _, dev := range m.cachedDevices {
-            if id == dev.ID {
-                res = append(res, dev)
-                found = true
-                break
-            }
-        }
-        if !found {
-            return res, fmt.Errorf("device %v not found", id)
-        }
-    }
-    return res, nil
-}
+//func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
+//    for _, d := range m.deviceCache.GetCache() {
+//        if d.ID == id {
+//            return true
+//        }
+//    }
+//    return false
+//}
+//
+//func (m *NvidiaDevicePlugin) getDevices(ids []string) ([]*Device, error) {
+//    var res []*Device
+//    for _, id := range ids {
+//        found := false
+//        for _, dev := range m.deviceCache.GetCache() {
+//            if id == dev.ID {
+//                res = append(res, dev)
+//                found = true
+//                break
+//            }
+//        }
+//        if !found {
+//            return res, fmt.Errorf("device %v not found", id)
+//        }
+//    }
+//    return res, nil
+//}
 
 func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
     devices := m.Devices()
@@ -381,61 +369,61 @@ func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
     return res
 }
 
-func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
-    return map[string]string{
-        envvar: strings.Join(deviceIDs, ","),
-    }
-}
+//func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
+//    return map[string]string{
+//        envvar: strings.Join(deviceIDs, ","),
+//    }
+//}
+//
+//func (m *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
+//    var mounts []*pluginapi.Mount
+//
+//    for _, id := range deviceIDs {
+//        mount := &pluginapi.Mount{
+//            HostPath:      deviceListAsVolumeMountsHostPath,
+//            ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
+//        }
+//        mounts = append(mounts, mount)
+//    }
+//
+//    return mounts
+//}
 
-func (m *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
-    var mounts []*pluginapi.Mount
-
-    for _, id := range deviceIDs {
-        mount := &pluginapi.Mount{
-            HostPath:      deviceListAsVolumeMountsHostPath,
-            ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
-        }
-        mounts = append(mounts, mount)
-    }
-
-    return mounts
-}
-
-func (m *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, uuids []string) []*pluginapi.DeviceSpec {
-    var specs []*pluginapi.DeviceSpec
-
-    paths := []string{
-        "/dev/nvidiactl",
-        "/dev/nvidia-uvm",
-        "/dev/nvidia-uvm-tools",
-        "/dev/nvidia-modeset",
-    }
-
-    for _, p := range paths {
-        if _, err := os.Stat(p); err == nil {
-            spec := &pluginapi.DeviceSpec{
-                ContainerPath: p,
-                HostPath:      filepath.Join(driverRoot, p),
-                Permissions:   "rw",
-            }
-            specs = append(specs, spec)
-        }
-    }
-
-    for _, d := range m.cachedDevices {
-        for _, id := range uuids {
-            if d.ID == id {
-                for _, p := range d.Paths {
-                    spec := &pluginapi.DeviceSpec{
-                        ContainerPath: p,
-                        HostPath:      filepath.Join(driverRoot, p),
-                        Permissions:   "rw",
-                    }
-                    specs = append(specs, spec)
-                }
-            }
-        }
-    }
-
-    return specs
-}
+//func (m *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, uuids []string) []*pluginapi.DeviceSpec {
+//    var specs []*pluginapi.DeviceSpec
+//
+//    paths := []string{
+//        "/dev/nvidiactl",
+//        "/dev/nvidia-uvm",
+//        "/dev/nvidia-uvm-tools",
+//        "/dev/nvidia-modeset",
+//    }
+//
+//    for _, p := range paths {
+//        if _, err := os.Stat(p); err == nil {
+//            spec := &pluginapi.DeviceSpec{
+//                ContainerPath: p,
+//                HostPath:      filepath.Join(driverRoot, p),
+//                Permissions:   "rw",
+//            }
+//            specs = append(specs, spec)
+//        }
+//    }
+//
+//    for _, d := range m.deviceCache.GetCache() {
+//        for _, id := range uuids {
+//            if d.ID == id {
+//                for _, p := range d.Paths {
+//                    spec := &pluginapi.DeviceSpec{
+//                        ContainerPath: p,
+//                        HostPath:      filepath.Join(driverRoot, p),
+//                        Permissions:   "rw",
+//                    }
+//                    specs = append(specs, spec)
+//                }
+//            }
+//        }
+//    }
+//
+//    return specs
+//}

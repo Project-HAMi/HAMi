@@ -30,29 +30,30 @@ import (
 type DevListFunc func() []*Device
 
 type DeviceRegister struct {
-    changed     chan struct{}
-    stop        chan struct{}
-    devListFunc DevListFunc
+    deviceCache *DeviceCache
+    unhealthy   chan *Device
+    stopCh      chan struct{}
 }
 
-func NewDeviceRegister(changed chan struct{}, devListFunc DevListFunc) *DeviceRegister {
+func NewDeviceRegister(deviceCache *DeviceCache) *DeviceRegister {
     return &DeviceRegister{
-        changed: changed,
-        stop:    make(chan struct{}),
-        devListFunc: devListFunc,
+        deviceCache: deviceCache,
+        unhealthy:   make(chan *Device),
+        stopCh:      make(chan struct{}),
     }
 }
 
 func (r *DeviceRegister) Start() {
+    r.deviceCache.AddNotifyChannel("register", r.unhealthy)
     go r.WatchAndRegister()
 }
 
 func (r *DeviceRegister) Stop() {
-    close(r.stop)
+    close(r.stopCh)
 }
 
 func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
-    devs := r.devListFunc()
+    devs := r.deviceCache.GetCache()
     res := make([]*api.DeviceInfo, 0, len(devs))
     for _, dev := range devs {
         res = append(res, &api.DeviceInfo{
@@ -102,7 +103,7 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
     }()
     for {
         select {
-        case <-r.changed:
+        case <-r.unhealthy:
             err = register.Send(&api.RegisterRequest{
                 Node:    config.NodeName,
                 Devices: *r.apiDevices(),
@@ -115,7 +116,7 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
         case <-closeCh:
             klog.Infof("register server closed")
             return fmt.Errorf("register server closed")
-        case <-r.stop:
+        case <-r.stopCh:
             klog.Infof("register stoped")
             return nil
         }

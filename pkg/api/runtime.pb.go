@@ -74,14 +74,14 @@ func (m *GetDeviceRequest) GetCtrUUID() string {
 }
 
 type GetDeviceReply struct {
-	DevList              []string `protobuf:"bytes,1,rep,name=devList,proto3" json:"devList,omitempty"`
-	PodUID               string   `protobuf:"bytes,3,opt,name=podUID,proto3" json:"podUID,omitempty"`
-	CtrName              string   `protobuf:"bytes,4,opt,name=ctrName,proto3" json:"ctrName,omitempty"`
-	PodNamespace         string   `protobuf:"bytes,5,opt,name=podNamespace,proto3" json:"podNamespace,omitempty"`
-	PodName              string   `protobuf:"bytes,6,opt,name=podName,proto3" json:"podName,omitempty"`
-	XXX_NoUnkeyedLiteral struct{} `json:"-"`
-	XXX_unrecognized     []byte   `json:"-"`
-	XXX_sizecache        int32    `json:"-"`
+	Envs                 map[string]string `protobuf:"bytes,1,rep,name=envs,proto3" json:"envs,omitempty" protobuf_key:"bytes,1,opt,name=key,proto3" protobuf_val:"bytes,2,opt,name=value,proto3"`
+	PodUID               string            `protobuf:"bytes,3,opt,name=podUID,proto3" json:"podUID,omitempty"`
+	CtrName              string            `protobuf:"bytes,4,opt,name=ctrName,proto3" json:"ctrName,omitempty"`
+	PodNamespace         string            `protobuf:"bytes,5,opt,name=podNamespace,proto3" json:"podNamespace,omitempty"`
+	PodName              string            `protobuf:"bytes,6,opt,name=podName,proto3" json:"podName,omitempty"`
+	XXX_NoUnkeyedLiteral struct{}          `json:"-"`
+	XXX_unrecognized     []byte            `json:"-"`
+	XXX_sizecache        int32             `json:"-"`
 }
 
 func (m *GetDeviceReply) Reset()         { *m = GetDeviceReply{} }
@@ -117,9 +117,9 @@ func (m *GetDeviceReply) XXX_DiscardUnknown() {
 
 var xxx_messageInfo_GetDeviceReply proto.InternalMessageInfo
 
-func (m *GetDeviceReply) GetDevList() []string {
+func (m *GetDeviceReply) GetEnvs() map[string]string {
 	if m != nil {
-		return m.DevList
+		return m.Envs
 	}
 	return nil
 }
@@ -155,27 +155,32 @@ func (m *GetDeviceReply) GetPodName() string {
 func init() {
 	proto.RegisterType((*GetDeviceRequest)(nil), "api.GetDeviceRequest")
 	proto.RegisterType((*GetDeviceReply)(nil), "api.GetDeviceReply")
+	proto.RegisterMapType((map[string]string)(nil), "api.GetDeviceReply.EnvsEntry")
 }
 
 func init() { proto.RegisterFile("pkg/api/runtime.proto", fileDescriptor_1e1a7998f4db04c8) }
 
 var fileDescriptor_1e1a7998f4db04c8 = []byte{
-	// 239 bytes of a gzipped FileDescriptorProto
+	// 290 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0x12, 0x2d, 0xc8, 0x4e, 0xd7,
 	0x4f, 0x2c, 0xc8, 0xd4, 0x2f, 0x2a, 0xcd, 0x2b, 0xc9, 0xcc, 0x4d, 0xd5, 0x2b, 0x28, 0xca, 0x2f,
 	0xc9, 0x17, 0x62, 0x4e, 0x2c, 0xc8, 0x54, 0xd2, 0xe1, 0x12, 0x70, 0x4f, 0x2d, 0x71, 0x49, 0x2d,
 	0xcb, 0x4c, 0x4e, 0x0d, 0x4a, 0x2d, 0x2c, 0x4d, 0x2d, 0x2e, 0x11, 0x92, 0xe0, 0x62, 0x4f, 0x2e,
-	0x29, 0x0a, 0x0d, 0xf5, 0x74, 0x91, 0x60, 0x54, 0x60, 0xd4, 0xe0, 0x0c, 0x82, 0x71, 0x95, 0x66,
-	0x31, 0x72, 0xf1, 0x21, 0x29, 0x2f, 0xc8, 0xa9, 0x04, 0x29, 0x4e, 0x49, 0x2d, 0xf3, 0xc9, 0x2c,
-	0x2e, 0x91, 0x60, 0x54, 0x60, 0x06, 0x29, 0x86, 0x72, 0x85, 0xc4, 0xb8, 0xd8, 0x0a, 0xf2, 0x53,
-	0x40, 0xa6, 0x30, 0x83, 0x4d, 0x81, 0xf2, 0xa0, 0xc6, 0xfb, 0x25, 0xe6, 0xa6, 0x4a, 0xb0, 0xc0,
-	0x8d, 0x07, 0x71, 0x85, 0x94, 0xb8, 0x78, 0x0a, 0xf2, 0x53, 0x40, 0xcc, 0xe2, 0x82, 0xc4, 0xe4,
-	0x54, 0x09, 0x56, 0xb0, 0x34, 0x8a, 0x18, 0x48, 0x37, 0x94, 0x2f, 0xc1, 0x06, 0xd1, 0x0d, 0xe5,
-	0x1a, 0xf9, 0x73, 0x09, 0x85, 0xb9, 0x07, 0x84, 0x06, 0x41, 0x3c, 0x19, 0x9c, 0x5a, 0x04, 0x72,
-	0xa4, 0x90, 0x25, 0x17, 0x27, 0xdc, 0xc5, 0x42, 0xa2, 0x7a, 0x89, 0x05, 0x99, 0x7a, 0xe8, 0x1e,
-	0x96, 0x12, 0x46, 0x17, 0x2e, 0xc8, 0xa9, 0x54, 0x62, 0x70, 0x12, 0x38, 0xf1, 0x48, 0x8e, 0xf1,
-	0xc2, 0x23, 0x39, 0xc6, 0x07, 0x8f, 0xe4, 0x18, 0x67, 0x3c, 0x96, 0x63, 0x48, 0x62, 0x03, 0x87,
-	0x9c, 0x31, 0x20, 0x00, 0x00, 0xff, 0xff, 0xc5, 0x97, 0xe9, 0xf6, 0x52, 0x01, 0x00, 0x00,
+	0x29, 0x0a, 0x0d, 0xf5, 0x74, 0x91, 0x60, 0x54, 0x60, 0xd4, 0xe0, 0x0c, 0x82, 0x71, 0x95, 0xde,
+	0x30, 0x72, 0xf1, 0x21, 0x29, 0x2f, 0xc8, 0xa9, 0x14, 0x32, 0xe4, 0x62, 0x49, 0xcd, 0x2b, 0x2b,
+	0x96, 0x60, 0x54, 0x60, 0xd6, 0xe0, 0x36, 0x92, 0xd5, 0x4b, 0x2c, 0xc8, 0xd4, 0x43, 0x55, 0xa2,
+	0xe7, 0x9a, 0x57, 0x56, 0xec, 0x9a, 0x57, 0x52, 0x54, 0x19, 0x04, 0x56, 0x2a, 0x24, 0xc6, 0xc5,
+	0x56, 0x90, 0x9f, 0x02, 0x32, 0x9e, 0x19, 0x6c, 0x3c, 0x94, 0x07, 0xb5, 0xd7, 0x2f, 0x31, 0x37,
+	0x55, 0x82, 0x05, 0x6e, 0x2f, 0x88, 0x2b, 0xa4, 0xc4, 0xc5, 0x53, 0x90, 0x9f, 0x02, 0x62, 0x16,
+	0x17, 0x24, 0x26, 0xa7, 0x4a, 0xb0, 0x82, 0xa5, 0x51, 0xc4, 0x40, 0xba, 0xa1, 0x7c, 0x09, 0x36,
+	0x88, 0x6e, 0x28, 0x57, 0xca, 0x9c, 0x8b, 0x13, 0xee, 0x04, 0x21, 0x01, 0x2e, 0xe6, 0xec, 0xd4,
+	0x4a, 0xa8, 0xc7, 0x40, 0x4c, 0x21, 0x11, 0x2e, 0xd6, 0xb2, 0xc4, 0x9c, 0xd2, 0x54, 0x09, 0x26,
+	0xb0, 0x18, 0x84, 0x63, 0xc5, 0x64, 0xc1, 0x68, 0xe4, 0xcf, 0x25, 0x14, 0xe6, 0x1e, 0x10, 0x1a,
+	0x04, 0x09, 0xb6, 0xe0, 0xd4, 0x22, 0x90, 0x9f, 0x84, 0x2c, 0xb9, 0x38, 0xe1, 0x1e, 0x14, 0x12,
+	0x45, 0xf7, 0x30, 0x38, 0x08, 0xa5, 0x84, 0xb1, 0x84, 0x83, 0x12, 0x83, 0x93, 0xc0, 0x89, 0x47,
+	0x72, 0x8c, 0x17, 0x1e, 0xc9, 0x31, 0x3e, 0x78, 0x24, 0xc7, 0x38, 0xe3, 0xb1, 0x1c, 0x43, 0x12,
+	0x1b, 0x38, 0x2e, 0x8c, 0x01, 0x01, 0x00, 0x00, 0xff, 0xff, 0xee, 0xa1, 0xc2, 0xa4, 0xa4, 0x01,
+	0x00, 0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -344,11 +349,21 @@ func (m *GetDeviceReply) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.DevList) > 0 {
-		for iNdEx := len(m.DevList) - 1; iNdEx >= 0; iNdEx-- {
-			i -= len(m.DevList[iNdEx])
-			copy(dAtA[i:], m.DevList[iNdEx])
-			i = encodeVarintRuntime(dAtA, i, uint64(len(m.DevList[iNdEx])))
+	if len(m.Envs) > 0 {
+		for k := range m.Envs {
+			v := m.Envs[k]
+			baseI := i
+			i -= len(v)
+			copy(dAtA[i:], v)
+			i = encodeVarintRuntime(dAtA, i, uint64(len(v)))
+			i--
+			dAtA[i] = 0x12
+			i -= len(k)
+			copy(dAtA[i:], k)
+			i = encodeVarintRuntime(dAtA, i, uint64(len(k)))
+			i--
+			dAtA[i] = 0xa
+			i = encodeVarintRuntime(dAtA, i, uint64(baseI-i))
 			i--
 			dAtA[i] = 0xa
 		}
@@ -389,10 +404,12 @@ func (m *GetDeviceReply) Size() (n int) {
 	}
 	var l int
 	_ = l
-	if len(m.DevList) > 0 {
-		for _, s := range m.DevList {
-			l = len(s)
-			n += 1 + l + sovRuntime(uint64(l))
+	if len(m.Envs) > 0 {
+		for k, v := range m.Envs {
+			_ = k
+			_ = v
+			mapEntrySize := 1 + len(k) + sovRuntime(uint64(len(k))) + 1 + len(v) + sovRuntime(uint64(len(v)))
+			n += mapEntrySize + 1 + sovRuntime(uint64(mapEntrySize))
 		}
 	}
 	l = len(m.PodUID)
@@ -537,9 +554,9 @@ func (m *GetDeviceReply) Unmarshal(dAtA []byte) error {
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field DevList", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field Envs", wireType)
 			}
-			var stringLen uint64
+			var msglen int
 			for shift := uint(0); ; shift += 7 {
 				if shift >= 64 {
 					return ErrIntOverflowRuntime
@@ -549,23 +566,118 @@ func (m *GetDeviceReply) Unmarshal(dAtA []byte) error {
 				}
 				b := dAtA[iNdEx]
 				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
+				msglen |= int(b&0x7F) << shift
 				if b < 0x80 {
 					break
 				}
 			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
+			if msglen < 0 {
 				return ErrInvalidLengthRuntime
 			}
-			postIndex := iNdEx + intStringLen
+			postIndex := iNdEx + msglen
 			if postIndex < 0 {
 				return ErrInvalidLengthRuntime
 			}
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.DevList = append(m.DevList, string(dAtA[iNdEx:postIndex]))
+			if m.Envs == nil {
+				m.Envs = make(map[string]string)
+			}
+			var mapkey string
+			var mapvalue string
+			for iNdEx < postIndex {
+				entryPreIndex := iNdEx
+				var wire uint64
+				for shift := uint(0); ; shift += 7 {
+					if shift >= 64 {
+						return ErrIntOverflowRuntime
+					}
+					if iNdEx >= l {
+						return io.ErrUnexpectedEOF
+					}
+					b := dAtA[iNdEx]
+					iNdEx++
+					wire |= uint64(b&0x7F) << shift
+					if b < 0x80 {
+						break
+					}
+				}
+				fieldNum := int32(wire >> 3)
+				if fieldNum == 1 {
+					var stringLenmapkey uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRuntime
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapkey |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapkey := int(stringLenmapkey)
+					if intStringLenmapkey < 0 {
+						return ErrInvalidLengthRuntime
+					}
+					postStringIndexmapkey := iNdEx + intStringLenmapkey
+					if postStringIndexmapkey < 0 {
+						return ErrInvalidLengthRuntime
+					}
+					if postStringIndexmapkey > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapkey = string(dAtA[iNdEx:postStringIndexmapkey])
+					iNdEx = postStringIndexmapkey
+				} else if fieldNum == 2 {
+					var stringLenmapvalue uint64
+					for shift := uint(0); ; shift += 7 {
+						if shift >= 64 {
+							return ErrIntOverflowRuntime
+						}
+						if iNdEx >= l {
+							return io.ErrUnexpectedEOF
+						}
+						b := dAtA[iNdEx]
+						iNdEx++
+						stringLenmapvalue |= uint64(b&0x7F) << shift
+						if b < 0x80 {
+							break
+						}
+					}
+					intStringLenmapvalue := int(stringLenmapvalue)
+					if intStringLenmapvalue < 0 {
+						return ErrInvalidLengthRuntime
+					}
+					postStringIndexmapvalue := iNdEx + intStringLenmapvalue
+					if postStringIndexmapvalue < 0 {
+						return ErrInvalidLengthRuntime
+					}
+					if postStringIndexmapvalue > l {
+						return io.ErrUnexpectedEOF
+					}
+					mapvalue = string(dAtA[iNdEx:postStringIndexmapvalue])
+					iNdEx = postStringIndexmapvalue
+				} else {
+					iNdEx = entryPreIndex
+					skippy, err := skipRuntime(dAtA[iNdEx:])
+					if err != nil {
+						return err
+					}
+					if (skippy < 0) || (iNdEx+skippy) < 0 {
+						return ErrInvalidLengthRuntime
+					}
+					if (iNdEx + skippy) > postIndex {
+						return io.ErrUnexpectedEOF
+					}
+					iNdEx += skippy
+				}
+			}
+			m.Envs[mapkey] = mapvalue
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {

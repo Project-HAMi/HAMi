@@ -16,19 +16,22 @@
 package main
 
 import (
-    "4pd.io/k8s-vgpu/pkg/device-plugin"
-    "4pd.io/k8s-vgpu/pkg/device-plugin/config"
-    "4pd.io/k8s-vgpu/pkg/util"
     "fmt"
-    "github.com/NVIDIA/go-gpuallocator/gpuallocator"
-    "github.com/spf13/viper"
     "log"
+    "net"
     "os"
     "syscall"
 
+    "4pd.io/k8s-vgpu/pkg/api"
+    "4pd.io/k8s-vgpu/pkg/device-plugin"
+    "4pd.io/k8s-vgpu/pkg/device-plugin/config"
+    "4pd.io/k8s-vgpu/pkg/util"
+    "github.com/NVIDIA/go-gpuallocator/gpuallocator"
     "github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
     "github.com/fsnotify/fsnotify"
     "github.com/spf13/cobra"
+    "github.com/spf13/viper"
+    "google.golang.org/grpc"
     "k8s.io/klog/v2"
     pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -37,6 +40,7 @@ var (
     failOnInitErrorFlag bool
     //nvidiaDriverRootFlag string
     //enableLegacyPreferredFlag bool
+    runtimeSocketFlag string
 
     rootCmd = &cobra.Command{
         Use:   "scheduler",
@@ -57,6 +61,7 @@ func init() {
     rootCmd.PersistentFlags().SortFlags = false
 
     rootCmd.Flags().BoolVar(&failOnInitErrorFlag, "fail-on-init-error", true, "fail the plugin if an error is encountered during initialization, otherwise block indefinitely")
+    rootCmd.Flags().StringVar(&runtimeSocketFlag, "runtime-socket", "/var/lib/vgpu/vgpu.sock", "runtime socket")
     rootCmd.Flags().UintVar(&config.DeviceSplitCount, "device-split-count", 2, "the number for NVIDIA device split")
     rootCmd.Flags().Float64Var(&config.DeviceMemoryScaling, "device-memory-scaling", 1.0, "the ratio for NVIDIA device memory scaling")
     rootCmd.Flags().Float64Var(&config.DeviceCoresScaling, "device-cores-scaling", 1.0, "the ratio for NVIDIA device cores scaling")
@@ -92,6 +97,26 @@ func start() error {
     log.Println("Starting OS watcher.")
     sigs := NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
+    cache := device_plugin.NewDeviceCache()
+    cache.Start()
+    defer cache.Stop()
+    register := device_plugin.NewDeviceRegister(cache)
+    register.Start()
+    defer register.Stop()
+    rt := device_plugin.NewVGPURuntimeService(cache)
+
+    // start runtime grpc server
+    lisGrpc, _ := net.Listen("unix", runtimeSocketFlag)
+    defer lisGrpc.Close()
+    s := grpc.NewServer()
+    api.RegisterVGPURuntimeServiceServer(s, rt)
+    go func() {
+        err := s.Serve(lisGrpc)
+        if err != nil {
+            klog.Fatal(err)
+        }
+    }()
+
     var plugins []*device_plugin.NvidiaDevicePlugin
 restart:
     // If we are restarting, idempotently stop any running plugins before
@@ -104,8 +129,7 @@ restart:
     plugins = []*device_plugin.NvidiaDevicePlugin{
         device_plugin.NewNvidiaDevicePlugin(
             util.ResourceName,
-            device_plugin.NewGpuDeviceManager(true), // Enumerate device even if MIG enabled
-            "NVIDIA_VISIBLE_DEVICES",
+            cache,
             gpuallocator.NewBestEffortPolicy(),
             pluginapi.DevicePluginPath+"nvidia-gpu.sock"),
     }
