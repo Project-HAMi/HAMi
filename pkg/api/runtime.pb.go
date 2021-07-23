@@ -26,25 +26,25 @@ var _ = math.Inf
 // proto package needs to be updated.
 const _ = proto.ProtoPackageIsVersion3 // please upgrade the proto package
 
-type VGPURuntimeRequest struct {
-	Ctruuid              string   `protobuf:"bytes,1,opt,name=ctruuid,proto3" json:"ctruuid,omitempty"`
+type GetDeviceRequest struct {
+	CtrUUID              string   `protobuf:"bytes,1,opt,name=ctrUUID,proto3" json:"ctrUUID,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *VGPURuntimeRequest) Reset()         { *m = VGPURuntimeRequest{} }
-func (m *VGPURuntimeRequest) String() string { return proto.CompactTextString(m) }
-func (*VGPURuntimeRequest) ProtoMessage()    {}
-func (*VGPURuntimeRequest) Descriptor() ([]byte, []int) {
+func (m *GetDeviceRequest) Reset()         { *m = GetDeviceRequest{} }
+func (m *GetDeviceRequest) String() string { return proto.CompactTextString(m) }
+func (*GetDeviceRequest) ProtoMessage()    {}
+func (*GetDeviceRequest) Descriptor() ([]byte, []int) {
 	return fileDescriptor_1e1a7998f4db04c8, []int{0}
 }
-func (m *VGPURuntimeRequest) XXX_Unmarshal(b []byte) error {
+func (m *GetDeviceRequest) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *VGPURuntimeRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *GetDeviceRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_VGPURuntimeRequest.Marshal(b, m, deterministic)
+		return xxx_messageInfo_GetDeviceRequest.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -54,47 +54,47 @@ func (m *VGPURuntimeRequest) XXX_Marshal(b []byte, deterministic bool) ([]byte, 
 		return b[:n], nil
 	}
 }
-func (m *VGPURuntimeRequest) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_VGPURuntimeRequest.Merge(m, src)
+func (m *GetDeviceRequest) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetDeviceRequest.Merge(m, src)
 }
-func (m *VGPURuntimeRequest) XXX_Size() int {
+func (m *GetDeviceRequest) XXX_Size() int {
 	return m.Size()
 }
-func (m *VGPURuntimeRequest) XXX_DiscardUnknown() {
-	xxx_messageInfo_VGPURuntimeRequest.DiscardUnknown(m)
+func (m *GetDeviceRequest) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetDeviceRequest.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_VGPURuntimeRequest proto.InternalMessageInfo
+var xxx_messageInfo_GetDeviceRequest proto.InternalMessageInfo
 
-func (m *VGPURuntimeRequest) GetCtruuid() string {
+func (m *GetDeviceRequest) GetCtrUUID() string {
 	if m != nil {
-		return m.Ctruuid
+		return m.CtrUUID
 	}
 	return ""
 }
 
-type VGPURuntimeReply struct {
-	Devlist              string   `protobuf:"bytes,1,opt,name=devlist,proto3" json:"devlist,omitempty"`
-	PodNamespace         string   `protobuf:"bytes,2,opt,name=pod_namespace,json=podNamespace,proto3" json:"pod_namespace,omitempty"`
-	PodId                string   `protobuf:"bytes,3,opt,name=pod_id,json=podId,proto3" json:"pod_id,omitempty"`
-	CtrName              string   `protobuf:"bytes,4,opt,name=ctr_name,json=ctrName,proto3" json:"ctr_name,omitempty"`
+type GetDeviceReply struct {
+	DevList []string `protobuf:"bytes,1,rep,name=devList,proto3" json:"devList,omitempty"`
+	//  string podNamespace = 2;
+	PodUID               string   `protobuf:"bytes,3,opt,name=podUID,proto3" json:"podUID,omitempty"`
+	CtrName              string   `protobuf:"bytes,4,opt,name=ctrName,proto3" json:"ctrName,omitempty"`
 	XXX_NoUnkeyedLiteral struct{} `json:"-"`
 	XXX_unrecognized     []byte   `json:"-"`
 	XXX_sizecache        int32    `json:"-"`
 }
 
-func (m *VGPURuntimeReply) Reset()         { *m = VGPURuntimeReply{} }
-func (m *VGPURuntimeReply) String() string { return proto.CompactTextString(m) }
-func (*VGPURuntimeReply) ProtoMessage()    {}
-func (*VGPURuntimeReply) Descriptor() ([]byte, []int) {
+func (m *GetDeviceReply) Reset()         { *m = GetDeviceReply{} }
+func (m *GetDeviceReply) String() string { return proto.CompactTextString(m) }
+func (*GetDeviceReply) ProtoMessage()    {}
+func (*GetDeviceReply) Descriptor() ([]byte, []int) {
 	return fileDescriptor_1e1a7998f4db04c8, []int{1}
 }
-func (m *VGPURuntimeReply) XXX_Unmarshal(b []byte) error {
+func (m *GetDeviceReply) XXX_Unmarshal(b []byte) error {
 	return m.Unmarshal(b)
 }
-func (m *VGPURuntimeReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
+func (m *GetDeviceReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, error) {
 	if deterministic {
-		return xxx_messageInfo_VGPURuntimeReply.Marshal(b, m, deterministic)
+		return xxx_messageInfo_GetDeviceReply.Marshal(b, m, deterministic)
 	} else {
 		b = b[:cap(b)]
 		n, err := m.MarshalToSizedBuffer(b)
@@ -104,40 +104,33 @@ func (m *VGPURuntimeReply) XXX_Marshal(b []byte, deterministic bool) ([]byte, er
 		return b[:n], nil
 	}
 }
-func (m *VGPURuntimeReply) XXX_Merge(src proto.Message) {
-	xxx_messageInfo_VGPURuntimeReply.Merge(m, src)
+func (m *GetDeviceReply) XXX_Merge(src proto.Message) {
+	xxx_messageInfo_GetDeviceReply.Merge(m, src)
 }
-func (m *VGPURuntimeReply) XXX_Size() int {
+func (m *GetDeviceReply) XXX_Size() int {
 	return m.Size()
 }
-func (m *VGPURuntimeReply) XXX_DiscardUnknown() {
-	xxx_messageInfo_VGPURuntimeReply.DiscardUnknown(m)
+func (m *GetDeviceReply) XXX_DiscardUnknown() {
+	xxx_messageInfo_GetDeviceReply.DiscardUnknown(m)
 }
 
-var xxx_messageInfo_VGPURuntimeReply proto.InternalMessageInfo
+var xxx_messageInfo_GetDeviceReply proto.InternalMessageInfo
 
-func (m *VGPURuntimeReply) GetDevlist() string {
+func (m *GetDeviceReply) GetDevList() []string {
 	if m != nil {
-		return m.Devlist
+		return m.DevList
+	}
+	return nil
+}
+
+func (m *GetDeviceReply) GetPodUID() string {
+	if m != nil {
+		return m.PodUID
 	}
 	return ""
 }
 
-func (m *VGPURuntimeReply) GetPodNamespace() string {
-	if m != nil {
-		return m.PodNamespace
-	}
-	return ""
-}
-
-func (m *VGPURuntimeReply) GetPodId() string {
-	if m != nil {
-		return m.PodId
-	}
-	return ""
-}
-
-func (m *VGPURuntimeReply) GetCtrName() string {
+func (m *GetDeviceReply) GetCtrName() string {
 	if m != nil {
 		return m.CtrName
 	}
@@ -145,29 +138,28 @@ func (m *VGPURuntimeReply) GetCtrName() string {
 }
 
 func init() {
-	proto.RegisterType((*VGPURuntimeRequest)(nil), "api.VGPURuntimeRequest")
-	proto.RegisterType((*VGPURuntimeReply)(nil), "api.VGPURuntimeReply")
+	proto.RegisterType((*GetDeviceRequest)(nil), "api.GetDeviceRequest")
+	proto.RegisterType((*GetDeviceReply)(nil), "api.GetDeviceReply")
 }
 
 func init() { proto.RegisterFile("pkg/api/runtime.proto", fileDescriptor_1e1a7998f4db04c8) }
 
 var fileDescriptor_1e1a7998f4db04c8 = []byte{
-	// 237 bytes of a gzipped FileDescriptorProto
+	// 209 bytes of a gzipped FileDescriptorProto
 	0x1f, 0x8b, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02, 0xff, 0xe2, 0x12, 0x2d, 0xc8, 0x4e, 0xd7,
 	0x4f, 0x2c, 0xc8, 0xd4, 0x2f, 0x2a, 0xcd, 0x2b, 0xc9, 0xcc, 0x4d, 0xd5, 0x2b, 0x28, 0xca, 0x2f,
-	0xc9, 0x17, 0x62, 0x4e, 0x2c, 0xc8, 0x54, 0xd2, 0xe3, 0x12, 0x0a, 0x73, 0x0f, 0x08, 0x0d, 0x82,
-	0xc8, 0x04, 0xa5, 0x16, 0x96, 0xa6, 0x16, 0x97, 0x08, 0x49, 0x70, 0xb1, 0x27, 0x97, 0x14, 0x95,
-	0x96, 0x66, 0xa6, 0x48, 0x30, 0x2a, 0x30, 0x6a, 0x70, 0x06, 0xc1, 0xb8, 0x4a, 0xcd, 0x8c, 0x5c,
-	0x02, 0x28, 0x1a, 0x0a, 0x72, 0x2a, 0x41, 0xca, 0x53, 0x52, 0xcb, 0x72, 0x32, 0x8b, 0x4b, 0x60,
-	0xca, 0xa1, 0x5c, 0x21, 0x65, 0x2e, 0xde, 0x82, 0xfc, 0x94, 0xf8, 0xbc, 0xc4, 0xdc, 0xd4, 0xe2,
-	0x82, 0xc4, 0xe4, 0x54, 0x09, 0x26, 0xb0, 0x3c, 0x4f, 0x41, 0x7e, 0x8a, 0x1f, 0x4c, 0x4c, 0x48,
-	0x94, 0x8b, 0x0d, 0xa4, 0x28, 0x33, 0x45, 0x82, 0x19, 0x2c, 0xcb, 0x5a, 0x90, 0x9f, 0xe2, 0x99,
-	0x22, 0x24, 0xc9, 0xc5, 0x91, 0x5c, 0x52, 0x04, 0xd6, 0x2b, 0xc1, 0x02, 0x77, 0x05, 0x48, 0x9b,
-	0x51, 0x00, 0x17, 0x37, 0x92, 0x23, 0x84, 0x1c, 0xb9, 0x78, 0x41, 0x5c, 0xf7, 0xd4, 0x12, 0x97,
-	0xd4, 0xb2, 0xcc, 0xe4, 0x54, 0x21, 0x71, 0xbd, 0xc4, 0x82, 0x4c, 0x3d, 0x4c, 0x8f, 0x49, 0x89,
-	0x62, 0x4a, 0x14, 0xe4, 0x54, 0x2a, 0x31, 0x38, 0x09, 0x9c, 0x78, 0x24, 0xc7, 0x78, 0xe1, 0x91,
-	0x1c, 0xe3, 0x83, 0x47, 0x72, 0x8c, 0x33, 0x1e, 0xcb, 0x31, 0x24, 0xb1, 0x81, 0x43, 0xc9, 0x18,
-	0x10, 0x00, 0x00, 0xff, 0xff, 0xdf, 0xf5, 0x3a, 0xaa, 0x3e, 0x01, 0x00, 0x00,
+	0xc9, 0x17, 0x62, 0x4e, 0x2c, 0xc8, 0x54, 0xd2, 0xe1, 0x12, 0x70, 0x4f, 0x2d, 0x71, 0x49, 0x2d,
+	0xcb, 0x4c, 0x4e, 0x0d, 0x4a, 0x2d, 0x2c, 0x4d, 0x2d, 0x2e, 0x11, 0x92, 0xe0, 0x62, 0x4f, 0x2e,
+	0x29, 0x0a, 0x0d, 0xf5, 0x74, 0x91, 0x60, 0x54, 0x60, 0xd4, 0xe0, 0x0c, 0x82, 0x71, 0x95, 0x62,
+	0xb8, 0xf8, 0x90, 0x54, 0x17, 0xe4, 0x54, 0x82, 0xd4, 0xa6, 0xa4, 0x96, 0xf9, 0x64, 0x16, 0x97,
+	0x48, 0x30, 0x2a, 0x30, 0x83, 0xd4, 0x42, 0xb9, 0x42, 0x62, 0x5c, 0x6c, 0x05, 0xf9, 0x29, 0x20,
+	0x43, 0x98, 0xc1, 0x86, 0x40, 0x79, 0x50, 0xd3, 0xfd, 0x12, 0x73, 0x53, 0x25, 0x58, 0xe0, 0xa6,
+	0x83, 0xb8, 0x46, 0xfe, 0x5c, 0x42, 0x61, 0xee, 0x01, 0xa1, 0x41, 0x10, 0x57, 0x06, 0xa7, 0x16,
+	0x81, 0xac, 0x11, 0xb2, 0xe4, 0xe2, 0x84, 0xdb, 0x29, 0x24, 0xaa, 0x97, 0x58, 0x90, 0xa9, 0x87,
+	0xee, 0x62, 0x29, 0x61, 0x74, 0xe1, 0x82, 0x9c, 0x4a, 0x25, 0x06, 0x27, 0x81, 0x13, 0x8f, 0xe4,
+	0x18, 0x2f, 0x3c, 0x92, 0x63, 0x7c, 0xf0, 0x48, 0x8e, 0x71, 0xc6, 0x63, 0x39, 0x86, 0x24, 0x36,
+	0xb0, 0xd7, 0x8d, 0x01, 0x01, 0x00, 0x00, 0xff, 0xff, 0x65, 0x32, 0x91, 0xa5, 0x13, 0x01, 0x00,
+	0x00,
 }
 
 // Reference imports to suppress errors if they are not otherwise used.
@@ -178,79 +170,79 @@ var _ grpc.ClientConn
 // is compatible with the grpc package it is being compiled against.
 const _ = grpc.SupportPackageIsVersion4
 
-// VGPURuntimeClient is the client API for VGPURuntime service.
+// VGPURuntimeServiceClient is the client API for VGPURuntimeService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://godoc.org/google.golang.org/grpc#ClientConn.NewStream.
-type VGPURuntimeClient interface {
-	VGPUGetDevice(ctx context.Context, in *VGPURuntimeRequest, opts ...grpc.CallOption) (*VGPURuntimeReply, error)
+type VGPURuntimeServiceClient interface {
+	GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*GetDeviceReply, error)
 }
 
-type vGPURuntimeClient struct {
+type vGPURuntimeServiceClient struct {
 	cc *grpc.ClientConn
 }
 
-func NewVGPURuntimeClient(cc *grpc.ClientConn) VGPURuntimeClient {
-	return &vGPURuntimeClient{cc}
+func NewVGPURuntimeServiceClient(cc *grpc.ClientConn) VGPURuntimeServiceClient {
+	return &vGPURuntimeServiceClient{cc}
 }
 
-func (c *vGPURuntimeClient) VGPUGetDevice(ctx context.Context, in *VGPURuntimeRequest, opts ...grpc.CallOption) (*VGPURuntimeReply, error) {
-	out := new(VGPURuntimeReply)
-	err := c.cc.Invoke(ctx, "/api.VGPURuntime/VGPUGetDevice", in, out, opts...)
+func (c *vGPURuntimeServiceClient) GetDevice(ctx context.Context, in *GetDeviceRequest, opts ...grpc.CallOption) (*GetDeviceReply, error) {
+	out := new(GetDeviceReply)
+	err := c.cc.Invoke(ctx, "/api.VGPURuntimeService/GetDevice", in, out, opts...)
 	if err != nil {
 		return nil, err
 	}
 	return out, nil
 }
 
-// VGPURuntimeServer is the server API for VGPURuntime service.
-type VGPURuntimeServer interface {
-	VGPUGetDevice(context.Context, *VGPURuntimeRequest) (*VGPURuntimeReply, error)
+// VGPURuntimeServiceServer is the server API for VGPURuntimeService service.
+type VGPURuntimeServiceServer interface {
+	GetDevice(context.Context, *GetDeviceRequest) (*GetDeviceReply, error)
 }
 
-// UnimplementedVGPURuntimeServer can be embedded to have forward compatible implementations.
-type UnimplementedVGPURuntimeServer struct {
+// UnimplementedVGPURuntimeServiceServer can be embedded to have forward compatible implementations.
+type UnimplementedVGPURuntimeServiceServer struct {
 }
 
-func (*UnimplementedVGPURuntimeServer) VGPUGetDevice(ctx context.Context, req *VGPURuntimeRequest) (*VGPURuntimeReply, error) {
-	return nil, status.Errorf(codes.Unimplemented, "method VGPUGetDevice not implemented")
+func (*UnimplementedVGPURuntimeServiceServer) GetDevice(ctx context.Context, req *GetDeviceRequest) (*GetDeviceReply, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method GetDevice not implemented")
 }
 
-func RegisterVGPURuntimeServer(s *grpc.Server, srv VGPURuntimeServer) {
-	s.RegisterService(&_VGPURuntime_serviceDesc, srv)
+func RegisterVGPURuntimeServiceServer(s *grpc.Server, srv VGPURuntimeServiceServer) {
+	s.RegisterService(&_VGPURuntimeService_serviceDesc, srv)
 }
 
-func _VGPURuntime_VGPUGetDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(VGPURuntimeRequest)
+func _VGPURuntimeService_GetDevice_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetDeviceRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(VGPURuntimeServer).VGPUGetDevice(ctx, in)
+		return srv.(VGPURuntimeServiceServer).GetDevice(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: "/api.VGPURuntime/VGPUGetDevice",
+		FullMethod: "/api.VGPURuntimeService/GetDevice",
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(VGPURuntimeServer).VGPUGetDevice(ctx, req.(*VGPURuntimeRequest))
+		return srv.(VGPURuntimeServiceServer).GetDevice(ctx, req.(*GetDeviceRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
 
-var _VGPURuntime_serviceDesc = grpc.ServiceDesc{
-	ServiceName: "api.VGPURuntime",
-	HandlerType: (*VGPURuntimeServer)(nil),
+var _VGPURuntimeService_serviceDesc = grpc.ServiceDesc{
+	ServiceName: "api.VGPURuntimeService",
+	HandlerType: (*VGPURuntimeServiceServer)(nil),
 	Methods: []grpc.MethodDesc{
 		{
-			MethodName: "VGPUGetDevice",
-			Handler:    _VGPURuntime_VGPUGetDevice_Handler,
+			MethodName: "GetDevice",
+			Handler:    _VGPURuntimeService_GetDevice_Handler,
 		},
 	},
 	Streams:  []grpc.StreamDesc{},
 	Metadata: "pkg/api/runtime.proto",
 }
 
-func (m *VGPURuntimeRequest) Marshal() (dAtA []byte, err error) {
+func (m *GetDeviceRequest) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -260,12 +252,12 @@ func (m *VGPURuntimeRequest) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *VGPURuntimeRequest) MarshalTo(dAtA []byte) (int, error) {
+func (m *GetDeviceRequest) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *VGPURuntimeRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *GetDeviceRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -274,17 +266,17 @@ func (m *VGPURuntimeRequest) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i -= len(m.XXX_unrecognized)
 		copy(dAtA[i:], m.XXX_unrecognized)
 	}
-	if len(m.Ctruuid) > 0 {
-		i -= len(m.Ctruuid)
-		copy(dAtA[i:], m.Ctruuid)
-		i = encodeVarintRuntime(dAtA, i, uint64(len(m.Ctruuid)))
+	if len(m.CtrUUID) > 0 {
+		i -= len(m.CtrUUID)
+		copy(dAtA[i:], m.CtrUUID)
+		i = encodeVarintRuntime(dAtA, i, uint64(len(m.CtrUUID)))
 		i--
 		dAtA[i] = 0xa
 	}
 	return len(dAtA) - i, nil
 }
 
-func (m *VGPURuntimeReply) Marshal() (dAtA []byte, err error) {
+func (m *GetDeviceReply) Marshal() (dAtA []byte, err error) {
 	size := m.Size()
 	dAtA = make([]byte, size)
 	n, err := m.MarshalToSizedBuffer(dAtA[:size])
@@ -294,12 +286,12 @@ func (m *VGPURuntimeReply) Marshal() (dAtA []byte, err error) {
 	return dAtA[:n], nil
 }
 
-func (m *VGPURuntimeReply) MarshalTo(dAtA []byte) (int, error) {
+func (m *GetDeviceReply) MarshalTo(dAtA []byte) (int, error) {
 	size := m.Size()
 	return m.MarshalToSizedBuffer(dAtA[:size])
 }
 
-func (m *VGPURuntimeReply) MarshalToSizedBuffer(dAtA []byte) (int, error) {
+func (m *GetDeviceReply) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 	i := len(dAtA)
 	_ = i
 	var l int
@@ -315,26 +307,21 @@ func (m *VGPURuntimeReply) MarshalToSizedBuffer(dAtA []byte) (int, error) {
 		i--
 		dAtA[i] = 0x22
 	}
-	if len(m.PodId) > 0 {
-		i -= len(m.PodId)
-		copy(dAtA[i:], m.PodId)
-		i = encodeVarintRuntime(dAtA, i, uint64(len(m.PodId)))
+	if len(m.PodUID) > 0 {
+		i -= len(m.PodUID)
+		copy(dAtA[i:], m.PodUID)
+		i = encodeVarintRuntime(dAtA, i, uint64(len(m.PodUID)))
 		i--
 		dAtA[i] = 0x1a
 	}
-	if len(m.PodNamespace) > 0 {
-		i -= len(m.PodNamespace)
-		copy(dAtA[i:], m.PodNamespace)
-		i = encodeVarintRuntime(dAtA, i, uint64(len(m.PodNamespace)))
-		i--
-		dAtA[i] = 0x12
-	}
-	if len(m.Devlist) > 0 {
-		i -= len(m.Devlist)
-		copy(dAtA[i:], m.Devlist)
-		i = encodeVarintRuntime(dAtA, i, uint64(len(m.Devlist)))
-		i--
-		dAtA[i] = 0xa
+	if len(m.DevList) > 0 {
+		for iNdEx := len(m.DevList) - 1; iNdEx >= 0; iNdEx-- {
+			i -= len(m.DevList[iNdEx])
+			copy(dAtA[i:], m.DevList[iNdEx])
+			i = encodeVarintRuntime(dAtA, i, uint64(len(m.DevList[iNdEx])))
+			i--
+			dAtA[i] = 0xa
+		}
 	}
 	return len(dAtA) - i, nil
 }
@@ -350,13 +337,13 @@ func encodeVarintRuntime(dAtA []byte, offset int, v uint64) int {
 	dAtA[offset] = uint8(v)
 	return base
 }
-func (m *VGPURuntimeRequest) Size() (n int) {
+func (m *GetDeviceRequest) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	l = len(m.Ctruuid)
+	l = len(m.CtrUUID)
 	if l > 0 {
 		n += 1 + l + sovRuntime(uint64(l))
 	}
@@ -366,21 +353,19 @@ func (m *VGPURuntimeRequest) Size() (n int) {
 	return n
 }
 
-func (m *VGPURuntimeReply) Size() (n int) {
+func (m *GetDeviceReply) Size() (n int) {
 	if m == nil {
 		return 0
 	}
 	var l int
 	_ = l
-	l = len(m.Devlist)
-	if l > 0 {
-		n += 1 + l + sovRuntime(uint64(l))
+	if len(m.DevList) > 0 {
+		for _, s := range m.DevList {
+			l = len(s)
+			n += 1 + l + sovRuntime(uint64(l))
+		}
 	}
-	l = len(m.PodNamespace)
-	if l > 0 {
-		n += 1 + l + sovRuntime(uint64(l))
-	}
-	l = len(m.PodId)
+	l = len(m.PodUID)
 	if l > 0 {
 		n += 1 + l + sovRuntime(uint64(l))
 	}
@@ -400,7 +385,7 @@ func sovRuntime(x uint64) (n int) {
 func sozRuntime(x uint64) (n int) {
 	return sovRuntime(uint64((x << 1) ^ uint64((int64(x) >> 63))))
 }
-func (m *VGPURuntimeRequest) Unmarshal(dAtA []byte) error {
+func (m *GetDeviceRequest) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -423,15 +408,15 @@ func (m *VGPURuntimeRequest) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: VGPURuntimeRequest: wiretype end group for non-group")
+			return fmt.Errorf("proto: GetDeviceRequest: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: VGPURuntimeRequest: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: GetDeviceRequest: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Ctruuid", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field CtrUUID", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -459,7 +444,7 @@ func (m *VGPURuntimeRequest) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Ctruuid = string(dAtA[iNdEx:postIndex])
+			m.CtrUUID = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		default:
 			iNdEx = preIndex
@@ -483,7 +468,7 @@ func (m *VGPURuntimeRequest) Unmarshal(dAtA []byte) error {
 	}
 	return nil
 }
-func (m *VGPURuntimeReply) Unmarshal(dAtA []byte) error {
+func (m *GetDeviceReply) Unmarshal(dAtA []byte) error {
 	l := len(dAtA)
 	iNdEx := 0
 	for iNdEx < l {
@@ -506,15 +491,15 @@ func (m *VGPURuntimeReply) Unmarshal(dAtA []byte) error {
 		fieldNum := int32(wire >> 3)
 		wireType := int(wire & 0x7)
 		if wireType == 4 {
-			return fmt.Errorf("proto: VGPURuntimeReply: wiretype end group for non-group")
+			return fmt.Errorf("proto: GetDeviceReply: wiretype end group for non-group")
 		}
 		if fieldNum <= 0 {
-			return fmt.Errorf("proto: VGPURuntimeReply: illegal tag %d (wire type %d)", fieldNum, wire)
+			return fmt.Errorf("proto: GetDeviceReply: illegal tag %d (wire type %d)", fieldNum, wire)
 		}
 		switch fieldNum {
 		case 1:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field Devlist", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field DevList", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -542,43 +527,11 @@ func (m *VGPURuntimeReply) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.Devlist = string(dAtA[iNdEx:postIndex])
-			iNdEx = postIndex
-		case 2:
-			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PodNamespace", wireType)
-			}
-			var stringLen uint64
-			for shift := uint(0); ; shift += 7 {
-				if shift >= 64 {
-					return ErrIntOverflowRuntime
-				}
-				if iNdEx >= l {
-					return io.ErrUnexpectedEOF
-				}
-				b := dAtA[iNdEx]
-				iNdEx++
-				stringLen |= uint64(b&0x7F) << shift
-				if b < 0x80 {
-					break
-				}
-			}
-			intStringLen := int(stringLen)
-			if intStringLen < 0 {
-				return ErrInvalidLengthRuntime
-			}
-			postIndex := iNdEx + intStringLen
-			if postIndex < 0 {
-				return ErrInvalidLengthRuntime
-			}
-			if postIndex > l {
-				return io.ErrUnexpectedEOF
-			}
-			m.PodNamespace = string(dAtA[iNdEx:postIndex])
+			m.DevList = append(m.DevList, string(dAtA[iNdEx:postIndex]))
 			iNdEx = postIndex
 		case 3:
 			if wireType != 2 {
-				return fmt.Errorf("proto: wrong wireType = %d for field PodId", wireType)
+				return fmt.Errorf("proto: wrong wireType = %d for field PodUID", wireType)
 			}
 			var stringLen uint64
 			for shift := uint(0); ; shift += 7 {
@@ -606,7 +559,7 @@ func (m *VGPURuntimeReply) Unmarshal(dAtA []byte) error {
 			if postIndex > l {
 				return io.ErrUnexpectedEOF
 			}
-			m.PodId = string(dAtA[iNdEx:postIndex])
+			m.PodUID = string(dAtA[iNdEx:postIndex])
 			iNdEx = postIndex
 		case 4:
 			if wireType != 2 {
