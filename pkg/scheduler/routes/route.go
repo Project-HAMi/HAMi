@@ -17,7 +17,7 @@
 package routes
 
 import (
-    "4pd.io/k8s-vgpu/pkg/scheduler/service"
+    "4pd.io/k8s-vgpu/pkg/scheduler"
     "bytes"
     "encoding/json"
     "io"
@@ -35,7 +35,7 @@ func checkBody(w http.ResponseWriter, r *http.Request) {
     }
 }
 
-func PredicateRoute(s *service.Scheduler) httprouter.Handle {
+func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
     return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
         checkBody(w, r)
 
@@ -47,7 +47,7 @@ func PredicateRoute(s *service.Scheduler) httprouter.Handle {
 
         if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
             extenderFilterResult = &extenderv1.ExtenderFilterResult{
-                Error:       err.Error(),
+                Error: err.Error(),
             }
         } else {
             extenderFilterResult, err = s.Filter(extenderArgs)
@@ -74,7 +74,7 @@ func PredicateRoute(s *service.Scheduler) httprouter.Handle {
 }
 
 func WebHookRoute() httprouter.Handle {
-    h, err := service.NewWebHook()
+    h, err := scheduler.NewWebHook()
     if err != nil {
         klog.Fatalf("new web hook error, %v", err)
     }

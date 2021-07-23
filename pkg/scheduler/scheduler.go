@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package service
+package scheduler
 
 import (
     "context"
@@ -22,9 +22,9 @@ import (
     "fmt"
     "sort"
     "strconv"
-    "sync"
     "time"
 
+    "4pd.io/k8s-vgpu/pkg/api"
     "4pd.io/k8s-vgpu/pkg/k8sutil"
     "4pd.io/k8s-vgpu/pkg/util"
     corev1 "k8s.io/api/core/v1"
@@ -38,51 +38,22 @@ import (
     extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
 
-type DeviceUsage struct {
-    id     string
-    used   int32
-    count  int32
-    health bool
-}
-
-type DeviceUsageList []*DeviceUsage
-
-type NodeUsage struct {
-    devices     DeviceUsageList
-}
-
-type NodeScore struct {
-    nodeID      string
-    devices     util.PodDevices
-    score       float32
-}
-
-type NodeScoreList []*NodeScore
-
-type podInfo struct {
-    name     string
-    uid      k8stypes.UID
-    nodeID   string
-    devices  util.PodDevices
-}
-
 type Scheduler struct {
-    pods  map[k8stypes.UID]*podInfo
-    mutex sync.Mutex
+    nodeManager
+    podManager
 
     stopCh     chan struct{}
     kubeClient kubernetes.Interface
-    //podLister  listerscorev1.PodLister
+    podLister  listerscorev1.PodLister
     nodeLister listerscorev1.NodeLister
-
-    deviceService *DeviceService
 }
 
-func NewScheduler(deviceService *DeviceService) *Scheduler {
+func NewScheduler() *Scheduler {
     s := &Scheduler{
-        stopCh:        make(chan struct{}),
-        deviceService: deviceService,
+        stopCh: make(chan struct{}),
     }
+    s.nodeManager.init()
+    s.podManager.init()
     return s
 }
 
@@ -90,48 +61,6 @@ func check(err error) {
     if err != nil {
         klog.Fatal(err)
     }
-}
-
-func (l DeviceUsageList) Len() int {
-    return len(l)
-}
-
-func (l DeviceUsageList) Swap(i, j int) {
-    l[i], l[j] = l[j], l[i]
-}
-
-func (l DeviceUsageList) Less(i, j int) bool {
-    return l[i].count-l[i].used < l[j].count-l[j].used
-}
-
-func (l NodeScoreList) Len() int {
-    return len(l)
-}
-
-func (l NodeScoreList) Swap(i, j int) {
-    l[i], l[j] = l[j], l[i]
-}
-
-func (l NodeScoreList) Less(i, j int) bool {
-    return l[i].score < l[j].score
-}
-
-func (s *Scheduler) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevices) {
-    s.mutex.Lock()
-    defer s.mutex.Unlock()
-    pi, ok := s.pods[pod.UID]
-    if !ok {
-        pi = &podInfo{name: pod.Name, uid: pod.UID}
-        s.pods[pod.UID] = pi
-        pi.nodeID = nodeID
-        pi.devices = devices
-    }
-}
-
-func (s *Scheduler) delPod(pod *corev1.Pod) {
-    s.mutex.Lock()
-    defer s.mutex.Unlock()
-    delete(s.pods, pod.UID)
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
@@ -178,10 +107,9 @@ func (s *Scheduler) Start() {
     check(err)
     s.kubeClient = kubeClient
     informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
-    //s.podLister = informerFactory.Core().V1().Pods().Lister()
+    s.podLister = informerFactory.Core().V1().Pods().Lister()
     s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 
-    s.pods = make(map[k8stypes.UID]*podInfo)
     informer := informerFactory.Core().V1().Pods().Informer()
     informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
         AddFunc:    s.onAddPod,
@@ -197,19 +125,72 @@ func (s *Scheduler) Stop() {
     close(s.stopCh)
 }
 
-func (s *Scheduler) assignedNode(pod *corev1.Pod) string {
-    if node, ok := pod.ObjectMeta.Annotations[util.AssignedNodeAnnotations]; ok {
-        return node
+//func (s *Scheduler) assignedNode(pod *corev1.Pod) string {
+//    if node, ok := pod.ObjectMeta.Annotations[util.AssignedNodeAnnotations]; ok {
+//        return node
+//    }
+//    return ""
+//}
+func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
+    var nodeID string
+    for {
+        req, err := stream.Recv()
+        if err != nil {
+            s.delNode(nodeID)
+            klog.Infof("node %v leave, %v", nodeID, err)
+            _ = stream.SendAndClose(&api.RegisterReply{})
+            return err
+        }
+        klog.V(3).Infof("device register %v", req.String())
+        nodeID = req.GetNode()
+        nodeInfo := NodeInfo{}
+        nodeInfo.ID = nodeID
+        nodeInfo.Devices = make([]DeviceInfo, len(req.Devices))
+        for i := 0; i < len(req.Devices); i++ {
+            nodeInfo.Devices[i] = DeviceInfo{
+                ID:     req.Devices[i].GetId(),
+                Count:  req.Devices[i].GetCount(),
+                Health: req.Devices[i].GetHealth(),
+            }
+        }
+        s.addNode(nodeID, nodeInfo)
+        klog.Infof("node %v come", nodeID)
     }
-    return ""
 }
 
-func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, error) {
+func (s *Scheduler) GetContainer(_ context.Context, req *api.GetContainerRequest) (*api.GetContainerReply, error) {
+    pi, ctrIdx, err := s.getContainerByUUID(req.Uuid)
+    if err != nil {
+        return nil, err
+    }
+    if ctrIdx >= len(pi.devices) {
+        return nil, fmt.Errorf("container index error")
+    }
+    pod, err := s.podLister.Pods(pi.namespace).Get(pi.name)
+    if err != nil {
+        return nil, err
+    }
+    if pod == nil || ctrIdx >= len(pi.devices) {
+        return nil, fmt.Errorf("container not found")
+    }
+    rep := api.GetContainerReply{
+        DevList:      pi.devices[ctrIdx],
+        PodUID:       string(pod.UID),
+        CtrName:      pod.Spec.Containers[ctrIdx].Name,
+        PodNamespace: pod.Namespace,
+        PodName:      pod.Name,
+    }
+    return &rep, nil
+}
+
+func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[string]string, error) {
     nodeMap := make(map[string]*NodeUsage)
+    failedNodes := make(map[string]string)
     for _, nodeID := range *nodes {
-        node, err := s.deviceService.GetNode(nodeID)
+        node, err := s.GetNode(nodeID)
         if err != nil {
             klog.Errorf("get node %v device error, %v", nodeID, err)
+            failedNodes[nodeID] = fmt.Sprintf("node unregisterd")
             continue
         }
 
@@ -240,61 +221,18 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, erro
         }
         klog.V(5).Infof("usage: pod %v assigned %v %v", p.name, p.nodeID, p.devices)
     }
-    return &nodeMap, nil
-}
-
-func calcScore(nodes *map[string]*NodeUsage, nums []int) (*NodeScoreList, error) {
-    res := make(NodeScoreList, 0, len(*nodes))
-    for nodeID, node := range *nodes {
-        //if len(node.pendingPods) > 0 {
-        //    continue
-        //}
-        dn := len(node.devices)
-        score := NodeScore{nodeID: nodeID, score: 0}
-        for _, n := range nums {
-            if n == 0 {
-                score.devices = append(score.devices, []string{})
-                continue
-            }
-            if n > dn {
-                break
-            }
-            sort.Sort(node.devices)
-            if node.devices[dn-n].count <= node.devices[dn-n].used {
-                continue
-            }
-            total := int32(0)
-            free := int32(0)
-            devs := make([]string, 0, n)
-            for i := len(node.devices) - 1; i >= 0; i-- {
-                total += node.devices[i].count
-                free += node.devices[i].count - node.devices[i].used
-                if n > 0 {
-                    n--
-                    node.devices[i].used++
-                    devs = append(devs, node.devices[i].id)
-                }
-            }
-            score.devices = append(score.devices, devs)
-            score.score += float32(free) / float32(total)
-            score.score += float32(dn - n)
-        }
-        if len(score.devices) == len(nums) {
-            res = append(res, &score)
-        }
-    }
-    return &res, nil
+    return &nodeMap, failedNodes, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
     klog.Infof("schedule pod %v/%v[%v]", args.Pod.Namespace, args.Pod.Name, args.Pod.UID)
     nums := k8sutil.ResourceNums(args.Pod, corev1.ResourceName(util.ResourceName))
-    total := int(0)
+    total := 0
     for _, n := range nums {
         total += n
     }
-    if total == 1 {
-        klog.Infof("pod %v not find resource %v", args.Pod.Name, util.ResourceName)
+    if total == 0 {
+        klog.V(1).Infof("pod %v not find resource %v", args.Pod.Name, util.ResourceName)
         return &extenderv1.ExtenderFilterResult{
             NodeNames:   args.NodeNames,
             FailedNodes: nil,
@@ -302,20 +240,15 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
         }, nil
     }
     s.delPod(args.Pod)
-    nodeUsage, err := s.getNodesUsage(args.NodeNames)
+    nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames)
     if err != nil {
         return nil, err
     }
-    nodeScores, err := calcScore(nodeUsage, nums)
+    nodeScores, err := calcScore(nodeUsage, &failedNodes, nums)
     if err != nil {
         return nil, err
     }
     if len(*nodeScores) == 0 {
-        klog.Infof("no suitable vgpu node")
-        failedNodes := make(map[string]string)
-        for _, v := range *args.NodeNames {
-            failedNodes[v] = fmt.Sprintf("no suitable vgpu")
-        }
         return &extenderv1.ExtenderFilterResult{
             FailedNodes: failedNodes,
         }, nil

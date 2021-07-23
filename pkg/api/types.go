@@ -17,7 +17,6 @@
 package api
 
 const (
-     ContainerUID = "VGPU_4PD_UUID"
-     PluginRuntimeSocket = "VGPU_4PD_SOCKET"
+    ContainerUID        = "VGPU_4PD_UUID"
+    PluginRuntimeSocket = "VGPU_4PD_SOCKET"
 )
-

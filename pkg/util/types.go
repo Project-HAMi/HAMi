@@ -20,18 +20,15 @@ const (
     //ResourceName = "nvidia.com/gpu"
     //ResourceName = "4pd.io/vgpu"
     AssignedTimeAnnotations = "4pd.io/vgpu-time"
-    AssignedIDsAnnotations = "4pd.io/vgpu-ids"
+    AssignedIDsAnnotations  = "4pd.io/vgpu-ids"
     AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
-    AssignedUID = "VGPU_4PD_UID"
-    VGPUSocket = "VGPU_4PD_SOCKET"
-
-    TimeLayout = "ANSIC"
+    //TimeLayout = "ANSIC"
 )
 
 var (
     ResourceName string
-    DebugMode bool
+    DebugMode    bool
 )
 
 //type ContainerDevices struct {
@@ -45,4 +42,3 @@ var (
 type ContainerDevices []string
 
 type PodDevices []ContainerDevices
-

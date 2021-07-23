@@ -22,7 +22,7 @@ import (
     "testing"
 )
 
-func TestEmptyContainerDevicesCoding(t *testing.T)  {
+func TestEmptyContainerDevicesCoding(t *testing.T) {
     cd1 := ContainerDevices{}
     s := EncodeContainerDevices(cd1)
     fmt.Println(s)
@@ -49,4 +49,3 @@ func TestPodDevicesCoding(t *testing.T) {
     pd2 := DecodePodDevices(s)
     assert.DeepEqual(t, pd1, pd2)
 }
-

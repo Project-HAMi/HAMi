@@ -21,9 +21,9 @@ import (
     "net/http"
 
     pb "4pd.io/k8s-vgpu/pkg/api"
+    "4pd.io/k8s-vgpu/pkg/scheduler"
     "4pd.io/k8s-vgpu/pkg/scheduler/config"
     "4pd.io/k8s-vgpu/pkg/scheduler/routes"
-    "4pd.io/k8s-vgpu/pkg/scheduler/service"
     "github.com/julienschmidt/httprouter"
     "github.com/spf13/cobra"
     "google.golang.org/grpc"
@@ -33,9 +33,9 @@ import (
 //var version string
 
 var (
-    tlsKeyFile string
+    tlsKeyFile  string
     tlsCertFile string
-    rootCmd = &cobra.Command{
+    rootCmd     = &cobra.Command{
         Use:   "scheduler",
         Short: "kubernetes vgpu scheduler",
         Run: func(cmd *cobra.Command, args []string) {
@@ -43,6 +43,7 @@ var (
         },
     }
 )
+
 func init() {
     rootCmd.Flags().SortFlags = false
     rootCmd.PersistentFlags().SortFlags = false
@@ -55,17 +56,16 @@ func init() {
     rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
 }
 
-func start()  {
-    deviceService := service.NewDeviceService()
-    scheduler := service.NewScheduler(deviceService)
-    scheduler.Start()
-    defer scheduler.Stop()
+func start() {
+    sher := scheduler.NewScheduler()
+    sher.Start()
+    defer sher.Stop()
 
     // start grpc server
     lisGrpc, _ := net.Listen("tcp", config.GrpcBind)
     defer lisGrpc.Close()
     s := grpc.NewServer()
-    pb.RegisterDeviceServiceServer(s, deviceService)
+    pb.RegisterDeviceServiceServer(s, sher)
     go func() {
         err := s.Serve(lisGrpc)
         if err != nil {
@@ -75,7 +75,7 @@ func start()  {
 
     // start http server
     router := httprouter.New()
-    router.POST("/filter", routes.PredicateRoute(scheduler))
+    router.POST("/filter", routes.PredicateRoute(sher))
     router.POST("/webhook", routes.WebHookRoute())
     klog.Info("listen on ", config.HttpBind)
     if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {

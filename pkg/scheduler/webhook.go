@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-package service
+package scheduler
 
 import (
+    "4pd.io/k8s-vgpu/pkg/api"
     "4pd.io/k8s-vgpu/pkg/k8sutil"
     "4pd.io/k8s-vgpu/pkg/util"
     "context"
@@ -71,8 +72,8 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
         total += nums[i]
         c := &pod.Spec.Containers[i]
         c.Env = append(c.Env, corev1.EnvVar{
-            Name:      util.AssignedUID,
-            Value:     fmt.Sprintf("%v/%v", uid, c.Name),
+            Name:  api.ContainerUID,
+            Value: fmt.Sprintf("%v/%v", uid, c.Name),
         })
     }
     if total == 0 {

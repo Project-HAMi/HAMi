@@ -22,22 +22,24 @@ import (
     "k8s.io/klog/v2"
     "time"
 
-    pb "4pd.io/k8s-vgpu/pkg/api"
+    "4pd.io/k8s-vgpu/pkg/api"
     "4pd.io/k8s-vgpu/pkg/device-plugin/config"
     "google.golang.org/grpc"
 )
 
+type DevListFunc func() []*Device
+
 type DeviceRegister struct {
-    changed  chan struct{}
-    stop     chan struct{}
-    resource ResourceManager
+    changed     chan struct{}
+    stop        chan struct{}
+    devListFunc DevListFunc
 }
 
-func NewDeviceRegister(changed chan struct{}, resourceManager ResourceManager) *DeviceRegister {
+func NewDeviceRegister(changed chan struct{}, devListFunc DevListFunc) *DeviceRegister {
     return &DeviceRegister{
-        changed:  changed,
-        stop:     make(chan struct{}),
-        resource: resourceManager,
+        changed: changed,
+        stop:    make(chan struct{}),
+        devListFunc: devListFunc,
     }
 }
 
@@ -49,11 +51,11 @@ func (r *DeviceRegister) Stop() {
     close(r.stop)
 }
 
-func (r *DeviceRegister) apiDevices() *[]*pb.DeviceInfo {
-    devs := r.resource.Devices()
-    res := make([]*pb.DeviceInfo, 0, len(devs))
+func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
+    devs := r.devListFunc()
+    res := make([]*api.DeviceInfo, 0, len(devs))
     for _, dev := range devs {
-        res = append(res, &pb.DeviceInfo{
+        res = append(res, &api.DeviceInfo{
             Id:     dev.ID,
             Count:  int32(config.DeviceSplitCount),
             Health: dev.Health == "healthy",
@@ -73,14 +75,14 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
     if err != nil {
         return fmt.Errorf("connect scheduler error, %v", err)
     }
-    client := pb.NewDeviceServiceClient(conn)
+    client := api.NewDeviceServiceClient(conn)
     register, err := client.Register(ctx)
     if err != nil {
         klog.Errorf("register error %v", err)
         err = fmt.Errorf("client register error, %v", err)
         return err
     }
-    req := pb.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
+    req := api.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
     err = register.Send(&req)
     if err != nil {
         klog.Errorf("register send error, %v", err)
@@ -89,7 +91,7 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
     klog.V(3).Infof("register info %v", req.String())
     closeCh := make(chan struct{})
     go func() {
-        reply := pb.RegisterReply{}
+        reply := api.RegisterReply{}
         err := register.RecvMsg(reply)
         if err != nil {
             klog.Errorf("register recv error, %v", err)
@@ -101,7 +103,7 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
     for {
         select {
         case <-r.changed:
-            err = register.Send(&pb.RegisterRequest{
+            err = register.Send(&api.RegisterRequest{
                 Node:    config.NodeName,
                 Devices: *r.apiDevices(),
             })

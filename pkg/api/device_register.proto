@@ -3,6 +3,8 @@ package api;
 
 service DeviceService {
   rpc Register (stream RegisterRequest) returns (RegisterReply);
+
+  rpc GetContainer(GetContainerRequest) returns (GetContainerReply);
 }
 
 message DeviceInfo {
@@ -17,4 +19,16 @@ message RegisterRequest {
 }
 
 message RegisterReply {
+}
+
+message GetContainerRequest {
+  string uuid = 1;
+}
+
+message GetContainerReply {
+  repeated string devList = 1;
+  string podUID = 3;
+  string ctrName = 4;
+  string podNamespace = 5;
+  string podName = 6;
 }

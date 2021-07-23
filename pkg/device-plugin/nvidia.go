@@ -15,6 +15,7 @@
  */
 
 package device_plugin
+
 import (
     "fmt"
     "log"
@@ -27,15 +28,15 @@ import (
 )
 
 const (
-   envDisableHealthChecks = "DP_DISABLE_HEALTHCHECKS"
-   allHealthChecks        = "xids"
+    envDisableHealthChecks = "DP_DISABLE_HEALTHCHECKS"
+    allHealthChecks        = "xids"
 )
 
 // Device couples an underlying pluginapi.Device type with its device node paths
 type Device struct {
     pluginapi.Device
-    Paths []string
-    Index string
+    Paths  []string
+    Index  string
     Memory uint64
 }
 
@@ -86,7 +87,6 @@ func (g *GpuDeviceManager) Devices() []*Device {
     return devs
 }
 
-
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
 func (g *GpuDeviceManager) CheckHealth(stop <-chan interface{}, devices []*Device, unhealthy chan<- *Device) {
     checkHealth(stop, devices, unhealthy)
@@ -102,7 +102,7 @@ func buildDevice(d *nvml.Device, paths []string, index string) *Device {
     if d.CPUAffinity != nil {
         dev.Topology = &pluginapi.TopologyInfo{
             Nodes: []*pluginapi.NUMANode{
-                &pluginapi.NUMANode{
+                {
                     ID: int64(*(d.CPUAffinity)),
                 },
             },
@@ -183,4 +183,3 @@ func checkHealth(stop <-chan interface{}, devices []*Device, unhealthy chan<- *D
         }
     }
 }
-
