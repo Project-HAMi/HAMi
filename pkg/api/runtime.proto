@@ -10,8 +10,9 @@ message GetDeviceRequest {
 }
 
 message GetDeviceReply {
-  repeated string devList = 1;
-//  string podNamespace = 2;
+  repeated string devLidevListst = 1;
   string podUID = 3;
   string ctrName = 4;
+  string podNamespace = 5;
+  string podName = 6;
 }
