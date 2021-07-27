@@ -35,9 +35,9 @@ var (
     }
 
     getCmd = &cobra.Command{
-        Use: "get devices",
+        Use:   "get devices",
         Short: "get devices",
-        Args: cobra.ExactArgs(1),
+        Args:  cobra.ExactArgs(1),
         Run: func(cmd *cobra.Command, args []string) {
             getDevices(args[0])
         },
@@ -54,7 +54,7 @@ func init() {
 
 func getDevices(uid string) {
     ctx := context.Background()
-    ctx, cancel := context.WithTimeout(ctx, time.Second * 10)
+    ctx, cancel := context.WithTimeout(ctx, time.Second*10)
     defer cancel()
     conn, err := grpc.DialContext(
         ctx,
@@ -67,13 +67,13 @@ func getDevices(uid string) {
         os.Exit(1)
     }
     client := api.NewVGPURuntimeServiceClient(conn)
-    req := api.GetDeviceRequest{ CtrUUID: uid }
+    req := api.GetDeviceRequest{CtrUUID: uid}
     resp, err := client.GetDevice(ctx, &req)
     if err != nil {
         fmt.Printf("get device failed, %v\n", err)
         os.Exit(1)
     }
-    fmt.Printf("res:\n%v\n", resp.String())
+    fmt.Printf("%v\n", resp.String())
 }
 
 func main() {
