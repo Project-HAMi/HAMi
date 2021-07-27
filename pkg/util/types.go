@@ -24,6 +24,7 @@ const (
     AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
     //TimeLayout = "ANSIC"
+    //DefaultTimeout = time.Second * 60
 )
 
 var (
