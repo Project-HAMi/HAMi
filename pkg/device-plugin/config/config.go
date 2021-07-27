@@ -16,8 +16,6 @@
 
 package config
 
-import "github.com/spf13/cobra"
-
 var (
     DeviceSplitCount    uint
     DeviceMemoryScaling float64
@@ -25,7 +23,5 @@ var (
     SchedulerEndpoint   string
     SchedulerTimeout    int
     NodeName            string
+    RuntimeSocketFlag   string
 )
-
-func AddFlags(cmd *cobra.Command) {
-}

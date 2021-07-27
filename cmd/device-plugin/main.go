@@ -17,9 +17,7 @@ package main
 
 import (
     "fmt"
-    "log"
     "net"
-    "os"
     "syscall"
 
     "4pd.io/k8s-vgpu/pkg/api"
@@ -40,7 +38,6 @@ var (
     failOnInitErrorFlag bool
     //nvidiaDriverRootFlag string
     //enableLegacyPreferredFlag bool
-    runtimeSocketFlag string
 
     rootCmd = &cobra.Command{
         Use:   "scheduler",
@@ -61,7 +58,7 @@ func init() {
     rootCmd.PersistentFlags().SortFlags = false
 
     rootCmd.Flags().BoolVar(&failOnInitErrorFlag, "fail-on-init-error", true, "fail the plugin if an error is encountered during initialization, otherwise block indefinitely")
-    rootCmd.Flags().StringVar(&runtimeSocketFlag, "runtime-socket", "/var/lib/vgpu/vgpu.sock", "runtime socket")
+    rootCmd.Flags().StringVar(&config.RuntimeSocketFlag, "runtime-socket", "/var/lib/vgpu/vgpu.sock", "runtime socket")
     rootCmd.Flags().UintVar(&config.DeviceSplitCount, "device-split-count", 2, "the number for NVIDIA device split")
     rootCmd.Flags().Float64Var(&config.DeviceMemoryScaling, "device-memory-scaling", 1.0, "the ratio for NVIDIA device memory scaling")
     rootCmd.Flags().Float64Var(&config.DeviceCoresScaling, "device-cores-scaling", 1.0, "the ratio for NVIDIA device cores scaling")
@@ -73,7 +70,7 @@ func init() {
 }
 
 func start() error {
-    klog.Infof("Loading NVML")
+    klog.Info("Loading NVML")
     if err := nvml.Init(); err != nil {
         klog.Infof("Failed to initialize NVML: %v.", err)
         klog.Infof("If this is a GPU node, did you set the docker default runtime to `nvidia`?")
@@ -85,16 +82,16 @@ func start() error {
         }
         select {}
     }
-    defer func() { log.Println("Shutdown of NVML returned:", nvml.Shutdown()) }()
+    defer func() { klog.Info("Shutdown of NVML returned:", nvml.Shutdown()) }()
 
-    log.Println("Starting FS watcher.")
+    klog.Info("Starting FS watcher.")
     watcher, err := NewFSWatcher(pluginapi.DevicePluginPath)
     if err != nil {
         return fmt.Errorf("failed to create FS watcher: %v", err)
     }
     defer watcher.Close()
 
-    log.Println("Starting OS watcher.")
+    klog.Info("Starting OS watcher.")
     sigs := NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
     cache := device_plugin.NewDeviceCache()
@@ -106,16 +103,20 @@ func start() error {
     rt := device_plugin.NewVGPURuntimeService(cache)
 
     // start runtime grpc server
-    lisGrpc, _ := net.Listen("unix", runtimeSocketFlag)
+    lisGrpc, err := net.Listen("unix", config.RuntimeSocketFlag)
+    if err != nil {
+        klog.Fatalf("bind unix socket %v failed, %v", err)
+    }
     defer lisGrpc.Close()
-    s := grpc.NewServer()
-    api.RegisterVGPURuntimeServiceServer(s, rt)
+    runtimeServer := grpc.NewServer()
+    api.RegisterVGPURuntimeServiceServer(runtimeServer, rt)
     go func() {
-        err := s.Serve(lisGrpc)
+        err := runtimeServer.Serve(lisGrpc)
         if err != nil {
             klog.Fatal(err)
         }
     }()
+    defer runtimeServer.Stop()
 
     var plugins []*device_plugin.NvidiaDevicePlugin
 restart:
@@ -125,7 +126,7 @@ restart:
         p.Stop()
     }
 
-    log.Println("Retreiving plugins.")
+    klog.Info("Retreiving plugins.")
     plugins = []*device_plugin.NvidiaDevicePlugin{
         device_plugin.NewNvidiaDevicePlugin(
             util.ResourceName,
@@ -147,10 +148,10 @@ restart:
 
         // Start the gRPC server for plugin p and connect it with the kubelet.
         if err := p.Start(); err != nil {
-            log.SetOutput(os.Stderr)
-            log.Println("Could not contact Kubelet, retrying. Did you enable the device plugin feature gate?")
-            log.Printf("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
-            log.Printf("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
+            //klog.SetOutput(os.Stderr)
+            klog.Info("Could not contact Kubelet, retrying. Did you enable the device plugin feature gate?")
+            klog.Info("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
+            klog.Info("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
             close(pluginStartError)
             goto events
         }
@@ -158,7 +159,7 @@ restart:
     }
 
     if started == 0 {
-        log.Println("No devices found. Waiting indefinitely.")
+        klog.Info("No devices found. Waiting indefinitely.")
     }
 
 events:
@@ -175,13 +176,13 @@ events:
         // restarting all of the plugins in the process.
         case event := <-watcher.Events:
             if event.Name == pluginapi.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-                log.Printf("inotify: %s created, restarting.", pluginapi.KubeletSocket)
+                klog.Infof("inotify: %s created, restarting.", pluginapi.KubeletSocket)
                 goto restart
             }
 
         // Watch for any other fs errors and log them.
         case err := <-watcher.Errors:
-            log.Printf("inotify: %s", err)
+            klog.Infof("inotify: %s", err)
 
         // Watch for any signals from the OS. On SIGHUP, restart this loop,
         // restarting all of the plugins in the process. On all other
@@ -189,10 +190,10 @@ events:
         case s := <-sigs:
             switch s {
             case syscall.SIGHUP:
-                log.Println("Received SIGHUP, restarting.")
+                klog.Info("Received SIGHUP, restarting.")
                 goto restart
             default:
-                log.Printf("Received signal \"%v\", shutting down.", s)
+                klog.Infof("Received signal %v, shutting down.", s)
                 for _, p := range plugins {
                     p.Stop()
                 }

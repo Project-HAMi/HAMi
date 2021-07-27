@@ -17,6 +17,7 @@
 package device_plugin
 
 import (
+    "4pd.io/k8s-vgpu/pkg/api"
     "4pd.io/k8s-vgpu/pkg/device-plugin/config"
     "fmt"
     "k8s.io/apimachinery/pkg/util/uuid"
@@ -55,11 +56,11 @@ const (
 type NvidiaDevicePlugin struct {
     //ResourceManager
     //resourceManager  *ResourceManager
-    deviceCache      *DeviceCache
-    resourceName     string
+    deviceCache  *DeviceCache
+    resourceName string
     //deviceListEnvvar string
-    allocatePolicy   gpuallocator.Policy
-    socket           string
+    allocatePolicy gpuallocator.Policy
+    socket         string
 
     server *grpc.Server
     //cachedDevices []*Device
@@ -73,10 +74,10 @@ type NvidiaDevicePlugin struct {
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
 func NewNvidiaDevicePlugin(resourceName string, deviceCache *DeviceCache, allocatePolicy gpuallocator.Policy, socket string) *NvidiaDevicePlugin {
     return &NvidiaDevicePlugin{
-        deviceCache:      deviceCache,
-        resourceName:     resourceName,
-        allocatePolicy:   allocatePolicy,
-        socket:           socket,
+        deviceCache:    deviceCache,
+        resourceName:   resourceName,
+        allocatePolicy: allocatePolicy,
+        socket:         socket,
 
         // These will be reinitialized every
         // time the plugin server is restarted.
@@ -290,14 +291,17 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
         if config.DeviceMemoryScaling > 1 {
             response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
         }
+        response.Envs[api.PluginRuntimeSocket] = fmt.Sprintf("unix://%v", config.RuntimeSocketFlag)
         response.Mounts = append(response.Mounts,
             &pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
-                HostPath: "/usr/local/vgpu/libvgpu.so", ReadOnly: true},
+                HostPath: "/usr/local/vgpu/libvgpu.so",
+                ReadOnly: true},
             &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
-                HostPath: "/usr/local/vgpu/ld.so.preload", ReadOnly: true})
+               HostPath: "/usr/local/vgpu/ld.so.preload",
+               ReadOnly: true},
+        )
         responses.ContainerResponses = append(responses.ContainerResponses, &response)
     }
-    time.Sleep(time.Second * 20)
     return &responses, nil
 }
 

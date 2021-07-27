@@ -52,6 +52,7 @@ func init() {
     rootCmd.Flags().StringVar(&config.HttpBind, "http_bind", "127.0.0.1:8080", "http server bind address")
     rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
     rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
+    rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 
     rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
 }

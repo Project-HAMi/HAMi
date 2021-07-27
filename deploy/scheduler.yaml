@@ -1,0 +1,84 @@
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: 4pd-scheduler
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: 4pd-scheduler-binding
+  namespace: kube-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-admin
+subjects:
+  - kind: ServiceAccount
+    namespace: kube-system
+    name: 4pd-scheduler
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: 4pd-scheduler-config
+  namespace: kube-system
+data:
+  config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1beta1
+    kind: KubeSchedulerConfiguration
+    healthzBindAddress: 0.0.0.0:10251
+    leaderElection:
+      leaderElect: false
+    metricsBindAddress: 0.0.0.0:10251
+    profiles:
+    - schedulerName: 4pd-scheduler
+    extenders:
+    - urlPrefix: https://172.27.95.15:3456
+      filterVerb: filter
+      nodeCacheCapable: true
+      weight: 1
+      httpTimeout: 30s
+      enableHTTPS: true
+      tlsConfig:
+        insecure: true
+      managedResources:
+      - name: 4pd.io/vgpu
+        ignoredByScheduler: true
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: 4pd-scheduler
+  namespace: kube-system
+  labels:
+    app: 4pd-scheduler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: 4pd-scheduler
+  template:
+    metadata:
+      labels:
+        app: 4pd-scheduler
+    spec:
+      nodeSelector:
+        kubernetes.io/hostname: 172.24.4.80
+      serviceAccountName: 4pd-scheduler
+      volumes:
+        - name: config
+          configMap:
+            name: 4pd-scheduler-config
+      containers:
+        - name: kube-scheduler
+          image: 4pdosc/kube-scheduler:v1.20.9
+          imagePullPolicy: IfNotPresent
+          args:
+            - kube-scheduler
+            - --config=/config/config.yaml
+            - -v=4
+          volumeMounts:
+            - name: config
+              mountPath: /config

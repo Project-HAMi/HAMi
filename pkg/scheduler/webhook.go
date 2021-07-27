@@ -17,19 +17,20 @@
 package scheduler
 
 import (
-    "4pd.io/k8s-vgpu/pkg/api"
-    "4pd.io/k8s-vgpu/pkg/k8sutil"
-    "4pd.io/k8s-vgpu/pkg/util"
     "context"
     "encoding/json"
     "fmt"
+    "net/http"
+
+    "4pd.io/k8s-vgpu/pkg/api"
+    "4pd.io/k8s-vgpu/pkg/k8sutil"
+    "4pd.io/k8s-vgpu/pkg/scheduler/config"
+    "4pd.io/k8s-vgpu/pkg/util"
     corev1 "k8s.io/api/core/v1"
     "k8s.io/apimachinery/pkg/runtime"
     clientgoscheme "k8s.io/client-go/kubernetes/scheme"
     "k8s.io/klog/v2"
     "k8s.io/klog/v2/klogr"
-    "net/http"
-
     "sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -78,6 +79,9 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
     }
     if total == 0 {
         return admission.Allowed(fmt.Sprintf("no resource %v", util.ResourceName))
+    }
+    if len(config.SchedulerName) > 0 {
+        pod.Spec.SchedulerName = config.SchedulerName
     }
     marshaledPod, err := json.Marshal(pod)
     if err != nil {

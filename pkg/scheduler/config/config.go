@@ -17,6 +17,7 @@
 package config
 
 var (
-    HttpBind string
-    GrpcBind string
+    HttpBind      string
+    GrpcBind      string
+    SchedulerName string
 )

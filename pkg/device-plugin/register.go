@@ -117,7 +117,6 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
             klog.Infof("register server closed")
             return fmt.Errorf("register server closed")
         case <-r.stopCh:
-            klog.Infof("register stoped")
             return nil
         }
     }
