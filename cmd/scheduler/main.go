@@ -17,6 +17,7 @@ package main
 
 import (
     "4pd.io/k8s-vgpu/pkg/util"
+    "4pd.io/k8s-vgpu/pkg/version"
     "net"
     "net/http"
 
@@ -55,6 +56,7 @@ func init() {
     rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 
     rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
+    rootCmd.AddCommand(version.VersionCmd)
 }
 
 func start() {

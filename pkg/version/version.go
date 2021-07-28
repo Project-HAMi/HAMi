@@ -16,7 +16,21 @@
 
 package version
 
-var version string
+import (
+    "fmt"
+    "github.com/spf13/cobra"
+)
+
+var (
+    version string
+    VersionCmd = &cobra.Command{
+        Use: "version",
+        Short: "print version",
+        Run: func(cmd *cobra.Command, args []string) {
+            fmt.Println(Version())
+        },
+    }
+)
 
 func Version() string {
     return version

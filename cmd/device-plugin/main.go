@@ -16,6 +16,7 @@
 package main
 
 import (
+    "4pd.io/k8s-vgpu/pkg/version"
     "fmt"
     "net"
     "syscall"
@@ -40,8 +41,8 @@ var (
     //enableLegacyPreferredFlag bool
 
     rootCmd = &cobra.Command{
-        Use:   "scheduler",
-        Short: "kubernetes vgpu scheduler",
+        Use:   "device-plugin",
+        Short: "kubernetes vgpu device-plugin",
         Run: func(cmd *cobra.Command, args []string) {
             if err := start(); err != nil {
                 klog.Fatal(err)
@@ -67,6 +68,7 @@ func init() {
     rootCmd.Flags().StringVar(&config.NodeName, "node-name", viper.GetString("node-name"), "node name")
 
     rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
+    rootCmd.AddCommand(version.VersionCmd)
 }
 
 func start() error {
