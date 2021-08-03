@@ -1,0 +1,13 @@
+apiVersion: v2
+name: 4pd-vgpu
+version: 0.0.1
+kubeVersion: ">= 1.16.0"
+description: 4paradigm vgpu for kubernetes
+keywords:
+  - vgpu
+  - gpu
+type: application
+maintainers:
+  - name: 4pd
+    email: opensource@4paradigm.com
+appVersion: 0.0.1

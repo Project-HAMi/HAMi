@@ -1,0 +1,54 @@
+# Default values for 4pd-vgpu.
+
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+# 
+resourceName: "4pd.io/vgpu"
+schedulerName: "4pd-scheduler"
+
+global:
+  labels: {}
+  annotations: {}
+
+scheduler:
+  kubeScheduler:
+    image: "4pdosc/kube-scheduler:v1.20.9"
+    imagePullPolicy: IfNotPresent
+    extraArgs:
+      - -v=4
+  extender:
+    image: "m7-ieg-pico-test01:5000/k8s-vgpu:master"
+    imagePullPolicy: Always
+    extraArgs:
+      - --debug
+      - -v=4
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  #serviceAccountName: "4pd-vgpu-scheduler-sa"
+
+  service:
+    httpPort: 443
+    grpcPort: 1080
+    labels: {}
+    annotations: {}
+
+devicePlugin:
+  image: "m7-ieg-pico-test01:5000/k8s-vgpu:master"
+  imagePullPolicy: Always
+  extraArgs:
+    - --device-split-count=2
+    - -v=4
+
+  pluginPath: /var/lib/kubelet/device-plugins
+  libPath: /usr/local/vgpu
+  sockPath: /var/lib/vgpu
+
+  podAnnotations: {}
+  nodeSelector:
+    gpu: on
+    #nvidia.com/gpu.deploy.container-toolkit: true
+  tolerations: []
+

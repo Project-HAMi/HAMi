@@ -1,0 +1,68 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "4pd-vgpu.device-plugin" . }}
+  labels:
+    app.kubernetes.io/component: 4pd-device-plugin
+    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: 4pd-device-plugin
+      {{- include "4pd-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: 4pd-device-plugin
+        {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
+      {{- if .Values.devicePlugin.podAnnotations }}
+      annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
+      # serviceAccountName:
+      priorityClassName: system-node-critical
+      containers:
+        - name: device-plugin
+          image: {{ .Values.devicePlugin.image | quote }}
+          imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          command:
+            - device-plugin
+            - --resource-name={{ .Values.resourceName }}
+            - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
+            {{- range .Values.devicePlugin.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: lib
+              mountPath: /usr/local/vgpu
+            - name: sock
+              mountPath: /var/lib/vgpu
+      volumes:
+        - name: device-plugin
+          hostPath: {{ .Values.devicePlugin.pluginPath }}
+        - name: lib
+          hostPath: {{ .Values.devicePlugin.libPath }}
+        - name: sock
+          hostPath: {{ .Values.devicePlugin.sockPath }}
+      {{- if .Values.devicePlugin.nodeSelector }}
+      nodeSelector: {{ toYaml .Values.devicePlugin.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.devicePlugin.tolerations }}
+      tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}
+      {{- end }}
+
+
