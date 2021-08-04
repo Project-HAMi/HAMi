@@ -22,12 +22,13 @@ spec:
       labels:
         app.kubernetes.io/component: 4pd-scheduler
         {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
+        4pd.io/webhook: ignore
       {{- if .Values.scheduler.podAnnotations }}
       annotations: {{ toYaml .Values.scheduler.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
       {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
-      serviceAccountName: 4pd-scheduler
+      serviceAccountName: {{ include "4pd-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
       containers:
         - name: kube-scheduler
@@ -48,8 +49,8 @@ spec:
           command:
             - scheduler
             - --resource-name={{ .Values.resourceName }}
-            - --http_bind=0.0.0.0:3456
-            - --grpc_bind=0.0.0.0:3457
+            - --http_bind=0.0.0.0:443
+            - --grpc_bind=0.0.0.0:1080
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}
@@ -58,10 +59,10 @@ spec:
             {{- end }}
           ports:
             - name: http
-              containerPort: 3456
+              containerPort: 443
               protocol: TCP
             - name: grpc
-              containerPort: 3457
+              containerPort: 1080
               protocol: TCP
           volumeMounts:
             - name: tls-config

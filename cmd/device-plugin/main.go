@@ -53,7 +53,7 @@ var (
 
 func init() {
     // https://github.com/spf13/viper/issues/461
-    viper.BindEnv("node-name", "NODENAME")
+    viper.BindEnv("node-name", "NODE_NAME")
 
     rootCmd.Flags().SortFlags = false
     rootCmd.PersistentFlags().SortFlags = false

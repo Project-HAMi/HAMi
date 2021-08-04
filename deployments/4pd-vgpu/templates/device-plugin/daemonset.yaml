@@ -53,11 +53,14 @@ spec:
               mountPath: /var/lib/vgpu
       volumes:
         - name: device-plugin
-          hostPath: {{ .Values.devicePlugin.pluginPath }}
+          hostPath:
+            path: {{ .Values.devicePlugin.pluginPath }}
         - name: lib
-          hostPath: {{ .Values.devicePlugin.libPath }}
+          hostPath:
+            path: {{ .Values.devicePlugin.libPath }}
         - name: sock
-          hostPath: {{ .Values.devicePlugin.sockPath }}
+          hostPath:
+            path: {{ .Values.devicePlugin.sockPath }}
       {{- if .Values.devicePlugin.nodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nodeSelector | nindent 8 }}
       {{- end }}

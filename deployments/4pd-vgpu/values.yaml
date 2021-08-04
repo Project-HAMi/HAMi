@@ -48,7 +48,6 @@ devicePlugin:
 
   podAnnotations: {}
   nodeSelector:
-    gpu: on
-    #nvidia.com/gpu.deploy.container-toolkit: true
+    gpu: "on"
   tolerations: []
 

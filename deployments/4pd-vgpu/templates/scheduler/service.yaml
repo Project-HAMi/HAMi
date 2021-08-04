@@ -16,11 +16,11 @@ spec:
   ports:
     - name: http
       port: {{ .Values.scheduler.service.httpPort }}
-      targetPort: 3456
+      targetPort: 443
       protocol: TCP
     - name: grpc
       port: {{ .Values.scheduler.service.grpcPort }}
-      targetPort: 3457
+      targetPort: 1080
       protocol: TCP
   selector:
     app.kubernetes.io/component: 4pd-scheduler

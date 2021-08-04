@@ -1,6 +1,6 @@
 {{- $cn := printf "%s.%s.svc" ( include "4pd-vgpu.scheduler" . ) .Release.Namespace -}}
-{{- $ca := genCA "4pd-vgpu" 3650 -}}
-{{- $cert := genSignedCert $cn (list "127.0.0.1") nil 3650 $ca -}}
+{{- $ca := genCA $cn 3650 -}}
+{{- $cert := genSignedCert $cn (list "127.0.0.1") (list $cn) 3650 $ca -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
@@ -11,11 +11,11 @@ webhooks:
     clientConfig:
       caBundle: {{ b64enc $ca.Cert }}
       service:
-        name: {{ $cn }}
+        name: {{ include "4pd-vgpu.scheduler" . }}
         namespace: {{ .Release.Namespace }}
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
-    failurePolicy: Ignore
+    failurePolicy: Fail
     matchPolicy: Equivalent
     name: vgpu.4pd.io
     namespaceSelector:

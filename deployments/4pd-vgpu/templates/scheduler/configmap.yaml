@@ -16,7 +16,7 @@ data:
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
-    - urlPrefix: {{ printf "https://127.0.0.1:%d" ( int .Values.scheduler.service.httpPort )}}
+    - urlPrefix: "https://127.0.0.1:443"
       filterVerb: filter
       nodeCacheCapable: true
       weight: 1
