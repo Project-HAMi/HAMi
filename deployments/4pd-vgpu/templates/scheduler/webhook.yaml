@@ -1,3 +1,4 @@
+{{- if .Release.IsInstall }}
 {{- $cn := printf "%s.%s.svc" ( include "4pd-vgpu.scheduler" . ) .Release.Namespace -}}
 {{- $ca := genCA $cn 3650 -}}
 {{- $cert := genSignedCert $cn (list "127.0.0.1") (list $cn) 3650 $ca -}}
@@ -54,3 +55,4 @@ data:
   tls.crt: {{ b64enc $cert.Cert }}
   tls.key: {{ b64enc $cert.Key }}
   ca.crt: {{ b64enc $ca.Cert }}
+{{- end }}

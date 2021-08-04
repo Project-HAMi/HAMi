@@ -43,8 +43,8 @@ devicePlugin:
     - -v=4
 
   pluginPath: /var/lib/kubelet/device-plugins
-  libPath: /usr/local/vgpu
-  sockPath: /var/lib/vgpu
+  #libPath: /usr/local/vgpu
+  #sockPath: /var/lib/vgpu
 
   podAnnotations: {}
   nodeSelector:

@@ -57,10 +57,12 @@ spec:
             path: {{ .Values.devicePlugin.pluginPath }}
         - name: lib
           hostPath:
-            path: {{ .Values.devicePlugin.libPath }}
+            path: /usr/local/vgpu
+            #path: {{ .Values.devicePlugin.libPath }}
         - name: sock
           hostPath:
-            path: {{ .Values.devicePlugin.sockPath }}
+            path: /var/lib/vgpu
+            #path: {{ .Values.devicePlugin.sockPath }}
       {{- if .Values.devicePlugin.nodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nodeSelector | nindent 8 }}
       {{- end }}
