@@ -44,7 +44,12 @@ The tls secret name for Scheduler
 {{- printf "%s-scheduler-tls" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
-
+{{/*
+The webhook name
+*/}}
+{{- define "4pd-vgpu.scheduler.webhook" -}}
+{{- printf "%s-webhook" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 
 {{/*
 Create chart name and version as used by the chart label.

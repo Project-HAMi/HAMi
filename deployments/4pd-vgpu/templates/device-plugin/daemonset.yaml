@@ -20,6 +20,7 @@ spec:
     metadata:
       labels:
         app.kubernetes.io/component: 4pd-device-plugin
+        4pd.io/webhook: ignore
         {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
       {{- if .Values.devicePlugin.podAnnotations }}
       annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}

@@ -8,6 +8,9 @@ imagePullSecrets: []
 resourceName: "4pd.io/vgpu"
 schedulerName: "4pd-scheduler"
 
+podSecurityPolicy:
+  enabled: false
+
 global:
   labels: {}
   annotations: {}
@@ -28,6 +31,14 @@ scheduler:
   nodeSelector: {}
   tolerations: []
   #serviceAccountName: "4pd-vgpu-scheduler-sa"
+  patch:
+    image: docker.io/jettech/kube-webhook-certgen:v1.5.2
+    imagePullPolicy: IfNotPresent
+    priorityClassName: ""
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    runAsUser: 2000
 
   service:
     httpPort: 443

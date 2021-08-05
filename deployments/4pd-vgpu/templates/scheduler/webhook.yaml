@@ -1,16 +1,11 @@
-{{- if .Release.IsInstall }}
-{{- $cn := printf "%s.%s.svc" ( include "4pd-vgpu.scheduler" . ) .Release.Namespace -}}
-{{- $ca := genCA $cn 3650 -}}
-{{- $cert := genSignedCert $cn (list "127.0.0.1") (list $cn) 3650 $ca -}}
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: 4pd-vgpu-hook
+  name: {{ include "4pd-vgpu.scheduler.webhook" . }}
 webhooks:
   - admissionReviewVersions:
     - v1
     clientConfig:
-      caBundle: {{ b64enc $ca.Cert }}
       service:
         name: {{ include "4pd-vgpu.scheduler" . }}
         namespace: {{ .Release.Namespace }}
@@ -44,15 +39,3 @@ webhooks:
         scope: '*'
     sideEffects: None
     timeoutSeconds: 10
----
-apiVersion: v1
-kind: Secret
-metadata:
-  name: {{ template "4pd-vgpu.scheduler.tls" . }}
-  labels: {{- include "4pd-vgpu.labels" . | nindent 4 }}
-type: kubernetes.io/tls
-data:
-  tls.crt: {{ b64enc $cert.Cert }}
-  tls.key: {{ b64enc $cert.Key }}
-  ca.crt: {{ b64enc $ca.Cert }}
-{{- end }}
