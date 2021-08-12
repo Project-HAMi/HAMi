@@ -1,13 +1,15 @@
-FROM golang:1.16.6-buster AS build
+ARG GOLANG_IMAGE=golang:1.16.6-buster
+ARG NVIDIA_IMAGE=nvidia/cuda:11.2.1-base-ubuntu20.04
+FROM GOLANG_IMAGE AS build
 
-ARG VERSION="unknown"
 ADD . /k8s-vgpu
-ENV GOPROXY="https://goproxy.cn,direct"
 ENV GOPRIVATE="gitlab.4pd.io/*"
-ENV VERSION="$VERSION"
+ARG GOPROXY=https://goproxy.cn,direct
+ARG VERSION="unknown"
 RUN cd /k8s-vgpu && make all
 
-FROM nvidia/cuda:11.2.1-base-ubuntu20.04
+
+FROM $NVIDIA_IMAGE
 
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
