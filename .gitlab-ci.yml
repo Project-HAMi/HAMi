@@ -15,7 +15,7 @@ variables:
       --build-arg GOLANG_IMAGE=${GOLANG_IMAGE}
       --build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE}
       --build-arg VERSION=${VERSION}
-      --build-arg GOPROXY=${GOPROXY} -f ./dockerfile/Dockerfile .
+      --build-arg GOPROXY=${GOPROXY} -f ./docker/Dockerfile .
     - docker push ${IMAGE_FULL_NAME}
 
 build_dev_image:
