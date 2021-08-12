@@ -47,6 +47,7 @@ build_release_image:
       helm upgrade --install ${RELEASE_NAME} ./deployments/4pd-vgpu
       -n ${RELEASE_NAMESPACE}
       --set scheduler.extender.image=${IMAGE_FULL_NAME}
+      --set devicePlugin.image=${IMAGE_FULL_NAME}
       ${EXTRA_ARGS}
 
 deploy_develop:
