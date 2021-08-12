@@ -42,6 +42,7 @@ build_release_image:
     RELEASE_NAMESPACE: vgpu
     EXTRA_ARGS: ''
   script:
+    - sleep 1800
     - IMAGE_FULL_NAME=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
     - kubectl get no
     - >
