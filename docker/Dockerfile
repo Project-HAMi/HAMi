@@ -1,6 +1,6 @@
 ARG GOLANG_IMAGE=golang:1.16.6-buster
 ARG NVIDIA_IMAGE=nvidia/cuda:11.2.1-base-ubuntu20.04
-FROM GOLANG_IMAGE AS build
+FROM $GOLANG_IMAGE AS build
 
 ADD . /k8s-vgpu
 ENV GOPRIVATE="gitlab.4pd.io/*"
