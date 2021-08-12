@@ -17,78 +17,79 @@
 package scheduler
 
 import (
-    "4pd.io/k8s-vgpu/pkg/util"
-    "sort"
+	"sort"
+
+	"4pd.io/k8s-vgpu/pkg/util"
 )
 
 type NodeScore struct {
-    nodeID  string
-    devices util.PodDevices
-    score   float32
+	nodeID  string
+	devices util.PodDevices
+	score   float32
 }
 
 type NodeScoreList []*NodeScore
 
 func (l DeviceUsageList) Len() int {
-    return len(l)
+	return len(l)
 }
 
 func (l DeviceUsageList) Swap(i, j int) {
-    l[i], l[j] = l[j], l[i]
+	l[i], l[j] = l[j], l[i]
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-    return l[i].count-l[i].used < l[j].count-l[j].used
+	return l[i].count-l[i].used < l[j].count-l[j].used
 }
 
 func (l NodeScoreList) Len() int {
-    return len(l)
+	return len(l)
 }
 
 func (l NodeScoreList) Swap(i, j int) {
-    l[i], l[j] = l[j], l[i]
+	l[i], l[j] = l[j], l[i]
 }
 
 func (l NodeScoreList) Less(i, j int) bool {
-    return l[i].score < l[j].score
+	return l[i].score < l[j].score
 }
 
 func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []int) (*NodeScoreList, error) {
-    res := make(NodeScoreList, 0, len(*nodes))
-    for nodeID, node := range *nodes {
-        dn := len(node.devices)
-        score := NodeScore{nodeID: nodeID, score: 0}
-        for _, n := range nums {
-            if n == 0 {
-                score.devices = append(score.devices, []string{})
-                continue
-            }
-            if n > dn {
-                break
-            }
-            sort.Sort(node.devices)
-            if node.devices[dn-n].count <= node.devices[dn-n].used {
-                continue
-            }
-            total := int32(0)
-            free := int32(0)
-            devs := make([]string, 0, n)
-            for i := len(node.devices) - 1; i >= 0; i-- {
-                total += node.devices[i].count
-                free += node.devices[i].count - node.devices[i].used
-                if n > 0 {
-                    n--
-                    node.devices[i].used++
-                    devs = append(devs, node.devices[i].id)
-                }
-            }
-            score.devices = append(score.devices, devs)
-            score.score += float32(free) / float32(total)
-            score.score += float32(dn - n)
-        }
-        if len(score.devices) == len(nums) {
-            res = append(res, &score)
-        }
-    }
-    return &res, nil
+	res := make(NodeScoreList, 0, len(*nodes))
+	for nodeID, node := range *nodes {
+		dn := len(node.devices)
+		score := NodeScore{nodeID: nodeID, score: 0}
+		for _, n := range nums {
+			if n == 0 {
+				score.devices = append(score.devices, []string{})
+				continue
+			}
+			if n > dn {
+				break
+			}
+			sort.Sort(node.devices)
+			if node.devices[dn-n].count <= node.devices[dn-n].used {
+				break
+			}
+			total := int32(0)
+			free := int32(0)
+			devs := make([]string, 0, n)
+			for i := len(node.devices) - 1; i >= 0; i-- {
+				total += node.devices[i].count
+				free += node.devices[i].count - node.devices[i].used
+				if n > 0 {
+					n--
+					node.devices[i].used++
+					devs = append(devs, node.devices[i].id)
+				}
+			}
+			score.devices = append(score.devices, devs)
+			score.score += float32(free) / float32(total)
+			score.score += float32(dn - n)
+		}
+		if len(score.devices) == len(nums) {
+			res = append(res, &score)
+		}
+	}
+	return &res, nil
 }
