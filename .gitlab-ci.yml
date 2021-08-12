@@ -42,8 +42,6 @@ build_release_image:
     RELEASE_NAMESPACE: vgpu
     EXTRA_ARGS: ''
   script:
-    - sleep 300
-    - kubectl get no -v ${VERBOSE}
     - IMAGE_FULL_NAME=${IMAGE_REGISTRY}/${IMAGE_NAME}:${IMAGE_TAG}
     - >
       helm upgrade --install ${RELEASE_NAME} ./deployments/4pd-vgpu
