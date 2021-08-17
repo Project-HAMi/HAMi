@@ -1,0 +1,12 @@
+stages:
+  - build
+  - test
+
+build:
+  stage: build
+  tags:
+    - build-test
+  script:
+    - make
+  
+  
