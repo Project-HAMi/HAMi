@@ -8,11 +8,14 @@ require (
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52
 	github.com/fsnotify/fsnotify v1.4.9
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/prometheus/client_golang v1.11.0
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/viper v1.7.0
+	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
 	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
 	google.golang.org/grpc v1.39.0
+	google.golang.org/protobuf v1.26.0
 	gotest.tools/v3 v3.0.3
 	k8s.io/api v0.21.2
 	k8s.io/apimachinery v0.21.2

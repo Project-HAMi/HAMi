@@ -48,6 +48,8 @@ scheduler:
 
 devicePlugin:
   image: "m7-ieg-pico-test01:5000/k8s-vgpu:master"
+  monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu:master"
+  monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
   extraArgs:
     - --device-split-count=2
