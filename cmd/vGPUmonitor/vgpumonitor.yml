@@ -1,0 +1,69 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: vgpu-monitor-daemonset
+  namespace: kube-system
+spec:
+  selector:
+    matchLabels:
+      name: vgpu-monitor-ds
+      app: vgpu-monitor-ds-app
+  updateStrategy:
+    type: RollingUpdate
+  template:
+    metadata:
+      # This annotation is deprecated. Kept here for backward compatibility
+      # See https://kubernetes.io/docs/tasks/administer-cluster/guaranteed-scheduling-critical-addon-pods/
+      annotations:
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+      labels:
+        name: vgpu-monitor-ds
+        app: vgpu-monitor-ds-app
+    spec:
+      priorityClassName: "system-node-critical"
+      containers:
+      - image: ubuntu:18.04
+        #- image: m7-ieg-pico-test01:5000/k8s-device-plugin-test:v0.9.0-ubuntu20.04
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 9394
+        name: vgpu-monitor-ctr
+        command: ["/vGPUmonitor/vGPUmonitor"]
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            drop: ["ALL"]
+        volumeMounts:
+          - name: run-path
+            mountPath: /run
+          - name: vgpu-monitor
+            mountPath: /vGPUmonitor
+          - name: monitor-containers
+            mountPath: /tmp/vgpu/containers
+      volumes:
+        - name: run-path
+          hostPath:
+            path: /run
+        - name: vgpu-monitor
+          hostPath:
+            path: /home/work/work/runtime_test
+        - name: monitor-containers
+          hostPath:
+            path: /tmp/vgpu/containers
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: my-service
+  namespace: kube-system
+spec:
+  type: NodePort
+  selector:
+    app: vgpu-monitor-ds-app
+  ports:
+      # By default and for convenience, the `targetPort` is set to the same value as the `port` field.
+    - port: 9394
+      targetPort: 9394
+      # Optional field
+      # By default and for convenience, the Kubernetes control plane will allocate a port from a range (default: 30000-32767)
+      # nodePort: 30007

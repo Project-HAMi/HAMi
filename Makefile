@@ -1,11 +1,14 @@
 GO=go
 GO111MODULE=on
-CMDS=scheduler device-plugin
+CMDS=scheduler device-plugin vGPUmonitor
 OUTPUT_DIR=bin
 
 VERSION ?= unknown
 
 all: build
+
+docker:
+	docker build . -f=docker/Dockerfile
 
 build: $(CMDS)
 
@@ -16,4 +19,4 @@ clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build clean $(CMDS)
+.PHONY: all build docker clean $(CMDS)

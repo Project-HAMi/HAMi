@@ -28,6 +28,7 @@ spec:
     spec:
       {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
       # serviceAccountName:
+      serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       containers:
         - name: device-plugin
@@ -52,7 +53,23 @@ spec:
               mountPath: /usr/local/vgpu
             - name: sock
               mountPath: /var/lib/vgpu
+        - name: vgpu-monitor
+          image: {{ .Values.devicePlugin.image | quote }}
+          imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          command:
+            - vGPUmonitor
+          volumeMounts:
+            - name: ctrs
+              mountPath: /tmp/vgpu/containers
+            - name: dockers
+              mountPath: /run/docker
       volumes:
+        - name: ctrs
+          hostPath:
+            path: {{ .Values.devicePlugin.monitorctrPath }}
+        - name: dockers
+          hostPath:
+            path: /run/docker
         - name: device-plugin
           hostPath:
             path: {{ .Values.devicePlugin.pluginPath }}

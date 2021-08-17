@@ -1,0 +1,61 @@
+// Copyright 2015 gRPC authors.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+option go_package = "gitlab.4pd.io/vGPUmonitor";
+option java_multiple_files = true;
+option java_package = "io.grpc.examples.helloworld";
+option java_outer_classname = "HelloWorldProto";
+
+package pluginrpc;
+
+// The greeting service definition.
+service NodeVGPUInfo {
+  // Sends a greeting
+  rpc GetNodeVGPU (GetNodeVGPURequest) returns (GetNodeVGPUReply) {}
+}
+
+// The sharedProcs contains the sharedRegion
+message shrregProcSlotT {
+	int32 pid = 1;
+	repeated uint64 used = 2;
+	int32 status = 3;
+}
+
+// The sharedRegionT struct is the main struct for monitoring vgpu
+message sharedRegionT {
+	int32 initializedFlag = 1;
+	uint32 ownerPid = 2;
+	uint32 sem = 3;
+	repeated uint64 limit = 4;
+	repeated uint64 sm_limit = 5;
+	repeated shrregProcSlotT procs = 6;
+}
+
+message podusage {
+	string poduuid = 1;
+	sharedRegionT podvgpuinfo = 2;
+}
+
+// The request message containing the user's name.
+message GetNodeVGPURequest {
+ 	string ctruuid = 1;
+}
+
+// The response message containing the greetings
+message GetNodeVGPUReply {
+	string nodeid = 1;
+	repeated podusage nodevgpuinfo = 2;	
+}
