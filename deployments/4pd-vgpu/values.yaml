@@ -5,7 +5,7 @@ fullnameOverride: ""
 
 imagePullSecrets: []
 # 
-resourceName: "4pd.io/vgpu"
+resourceName: "nvidia.com/gpu"
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
