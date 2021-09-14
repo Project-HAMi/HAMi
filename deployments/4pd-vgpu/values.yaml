@@ -6,6 +6,8 @@ fullnameOverride: ""
 imagePullSecrets: []
 # 
 resourceName: "nvidia.com/gpu"
+resourceMem: "nvidia.com/gpumem"
+resourceCores: "nvidia.com/gpucores"
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:

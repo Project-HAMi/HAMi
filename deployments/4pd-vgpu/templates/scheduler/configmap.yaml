@@ -27,3 +27,7 @@ data:
       managedResources:
       - name: {{ .Values.resourceName }}
         ignoredByScheduler: true
+      - name: {{ .Values.resourceMem }}
+        ignoredByScheduler: true
+      - name: {{ .Values.resourcecores }}
+        ignoredByScheduler: true

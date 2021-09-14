@@ -17,48 +17,78 @@
 package util
 
 import (
-    "flag"
-    "os"
-    "strings"
+	"flag"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
 
-    "k8s.io/klog/v2"
+	"k8s.io/klog/v2"
 )
 
 func GlobalFlagSet() *flag.FlagSet {
-    fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-    fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
-    fs.BoolVar(&DebugMode, "debug", false, "debug mode")
-    klog.InitFlags(fs)
-    return fs
+	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
+	fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
+	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
+	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
+	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
+	klog.InitFlags(fs)
+	return fs
 }
 
 func EncodeContainerDevices(cd ContainerDevices) string {
-    return strings.Join(cd, ",")
+	tmp := ""
+	for _, val := range cd {
+		tmp += val.UUID + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + ":"
+	}
+	fmt.Println("Encoded container Devices=", tmp)
+	return tmp
+	//return strings.Join(cd, ",")
 }
 
 func EncodePodDevices(pd PodDevices) string {
-    var ss []string
-    for _, cd := range pd {
-        ss = append(ss, EncodeContainerDevices(cd))
-    }
-    return strings.Join(ss, ";")
+	var ss []string
+	for _, cd := range pd {
+		ss = append(ss, EncodeContainerDevices(cd))
+	}
+	return strings.Join(ss, ";")
 }
 
 func DecodeContainerDevices(str string) ContainerDevices {
-    if len(str) == 0 {
-        return ContainerDevices{}
-    }
-    return strings.Split(str, ",")
+	if len(str) == 0 {
+		return ContainerDevices{}
+	}
+	cd := strings.Split(str, ":")
+	contdev := ContainerDevices{}
+	tmpdev := ContainerDevice{}
+	//fmt.Println("before container device", str)
+	if len(str) == 0 {
+		return contdev
+	}
+	for _, val := range cd {
+		if strings.Contains(val, ",") {
+			//fmt.Println("cd is ", val)
+			tmpstr := strings.Split(val, ",")
+			tmpdev.UUID = tmpstr[0]
+			devmem, _ := strconv.ParseInt(tmpstr[1], 10, 32)
+			tmpdev.Usedmem = int32(devmem)
+			devcores, _ := strconv.ParseInt(tmpstr[2], 10, 32)
+			tmpdev.Usedcores = int32(devcores)
+			contdev = append(contdev, tmpdev)
+		}
+	}
+	//fmt.Println("Decoded container device", contdev)
+	return contdev
 }
 
 func DecodePodDevices(str string) PodDevices {
-    if len(str) == 0 {
-        return PodDevices{}
-    }
-    var pd PodDevices
-    for _, s := range strings.Split(str, ";") {
-        cd := DecodeContainerDevices(s)
-        pd = append(pd, cd)
-    }
-    return pd
+	if len(str) == 0 {
+		return PodDevices{}
+	}
+	var pd PodDevices
+	for _, s := range strings.Split(str, ";") {
+		cd := DecodeContainerDevices(s)
+		pd = append(pd, cd)
+	}
+	return pd
 }

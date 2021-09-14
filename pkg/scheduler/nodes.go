@@ -17,60 +17,64 @@
 package scheduler
 
 import (
-    "fmt"
-    "sync"
+	"fmt"
+	"sync"
 )
 
 type DeviceInfo struct {
-    ID     string
-    Count  int32
-    Health bool
+	ID     string
+	Count  int32
+	Devmem int32
+	Health bool
 }
 
 type NodeInfo struct {
-    ID      string
-    Devices []DeviceInfo
+	ID      string
+	Devices []DeviceInfo
 }
 
 type DeviceUsage struct {
-    id     string
-    used   int32
-    count  int32
-    health bool
+	id        string
+	used      int32
+	count     int32
+	usedmem   int32
+	totalmem  int32
+	usedcores int32
+	health    bool
 }
 
 type DeviceUsageList []*DeviceUsage
 
 type NodeUsage struct {
-    devices DeviceUsageList
+	devices DeviceUsageList
 }
 
 type nodeManager struct {
-    nodes map[string]NodeInfo
-    mutex sync.Mutex
+	nodes map[string]NodeInfo
+	mutex sync.Mutex
 }
 
 func (m *nodeManager) init() {
-    m.nodes = make(map[string]NodeInfo)
+	m.nodes = make(map[string]NodeInfo)
 }
 
 func (m *nodeManager) addNode(nodeID string, nodeInfo NodeInfo) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    m.nodes[nodeID] = nodeInfo
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	m.nodes[nodeID] = nodeInfo
 }
 
 func (m *nodeManager) delNode(nodeID string) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    delete(m.nodes, nodeID)
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	delete(m.nodes, nodeID)
 }
 
 func (m *nodeManager) GetNode(nodeID string) (NodeInfo, error) {
-    m.mutex.Lock()
-    defer m.mutex.Unlock()
-    if n, ok := m.nodes[nodeID]; ok {
-        return n, nil
-    }
-    return NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+	if n, ok := m.nodes[nodeID]; ok {
+		return n, nil
+	}
+	return NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 }
