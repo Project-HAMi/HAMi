@@ -37,7 +37,7 @@
 
 ## 性能测试
 
-见[k8s-device-plugin]的性能测试部分
+见[k8s-device-plugin的性能测试部分](https://github.com/4paradigm/k8s-device-plugin/blob/master/README_cn.md#性能测试)
 
 ## 功能
 
@@ -153,8 +153,6 @@ spec:
 ```
 
 现在你可以在容器执行`nvidia-smi`命令，然后比较vGPU和实际GPU显存大小的不同。
-
-> **注意:** 如果你使用插件装置时，如果没有请求vGPU资源，那容器所在机器的所有vGPU都将暴露给容器。
 
 ## 测试
 
