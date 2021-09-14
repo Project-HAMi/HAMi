@@ -54,7 +54,7 @@ devicePlugin:
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
   extraArgs:
-    - --device-split-count=2
+    - --device-split-count=10
     - -v=4
 
   pluginPath: /var/lib/kubelet/device-plugins
