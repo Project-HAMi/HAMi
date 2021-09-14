@@ -10,7 +10,8 @@ service DeviceService {
 message DeviceInfo {
   string  id = 1;
   int32 count = 2;
-  bool health = 3;
+  int32 devmem = 3;
+  bool health = 4;
 }
 
 message RegisterRequest {
@@ -25,8 +26,14 @@ message GetContainerRequest {
   string uuid = 1;
 }
 
+message DeviceUsage {
+  string id = 1;
+  int32 devmem = 2;
+  int32 cores = 3;
+}
+
 message GetContainerReply {
-  repeated string devList = 1;
+  repeated DeviceUsage devList = 1;
   string podUID = 3;
   string ctrName = 4;
   string podNamespace = 5;
