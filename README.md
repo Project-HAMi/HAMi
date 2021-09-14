@@ -1,4 +1,4 @@
-# vGPU device plugin for Kubernetes
+# vGPU scheduler for Kubernetes
 
 
 ## 目录
@@ -21,7 +21,7 @@
 
 ## 关于
 
-**k8s vGPU scheduler** 基于NVIDIA官方插件([NVIDIA/k8s-device-plugin](https://github.com/NVIDIA/k8s-device-plugin))，在保留官方功能的基础上，实现了对物理GPU进行切分，并对显存和计算单元进行限制，从而模拟出多张小的vGPU卡。k8s vGPU scheduler在原有显存分配方式的基础上，可以通过设置显存和算力更准确的分配到任务所需要的vGPU卡。在k8s集群中，基于这些切分后的vGPU进行调度，使不同的容器可以安全的共享同一张物理GPU，提高GPU的利用率。此外，插件还可以对显存做虚拟化处理（使用到的显存可以超过物理上的显存），运行一些超大显存需求的任务，或提高共享的任务数，可参考[性能测试报告](#性能测试)。
+**k8s vGPU scheduler** 基于4pd-k8s-device-plugin插件([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin))，在保留原功能的基础上，添加了调度模块，以实现多个GPU节点间的负载均衡。k8s vGPU scheduler在原有显卡分配方式的基础上，可以进一步根据显存和算力来切分显卡。在k8s集群中，基于这些切分后的vGPU进行调度，使不同的容器可以安全的共享同一张物理GPU，提高GPU的利用率。此外，插件还可以对显存做虚拟化处理（使用到的显存可以超过物理上的显存），运行一些超大显存需求的任务，或提高共享的任务数，可参考[性能测试报告](#性能测试)。
 
 ## 使用场景
 
@@ -118,6 +118,14 @@ $ cd k8s-vgpu/deployments
   整数类型，预设值是10。GPU的分割数，每一张GPU都不能分配超过其配置数目的任务。若其配置为N的话，每个GPU上最多可以同时存在N个任务。
 * `device-memory-scaling:` 
   浮点数类型，预设值是1。NVIDIA装置显存使用比例，可以大于1（启用虚拟显存，实验功能）。对于有*M​*显存大小的NVIDIA GPU，如果我们配置`device-memory-scaling`参数为*S*，在部署了我们装置插件的Kubenetes集群中，这张GPU分出的vGPU将总共包含 *S \* M*显存。每张vGPU的显存大小也受`device-split-count`参数影响。在先前的例子中，如果`device-split-count`参数配置为*K*，那每一张vGPU最后会取得 *S \* M / K* 大小的显存。
+
+除此之外，你可以在 `values.yaml/scheduler/extender/extraArgs` 中使用以下客制化参数:
+
+* `default-mem:`
+  整数类型，预设值为5000，表示不配置显存时使用的默认显存大小，单位为MB
+
+* `default-cores:`
+  整数类型(0-100)，默认为0，表示不配置显卡使用比例时默认的使用比例。若设置为0，则代表任务可能会被分配到任一满足显存需求的GPU中，若设置为100，代表该任务独享整张显卡
 
 配置完成后，随后使用helm安装整个chart
 

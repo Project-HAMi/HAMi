@@ -24,10 +24,10 @@ const (
 	AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
 	//Set default mem to 5000m
-	DefaultMem   = 5000
-	DefaultCores = 0
+	//DefaultMem   = 5000
+	//DefaultCores = 0
 
-	DeviceLimit = 2
+	DeviceLimit = 100
 	//TimeLayout = "ANSIC"
 	//DefaultTimeout = time.Second * 60
 )

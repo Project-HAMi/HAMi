@@ -17,6 +17,7 @@
 package k8sutil
 
 import (
+	"4pd.io/k8s-vgpu/pkg/scheduler/config"
 	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 )
@@ -33,7 +34,7 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 		}
 		if ok {
 			if n, ok := v.AsInt64(); ok {
-				memnum := util.DefaultMem
+				memnum := config.DefaultMem
 				mem, ok := pod.Spec.Containers[i].Resources.Limits[resourceMem]
 				if !ok {
 					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMem]
@@ -41,10 +42,10 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 				if ok {
 					memnums, ok := mem.AsInt64()
 					if ok {
-						memnum = int(memnums)
+						memnum = int32(memnums)
 					}
 				}
-				corenum := util.DefaultCores
+				corenum := config.DefaultCores
 				core, ok := pod.Spec.Containers[i].Resources.Limits[resourceCores]
 				if !ok {
 					core, ok = pod.Spec.Containers[i].Resources.Requests[resourceCores]
@@ -52,7 +53,7 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 				if ok {
 					corenums, ok := core.AsInt64()
 					if ok {
-						corenum = int(corenums)
+						corenum = int32(corenums)
 					}
 				}
 				counts[i] = util.ContainerDeviceRequest{
