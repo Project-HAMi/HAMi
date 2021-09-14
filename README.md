@@ -109,7 +109,7 @@ $ sudo systemctl restart docker
 
 ```
 $ git clone https://gitlab.4pd.io/vgpu/k8s-vgpu.git
-cd k8s-vgpu/deployments
+$ cd k8s-vgpu/deployments
 ```
 
 在这个deployments文件中, 你可以在 `values.yaml/devicePlugin/extraArgs` 中使用以下的客制化参数：
@@ -122,13 +122,13 @@ cd k8s-vgpu/deployments
 配置完成后，随后使用helm安装整个chart
 
 ```
-helm install vgpu 4pd-vgpu
+$ helm install vgpu 4pd-vgpu
 ```
 
 通过kubectl get pods指令看到vgpu-4pd-vgpu-device-plugin与vgpu-4pd-vgpu-scheduler两个pod即为安装成功
 
 ```
-kubectl get pods
+$ kubectl get pods
 ```
 
 ### 运行GPU任务
