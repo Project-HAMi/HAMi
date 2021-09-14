@@ -17,75 +17,86 @@
 package device_plugin
 
 import (
-    "context"
-    "fmt"
-    "strings"
+	"context"
+	"fmt"
+	"strconv"
 
-    "4pd.io/k8s-vgpu/pkg/api"
-    "4pd.io/k8s-vgpu/pkg/device-plugin/config"
-    "google.golang.org/grpc"
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	"google.golang.org/grpc"
 )
 
 type VGPURuntimeService struct {
-    deviceCache *DeviceCache
+	deviceCache *DeviceCache
 }
 
 func NewVGPURuntimeService(deviceCache *DeviceCache) *VGPURuntimeService {
-    return &VGPURuntimeService{deviceCache: deviceCache}
+	return &VGPURuntimeService{deviceCache: deviceCache}
 }
 
 func (s *VGPURuntimeService) GetDevice(ctx context.Context, req *api.GetDeviceRequest) (*api.GetDeviceReply, error) {
-    conn, err := grpc.DialContext(
-        ctx,
-        config.SchedulerEndpoint,
-        grpc.WithInsecure(),
-        grpc.WithBlock(),
-        //grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
-    )
-    if err != nil {
-        return nil, fmt.Errorf("connect scheduler error, %v", err)
-    }
-    client := api.NewDeviceServiceClient(conn)
-    sReq := api.GetContainerRequest{Uuid: req.CtrUUID}
-    sResp, err := client.GetContainer(ctx, &sReq)
-    if err != nil {
-        return nil, err
-    }
-    envs, err := s.containerEnvs(sResp.DevList)
-    if err != nil {
-        return nil, err
-    }
-    resp := api.GetDeviceReply{
-        Envs:         envs,
-        PodUID:       sResp.PodUID,
-        CtrName:      sResp.CtrName,
-        PodNamespace: sResp.PodNamespace,
-        PodName:      sResp.PodName,
-    }
-    return &resp, nil
+	conn, err := grpc.DialContext(
+		ctx,
+		config.SchedulerEndpoint,
+		grpc.WithInsecure(),
+		grpc.WithBlock(),
+		//grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("connect scheduler error, %v", err)
+	}
+	client := api.NewDeviceServiceClient(conn)
+	sReq := api.GetContainerRequest{Uuid: req.CtrUUID}
+	sResp, err := client.GetContainer(ctx, &sReq)
+	if err != nil {
+		return nil, err
+	}
+	envs, err := s.containerEnvs(sResp.DevList)
+	if err != nil {
+		return nil, err
+	}
+	resp := api.GetDeviceReply{
+		Envs:         envs,
+		PodUID:       sResp.PodUID,
+		CtrName:      sResp.CtrName,
+		PodNamespace: sResp.PodNamespace,
+		PodName:      sResp.PodName,
+	}
+	return &resp, nil
 }
 
-func (s *VGPURuntimeService) containerEnvs(devIDs []string) (map[string]string, error) {
-    envs := make(map[string]string)
-    var devs []*Device
-    for _, id := range devIDs {
-        found := false
-        for _, d := range s.deviceCache.GetCache() {
-            if id == d.ID {
-                found = true
-                devs = append(devs, d)
-                break
-            }
-        }
-        if !found {
-            return nil, fmt.Errorf("device %v not found", id)
-        }
-    }
+func (s *VGPURuntimeService) containerEnvs(devIDs []*api.DeviceUsage) (map[string]string, error) {
+	envs := make(map[string]string)
+	var devs []*Device
+	for _, id := range devIDs {
+		found := false
+		for _, d := range s.deviceCache.GetCache() {
+			if id.GetId() == d.ID {
+				found = true
+				devs = append(devs, d)
+				break
+			}
+		}
+		if !found {
+			return nil, fmt.Errorf("device %v not found", id)
+		}
+	}
 
-    envs["NVIDIA_VISIBLE_DEVICES"] = strings.Join(devIDs, ",")
-    for i, d := range devs {
-        limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
-        envs[limitKey] = fmt.Sprintf("%vm", config.DeviceMemoryScaling*float64(d.Memory)/float64(config.DeviceSplitCount))
-    }
-    return envs, nil
+	devenv := ""
+	for idx, val := range devIDs {
+		if idx == 0 {
+			devenv = "" + val.GetId()
+		} else {
+			devenv = devenv + "," + val.GetId()
+		}
+	}
+	//envs["NVIDIA_VISIBLE_DEVICES"] = strings.Join(devIDs, ",")
+	//fmt.Println("Assigneing NVIDIA_VISIBLE_DEVICES:", devenv)
+	envs["NVIDIA_VISIBLE_DEVICES"] = devenv
+	for i, d := range devIDs {
+		limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
+		envs[limitKey] = strconv.Itoa(int(d.GetDevmem())) + "m"
+		//envs[limitKey] = fmt.Sprintf("%vm", config.DeviceMemoryScaling*float64(d.Memory)/float64(config.DeviceSplitCount))
+	}
+	return envs, nil
 }

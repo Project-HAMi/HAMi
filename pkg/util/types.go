@@ -17,19 +17,26 @@
 package util
 
 const (
-    //ResourceName = "nvidia.com/gpu"
-    //ResourceName = "4pd.io/vgpu"
-    AssignedTimeAnnotations = "4pd.io/vgpu-time"
-    AssignedIDsAnnotations  = "4pd.io/vgpu-ids"
-    AssignedNodeAnnotations = "4pd.io/vgpu-node"
+	//ResourceName = "nvidia.com/gpu"
+	//ResourceName = "4pd.io/vgpu"
+	AssignedTimeAnnotations = "4pd.io/vgpu-time"
+	AssignedIDsAnnotations  = "4pd.io/vgpu-ids-new"
+	AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
-    //TimeLayout = "ANSIC"
-    //DefaultTimeout = time.Second * 60
+	//Set default mem to 5000m
+	//DefaultMem   = 5000
+	//DefaultCores = 0
+
+	DeviceLimit = 100
+	//TimeLayout = "ANSIC"
+	//DefaultTimeout = time.Second * 60
 )
 
 var (
-    ResourceName string
-    DebugMode    bool
+	ResourceName  string
+	ResourceMem   string
+	ResourceCores string
+	DebugMode     bool
 )
 
 //type ContainerDevices struct {
@@ -39,7 +46,18 @@ var (
 //type PodDevices struct {
 //    Containers []ContainerDevices `json:"containers,omitempty"`
 //}
+type ContainerDevice struct {
+	UUID      string
+	Usedmem   int32
+	Usedcores int32
+}
 
-type ContainerDevices []string
+type ContainerDeviceRequest struct {
+	Nums     int32
+	Memreq   int32
+	Coresreq int32
+}
+
+type ContainerDevices []ContainerDevice
 
 type PodDevices []ContainerDevices

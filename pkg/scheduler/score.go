@@ -17,6 +17,7 @@
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 
 	"4pd.io/k8s-vgpu/pkg/util"
@@ -54,38 +55,67 @@ func (l NodeScoreList) Less(i, j int) bool {
 	return l[i].score < l[j].score
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []int) (*NodeScoreList, error) {
+func viewStatus(usage NodeUsage) {
+	fmt.Println("viewing status")
+	for _, val := range usage.devices {
+		fmt.Println(val)
+	}
+}
+
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []util.ContainerDeviceRequest) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
+		viewStatus(*node)
 		dn := len(node.devices)
 		score := NodeScore{nodeID: nodeID, score: 0}
 		for _, n := range nums {
-			if n == 0 {
-				score.devices = append(score.devices, []string{})
+			if n.Nums == 0 {
+				score.devices = append(score.devices, util.ContainerDevices{})
 				continue
 			}
-			if n > dn {
+			if int(n.Nums) > dn {
 				break
 			}
 			sort.Sort(node.devices)
-			if node.devices[dn-n].count <= node.devices[dn-n].used {
+			if node.devices[dn-int(n.Nums)].count <= node.devices[dn-int(n.Nums)].used {
 				break
 			}
 			total := int32(0)
 			free := int32(0)
-			devs := make([]string, 0, n)
+			//devs := make([]string, 0, n)
+			devs := make([]util.ContainerDevice, 0, n.Nums)
+			countremains := 1
 			for i := len(node.devices) - 1; i >= 0; i-- {
+				if node.devices[i].count <= node.devices[i].used {
+					countremains = 0
+					break
+				}
+				if node.devices[i].totalmem-node.devices[i].usedmem < n.Memreq {
+					continue
+				}
+				if 100-node.devices[i].usedcores < n.Coresreq {
+					continue
+				}
 				total += node.devices[i].count
 				free += node.devices[i].count - node.devices[i].used
-				if n > 0 {
-					n--
+				if n.Nums > 0 {
+					n.Nums--
 					node.devices[i].used++
-					devs = append(devs, node.devices[i].id)
+					node.devices[i].usedmem += n.Memreq
+					node.devices[i].usedcores += n.Coresreq
+					devs = append(devs, util.ContainerDevice{
+						UUID:      node.devices[i].id,
+						Usedmem:   n.Memreq,
+						Usedcores: n.Coresreq,
+					})
 				}
+			}
+			if countremains == 0 || n.Nums > 0 {
+				break
 			}
 			score.devices = append(score.devices, devs)
 			score.score += float32(free) / float32(total)
-			score.score += float32(dn - n)
+			score.score += float32(dn - int(n.Nums))
 		}
 		if len(score.devices) == len(nums) {
 			res = append(res, &score)
