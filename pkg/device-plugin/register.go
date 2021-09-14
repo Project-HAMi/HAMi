@@ -17,123 +17,133 @@
 package device_plugin
 
 import (
-    "context"
-    "fmt"
-    "k8s.io/klog/v2"
-    "time"
+	"context"
+	"fmt"
+	"time"
 
-    "4pd.io/k8s-vgpu/pkg/api"
-    "4pd.io/k8s-vgpu/pkg/device-plugin/config"
-    "google.golang.org/grpc"
+	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
+	"k8s.io/klog/v2"
+
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	"google.golang.org/grpc"
 )
 
 type DevListFunc func() []*Device
 
 type DeviceRegister struct {
-    deviceCache *DeviceCache
-    unhealthy   chan *Device
-    stopCh      chan struct{}
+	deviceCache *DeviceCache
+	unhealthy   chan *Device
+	stopCh      chan struct{}
 }
 
 func NewDeviceRegister(deviceCache *DeviceCache) *DeviceRegister {
-    return &DeviceRegister{
-        deviceCache: deviceCache,
-        unhealthy:   make(chan *Device),
-        stopCh:      make(chan struct{}),
-    }
+	return &DeviceRegister{
+		deviceCache: deviceCache,
+		unhealthy:   make(chan *Device),
+		stopCh:      make(chan struct{}),
+	}
 }
 
 func (r *DeviceRegister) Start() {
-    r.deviceCache.AddNotifyChannel("register", r.unhealthy)
-    go r.WatchAndRegister()
+	r.deviceCache.AddNotifyChannel("register", r.unhealthy)
+	go r.WatchAndRegister()
 }
 
 func (r *DeviceRegister) Stop() {
-    close(r.stopCh)
+	close(r.stopCh)
 }
 
 func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
-    devs := r.deviceCache.GetCache()
-    res := make([]*api.DeviceInfo, 0, len(devs))
-    for _, dev := range devs {
-        res = append(res, &api.DeviceInfo{
-            Id:     dev.ID,
-            Count:  int32(config.DeviceSplitCount),
-            Health: dev.Health == "healthy",
-        })
-    }
-    return &res
+	devs := r.deviceCache.GetCache()
+	res := make([]*api.DeviceInfo, 0, len(devs))
+	for _, dev := range devs {
+		ndev, err := nvml.NewDeviceByUUID(dev.ID)
+		if err != nil {
+			fmt.Println("nvml new device by uuid error id=", dev.ID)
+			panic(0)
+		} else {
+			fmt.Println("nvml registered device id=", dev.ID, "memory=", *ndev.Memory)
+		}
+		res = append(res, &api.DeviceInfo{
+			Id:     dev.ID,
+			Count:  int32(config.DeviceSplitCount),
+			Devmem: int32(*ndev.Memory),
+			Health: dev.Health == "healthy",
+		})
+	}
+	return &res
 }
 
 func (r *DeviceRegister) Register(ctx context.Context) error {
-    conn, err := grpc.DialContext(
-        ctx,
-        config.SchedulerEndpoint,
-        grpc.WithInsecure(),
-        grpc.WithBlock(),
-        //grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
-    )
-    if err != nil {
-        return fmt.Errorf("connect scheduler error, %v", err)
-    }
-    client := api.NewDeviceServiceClient(conn)
-    register, err := client.Register(ctx)
-    if err != nil {
-        klog.Errorf("register error %v", err)
-        err = fmt.Errorf("client register error, %v", err)
-        return err
-    }
-    req := api.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
-    err = register.Send(&req)
-    if err != nil {
-        klog.Errorf("register send error, %v", err)
-        return err
-    }
-    klog.V(3).Infof("register info %v", req.String())
-    closeCh := make(chan struct{})
-    go func() {
-        reply := api.RegisterReply{}
-        err := register.RecvMsg(reply)
-        if err != nil {
-            klog.Errorf("register recv error, %v", err)
-        } else {
-            klog.Errorf("register recv closed")
-        }
-        closeCh <- struct{}{}
-    }()
-    for {
-        select {
-        case <-r.unhealthy:
-            err = register.Send(&api.RegisterRequest{
-                Node:    config.NodeName,
-                Devices: *r.apiDevices(),
-            })
-            if err != nil {
-                klog.Errorf("register send error, %v", err)
-                return err
-            }
-            klog.V(3).Infof("register info %v", req.String())
-        case <-closeCh:
-            klog.Infof("register server closed")
-            return fmt.Errorf("register server closed")
-        case <-r.stopCh:
-            return nil
-        }
-    }
+	conn, err := grpc.DialContext(
+		ctx,
+		config.SchedulerEndpoint,
+		grpc.WithInsecure(),
+		grpc.WithBlock(),
+		//grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
+	)
+	if err != nil {
+		return fmt.Errorf("connect scheduler error, %v", err)
+	}
+	client := api.NewDeviceServiceClient(conn)
+	register, err := client.Register(ctx)
+	if err != nil {
+		klog.Errorf("register error %v", err)
+		err = fmt.Errorf("client register error, %v", err)
+		return err
+	}
+	req := api.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
+	err = register.Send(&req)
+	if err != nil {
+		klog.Errorf("register send error, %v", err)
+		return err
+	}
+	klog.V(3).Infof("register info %v", req.String())
+	closeCh := make(chan struct{})
+	go func() {
+		reply := api.RegisterReply{}
+		err := register.RecvMsg(reply)
+		if err != nil {
+			klog.Errorf("register recv error, %v", err)
+		} else {
+			klog.Errorf("register recv closed")
+		}
+		closeCh <- struct{}{}
+	}()
+	for {
+		select {
+		case <-r.unhealthy:
+			err = register.Send(&api.RegisterRequest{
+				Node:    config.NodeName,
+				Devices: *r.apiDevices(),
+			})
+			if err != nil {
+				klog.Errorf("register send error, %v", err)
+				return err
+			}
+			klog.V(3).Infof("register info %v", req.String())
+		case <-closeCh:
+			klog.Infof("register server closed")
+			return fmt.Errorf("register server closed")
+		case <-r.stopCh:
+			return nil
+		}
+	}
 }
 
 func (r *DeviceRegister) WatchAndRegister() {
-    //ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-    //defer cancel()
-    ctx := context.Background()
-    for {
-        err := r.Register(ctx)
-        if err != nil {
-            klog.Errorf("register error, %v", err)
-            time.Sleep(time.Second * 5)
-        } else {
-            klog.Infof("register stopped")
-            break
-        }
-    }
+	//ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
+	//defer cancel()
+	ctx := context.Background()
+	for {
+		err := r.Register(ctx)
+		if err != nil {
+			klog.Errorf("register error, %v", err)
+			time.Sleep(time.Second * 5)
+		} else {
+			klog.Infof("register stopped")
+			break
+		}
+	}
 }

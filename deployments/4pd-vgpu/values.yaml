@@ -6,6 +6,8 @@ fullnameOverride: ""
 imagePullSecrets: []
 # 
 resourceName: "nvidia.com/gpu"
+resourceMem: "nvidia.com/gpumem"
+resourceCores: "nvidia.com/gpucores"
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -26,6 +28,8 @@ scheduler:
     imagePullPolicy: Always
     extraArgs:
       - --debug
+      - --default-mem=5000
+      - --default-cores=0
       - -v=4
   podAnnotations: {}
   nodeSelector: {}
@@ -52,7 +56,7 @@ devicePlugin:
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
   extraArgs:
-    - --device-split-count=2
+    - --device-split-count=10
     - -v=4
 
   pluginPath: /var/lib/kubelet/device-plugins
