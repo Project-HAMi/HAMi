@@ -28,6 +28,8 @@ scheduler:
     imagePullPolicy: Always
     extraArgs:
       - --debug
+      - -default-mem=5000
+      - -default-cores=0
       - -v=4
   podAnnotations: {}
   nodeSelector: {}
