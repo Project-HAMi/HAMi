@@ -37,7 +37,7 @@ function docker_build() {
 
 function docker_push() {
     docker push "${IMAGE}:${VERSION}"
-    docker push "${IMAGE}:${SHORT_VERSION}"
+    #docker push "${IMAGE}:${SHORT_VERSION}"
 }
 
 go_build
