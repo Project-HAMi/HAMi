@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io/ioutil"
 	"os"
 	"path"
 
@@ -78,7 +79,7 @@ func getConfig() (*config, error) {
 
 	configFilePath := path.Join(configDir, configFilePath)
 
-	tomlContent, err := os.ReadFile(configFilePath)
+	tomlContent, err := ioutil.ReadFile(configFilePath)
 	if err != nil {
 		return nil, err
 	}
