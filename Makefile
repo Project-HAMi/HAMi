@@ -1,6 +1,6 @@
 GO=go
 GO111MODULE=on
-CMDS=scheduler device-plugin vGPUmonitor
+CMDS=scheduler device-plugin vGPUmonitor nvidia-container-runtime
 OUTPUT_DIR=bin
 
 VERSION ?= unknown
