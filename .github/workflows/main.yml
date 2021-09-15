@@ -43,5 +43,12 @@ jobs:
             # Password or personal access token used to log against the Docker registry
             password: c5a0796d-fc37-4f89-9249-452791085bf2
       
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v1
+      
+      - run: make proto
+      - run: bash ./hack/build.sh
+      
       
       
