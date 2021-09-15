@@ -49,6 +49,11 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v1
       
+      - name: Setup protoc
+        # You may pin to the exact commit or the version.
+        # uses: arduino/setup-protoc@64c0c85d18e984422218383b81c52f8b077404d3
+        uses: arduino/setup-protoc@v1.1.2
+
       - run: make tidy
       - run: make proto
       - run: bash ./hack/build.sh
