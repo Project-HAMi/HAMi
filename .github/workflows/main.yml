@@ -47,6 +47,7 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v1
       
+      - run: make tidy
       - run: make proto
       - run: bash ./hack/build.sh
       
