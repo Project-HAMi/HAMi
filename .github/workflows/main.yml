@@ -32,5 +32,16 @@ jobs:
       # Runs a single command using the runners shell
       - name: Run a one-line script
         run: echo Hello, world!
-             
+     
+      - name: Docker Login
+        uses: docker/login-action@v1.10.0
+        with:
+            # Server address of Docker registry. If not set then will default to Docker Hub
+            # registry: 4pdosc
+            # Username used to log against the Docker registry
+            username: 4pdopensource
+            # Password or personal access token used to log against the Docker registry
+            password: c5a0796d-fc37-4f89-9249-452791085bf2
+      
+      
       
