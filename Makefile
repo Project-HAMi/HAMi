@@ -14,7 +14,7 @@ tidy:
 	$(GO) mod tidy
 
 proto:
-	$(GO) install github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
+	$(GO) get github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
 	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
 
 build: $(CMDS)
