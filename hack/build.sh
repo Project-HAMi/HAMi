@@ -22,7 +22,8 @@ export SHORT_VERSION
 export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
 
-IMAGE=${IMAGE-"m7-ieg-pico-test01:5000/k8s-vgpu"}
+#IMAGE=${IMAGE-"m7-ieg-pico-test01:5000/k8s-vgpu"}
+IMAGE=${IMAGE-"4pdosc/k8s-vgpu"}
 
 function go_build() {
   [[ -z "$J" ]] && J=$(nproc | awk '{print int(($0 + 1)/ 2)}')
