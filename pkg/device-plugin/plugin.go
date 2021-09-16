@@ -17,317 +17,318 @@
 package device_plugin
 
 import (
-    "4pd.io/k8s-vgpu/pkg/api"
-    "4pd.io/k8s-vgpu/pkg/device-plugin/config"
-    "fmt"
-    "k8s.io/apimachinery/pkg/util/uuid"
-    "log"
-    "net"
-    "os"
-    "path"
-    "strconv"
-    "time"
+	"fmt"
+	"log"
+	"net"
+	"os"
+	"path"
+	"strconv"
+	"time"
 
-    "github.com/NVIDIA/go-gpuallocator/gpuallocator"
-    "golang.org/x/net/context"
-    "google.golang.org/grpc"
-    pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	"k8s.io/apimachinery/pkg/util/uuid"
+
+	"github.com/NVIDIA/go-gpuallocator/gpuallocator"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 // Constants to represent the various device list strategies
 const (
-    DeviceListStrategyEnvvar       = "envvar"
-    DeviceListStrategyVolumeMounts = "volume-mounts"
+	DeviceListStrategyEnvvar       = "envvar"
+	DeviceListStrategyVolumeMounts = "volume-mounts"
 )
 
 // Constants to represent the various device id strategies
 const (
-    DeviceIDStrategyUUID  = "uuid"
-    DeviceIDStrategyIndex = "index"
+	DeviceIDStrategyUUID  = "uuid"
+	DeviceIDStrategyIndex = "index"
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
 const (
-    deviceListAsVolumeMountsHostPath          = "/dev/null"
-    deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
+	deviceListAsVolumeMountsHostPath          = "/dev/null"
+	deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
 )
 
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
-    //ResourceManager
-    //resourceManager  *ResourceManager
-    deviceCache  *DeviceCache
-    resourceName string
-    //deviceListEnvvar string
-    allocatePolicy gpuallocator.Policy
-    socket         string
+	//ResourceManager
+	//resourceManager  *ResourceManager
+	deviceCache  *DeviceCache
+	resourceName string
+	//deviceListEnvvar string
+	allocatePolicy gpuallocator.Policy
+	socket         string
 
-    server *grpc.Server
-    //cachedDevices []*Device
-    health chan *Device
-    stop   chan interface{}
-    //changed       chan struct{}
-    //devRegister   *DeviceRegister
-    //podManager    *PodManager
+	server *grpc.Server
+	//cachedDevices []*Device
+	health chan *Device
+	stop   chan interface{}
+	//changed       chan struct{}
+	//devRegister   *DeviceRegister
+	//podManager    *PodManager
 }
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
 func NewNvidiaDevicePlugin(resourceName string, deviceCache *DeviceCache, allocatePolicy gpuallocator.Policy, socket string) *NvidiaDevicePlugin {
-    return &NvidiaDevicePlugin{
-        deviceCache:    deviceCache,
-        resourceName:   resourceName,
-        allocatePolicy: allocatePolicy,
-        socket:         socket,
+	return &NvidiaDevicePlugin{
+		deviceCache:    deviceCache,
+		resourceName:   resourceName,
+		allocatePolicy: allocatePolicy,
+		socket:         socket,
 
-        // These will be reinitialized every
-        // time the plugin server is restarted.
-        server: nil,
-        health: nil,
-        stop:   nil,
-    }
+		// These will be reinitialized every
+		// time the plugin server is restarted.
+		server: nil,
+		health: nil,
+		stop:   nil,
+	}
 }
 
 func (m *NvidiaDevicePlugin) initialize() {
-    var err error
-    m.server = grpc.NewServer([]grpc.ServerOption{}...)
-    m.health = make(chan *Device)
-    m.stop = make(chan interface{})
-    check(err)
+	var err error
+	m.server = grpc.NewServer([]grpc.ServerOption{}...)
+	m.health = make(chan *Device)
+	m.stop = make(chan interface{})
+	check(err)
 }
 
 func (m *NvidiaDevicePlugin) cleanup() {
-    close(m.stop)
-    m.server = nil
-    m.health = nil
-    m.stop = nil
-    //m.podManager = nil
+	close(m.stop)
+	m.server = nil
+	m.health = nil
+	m.stop = nil
+	//m.podManager = nil
 }
 
 // Start starts the gRPC server, registers the device plugin with the Kubelet,
 // and starts the device healthchecks.
 func (m *NvidiaDevicePlugin) Start() error {
-    m.initialize()
+	m.initialize()
 
-    err := m.Serve()
-    if err != nil {
-        log.Printf("Could not start device plugin for '%s': %s", m.resourceName, err)
-        m.cleanup()
-        return err
-    }
-    log.Printf("Starting to serve '%s' on %s", m.resourceName, m.socket)
+	err := m.Serve()
+	if err != nil {
+		log.Printf("Could not start device plugin for '%s': %s", m.resourceName, err)
+		m.cleanup()
+		return err
+	}
+	log.Printf("Starting to serve '%s' on %s", m.resourceName, m.socket)
 
-    err = m.Register()
-    if err != nil {
-        log.Printf("Could not register device plugin: %s", err)
-        m.Stop()
-        return err
-    }
-    log.Printf("Registered device plugin for '%s' with Kubelet", m.resourceName)
+	err = m.Register()
+	if err != nil {
+		log.Printf("Could not register device plugin: %s", err)
+		m.Stop()
+		return err
+	}
+	log.Printf("Registered device plugin for '%s' with Kubelet", m.resourceName)
 
-    m.deviceCache.AddNotifyChannel("plugin", m.health)
-    return nil
+	m.deviceCache.AddNotifyChannel("plugin", m.health)
+	return nil
 }
 
 // Stop stops the gRPC server.
 func (m *NvidiaDevicePlugin) Stop() error {
-    if m == nil || m.server == nil {
-        return nil
-    }
-    log.Printf("Stopping to serve '%s' on %s", m.resourceName, m.socket)
-    m.deviceCache.RemoveNotifyChannel("plugin")
-    m.server.Stop()
-    if err := os.Remove(m.socket); err != nil && !os.IsNotExist(err) {
-        return err
-    }
-    m.cleanup()
-    return nil
+	if m == nil || m.server == nil {
+		return nil
+	}
+	log.Printf("Stopping to serve '%s' on %s", m.resourceName, m.socket)
+	m.deviceCache.RemoveNotifyChannel("plugin")
+	m.server.Stop()
+	if err := os.Remove(m.socket); err != nil && !os.IsNotExist(err) {
+		return err
+	}
+	m.cleanup()
+	return nil
 }
 
 // Serve starts the gRPC server of the device plugin.
 func (m *NvidiaDevicePlugin) Serve() error {
-    os.Remove(m.socket)
-    sock, err := net.Listen("unix", m.socket)
-    if err != nil {
-        return err
-    }
+	os.Remove(m.socket)
+	sock, err := net.Listen("unix", m.socket)
+	if err != nil {
+		return err
+	}
 
-    pluginapi.RegisterDevicePluginServer(m.server, m)
+	pluginapi.RegisterDevicePluginServer(m.server, m)
 
-    go func() {
-        lastCrashTime := time.Now()
-        restartCount := 0
-        for {
-            log.Printf("Starting GRPC server for '%s'", m.resourceName)
-            err := m.server.Serve(sock)
-            if err == nil {
-                break
-            }
+	go func() {
+		lastCrashTime := time.Now()
+		restartCount := 0
+		for {
+			log.Printf("Starting GRPC server for '%s'", m.resourceName)
+			err := m.server.Serve(sock)
+			if err == nil {
+				break
+			}
 
-            log.Printf("GRPC server for '%s' crashed with error: %v", m.resourceName, err)
+			log.Printf("GRPC server for '%s' crashed with error: %v", m.resourceName, err)
 
-            // restart if it has not been too often
-            // i.e. if server has crashed more than 5 times and it didn't last more than one hour each time
-            if restartCount > 5 {
-                // quit
-                log.Fatalf("GRPC server for '%s' has repeatedly crashed recently. Quitting", m.resourceName)
-            }
-            timeSinceLastCrash := time.Since(lastCrashTime).Seconds()
-            lastCrashTime = time.Now()
-            if timeSinceLastCrash > 3600 {
-                // it has been one hour since the last crash.. reset the count
-                // to reflect on the frequency
-                restartCount = 1
-            } else {
-                restartCount++
-            }
-        }
-    }()
+			// restart if it has not been too often
+			// i.e. if server has crashed more than 5 times and it didn't last more than one hour each time
+			if restartCount > 5 {
+				// quit
+				log.Fatalf("GRPC server for '%s' has repeatedly crashed recently. Quitting", m.resourceName)
+			}
+			timeSinceLastCrash := time.Since(lastCrashTime).Seconds()
+			lastCrashTime = time.Now()
+			if timeSinceLastCrash > 3600 {
+				// it has been one hour since the last crash.. reset the count
+				// to reflect on the frequency
+				restartCount = 1
+			} else {
+				restartCount++
+			}
+		}
+	}()
 
-    // Wait for server to start by launching a blocking connexion
-    conn, err := m.dial(m.socket, 5*time.Second)
-    if err != nil {
-        return err
-    }
-    conn.Close()
+	// Wait for server to start by launching a blocking connexion
+	conn, err := m.dial(m.socket, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	conn.Close()
 
-    return nil
+	return nil
 }
 
 // Register registers the device plugin for the given resourceName with Kubelet.
 func (m *NvidiaDevicePlugin) Register() error {
-    conn, err := m.dial(pluginapi.KubeletSocket, 5*time.Second)
-    if err != nil {
-        return err
-    }
-    defer conn.Close()
+	conn, err := m.dial(pluginapi.KubeletSocket, 5*time.Second)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
 
-    client := pluginapi.NewRegistrationClient(conn)
-    reqt := &pluginapi.RegisterRequest{
-        Version:      pluginapi.Version,
-        Endpoint:     path.Base(m.socket),
-        ResourceName: m.resourceName,
-        Options: &pluginapi.DevicePluginOptions{
-            GetPreferredAllocationAvailable: false,
-        },
-    }
+	client := pluginapi.NewRegistrationClient(conn)
+	reqt := &pluginapi.RegisterRequest{
+		Version:      pluginapi.Version,
+		Endpoint:     path.Base(m.socket),
+		ResourceName: m.resourceName,
+		Options: &pluginapi.DevicePluginOptions{
+			GetPreferredAllocationAvailable: false,
+		},
+	}
 
-    _, err = client.Register(context.Background(), reqt)
-    if err != nil {
-        return err
-    }
-    return nil
+	_, err = client.Register(context.Background(), reqt)
+	if err != nil {
+		return err
+	}
+	return nil
 }
 
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (m *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-    options := &pluginapi.DevicePluginOptions{
-        GetPreferredAllocationAvailable: false,
-    }
-    return options, nil
+	options := &pluginapi.DevicePluginOptions{
+		GetPreferredAllocationAvailable: false,
+	}
+	return options, nil
 }
 
 // ListAndWatch lists devices and update that list according to the health status
 func (m *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
-    _ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
-    for {
-        select {
-        case <-m.stop:
-            return nil
-        case d := <-m.health:
-            // FIXME: there is no way to recover from the Unhealthy state.
-            //d.Health = pluginapi.Unhealthy
-            log.Printf("'%s' device marked unhealthy: %s", m.resourceName, d.ID)
-            _ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
-        }
-    }
+	_ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
+	for {
+		select {
+		case <-m.stop:
+			return nil
+		case d := <-m.health:
+			// FIXME: there is no way to recover from the Unhealthy state.
+			//d.Health = pluginapi.Unhealthy
+			log.Printf("'%s' device marked unhealthy: %s", m.resourceName, d.ID)
+			_ = s.Send(&pluginapi.ListAndWatchResponse{Devices: m.apiDevices()})
+		}
+	}
 }
 
 // GetPreferredAllocation returns the preferred allocation from the set of devices specified in the request
 func (m *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
 
-    return &pluginapi.PreferredAllocationResponse{}, nil
+	return &pluginapi.PreferredAllocationResponse{}, nil
 }
 
 // Allocate which return list of devices.
 func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-    ////reqNums := make([]int, 0, len(reqs.ContainerRequests))
-    ////for _, req := range reqs.ContainerRequests {
-    ////    reqNums = append(reqNums, len(req.DevicesIDs))
-    ////}
-    ////klog.V(3).Infof("allocate for device %v", reqNums)
-    //
-    ////devRequests, err := m.podManager.getDevices(reqNums)
-    //if err != nil {
-    //    klog.Errorf("get device request error, %v", err)
-    //    return nil, err
-    //}
-    //if devRequests == nil {
-    //    err = fmt.Errorf("get device request empty")
-    //    klog.Errorf("%v", err)
-    //    return nil, err
-    //}
-    responses := pluginapi.AllocateResponse{}
-    for _, _ = range reqs.ContainerRequests {
-        //reqDeviceIDs := req.DevicesIDs
-        //devs, err := m.getDevices(reqDeviceIDs)
-        //if err != nil {
-        //    return nil, err
-        //}
+	////reqNums := make([]int, 0, len(reqs.ContainerRequests))
+	////for _, req := range reqs.ContainerRequests {
+	////    reqNums = append(reqNums, len(req.DevicesIDs))
+	////}
+	////klog.V(3).Infof("allocate for device %v", reqNums)
+	//
+	////devRequests, err := m.podManager.getDevices(reqNums)
+	//if err != nil {
+	//    klog.Errorf("get device request error, %v", err)
+	//    return nil, err
+	//}
+	//if devRequests == nil {
+	//    err = fmt.Errorf("get device request empty")
+	//    klog.Errorf("%v", err)
+	//    return nil, err
+	//}
+	responses := pluginapi.AllocateResponse{}
+	for _, _ = range reqs.ContainerRequests {
+		//reqDeviceIDs := req.DevicesIDs
+		//devs, err := m.getDevices(reqDeviceIDs)
+		//if err != nil {
+		//    return nil, err
+		//}
 
-        response := pluginapi.ContainerAllocateResponse{}
+		response := pluginapi.ContainerAllocateResponse{}
 
-        //response.Envs = m.apiEnvs(m.deviceListEnvvar, reqDeviceIDs)
-        ////var mapEnvs []string
-        //for i, dev := range devs {
-        //    limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
-        //    response.Envs[limitKey] = fmt.Sprintf("%vm", config.DeviceMemoryScaling*float64(dev.Memory)/float64(config.DeviceSplitCount))
-        //    //mapEnvs = append(mapEnvs, fmt.Sprintf("%v:%v", i, vd.dev.ID))
-        //}
-        response.Envs = make(map[string]string)
-        //response.Annotations = map[string]string{util.AssignedIDsAnnotations: util.EncodeContainerDevices(reqDeviceIDs)}
-        response.Envs["CUDA_DEVICE_SM_LIMIT"] = strconv.Itoa(int(100 * config.DeviceCoresScaling / float64(config.DeviceSplitCount)))
-        //response.Envs["NVIDIA_DEVICE_MAP"] = strings.Join(mapEnvs, " ")
-        response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/%v.cache", uuid.NewUUID())
-        if config.DeviceMemoryScaling > 1 {
-            response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
-        }
-        response.Envs[api.PluginRuntimeSocket] = fmt.Sprintf("unix://%v", config.RuntimeSocketFlag)
-        response.Mounts = append(response.Mounts,
-            &pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
-                HostPath: "/usr/local/vgpu/libvgpu.so",
-                ReadOnly: true},
-            &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
-               HostPath: "/usr/local/vgpu/ld.so.preload",
-               ReadOnly: true},
-        )
-        responses.ContainerResponses = append(responses.ContainerResponses, &response)
-    }
-    return &responses, nil
+		//response.Envs = m.apiEnvs(m.deviceListEnvvar, reqDeviceIDs)
+		////var mapEnvs []string
+		//for i, dev := range devs {
+		//    limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
+		//    response.Envs[limitKey] = fmt.Sprintf("%vm", config.DeviceMemoryScaling*float64(dev.Memory)/float64(config.DeviceSplitCount))
+		//    //mapEnvs = append(mapEnvs, fmt.Sprintf("%v:%v", i, vd.dev.ID))
+		//}
+		response.Envs = make(map[string]string)
+		//response.Annotations = map[string]string{util.AssignedIDsAnnotations: util.EncodeContainerDevices(reqDeviceIDs)}
+		response.Envs["CUDA_DEVICE_SM_LIMIT"] = strconv.Itoa(int(100 * config.DeviceCoresScaling / float64(config.DeviceSplitCount)))
+		//response.Envs["NVIDIA_DEVICE_MAP"] = strings.Join(mapEnvs, " ")
+		response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/%v.cache", uuid.NewUUID())
+		if config.DeviceMemoryScaling > 1 {
+			response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+		}
+		response.Envs[api.PluginRuntimeSocket] = fmt.Sprintf("unix://%v", config.RuntimeSocketFlag)
+		response.Mounts = append(response.Mounts,
+			&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
+				HostPath: "/usr/local/vgpu/libvgpu.so",
+				ReadOnly: true},
+			&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
+				HostPath: "/usr/local/vgpu/ld.so.preload",
+				ReadOnly: true},
+		)
+		responses.ContainerResponses = append(responses.ContainerResponses, &response)
+	}
+	return &responses, nil
 }
 
 // PreStartContainer is unimplemented for this plugin
 func (m *NvidiaDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
-    return &pluginapi.PreStartContainerResponse{}, nil
+	return &pluginapi.PreStartContainerResponse{}, nil
 }
 
 // dial establishes the gRPC communication with the registered device plugin.
 func (m *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, error) {
-    c, err := grpc.Dial(unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
-        grpc.WithTimeout(timeout),
-        grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
-            return net.DialTimeout("unix", addr, timeout)
-        }),
-    )
+	c, err := grpc.Dial(unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
+		grpc.WithTimeout(timeout),
+		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+			return net.DialTimeout("unix", addr, timeout)
+		}),
+	)
 
-    if err != nil {
-        return nil, err
-    }
+	if err != nil {
+		return nil, err
+	}
 
-    return c, nil
+	return c, nil
 }
 
 func (m *NvidiaDevicePlugin) Devices() []*Device {
-    return m.deviceCache.GetCache()
+	return m.deviceCache.GetCache()
 }
 
 //func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
@@ -358,19 +359,19 @@ func (m *NvidiaDevicePlugin) Devices() []*Device {
 //}
 
 func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
-    devices := m.Devices()
-    var res []*pluginapi.Device
-    for _, dev := range devices {
-        for i := uint(0); i < config.DeviceSplitCount; i++ {
-            id := fmt.Sprintf("%v-%v", dev.ID, i)
-            res = append(res, &pluginapi.Device{
-                ID:       id,
-                Health:   dev.Health,
-                Topology: nil,
-            })
-        }
-    }
-    return res
+	devices := m.Devices()
+	var res []*pluginapi.Device
+	for _, dev := range devices {
+		for i := uint(0); i < config.DeviceSplitCount; i++ {
+			id := fmt.Sprintf("%v-%v", dev.ID, i)
+			res = append(res, &pluginapi.Device{
+				ID:       id,
+				Health:   dev.Health,
+				Topology: nil,
+			})
+		}
+	}
+	return res
 }
 
 //func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {

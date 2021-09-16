@@ -34,6 +34,13 @@ spec:
         - name: device-plugin
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          lifecycle:
+            postStart:
+              exec:
+                command: ["/bin/sh","-c","mv /usrbin/nvidia-container-runtime /usrbin/nvidia-container-runtime-4pdbackup;cp /k8s-vgpu/bin/nvidia-container-runtime /usrbin/;cp -f /k8s-vgpu/lib/* /usr/local/vgpu/"]
+          #  preStop:
+          #    exec:
+          #      command: ["/bin/sh","-c","mv /usrbin/nvidia-container-4pdbackup /usrbin/nvidia-container-runtime"]
           command:
             - device-plugin
             - --resource-name={{ .Values.resourceName }}
@@ -53,6 +60,8 @@ spec:
               mountPath: /usr/local/vgpu
             - name: sock
               mountPath: /var/lib/vgpu
+            - name: usrbin
+              mountPath: /usrbin
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
@@ -77,6 +86,9 @@ spec:
           hostPath:
             path: /usr/local/vgpu
             #path: {{ .Values.devicePlugin.libPath }}
+        - name: usrbin
+          hostPath:
+            path: /usr/bin
         - name: sock
           hostPath:
             path: /var/lib/vgpu
