@@ -103,6 +103,13 @@ $ sudo systemctl restart docker
 
 > *如果 `runtimes` 字段没有出现, 前往的安装页面执行安装操作 [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
 
+最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
+
+```
+kubectl label nodes {nodeid} gpu=on
+```
+
+
 ### Kubernetes开启vGPU支持
 
 当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入deployments文件夹
