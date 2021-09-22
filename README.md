@@ -1,84 +1,137 @@
-# vGPU scheduler for Kubernetes
+# vGPU device plugin for Kubernetes
 
+English version|[中文版](README_cn.md)
 
-## 目录
+## Table of Contents
 
-- [关于](#关于)
-- [使用场景](#使用场景)
-- [调度策略](#调度策略)
-- [性能测试](#性能测试)
-- [功能](#功能)
-- [实验性功能](#实验性功能)
-- [已知问题](#已知问题)
-- [开发计划](#开发计划)
-- [安装要求](#安装要求)
-- [快速入门](#快速入门)
-  - [GPU节点准备](#GPU节点准备)
-  - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
-  - [运行GPU任务](#运行GPU任务)
-- [测试](#测试)
-- [问题反馈及代码贡献](#问题反馈及代码贡献)
+- [About](#about)
+- [When to use](#when-to-use)
+- [Stategy](#strategy)
+- [Benchmarks](#Benchmarks)
+- [Features](#Features)
+- [Experimental Features](#Experimental-Features)
+- [Known Issues](#Known-Issues)
+- [TODO](#TODO)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
+  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
+  - [Running GPU Jobs](#running-gpu-jobs)
+- [Tests](#Tests)
+- [Issues and Contributing](#issues-and-contributing)
 
-## 关于
+## About
 
-**k8s vGPU scheduler** 基于4pd-k8s-device-plugin插件([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin))，在保留原功能的基础上，添加了调度模块，以实现多个GPU节点间的负载均衡。k8s vGPU scheduler在原有显卡分配方式的基础上，可以进一步根据显存和算力来切分显卡。在k8s集群中，基于这些切分后的vGPU进行调度，使不同的容器可以安全的共享同一张物理GPU，提高GPU的利用率。此外，插件还可以对显存做虚拟化处理（使用到的显存可以超过物理上的显存），运行一些超大显存需求的任务，或提高共享的任务数，可参考[性能测试报告](#性能测试)。
+The **k8s vGPU scheduler** is based on 4pd-k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), and on the basis of retaining features of 4pd-device-plugin, such as splits the physical GPU, limits the memory and computing unit. It adds the scheduling module to balance GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Thus provide great flexibility and more GPU utilization. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
-## 使用场景
+## When to use
 
-1. 需要定制GPU申请的场合，如申请特定大小的vGPU，每个vGPU使用特定比例的算力。
-2. 在多个GPU节点组成的集群中，任务需要根据自身的显卡需求分配到合适的节点执行。
-3. 显存、计算单元利用率低的情况，如在一张GPU卡上运行10个tf-serving。
-4. 需要大量小显卡的情况，如教学场景把一张GPU提供给多个学生使用、云平台提供小GPU实例。
-5. 物理显存不足的情况，可以开启虚拟显存，如大batch、大模型的训练。
+1. Needs pods with certain device memory usage or device core percentage.
+2. Needs to balance GPU usage in cluster with mutiple GPU node
+3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
+4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform provides small GPU instances.
+5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
 
-## 调度策略
+## Scheduling
 
-调度策略为，在保证显存和算力满足需求的GPU中，优先选择任务数最少的GPU执行任务，这样做可以使任务均匀分配到所有的GPU中
+Current schedule strategy is to select GPU with lowest task, thus balance the loads across mutiple GPUs
 
-## 性能测试
+## Benchmarks
 
-见[k8s-device-plugin的性能测试部分](https://github.com/4paradigm/k8s-device-plugin/blob/master/README_cn.md#性能测试)
+Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows
 
-## 功能
+| Test Environment | description                                              |
+| ---------------- | :------------------------------------------------------: |
+| Kubernetes version | v1.12.9                                                |
+| Docker  version    | 18.09.1                                                |
+| GPU Type           | Tesla V100                                             |
+| GPU Num            | 2                                                      |
 
-- 指定每张物理GPU切分的最大vGPU的数量
-- 限制vGPU的显存
-- 限制vGPU的计算单元
-- 对已有程序零改动
+| Test instance |                         description                         |
+| ------------- | :---------------------------------------------------------: |
+| nvidia-device-plugin      |               k8s + nvidia k8s-device-plugin                |
+| vGPU-device-plugin        | k8s + VGPU k8s-device-plugin，without virtual device memory |
+| vGPU-device-plugin(virtual device memory) |  k8s + VGPU k8s-device-plugin，with virtual device memory   |
 
-## 实验性功能
+Test Cases:
 
-- 虚拟显存
+| test id |     case      |   type    |         params          |
+| ------- | :-----------: | :-------: | :---------------------: |
+| 1.1     | Resnet-V2-50  | inference |  batch=50,size=346*346  |
+| 1.2     | Resnet-V2-50  | training  |  batch=20,size=346*346  |
+| 2.1     | Resnet-V2-152 | inference |  batch=10,size=256*256  |
+| 2.2     | Resnet-V2-152 | training  |  batch=10,size=256*256  |
+| 3.1     |    VGG-16     | inference |  batch=20,size=224*224  |
+| 3.2     |    VGG-16     | training  |  batch=2,size=224*224   |
+| 4.1     |    DeepLab    | inference |  batch=2,size=512*512   |
+| 4.2     |    DeepLab    | training  |  batch=1,size=384*384   |
+| 5.1     |     LSTM      | inference | batch=100,size=1024*300 |
+| 5.2     |     LSTM      | training  | batch=10,size=1024*300  |
 
-  vGPU的显存总和可以超过GPU实际的显存，这时候超过的部分会放到内存里，对性能有一定的影响。
+Test Result: ![img](./imgs/benchmark_inf.png)
 
-## 已知问题
+![img](./imgs/benchmark_train.png)
 
-- 目前仅支持计算任务，不支持视频编解码处理。
-- 暂时不支持MIG
+To reproduce:
 
-## 开发计划
-
-- 支持视频编解码处理
-- 支持Multi-Instance GPUs (MIG) 
-
-## 安装要求
-
-* NVIDIA drivers >= 384.81
-* nvidia-docker version > 2.0 
-* docker已配置nvidia作为默认runtime
-* Kubernetes version >= 1.10
-
-## 快速入门
-
-### GPU节点准备
-
-以下步骤要在所有GPU节点执行。这份README文档假定GPU节点已经安装NVIDIA驱动和`nvidia-docker`套件。
-
-注意你需要安装的是`nvidia-docker2`而非`nvidia-container-toolkit`。因为新的`--gpus`选项kubernetes尚不支持。安装步骤举例：
+1. install vGPU-nvidia-device-plugin，and configure properly
+2. run benchmark job
 
 ```
-# 加入套件仓库
+$ kubectl apply -f benchmarks/ai-benchmark/ai-benchmark.yml
+```
+
+3. View the result by using kubctl logs
+
+```
+$ kubectl logs [pod id]
+```
+
+## Features
+
+- Specify the number of vGPUs divided by each physical GPU.
+- Limit vGPU's Device Memory.
+- Allows vGPU allocation by specifying device memory 
+- Limit vGPU's Streaming Multiprocessor.
+- Allows vGPU allocation by specifying device core usage
+- Zero changes to existing programs
+
+## Experimental Features
+
+- Virtual Device Memory
+
+  The device memory of the vGPU can exceed the physical device memory of the GPU. At this time, the excess part will be put in the RAM, which will have a certain impact on the performance.
+
+## Known Issues
+
+- Currently, A100 MIG not supported 
+- Currently, only computing tasks are supported, and video codec processing is not supported.
+
+## TODO
+
+- Support video codec processing
+- Support Multi-Instance GPUs (MIG)
+
+## Prerequisites
+
+The list of prerequisites for running the NVIDIA device plugin is described below:
+* NVIDIA drivers ~= 384.81
+* nvidia-docker version > 2.0
+* Kubernetes version >= 1.10
+
+## Quick Start
+
+### Preparing your GPU Nodes
+
+
+The following steps need to be executed on all your GPU nodes.
+This README assumes that the NVIDIA drivers and `nvidia-docker` have been installed.
+
+Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
+This is because the new `--gpus` options hasn't reached kubernetes yet. Example:
+
+```
+# Add the package repositories
 $ distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
 $ curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
 $ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
@@ -87,7 +140,8 @@ $ sudo apt-get update && sudo apt-get install -y nvidia-docker2
 $ sudo systemctl restart docker
 ```
 
-你需要在节点上将nvidia runtime做为你的docker runtime预设值。我们将编辑docker daemon的配置文件，此文件通常在`/etc/docker/daemon.json`路径：
+You will need to enable the nvidia runtime as your default runtime on your node.
+We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
 
 ```
 {
@@ -101,54 +155,56 @@ $ sudo systemctl restart docker
 }
 ```
 
-> *如果 `runtimes` 字段没有出现, 前往的安装页面执行安装操作 [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
+> *if `runtimes` is not already present, head to the install page of [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
 
-最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
+Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it can not be managed by our scheduler.
 
 ```
 kubectl label nodes {nodeid} gpu=on
 ```
 
+### Enabling vGPU Support in Kubernetes
 
-### Kubernetes开启vGPU支持
-
-当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入deployments文件夹
+Once you have configured the options above on all the GPU nodes in your
+cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
 
 ```
 $ git clone https://gitlab.4pd.io/vgpu/k8s-vgpu.git
 $ cd k8s-vgpu/deployments
 ```
 
-在这个deployments文件中, 你可以在 `values.yaml/devicePlugin/extraArgs` 中使用以下的客制化参数：
+In the deployments folder, you can customize your vGPU support by modifying following values in `values.yaml/devicePlugin/extraArgs` :
 
-* `device-split-count:` 
-  整数类型，预设值是10。GPU的分割数，每一张GPU都不能分配超过其配置数目的任务。若其配置为N的话，每个GPU上最多可以同时存在N个任务。
 * `device-memory-scaling:` 
-  浮点数类型，预设值是1。NVIDIA装置显存使用比例，可以大于1（启用虚拟显存，实验功能）。对于有*M​*显存大小的NVIDIA GPU，如果我们配置`device-memory-scaling`参数为*S*，在部署了我们装置插件的Kubenetes集群中，这张GPU分出的vGPU将总共包含 *S \* M*显存。每张vGPU的显存大小也受`device-split-count`参数影响。在先前的例子中，如果`device-split-count`参数配置为*K*，那每一张vGPU最后会取得 *S \* M / K* 大小的显存。
+  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get *S \* M* memory in Kubernetes with our device plugin.
+* `device-split-count:` 
+  Integer type, by default: equals 10. Maxinum tasks assigned to a simple GPU device.
 
-除此之外，你可以在 `values.yaml/scheduler/extender/extraArgs` 中使用以下客制化参数:
+Besides, you can customize the follwing values in `values.yaml/scheduler/extender/extraArgs`:
 
-* `default-mem:`
-  整数类型，预设值为5000，表示不配置显存时使用的默认显存大小，单位为MB
+* `default-mem:` 
+  Integer type, by default: 5000. The default device memory of the current task, in MB
+* `default-cores:` 
+  Integer type, by default: equals 0. Default GPU core usage of the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
 
-* `default-cores:`
-  整数类型(0-100)，默认为0，表示不配置显卡使用比例时默认的使用比例。若设置为0，则代表任务可能会被分配到任一满足显存需求的GPU中，若设置为100，代表该任务独享整张显卡
-
-配置完成后，随后使用helm安装整个chart
+After configure those optional arguments, you can enable the vGPU support by following command:
 
 ```
 $ helm install vgpu 4pd-vgpu
 ```
 
-通过kubectl get pods指令看到vgpu-4pd-vgpu-device-plugin与vgpu-4pd-vgpu-scheduler两个pod即为安装成功
+You can verify your install by following command:
 
 ```
 $ kubectl get pods
 ```
 
-### 运行GPU任务
+If the following two pods `vgpu-4pd-vgpu-device-plugin` and `vgpu-4pd-vgpu-scheduler` are in running state, then your installation is successful.
 
-NVIDIA vGPUs 现在能透过资源类型`nvidia.com/gpu`被容器请求：
+### Running GPU Jobs
+
+NVIDIA vGPUs can now be requested by a container
+using the `nvidia.com/gpu` resource type:
 
 ```
 apiVersion: v1
@@ -162,24 +218,28 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # 请求2个vGPUs
-	  nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选）
-	  nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选）
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+	  nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional）
+	  nvidia.com/gpucores: 30 # Eacg vGPU uses 30% of the entire GPU （Optional)
 ```
 
-现在你可以在容器执行`nvidia-smi`命令，然后比较vGPU和实际GPU显存大小的不同。
+You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
 
-## 测试
+> **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
+> the vGPUs on the machine will be exposed inside your container.*
+
+## Tests
 
 - TensorFlow 1.14.0/2.4.1
-- torch1.1.0
+- torch 1.1.0
 - mxnet 1.4.0
 - mindspore 1.1.1
 
-以上框架均通过测试。
+The above frameworks have passed the test.
 
-## 反馈和参与
+## Issues and Contributing
 
-* bug、疑惑、修改欢迎提在 [Github Issues](https://github.com/4paradigm/k8s-device-plugin/issues/new)
-* 想了解更多或者有想法可以参与到[Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions)和[slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)交流
+* You can report a bug, a doubt or modify by [filing a new issue](https://github.com/NVIDIA/k8s-device-plugin/issues/new)
+* If you want to know more or have ideas, you can participate in [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
+
 
