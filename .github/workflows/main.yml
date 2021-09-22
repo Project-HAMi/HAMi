@@ -7,6 +7,8 @@ on:
   # Triggers the workflow on push or pull request events but only for the master branch
   push:
     branches: [ master ]
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+.[0-9]+
   pull_request:
     branches: [ master ]
 
@@ -31,9 +33,8 @@ jobs:
         with:
             go-version: 1.15
 
-      # Runs a single command using the runners shell
-      - name: Run a one-line script
-        run: echo Hello, world!
+      - name: Get branch name
+        uses: nelonoel/branch-name@v1.0.1
      
       - name: Docker Login
         uses: docker/login-action@v1.10.0
@@ -56,7 +57,7 @@ jobs:
 
       - run: make tidy
       - run: make proto
-      - run: bash ./hack/build.sh
+      - run: SHORT_VERSION="${BRANCH_NAME}" bash ./hack/build.sh
       
       
       
