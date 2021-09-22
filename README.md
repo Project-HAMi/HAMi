@@ -225,7 +225,7 @@ spec:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
 	  nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional）
-	  nvidia.com/gpucores: 30 # Eacg vGPU uses 30% of the entire GPU （Optional)
+	  nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional)
 ```
 
 You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
