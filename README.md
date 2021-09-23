@@ -123,6 +123,8 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 * NVIDIA drivers ~= 384.81
 * nvidia-docker version > 2.0
 * Kubernetes version >= 1.10
+* glibc >= 2.17
+* kernel version >= 3.10
 
 ## Quick Start
 
@@ -244,7 +246,7 @@ The above frameworks have passed the test.
 
 ## Issues and Contributing
 
-* You can report a bug, a doubt or modify by [filing a new issue](https://github.com/NVIDIA/k8s-device-plugin/issues/new)
+* You can report a bug, a doubt or modify by [filing a new issue](https://github.com/4paradigm/k8s-vgpu-scheduler/issues/new)
 * If you want to know more or have ideas, you can participate in [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
 
 
