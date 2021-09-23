@@ -39,9 +39,9 @@ jobs:
             # Server address of Docker registry. If not set then will default to Docker Hub
             # registry: 4pdosc
             # Username used to log against the Docker registry
-            username: 4pdopensource
+            username: ${{ secrets.DOCKER_4PD_NAME }}
             # Password or personal access token used to log against the Docker registry
-            password: c5a0796d-fc37-4f89-9249-452791085bf2
+            password: ${{ secrets.DOCKER_4PD_PASSWD }}
       
       - name: Set up Docker Buildx
         id: buildx
