@@ -129,6 +129,8 @@ $ kubectl logs [pod id]
 * nvidia-docker version > 2.0 
 * docker已配置nvidia作为默认runtime
 * Kubernetes version >= 1.10
+* glibc >= 2.17
+* kernel version >= 3.10
 
 ## 快速入门
 
