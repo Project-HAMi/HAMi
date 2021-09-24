@@ -206,7 +206,7 @@ You can verify your install by following command:
 $ kubectl get pods
 ```
 
-If the following two pods `vgpu-4pd-vgpu-device-plugin` and `vgpu-4pd-vgpu-scheduler` are in running state, then your installation is successful.
+If the following two pods `vgpu-device-plugin` and `vgpu-scheduler` are in running state, then your installation is successful.
 
 ### Running GPU Jobs
 
