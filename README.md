@@ -22,6 +22,7 @@ English version|[中文版](README_cn.md)
   - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
   - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
   - [Running GPU Jobs](#running-gpu-jobs)
+- [Uninstall](#Uninstall)
 - [Tests](#Tests)
 - [Issues and Contributing](#issues-and-contributing)
 
@@ -125,6 +126,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 * Kubernetes version >= 1.10
 * glibc >= 2.17
 * kernel version >= 3.10
+* helm
 
 ## Quick Start
 
@@ -234,6 +236,12 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 > **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
 > the vGPUs on the machine will be exposed inside your container.*
+
+### Uninstall 
+
+```
+helm uninstall vgpu
+```
 
 ## Tests
 

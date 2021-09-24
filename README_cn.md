@@ -21,6 +21,7 @@
   - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
   - [运行GPU任务](#运行GPU任务)
 - [测试](#测试)
+- [卸载](#卸载)
 - [问题反馈及代码贡献](#问题反馈及代码贡献)
 
 ## 关于
@@ -131,6 +132,7 @@ $ kubectl logs [pod id]
 * Kubernetes version >= 1.10
 * glibc >= 2.17
 * kernel version >= 3.10
+* helm 
 
 ## 快速入门
 
@@ -231,6 +233,12 @@ spec:
 ```
 
 现在你可以在容器执行`nvidia-smi`命令，然后比较vGPU和实际GPU显存大小的不同。
+
+### 卸载
+
+```
+helm uninstall vgpu
+```
 
 ## 测试
 
