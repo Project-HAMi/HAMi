@@ -203,7 +203,7 @@ $ cd k8s-vgpu/deployments
 $ helm install vgpu vgpu
 ```
 
-通过kubectl get pods指令看到vgpu-4pd-vgpu-device-plugin与vgpu-4pd-vgpu-scheduler两个pod即为安装成功
+通过kubectl get pods指令看到vgpu-device-plugin与vgpu-scheduler两个pod即为安装成功
 
 ```
 $ kubectl get pods
