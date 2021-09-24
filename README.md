@@ -176,7 +176,7 @@ Once you have configured the options above on all the GPU nodes in your
 cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
 
 ```
-$ git clone https://gitlab.4pd.io/vgpu/k8s-vgpu.git
+$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
 $ cd k8s-vgpu/deployments
 ```
 
@@ -197,7 +197,7 @@ Besides, you can customize the follwing values in `values.yaml/scheduler/extende
 After configure those optional arguments, you can enable the vGPU support by following command:
 
 ```
-$ helm install vgpu 4pd-vgpu
+$ helm install vgpu vgpu
 ```
 
 You can verify your install by following command:
