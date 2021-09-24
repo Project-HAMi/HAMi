@@ -171,7 +171,7 @@ $ sudo systemctl restart docker
 最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
 
 ```
-kubectl label nodes {nodeid} gpu=on
+$ kubectl label nodes {nodeid} gpu=on
 ```
 
 
@@ -234,10 +234,19 @@ spec:
 
 现在你可以在容器执行`nvidia-smi`命令，然后比较vGPU和实际GPU显存大小的不同。
 
+### 更新
+
+只需要重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
+
+```
+$ helm uninstall vgpu
+$ helm install vgpu vgpu
+```
+
 ### 卸载
 
 ```
-helm uninstall vgpu
+$ helm uninstall vgpu
 ```
 
 ## 测试

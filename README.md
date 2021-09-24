@@ -237,6 +237,15 @@ You can now execute `nvidia-smi` command in the container and see the difference
 > **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
 > the vGPUs on the machine will be exposed inside your container.*
 
+### Upgrade
+
+To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest will be downloaded automatically.
+
+```
+$ helm uninstall vgpu
+$ helm install vgpu vgpu
+```
+
 ### Uninstall 
 
 ```
