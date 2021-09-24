@@ -24,7 +24,7 @@ scheduler:
     extraArgs:
       - -v=4
   extender:
-    image: "4pdosc/k8s-vgpu:master"
+    image: "4pdosc/k8s-vgpu:latest"
     imagePullPolicy: Always
     extraArgs:
       - --debug
@@ -51,8 +51,8 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vgpu:master"
-  monitorimage: "4pdosc/k8s-vgpu:master"
+  image: "4pdosc/k8s-vgpu:latest"
+  monitorimage: "4pdosc/k8s-vgpu:latest"
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
   extraArgs:

@@ -21,6 +21,7 @@ set -e
 export SHORT_VERSION
 export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
+export LATEST_VERSION="latest"
 
 #IMAGE=${IMAGE-"m7-ieg-pico-test01:5000/k8s-vgpu"}
 IMAGE=${IMAGE-"4pdosc/k8s-vgpu"}
@@ -38,6 +39,7 @@ function docker_build() {
 function docker_push() {
     #docker push "${IMAGE}:${VERSION}"
     docker push "${IMAGE}:${SHORT_VERSION}"
+    docker push "${IMGAE}:${LATEST_VERSION}"
 }
 
 go_build
