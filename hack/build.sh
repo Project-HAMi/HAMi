@@ -40,7 +40,7 @@ function docker_build() {
 function docker_push() {
     #docker push "${IMAGE}:${VERSION}"
     docker push "${IMAGE}:${SHORT_VERSION}"
-    docker push "${IMGAE}:${LATEST_VERSION}"
+    docker push "${IMAGE}:${LATEST_VERSION}"
 }
 
 go_build
