@@ -34,6 +34,7 @@ function go_build() {
 function docker_build() {
     docker build --build-arg VERSION="${VERSION}" -t "${IMAGE}:${VERSION}" -f docker/Dockerfile .
     docker tag "${IMAGE}:${VERSION}" "${IMAGE}:${SHORT_VERSION}"
+    docker tag "${IMAGE}:${VERSION}" "${IMAGE}:${LATEST_VERSION}"
 }
 
 function docker_push() {
