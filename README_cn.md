@@ -178,7 +178,7 @@ kubectl label nodes {nodeid} gpu=on
 当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入deployments文件夹
 
 ```
-$ git clone https://gitlab.4pd.io/vgpu/k8s-vgpu.git
+$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
 $ cd k8s-vgpu/deployments
 ```
 
@@ -200,7 +200,7 @@ $ cd k8s-vgpu/deployments
 配置完成后，随后使用helm安装整个chart
 
 ```
-$ helm install vgpu 4pd-vgpu
+$ helm install vgpu vgpu
 ```
 
 通过kubectl get pods指令看到vgpu-4pd-vgpu-device-plugin与vgpu-4pd-vgpu-scheduler两个pod即为安装成功
