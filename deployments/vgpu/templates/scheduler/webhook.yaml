@@ -4,7 +4,7 @@ metadata:
   name: {{ include "4pd-vgpu.scheduler.webhook" . }}
 webhooks:
   - admissionReviewVersions:
-    - v1
+    - v1beta1
     clientConfig:
       service:
         name: {{ include "4pd-vgpu.scheduler" . }}

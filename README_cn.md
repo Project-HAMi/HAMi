@@ -239,14 +239,14 @@ spec:
 只需要重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
 
 ```
-$ helm uninstall vgpu
-$ helm install vgpu vgpu
+$ helm uninstall vgpu -n kube-system
+$ helm install vgpu vgpu -n kube-system
 ```
 
 ### 卸载
 
 ```
-$ helm uninstall vgpu
+$ helm uninstall vgpu -n kube-system
 ```
 
 ## 测试

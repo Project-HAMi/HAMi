@@ -242,14 +242,14 @@ You can now execute `nvidia-smi` command in the container and see the difference
 To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest will be downloaded automatically.
 
 ```
-$ helm uninstall vgpu
-$ helm install vgpu vgpu
+$ helm uninstall vgpu -n kube-system
+$ helm install vgpu vgpu -n kube-system
 ```
 
 ### Uninstall 
 
 ```
-helm uninstall vgpu
+helm uninstall vgpu -n kube-system
 ```
 
 ## Tests
