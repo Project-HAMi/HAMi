@@ -19,7 +19,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"strings"
@@ -55,13 +54,13 @@ func newNvidiaContainerRuntimeWithLogger(logger *log.Logger, runtime oci.Runtime
 // forwarded to the underlying runtime's Exec method.
 func (r nvidiaContainerRuntime) Exec(args []string) error {
 	if r.modificationRequired(args) {
-		fmt.Println("NEED modification")
+		//		fmt.Println("NEED modification")
 		err := r.modifyOCISpec()
 		if err != nil {
 			return fmt.Errorf("error modifying OCI spec: %v", err)
 		}
 	} else {
-		fmt.Println("Need not modification")
+		//fmt.Println("Need not modification")
 	}
 
 	r.logger.Println("Forwarding command to runtime")
@@ -164,54 +163,55 @@ func (r nvidiaContainerRuntime) addNVIDIAHook(spec *specs.Spec) error {
 		}
 	}
 
-	r.logger.Printf("prestart hook path: %s %s\n", path)
-	envmap, newuuids, err := GetNvidiaUUID(r, spec.Process.Env)
-	if err != nil {
-		r.logger.Println("GetNvidiaUUID failed")
-	} else {
-		if len(envmap) > 0 {
-			restr := ""
-			for idx, val := range envmap {
-				restr = appendtofilestr(idx, val, restr)
+	/*
+		r.logger.Printf("prestart hook path: %s %s\n", path)
+		envmap, newuuids, err := GetNvidiaUUID(r, spec.Process.Env)
+		if err != nil {
+			r.logger.Println("GetNvidiaUUID failed")
+		} else {
+			if len(envmap) > 0 {
+				restr := ""
+				for idx, val := range envmap {
+					restr = appendtofilestr(idx, val, restr)
 
-				tmp1 := idx + "=" + val
-				found := false
-				for idx1, val1 := range spec.Process.Env {
-					if strings.Compare(strings.Split(val1, "=")[0], idx) == 0 {
-						spec.Process.Env[idx1] = tmp1
-						found = true
-						r.logger.Println("modified env", tmp1)
-						continue
+					tmp1 := idx + "=" + val
+					found := false
+					for idx1, val1 := range spec.Process.Env {
+						if strings.Compare(strings.Split(val1, "=")[0], idx) == 0 {
+							spec.Process.Env[idx1] = tmp1
+							found = true
+							r.logger.Println("modified env", tmp1)
+							continue
+						}
+					}
+					if !found {
+						spec.Process.Env = append(spec.Process.Env, tmp1)
+						r.logger.Println("appended env", tmp1)
 					}
 				}
-				if !found {
-					spec.Process.Env = append(spec.Process.Env, tmp1)
-					r.logger.Println("appended env", tmp1)
+				restr = appendtofilestr("CUDA_DEVICE_MEMORY_SHARED_CACHE", "/tmp/vgpu/cudevshr.cache", restr)
+				ioutil.WriteFile("envfile.vgpu", []byte(restr), os.ModePerm)
+				dir, _ := os.Getwd()
+				sharedmnt := specs.Mount{
+					Destination: "/tmp/envfile.vgpu",
+					Source:      dir + "/envfile.vgpu",
+					Type:        "bind",
+					Options:     []string{"rbind", "rw"},
+				}
+				spec.Mounts = append(spec.Mounts, sharedmnt)
+
+				//spec.Mounts = append(spec.Mounts, )
+			}
+			if len(newuuids) > 0 {
+				//r.logger.Println("Get new uuids", newuuids)
+				//spec.Process.Env = append(spec.Process.Env, newuuids[0])
+				err1 := r.addMonitor(newuuids, spec)
+				if err1 != nil {
+					r.logger.Println("addMonitorPath failed", err1.Error())
 				}
 			}
-			restr = appendtofilestr("CUDA_DEVICE_MEMORY_SHARED_CACHE", "/tmp/vgpu/cudevshr.cache", restr)
-			ioutil.WriteFile("envfile.vgpu", []byte(restr), os.ModePerm)
-			dir, _ := os.Getwd()
-			sharedmnt := specs.Mount{
-				Destination: "/tmp/envfile.vgpu",
-				Source:      dir + "/envfile.vgpu",
-				Type:        "bind",
-				Options:     []string{"rbind", "rw"},
-			}
-			spec.Mounts = append(spec.Mounts, sharedmnt)
-
-			//spec.Mounts = append(spec.Mounts, )
 		}
-		if len(newuuids) > 0 {
-			//r.logger.Println("Get new uuids", newuuids)
-			//spec.Process.Env = append(spec.Process.Env, newuuids[0])
-			err1 := r.addMonitor(newuuids, spec)
-			if err1 != nil {
-				r.logger.Println("addMonitorPath failed", err1.Error())
-			}
-		}
-	}
-
+	*/
 	args := []string{path}
 	if spec.Hooks == nil {
 		spec.Hooks = &specs.Hooks{}
