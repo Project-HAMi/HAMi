@@ -11,6 +11,11 @@ English version|[中文版](README_cn.md)
 
 - [About](#about)
 - [When to use](#when-to-use)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
+  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
+  - [Running GPU Jobs](#running-gpu-jobs)
 - [Stategy](#strategy)
 - [Benchmarks](#Benchmarks)
 - [Features](#Features)
@@ -18,10 +23,6 @@ English version|[中文版](README_cn.md)
 - [Known Issues](#Known-Issues)
 - [TODO](#TODO)
 - [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
-  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
-  - [Running GPU Jobs](#running-gpu-jobs)
 - [Uninstall](#Uninstall)
 - [Tests](#Tests)
 - [Issues and Contributing](#issues-and-contributing)
@@ -37,86 +38,6 @@ The **k8s vGPU scheduler** is based on 4pd-k8s-device-plugin ([4paradigm/k8s-dev
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
 4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform provides small GPU instances.
 5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
-
-## Scheduling
-
-Current schedule strategy is to select GPU with lowest task, thus balance the loads across mutiple GPUs
-
-## Benchmarks
-
-Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows
-
-| Test Environment | description                                              |
-| ---------------- | :------------------------------------------------------: |
-| Kubernetes version | v1.12.9                                                |
-| Docker  version    | 18.09.1                                                |
-| GPU Type           | Tesla V100                                             |
-| GPU Num            | 2                                                      |
-
-| Test instance |                         description                         |
-| ------------- | :---------------------------------------------------------: |
-| nvidia-device-plugin      |               k8s + nvidia k8s-device-plugin                |
-| vGPU-device-plugin        | k8s + VGPU k8s-device-plugin，without virtual device memory |
-| vGPU-device-plugin(virtual device memory) |  k8s + VGPU k8s-device-plugin，with virtual device memory   |
-
-Test Cases:
-
-| test id |     case      |   type    |         params          |
-| ------- | :-----------: | :-------: | :---------------------: |
-| 1.1     | Resnet-V2-50  | inference |  batch=50,size=346*346  |
-| 1.2     | Resnet-V2-50  | training  |  batch=20,size=346*346  |
-| 2.1     | Resnet-V2-152 | inference |  batch=10,size=256*256  |
-| 2.2     | Resnet-V2-152 | training  |  batch=10,size=256*256  |
-| 3.1     |    VGG-16     | inference |  batch=20,size=224*224  |
-| 3.2     |    VGG-16     | training  |  batch=2,size=224*224   |
-| 4.1     |    DeepLab    | inference |  batch=2,size=512*512   |
-| 4.2     |    DeepLab    | training  |  batch=1,size=384*384   |
-| 5.1     |     LSTM      | inference | batch=100,size=1024*300 |
-| 5.2     |     LSTM      | training  | batch=10,size=1024*300  |
-
-Test Result: ![img](./imgs/benchmark_inf.png)
-
-![img](./imgs/benchmark_train.png)
-
-To reproduce:
-
-1. install vGPU-nvidia-device-plugin，and configure properly
-2. run benchmark job
-
-```
-$ kubectl apply -f benchmarks/ai-benchmark/ai-benchmark.yml
-```
-
-3. View the result by using kubctl logs
-
-```
-$ kubectl logs [pod id]
-```
-
-## Features
-
-- Specify the number of vGPUs divided by each physical GPU.
-- Limit vGPU's Device Memory.
-- Allows vGPU allocation by specifying device memory 
-- Limit vGPU's Streaming Multiprocessor.
-- Allows vGPU allocation by specifying device core usage
-- Zero changes to existing programs
-
-## Experimental Features
-
-- Virtual Device Memory
-
-  The device memory of the vGPU can exceed the physical device memory of the GPU. At this time, the excess part will be put in the RAM, which will have a certain impact on the performance.
-
-## Known Issues
-
-- Currently, A100 MIG not supported 
-- Currently, only computing tasks are supported, and video codec processing is not supported.
-
-## TODO
-
-- Support video codec processing
-- Support Multi-Instance GPUs (MIG)
 
 ## Prerequisites
 
@@ -172,7 +93,7 @@ Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-schedul
 kubectl label nodes {nodeid} gpu=on
 ```
 
-# Download
+### Download
 
 Once you have configured the options above on all the GPU nodes in your
 cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
@@ -269,6 +190,86 @@ $ helm install vgpu vgpu -n kube-system
 ```
 helm uninstall vgpu -n kube-system
 ```
+
+## Scheduling
+
+Current schedule strategy is to select GPU with lowest task, thus balance the loads across mutiple GPUs
+
+## Benchmarks
+
+Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows
+
+| Test Environment | description                                              |
+| ---------------- | :------------------------------------------------------: |
+| Kubernetes version | v1.12.9                                                |
+| Docker  version    | 18.09.1                                                |
+| GPU Type           | Tesla V100                                             |
+| GPU Num            | 2                                                      |
+
+| Test instance |                         description                         |
+| ------------- | :---------------------------------------------------------: |
+| nvidia-device-plugin      |               k8s + nvidia k8s-device-plugin                |
+| vGPU-device-plugin        | k8s + VGPU k8s-device-plugin，without virtual device memory |
+| vGPU-device-plugin(virtual device memory) |  k8s + VGPU k8s-device-plugin，with virtual device memory   |
+
+Test Cases:
+
+| test id |     case      |   type    |         params          |
+| ------- | :-----------: | :-------: | :---------------------: |
+| 1.1     | Resnet-V2-50  | inference |  batch=50,size=346*346  |
+| 1.2     | Resnet-V2-50  | training  |  batch=20,size=346*346  |
+| 2.1     | Resnet-V2-152 | inference |  batch=10,size=256*256  |
+| 2.2     | Resnet-V2-152 | training  |  batch=10,size=256*256  |
+| 3.1     |    VGG-16     | inference |  batch=20,size=224*224  |
+| 3.2     |    VGG-16     | training  |  batch=2,size=224*224   |
+| 4.1     |    DeepLab    | inference |  batch=2,size=512*512   |
+| 4.2     |    DeepLab    | training  |  batch=1,size=384*384   |
+| 5.1     |     LSTM      | inference | batch=100,size=1024*300 |
+| 5.2     |     LSTM      | training  | batch=10,size=1024*300  |
+
+Test Result: ![img](./imgs/benchmark_inf.png)
+
+![img](./imgs/benchmark_train.png)
+
+To reproduce:
+
+1. install vGPU-nvidia-device-plugin，and configure properly
+2. run benchmark job
+
+```
+$ kubectl apply -f benchmarks/ai-benchmark/ai-benchmark.yml
+```
+
+3. View the result by using kubctl logs
+
+```
+$ kubectl logs [pod id]
+```
+
+## Features
+
+- Specify the number of vGPUs divided by each physical GPU.
+- Limit vGPU's Device Memory.
+- Allows vGPU allocation by specifying device memory 
+- Limit vGPU's Streaming Multiprocessor.
+- Allows vGPU allocation by specifying device core usage
+- Zero changes to existing programs
+
+## Experimental Features
+
+- Virtual Device Memory
+
+  The device memory of the vGPU can exceed the physical device memory of the GPU. At this time, the excess part will be put in the RAM, which will have a certain impact on the performance.
+
+## Known Issues
+
+- Currently, A100 MIG not supported 
+- Currently, only computing tasks are supported, and video codec processing is not supported.
+
+## TODO
+
+- Support video codec processing
+- Support Multi-Instance GPUs (MIG)
 
 ## Tests
 

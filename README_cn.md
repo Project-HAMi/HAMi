@@ -9,17 +9,17 @@
 
 - [关于](#关于)
 - [使用场景](#使用场景)
+- [安装要求](#安装要求)
+- [快速入门](#快速入门)
+  - [GPU节点准备](#GPU节点准备)
+  - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
+  - [运行GPU任务](#运行GPU任务
 - [调度策略](#调度策略)
 - [性能测试](#性能测试)
 - [功能](#功能)
 - [实验性功能](#实验性功能)
 - [已知问题](#已知问题)
 - [开发计划](#开发计划)
-- [安装要求](#安装要求)
-- [快速入门](#快速入门)
-  - [GPU节点准备](#GPU节点准备)
-  - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
-  - [运行GPU任务](#运行GPU任务)
 - [测试](#测试)
 - [卸载](#卸载)
 - [问题反馈及代码贡献](#问题反馈及代码贡献)
@@ -36,93 +36,6 @@
 4. 需要大量小显卡的情况，如教学场景把一张GPU提供给多个学生使用、云平台提供小GPU实例。
 5. 物理显存不足的情况，可以开启虚拟显存，如大batch、大模型的训练。
 
-## 调度策略
-
-调度策略为，在保证显存和算力满足需求的GPU中，优先选择任务数最少的GPU执行任务，这样做可以使任务均匀分配到所有的GPU中
-
-## 性能测试
-
-## 使用场景
-
-1. 显存、计算单元利用率低的情况，如在一张GPU卡上运行10个tf-serving。
-2. 需要大量小显卡的情况，如教学场景把一张GPU提供给多个学生使用、云平台提供小GPU实例。
-3. 物理显存不足的情况，可以开启虚拟显存，如大batch、大模型的训练。
-
-## 性能测试
-
-在测试报告中，我们一共在下面五种场景都执行了ai-benchmark 测试脚本，并汇总最终结果：
-
-| 测试环境 | 环境描述                                              |
-| ---------------- | :------------------------------------------------------: |
-| Kubernetes version | v1.12.9                                                |
-| Docker  version    | 18.09.1                                                |
-| GPU Type           | Tesla V100                                             |
-| GPU Num            | 2                                                      |
-
-| 测试名称 |                      测试用例                      |
-| -------- | :------------------------------------------------: |
-| Nvidia-device-plugin        |         k8s + nvidia官方k8s-device-plugin          |
-| vGPU-device-plugin        |      k8s + VGPU k8s-device-plugin，无虚拟显存      |
-| vGPU-device-plugin(virtual device memory)  | k8s + VGPU k8s-device-plugin，高负载，开启虚拟显存 |
-
-测试内容
-
-| test id |     名称      |   类型    |          参数           |
-| ------- | :-----------: | :-------: | :---------------------: |
-| 1.1     | Resnet-V2-50  | inference |  batch=50,size=346*346  |
-| 1.2     | Resnet-V2-50  | training  |  batch=20,size=346*346  |
-| 2.1     | Resnet-V2-152 | inference |  batch=10,size=256*256  |
-| 2.2     | Resnet-V2-152 | training  |  batch=10,size=256*256  |
-| 3.1     |    VGG-16     | inference |  batch=20,size=224*224  |
-| 3.2     |    VGG-16     | training  |  batch=2,size=224*224   |
-| 4.1     |    DeepLab    | inference |  batch=2,size=512*512   |
-| 4.2     |    DeepLab    | training  |  batch=1,size=384*384   |
-| 5.1     |     LSTM      | inference | batch=100,size=1024*300 |
-| 5.2     |     LSTM      | training  | batch=10,size=1024*300  |
-
-测试结果： ![img](./imgs/benchmark_inf.png)
-
-![img](./imgs/benchmark_train.png)
-
-测试步骤：
-
-1. 安装nvidia-device-plugin，并配置相应的参数
-2. 运行benchmark任务
-
-```
-$ kubectl apply -f benchmarks/ai-benchmark/ai-benchmark.yml
-```
-
-3. 通过kubctl logs 查看结果
-
-```
-$ kubectl logs [pod id]
-```
-
-## 功能
-
-- 指定每张物理GPU切分的最大vGPU的数量
-- 限制vGPU的显存
-- 允许通过指定显存来申请GPU
-- 限制vGPU的计算单元
-- 允许通过指定vGPU使用比例来申请GPU
-- 对已有程序零改动
-
-## 实验性功能
-
-- 虚拟显存
-
-  vGPU的显存总和可以超过GPU实际的显存，这时候超过的部分会放到内存里，对性能有一定的影响。
-
-## 已知问题
-
-- 目前仅支持计算任务，不支持视频编解码处理。
-- 暂时不支持MIG
-
-## 开发计划
-
-- 支持视频编解码处理
-- 支持Multi-Instance GPUs (MIG) 
 
 ## 安装要求
 
@@ -268,7 +181,95 @@ $ helm install vgpu vgpu -n kube-system
 $ helm uninstall vgpu -n kube-system
 ```
 
-## 测试
+## 调度策略
+
+调度策略为，在保证显存和算力满足需求的GPU中，优先选择任务数最少的GPU执行任务，这样做可以使任务均匀分配到所有的GPU中
+
+## 性能测试
+
+## 使用场景
+
+1. 显存、计算单元利用率低的情况，如在一张GPU卡上运行10个tf-serving。
+2. 需要大量小显卡的情况，如教学场景把一张GPU提供给多个学生使用、云平台提供小GPU实例。
+3. 物理显存不足的情况，可以开启虚拟显存，如大batch、大模型的训练。
+
+## 性能测试
+
+在测试报告中，我们一共在下面五种场景都执行了ai-benchmark 测试脚本，并汇总最终结果：
+
+| 测试环境 | 环境描述                                              |
+| ---------------- | :------------------------------------------------------: |
+| Kubernetes version | v1.12.9                                                |
+| Docker  version    | 18.09.1                                                |
+| GPU Type           | Tesla V100                                             |
+| GPU Num            | 2                                                      |
+
+| 测试名称 |                      测试用例                      |
+| -------- | :------------------------------------------------: |
+| Nvidia-device-plugin        |         k8s + nvidia官方k8s-device-plugin          |
+| vGPU-device-plugin        |      k8s + VGPU k8s-device-plugin，无虚拟显存      |
+| vGPU-device-plugin(virtual device memory)  | k8s + VGPU k8s-device-plugin，高负载，开启虚拟显存 |
+
+测试内容
+
+| test id |     名称      |   类型    |          参数           |
+| ------- | :-----------: | :-------: | :---------------------: |
+| 1.1     | Resnet-V2-50  | inference |  batch=50,size=346*346  |
+| 1.2     | Resnet-V2-50  | training  |  batch=20,size=346*346  |
+| 2.1     | Resnet-V2-152 | inference |  batch=10,size=256*256  |
+| 2.2     | Resnet-V2-152 | training  |  batch=10,size=256*256  |
+| 3.1     |    VGG-16     | inference |  batch=20,size=224*224  |
+| 3.2     |    VGG-16     | training  |  batch=2,size=224*224   |
+| 4.1     |    DeepLab    | inference |  batch=2,size=512*512   |
+| 4.2     |    DeepLab    | training  |  batch=1,size=384*384   |
+| 5.1     |     LSTM      | inference | batch=100,size=1024*300 |
+| 5.2     |     LSTM      | training  | batch=10,size=1024*300  |
+
+测试结果： ![img](./imgs/benchmark_inf.png)
+
+![img](./imgs/benchmark_train.png)
+
+测试步骤：
+
+1. 安装nvidia-device-plugin，并配置相应的参数
+2. 运行benchmark任务
+
+```
+$ kubectl apply -f benchmarks/ai-benchmark/ai-benchmark.yml
+```
+
+3. 通过kubctl logs 查看结果
+
+```
+$ kubectl logs [pod id]
+```
+
+## 功能
+
+- 指定每张物理GPU切分的最大vGPU的数量
+- 限制vGPU的显存
+- 允许通过指定显存来申请GPU
+- 限制vGPU的计算单元
+- 允许通过指定vGPU使用比例来申请GPU
+- 对已有程序零改动
+
+## 实验性功能
+
+- 虚拟显存
+
+  vGPU的显存总和可以超过GPU实际的显存，这时候超过的部分会放到内存里，对性能有一定的影响。
+
+## 已知问题
+
+- 目前仅支持计算任务，不支持视频编解码处理。
+- 暂时不支持MIG
+
+## 开发计划
+
+- 支持视频编解码处理
+- 支持Multi-Instance GPUs (MIG) 
+
+# 测试
 
 - TensorFlow 1.14.0/2.4.1
 - torch1.1.0
