@@ -11,6 +11,11 @@ English version|[中文版](README_cn.md)
 
 - [About](#about)
 - [When to use](#when-to-use)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
+  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
+  - [Running GPU Jobs](#running-gpu-jobs)
 - [Stategy](#strategy)
 - [Benchmarks](#Benchmarks)
 - [Features](#Features)
@@ -18,10 +23,6 @@ English version|[中文版](README_cn.md)
 - [Known Issues](#Known-Issues)
 - [TODO](#TODO)
 - [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
-  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
-  - [Running GPU Jobs](#running-gpu-jobs)
 - [Uninstall](#Uninstall)
 - [Tests](#Tests)
 - [Issues and Contributing](#issues-and-contributing)
@@ -37,6 +38,158 @@ The **k8s vGPU scheduler** is based on 4pd-k8s-device-plugin ([4paradigm/k8s-dev
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
 4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform provides small GPU instances.
 5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
+
+## Prerequisites
+
+The list of prerequisites for running the NVIDIA device plugin is described below:
+* NVIDIA drivers ~= 384.81
+* nvidia-docker version > 2.0
+* Kubernetes version >= 1.10
+* glibc >= 2.17
+* kernel version >= 3.10
+* helm
+
+## Quick Start
+
+### Preparing your GPU Nodes
+
+
+The following steps need to be executed on all your GPU nodes.
+This README assumes that the NVIDIA drivers and `nvidia-docker` have been installed.
+
+Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
+This is because the new `--gpus` options hasn't reached kubernetes yet. Example:
+
+```
+# Add the package repositories
+$ distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+$ curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+$ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+
+$ sudo apt-get update && sudo apt-get install -y nvidia-docker2
+$ sudo systemctl restart docker
+```
+
+You will need to enable the nvidia runtime as your default runtime on your node.
+We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
+
+```
+{
+    "default-runtime": "nvidia",
+    "runtimes": {
+        "nvidia": {
+            "path": "/usr/bin/nvidia-container-runtime",
+            "runtimeArgs": []
+        }
+    }
+}
+```
+
+> *if `runtimes` is not already present, head to the install page of [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
+
+Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it can not be managed by our scheduler.
+
+```
+kubectl label nodes {nodeid} gpu=on
+```
+
+### Download
+
+Once you have configured the options above on all the GPU nodes in your
+cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
+
+```
+$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
+$ cd k8s-vgpu-scheduler/deployments
+```
+
+### Set scheduler image version
+
+Check your kubernetes version by the using the following command
+
+```
+kubectl version
+```
+
+Then you need to set the kubernetes scheduler image version according to your kubernetes server version key `scheduler.kubeScheduler.image` in `deployments/values.yaml` file , for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
+
+```
+scheduler:
+  kubeScheduler:
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+```
+
+### Enabling vGPU Support in Kubernetes
+
+In the deployments folder, you can customize your vGPU support by modifying following keys `devicePlugin.extraArgs` in `values.yaml` file:
+
+* `device-memory-scaling:` 
+  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get `S * M` memory in Kubernetes with our device plugin.
+* `device-split-count:` 
+  Integer type, by default: equals 10. Maxinum tasks assigned to a simple GPU device.
+
+Besides, you can customize the follwing keys `devicePlugin.extraArgs` in `values.yaml` file`:
+
+* `default-mem:` 
+  Integer type, by default: 5000. The default device memory of the current task, in MB
+* `default-cores:` 
+  Integer type, by default: equals 0. Default GPU core usage of the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
+
+After configure those optional arguments, you can enable the vGPU support by following command:
+
+```
+$ helm install vgpu vgpu -n kube-system
+```
+
+You can verify your install by following command:
+
+```
+$ kubectl get pods -n kube-system
+```
+
+If the following two pods `vgpu-device-plugin` and `vgpu-scheduler` are in *Running* state, then your installation is successful.
+
+### Running GPU Jobs
+
+NVIDIA vGPUs can now be requested by a container
+using the `nvidia.com/gpu` resource type:
+
+```
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ubuntu:18.04
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+	  nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional）
+	  nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional)
+```
+
+You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
+
+> **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
+> the vGPUs on the machine will be exposed inside your container.*
+
+### Upgrade
+
+To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest will be downloaded automatically.
+
+```
+$ helm uninstall vgpu -n kube-system
+$ helm install vgpu vgpu -n kube-system
+```
+
+### Uninstall 
+
+```
+helm uninstall vgpu -n kube-system
+```
 
 ## Scheduling
 
@@ -117,140 +270,6 @@ $ kubectl logs [pod id]
 
 - Support video codec processing
 - Support Multi-Instance GPUs (MIG)
-
-## Prerequisites
-
-The list of prerequisites for running the NVIDIA device plugin is described below:
-* NVIDIA drivers ~= 384.81
-* nvidia-docker version > 2.0
-* Kubernetes version >= 1.10
-* glibc >= 2.17
-* kernel version >= 3.10
-* helm
-
-## Quick Start
-
-### Preparing your GPU Nodes
-
-
-The following steps need to be executed on all your GPU nodes.
-This README assumes that the NVIDIA drivers and `nvidia-docker` have been installed.
-
-Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
-This is because the new `--gpus` options hasn't reached kubernetes yet. Example:
-
-```
-# Add the package repositories
-$ distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-$ curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-$ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
-
-$ sudo apt-get update && sudo apt-get install -y nvidia-docker2
-$ sudo systemctl restart docker
-```
-
-You will need to enable the nvidia runtime as your default runtime on your node.
-We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
-
-```
-{
-    "default-runtime": "nvidia",
-    "runtimes": {
-        "nvidia": {
-            "path": "/usr/bin/nvidia-container-runtime",
-            "runtimeArgs": []
-        }
-    }
-}
-```
-
-> *if `runtimes` is not already present, head to the install page of [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
-
-Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it can not be managed by our scheduler.
-
-```
-kubectl label nodes {nodeid} gpu=on
-```
-
-### Enabling vGPU Support in Kubernetes
-
-Once you have configured the options above on all the GPU nodes in your
-cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
-
-```
-$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu/deployments
-```
-
-In the deployments folder, you can customize your vGPU support by modifying following values in `values.yaml/devicePlugin/extraArgs` :
-
-* `device-memory-scaling:` 
-  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get *S \* M* memory in Kubernetes with our device plugin.
-* `device-split-count:` 
-  Integer type, by default: equals 10. Maxinum tasks assigned to a simple GPU device.
-
-Besides, you can customize the follwing values in `values.yaml/scheduler/extender/extraArgs`:
-
-* `default-mem:` 
-  Integer type, by default: 5000. The default device memory of the current task, in MB
-* `default-cores:` 
-  Integer type, by default: equals 0. Default GPU core usage of the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
-
-After configure those optional arguments, you can enable the vGPU support by following command:
-
-```
-$ helm install vgpu vgpu
-```
-
-You can verify your install by following command:
-
-```
-$ kubectl get pods
-```
-
-If the following two pods `vgpu-device-plugin` and `vgpu-scheduler` are in running state, then your installation is successful.
-
-### Running GPU Jobs
-
-NVIDIA vGPUs can now be requested by a container
-using the `nvidia.com/gpu` resource type:
-
-```
-apiVersion: v1
-kind: Pod
-metadata:
-  name: gpu-pod
-spec:
-  containers:
-    - name: ubuntu-container
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          nvidia.com/gpu: 2 # requesting 2 vGPUs
-	  nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional）
-	  nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional)
-```
-
-You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
-
-> **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
-> the vGPUs on the machine will be exposed inside your container.*
-
-### Upgrade
-
-To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest will be downloaded automatically.
-
-```
-$ helm uninstall vgpu -n kube-system
-$ helm install vgpu vgpu -n kube-system
-```
-
-### Uninstall 
-
-```
-helm uninstall vgpu -n kube-system
-```
 
 ## Tests
 
