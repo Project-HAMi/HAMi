@@ -42,7 +42,7 @@
 * NVIDIA drivers >= 384.81
 * nvidia-docker version > 2.0 
 * docker已配置nvidia作为默认runtime
-* Kubernetes version >= 1.10
+* Kubernetes version >= 1.16
 * glibc >= 2.17
 * kernel version >= 3.10
 * helm 
