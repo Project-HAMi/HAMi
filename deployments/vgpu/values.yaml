@@ -51,7 +51,7 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vgpu:latest"
+  image: "m7-ieg-pico-test01:5000/k8s-vgpu:latest"
   monitorimage: "4pdosc/k8s-vgpu:latest"
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always

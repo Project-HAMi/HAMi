@@ -6,28 +6,28 @@ metadata:
     app.kubernetes.io/component: 4pd-scheduler
     {{- include "4pd-vgpu.labels" . | nindent 4 }}
 data:
-  config.yaml: |
-    apiVersion: kubescheduler.config.k8s.io/v1beta1
-    kind: KubeSchedulerConfiguration
-    healthzBindAddress: 0.0.0.0:10251
-    leaderElection:
-      leaderElect: false
-    metricsBindAddress: 0.0.0.0:10251
-    profiles:
-    - schedulerName: {{ .Values.schedulerName }}
-    extenders:
-    - urlPrefix: "https://127.0.0.1:443"
-      filterVerb: filter
-      nodeCacheCapable: true
-      weight: 1
-      httpTimeout: 30s
-      enableHTTPS: true
-      tlsConfig:
-        insecure: true
-      managedResources:
-      - name: {{ .Values.resourceName }}
-        ignoredByScheduler: true
-      - name: {{ .Values.resourceMem }}
-        ignoredByScheduler: true
-      - name: {{ .Values.resourceCores }}
-        ignoredByScheduler: true
+  config.json: |
+    {
+        "kind": "Policy",
+        "apiVersion": "v1",
+        "extenders": [
+            {
+                "urlPrefix": "https://127.0.0.1:443",
+                "filterVerb": "filter",
+                "enableHttps": true,
+                "weight": 1,
+                "nodeCacheCapable": true,
+                "httpTimeout": 30000000000,
+                "tlsConfig": {
+                    "insecure": true
+                },
+                "managedResources": [
+                    {
+                        "name": "nvidia.com/gpu",
+                        "ignoredByScheduler": true
+                    }
+                ],
+                "ignoreable": false
+            }
+        ]
+    }
