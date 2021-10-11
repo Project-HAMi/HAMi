@@ -44,7 +44,7 @@ The **k8s vGPU scheduler** is based on 4pd-k8s-device-plugin ([4paradigm/k8s-dev
 The list of prerequisites for running the NVIDIA device plugin is described below:
 * NVIDIA drivers ~= 384.81
 * nvidia-docker version > 2.0
-* Kubernetes version >= 1.10
+* Kubernetes version >= 1.16
 * glibc >= 2.17
 * kernel version >= 3.10
 * helm
