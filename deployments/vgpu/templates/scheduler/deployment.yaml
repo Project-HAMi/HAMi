@@ -36,7 +36,9 @@ spec:
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
           command:
             - kube-scheduler
-            - --config=/config/config.yaml
+            - --policy-config-file=/config/config.json
+            - --leader-elect=false
+            - --scheduler-name={{ .Values.schedulerName }}
             {{- range .Values.scheduler.kubeScheduler.extraArgs }}
             - {{ . }}
             {{- end }}
