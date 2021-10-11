@@ -136,22 +136,6 @@ $ kubectl logs [pod id]
 
 ## 快速入门
 
-### 设置调度器镜像版本
-
-使用下列执行获取集群服务端版本
-
-```
-kubectl version
-```
-
-随后，根据获得的集群服务端版本，修改`deployments/values.yaml/scheduler/kubeScheduler/image`中调度器镜像版本，例如，如果你的服务端版本为1.16.8，则你需要将镜像版本修改为1.16.8
-
-```
-scheduler:
-  kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8
-```
-
 
 ### GPU节点准备
 
@@ -191,24 +175,42 @@ $ sudo systemctl restart docker
 $ kubectl label nodes {nodeid} gpu=on
 ```
 
-
-### Kubernetes开启vGPU支持
+### 下载项目并进入deployments文件夹
 
 当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入deployments文件夹
 
 ```
 $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu/deployments
+$ cd k8s-vgpu-scheduler/deployments
 ```
 
-在这个deployments文件中, 你可以在 `values.yaml/devicePlugin/extraArgs` 中使用以下的客制化参数：
+### 设置调度器镜像版本
+
+使用下列执行获取集群服务端版本
+
+```
+kubectl version
+```
+
+随后，根据获得的集群服务端版本，修改 `vgpu/values.yaml` 文件的 `scheduler.kubeScheduler.image` 中调度器镜像版本。例如，如果你的服务端版本为1.16.8，则你需要将镜像版本修改为1.16.8
+
+```
+scheduler:
+  kubeScheduler:
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+```
+
+
+### Kubernetes开启vGPU支持
+
+在这个deployments文件中, 你可以在 `vgpu/values.yaml` 文件的 `devicePlugin.extraArgs` 中使用以下的客制化参数：
 
 * `device-split-count:` 
   整数类型，预设值是10。GPU的分割数，每一张GPU都不能分配超过其配置数目的任务。若其配置为N的话，每个GPU上最多可以同时存在N个任务。
 * `device-memory-scaling:` 
-  浮点数类型，预设值是1。NVIDIA装置显存使用比例，可以大于1（启用虚拟显存，实验功能）。对于有*M​*显存大小的NVIDIA GPU，如果我们配置`device-memory-scaling`参数为*S*，在部署了我们装置插件的Kubenetes集群中，这张GPU分出的vGPU将总共包含 *S \* M*显存。
+  浮点数类型，预设值是1。NVIDIA装置显存使用比例，可以大于1（启用虚拟显存，实验功能）。对于有*M*显存大小的NVIDIA GPU，如果我们配置`device-memory-scaling`参数为*S*，在部署了我们装置插件的Kubenetes集群中，这张GPU分出的vGPU将总共包含 `S * M` 显存。
 
-除此之外，你可以在 `values.yaml/scheduler/extender/extraArgs` 中使用以下客制化参数:
+除此之外，你可以在 `vgpu/values.yaml` 文件的 `devicePlugin.extraArgs` 中使用以下客制化参数:
 
 * `default-mem:`
   整数类型，预设值为5000，表示不配置显存时使用的默认显存大小，单位为MB
@@ -219,13 +221,13 @@ $ cd k8s-vgpu/deployments
 配置完成后，随后使用helm安装整个chart
 
 ```
-$ helm install vgpu vgpu
+$ helm install vgpu vgpu -n kube-system
 ```
 
-通过kubectl get pods指令看到vgpu-device-plugin与vgpu-scheduler两个pod即为安装成功
+通过kubectl get pods指令看到 `vgpu-device-plugin` 与 `vgpu-scheduler` 两个pod 状态为*Running*  即为安装成功
 
 ```
-$ kubectl get pods
+$ kubectl get pods -n kube-system
 ```
 
 ### 运行GPU任务

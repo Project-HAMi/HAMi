@@ -130,22 +130,6 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 
 ## Quick Start
 
-### Set scheduler image version
-
-Check your kubernetes version by the using the following command
-
-```
-kubectl version
-```
-
-Then you need to set the kubernetes scheduler image version according to your kubernetes server version in `deployments/values.yaml/scheduler/kubeScheduler/image`, for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
-
-```
-scheduler:
-  kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8
-```
-
 ### Preparing your GPU Nodes
 
 
@@ -188,24 +172,42 @@ Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-schedul
 kubectl label nodes {nodeid} gpu=on
 ```
 
-### Enabling vGPU Support in Kubernetes
+# Download
 
 Once you have configured the options above on all the GPU nodes in your
 cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
 
 ```
 $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu/deployments
+$ cd k8s-vgpu-scheduler/deployments
 ```
 
-In the deployments folder, you can customize your vGPU support by modifying following values in `values.yaml/devicePlugin/extraArgs` :
+### Set scheduler image version
+
+Check your kubernetes version by the using the following command
+
+```
+kubectl version
+```
+
+Then you need to set the kubernetes scheduler image version according to your kubernetes server version key `scheduler.kubeScheduler.image` in `deployments/values.yaml` file , for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
+
+```
+scheduler:
+  kubeScheduler:
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+```
+
+### Enabling vGPU Support in Kubernetes
+
+In the deployments folder, you can customize your vGPU support by modifying following keys `devicePlugin.extraArgs` in `values.yaml` file:
 
 * `device-memory-scaling:` 
-  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get *S \* M* memory in Kubernetes with our device plugin.
+  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get `S * M` memory in Kubernetes with our device plugin.
 * `device-split-count:` 
   Integer type, by default: equals 10. Maxinum tasks assigned to a simple GPU device.
 
-Besides, you can customize the follwing values in `values.yaml/scheduler/extender/extraArgs`:
+Besides, you can customize the follwing keys `devicePlugin.extraArgs` in `values.yaml` file`:
 
 * `default-mem:` 
   Integer type, by default: 5000. The default device memory of the current task, in MB
@@ -215,16 +217,16 @@ Besides, you can customize the follwing values in `values.yaml/scheduler/extende
 After configure those optional arguments, you can enable the vGPU support by following command:
 
 ```
-$ helm install vgpu vgpu
+$ helm install vgpu vgpu -n kube-system
 ```
 
 You can verify your install by following command:
 
 ```
-$ kubectl get pods
+$ kubectl get pods -n kube-system
 ```
 
-If the following two pods `vgpu-device-plugin` and `vgpu-scheduler` are in running state, then your installation is successful.
+If the following two pods `vgpu-device-plugin` and `vgpu-scheduler` are in *Running* state, then your installation is successful.
 
 ### Running GPU Jobs
 
