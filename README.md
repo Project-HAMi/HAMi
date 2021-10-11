@@ -130,6 +130,22 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 
 ## Quick Start
 
+### Set scheduler image version
+
+Check your kubernetes version by the using the following command
+
+```
+kubectl version
+```
+
+Then you need to set the kubernetes scheduler image version according to your kubernetes server version in `deployments/values.yaml/scheduler/kubeScheduler/image`, for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
+
+```
+scheduler:
+  kubeScheduler:
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8
+```
+
 ### Preparing your GPU Nodes
 
 

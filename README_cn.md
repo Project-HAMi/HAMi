@@ -136,6 +136,23 @@ $ kubectl logs [pod id]
 
 ## 快速入门
 
+### 设置调度器镜像版本
+
+使用下列执行获取集群服务端版本
+
+```
+kubectl version
+```
+
+随后，根据获得的集群服务端版本，修改`deployments/values.yaml/scheduler/kubeScheduler/image`中调度器镜像版本，例如，如果你的服务端版本为1.16.8，则你需要将镜像版本修改为1.16.8
+
+```
+scheduler:
+  kubeScheduler:
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8
+```
+
+
 ### GPU节点准备
 
 以下步骤要在所有GPU节点执行。这份README文档假定GPU节点已经安装NVIDIA驱动和`nvidia-docker`套件。
