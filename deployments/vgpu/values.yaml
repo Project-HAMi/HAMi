@@ -19,7 +19,7 @@ global:
 
 scheduler:
   kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.20.6"
     imagePullPolicy: IfNotPresent
     extraArgs:
       - -v=4
