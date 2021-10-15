@@ -171,6 +171,8 @@ spec:
 	        nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
 ```
 
+You should be cautious that if the task can't fit in any GPU node(ie. the number of `nvidia.com/gpu` you request exceeds the number of GPU in any node). The task will get stuck in `pending` state.
+
 You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
 
 > **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
