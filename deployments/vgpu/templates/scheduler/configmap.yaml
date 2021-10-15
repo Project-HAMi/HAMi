@@ -25,6 +25,14 @@ data:
                     {
                         "name": "nvidia.com/gpu",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "nvidia.com/gpumem",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "nvidia.com/gpucores",
+                        "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false
