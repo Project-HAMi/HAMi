@@ -1,0 +1,39 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ai-benchmark
+spec:
+  template:
+    metadata:
+      name: ai-benchmark
+    spec:
+      containers:
+        - name: ai-benchmark1
+          image: 4pdosc/ai-benchmark:2.4.1-gpu
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+        - name: ai-benchmark2
+          image: 4pdosc/ai-benchmark:2.4.1-gpu
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+        - name: ai-benchmark3
+          image: 4pdosc/ai-benchmark:2.4.1-gpu
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+        - name: ai-benchmark4
+          image: 4pdosc/ai-benchmark:2.4.1-gpu
+          resources:
+            requests:
+              nvidia.com/gpu: 1
+            limits:
+              nvidia.com/gpu: 1
+      restartPolicy: Never
