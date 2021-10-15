@@ -133,7 +133,7 @@ Besides, you can customize the follwing keys `devicePlugin.extraArgs` in `values
 * `default-mem:` 
   Integer type, by default: 5000. The default device memory of the current task, in MB
 * `default-cores:` 
-  Integer type, by default: equals 0. Default GPU core usage of the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
+  Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
 
 After configure those optional arguments, you can enable the vGPU support by following command:
 
@@ -167,8 +167,8 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-	  nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional）
-	  nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional)
+	        nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+	        nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
 ```
 
 You can now execute `nvidia-smi` command in the container and see the difference of GPU memory between vGPU and real GPU.
