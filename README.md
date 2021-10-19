@@ -11,9 +11,9 @@ English version|[中文版](README_cn.md)
 
 **4paradigm k8s vgpu scheduler is an "all in one" chart to manage your GPU in k8s cluster**, It has everything you expect for a k8s GPU manager, including:
 
-**GPU sharing**: Each tasks can allocate a portion of GPU instead a whole GPU card, Thus GPU can be shared among multiple tasks.
+***GPU sharing***: Each tasks can allocate a portion of GPU instead a whole GPU card, Thus GPU can be shared among multiple tasks.
 
-**Device Memory Control**: GPUs can be allocated with certain device memory, and we will make it does not exceed the boundary.
+***Device Memory Control***: GPUs can be allocated with certain device memory, and we will make it does not exceed the boundary.
 
 **virtual Device memory**: You can oversubscribe GPU device memory by using host memory as its swap
 
