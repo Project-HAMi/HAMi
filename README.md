@@ -15,9 +15,9 @@ English version|[中文版](README_cn.md)
 
 ***Device Memory Control***: GPUs can be allocated with certain device memory, and we will make it does not exceed the boundary.
 
-**virtual Device memory**: You can oversubscribe GPU device memory by using host memory as its swap
+***virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap
 
-**Easy to use**: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automaically supported after installation.
+***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automaically supported after installation.
 
 The **k8s vGPU scheduler** is based on 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), and on the basis of retaining features of 4paradigm k8s-device-plugin, such as splits the physical GPU, limits the memory and computing unit. It adds the scheduling module to balance GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
