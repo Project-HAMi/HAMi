@@ -7,33 +7,23 @@
 
 English version|[中文版](README_cn.md)
 
-## Table of Contents
-
-- [About](#about)
-- [When to use](#when-to-use)
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-  - [Preparing your GPU Nodes](#preparing-your-gpu-nodes)
-  - [Enabling vGPU Support in Kubernetes](#enabling-vGPU-support-in-kubernetes)
-  - [Running GPU Jobs](#running-gpu-jobs)
-- [Stategy](#strategy)
-- [Benchmarks](#Benchmarks)
-- [Features](#Features)
-- [Experimental Features](#Experimental-Features)
-- [Known Issues](#Known-Issues)
-- [TODO](#TODO)
-- [Prerequisites](#prerequisites)
-- [Uninstall](#Uninstall)
-- [Tests](#Tests)
-- [Issues and Contributing](#issues-and-contributing)
-
 ## About
 
-The **k8s vGPU scheduler** is based on 4pd-k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), and on the basis of retaining features of 4pd-device-plugin, such as splits the physical GPU, limits the memory and computing unit. It adds the scheduling module to balance GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Thus provide great flexibility and more GPU utilization. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
+**4paradigm k8s vgpu scheduler is an "all in one" chart to manage your GPU in k8s cluster**, It has everything you expect for a k8s GPU manager, including:
+
+**GPU sharing**: Each tasks can allocate a portion of GPU instead a whole GPU card, Thus GPU can be shared among multiple tasks.
+
+**Device Memory Control**: GPUs can be allocated with certain device memory, and we will make it does not exceed the boundary.
+
+**virtual Device memory**: You can oversubscribe GPU device memory by using host memory as its swap
+
+**Easy to use**: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automaically supported after installation.
+
+The **k8s vGPU scheduler** is based on 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), and on the basis of retaining features of 4paradigm k8s-device-plugin, such as splits the physical GPU, limits the memory and computing unit. It adds the scheduling module to balance GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
 ## When to use
 
-1. Needs pods with certain device memory usage or device core percentage.
+1. Scenarios when pods need to be allocate with certain device memory usage or device cores.
 2. Needs to balance GPU usage in cluster with mutiple GPU node
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
 4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform provides small GPU instances.
