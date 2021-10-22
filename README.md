@@ -7,28 +7,26 @@
 
 English version|[中文版](README_cn.md)
 
-## About
+## Introduction
 
 **4paradigm k8s vgpu scheduler is an "all in one" chart to manage your GPU in k8s cluster**, It has everything you expect for a k8s GPU manager, including:
 
-***GPU sharing***: Each tasks can allocate a portion of GPU instead a whole GPU card, Thus GPU can be shared among multiple tasks.
+***GPU sharing***: Each tasks can allocate a portion of GPU instead of a whole GPU card, Thus GPU can be shared among multiple tasks.
 
-***Device Memory Control***: GPUs can be allocated with certain device memory, and we will make it does not exceed the boundary.
+***Device Memory Control***: GPUs can be allocated with certain device memory, and have made it that it does not exceed the boundary.
 
 ***virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap
 
-***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automaically supported after installation.
+***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation.
 
-## Introduction
-
-The **k8s vGPU scheduler** is based on 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), and on the basis of retaining features of 4paradigm k8s-device-plugin, such as splits the physical GPU, limits the memory and computing unit. It adds the scheduling module to balance GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
+The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), such as splitting the physical GPU, limiting the memory and computing unit. It adds the scheduling module to balance the GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
 ## When to use
 
 1. Scenarios when pods need to be allocate with certain device memory usage or device cores.
 2. Needs to balance GPU usage in cluster with mutiple GPU node
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
-4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform provides small GPU instances.
+4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform that provides small GPU instances.
 5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
 
 ## Prerequisites
@@ -47,7 +45,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 
 
 The following steps need to be executed on all your GPU nodes.
-This README assumes that the NVIDIA drivers and `nvidia-docker` have been installed.
+This README assumes that both the NVIDIA drivers and `nvidia-docker` have been installed.
 
 Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
 This is because the new `--gpus` options hasn't reached kubernetes yet. Example:
@@ -113,14 +111,14 @@ scheduler:
 
 ### Enabling vGPU Support in Kubernetes
 
-In the deployments folder, you can customize your vGPU support by modifying following keys `devicePlugin.extraArgs` in `values.yaml` file:
+In the deployments folder, you can customize your vGPU support by modifying the following keys `devicePlugin.extraArgs` in `values.yaml` file:
 
 * `device-memory-scaling:` 
-  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totaly get `S * M` memory in Kubernetes with our device plugin.
+  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totally get `S * M` memory in Kubernetes with our device plugin.
 * `device-split-count:` 
-  Integer type, by default: equals 10. Maxinum tasks assigned to a simple GPU device.
+  Integer type, by default: equals 10. Maximum tasks assigned to a simple GPU device.
 
-Besides, you can customize the follwing keys `devicePlugin.extraArgs` in `values.yaml` file`:
+Besides, you can customize the following keys `devicePlugin.extraArgs` in `values.yaml` file`:
 
 * `default-mem:` 
   Integer type, by default: 5000. The default device memory of the current task, in MB
@@ -172,7 +170,7 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 ### Upgrade
 
-To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest will be downloaded automatically.
+To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest version will be downloaded automatically.
 
 ```
 $ helm uninstall vgpu -n kube-system
@@ -187,7 +185,7 @@ helm uninstall vgpu -n kube-system
 
 ## Scheduling
 
-Current schedule strategy is to select GPU with lowest task, thus balance the loads across mutiple GPUs
+Current schedule strategy is to select GPU with the lowest task. Thus balance the loads across mutiple GPUs
 
 ## Benchmarks
 
@@ -243,9 +241,9 @@ $ kubectl logs [pod id]
 ## Features
 
 - Specify the number of vGPUs divided by each physical GPU.
-- Limit vGPU's Device Memory.
+- Limits vGPU's Device Memory.
 - Allows vGPU allocation by specifying device memory 
-- Limit vGPU's Streaming Multiprocessor.
+- Limits vGPU's Streaming Multiprocessor.
 - Allows vGPU allocation by specifying device core usage
 - Zero changes to existing programs
 
@@ -257,7 +255,7 @@ $ kubectl logs [pod id]
 
 ## Known Issues
 
-- Currently, A100 MIG not supported 
+- Currently, A100 MIG is not supported 
 - Currently, only computing tasks are supported, and video codec processing is not supported.
 
 ## TODO
@@ -277,6 +275,6 @@ The above frameworks have passed the test.
 ## Issues and Contributing
 
 * You can report a bug, a doubt or modify by [filing a new issue](https://github.com/4paradigm/k8s-vgpu-scheduler/issues/new)
-* If you want to know more or have ideas, you can participate in [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
+* If you want to know more or have ideas, you can participate in the [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and the [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
 
 
