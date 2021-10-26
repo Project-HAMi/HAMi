@@ -259,3 +259,4 @@ The above frameworks have passed the test.
 
 - Mengxuan Li (limengxuan@4paradigm.com)
 - Zhaoyou Pei (peizhaoyou@4paradigm.com)
+- Guangchuan Shi (shiguangchuan@4paradigm.com)
