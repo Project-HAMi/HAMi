@@ -48,17 +48,6 @@ The following steps need to be executed on all your GPU nodes.
 This README assumes that both the NVIDIA drivers and `nvidia-docker` have been installed.
 
 Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
-This is because the new `--gpus` options hasn't reached kubernetes yet. Example:
-
-```
-# Add the package repositories
-$ distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-$ curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-$ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
-
-$ sudo apt-get update && sudo apt-get install -y nvidia-docker2
-$ sudo systemctl restart docker
-```
 
 You will need to enable the nvidia runtime as your default runtime on your node.
 We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
@@ -111,21 +100,9 @@ scheduler:
 
 ### Enabling vGPU Support in Kubernetes
 
-In the deployments folder, you can customize your vGPU support by modifying the following keys `devicePlugin.extraArgs` in `values.yaml` file:
+You can customize your installation by adjusting [configs](docs/config.md).
 
-* `device-memory-scaling:` 
-  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totally get `S * M` memory in Kubernetes with our device plugin.
-* `device-split-count:` 
-  Integer type, by default: equals 10. Maximum tasks assigned to a simple GPU device.
-
-Besides, you can customize the following keys `devicePlugin.extraArgs` in `values.yaml` file`:
-
-* `default-mem:` 
-  Integer type, by default: 5000. The default device memory of the current task, in MB
-* `default-cores:` 
-  Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
-
-After configure those optional arguments, you can enable the vGPU support by following command:
+After checking those config arguments, you can enable the vGPU support by following command:
 
 ```
 $ helm install vgpu vgpu -n kube-system
