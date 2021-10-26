@@ -15,7 +15,7 @@ English version|[中文版](README_cn.md)
 
 ***Device Memory Control***: GPUs can be allocated with certain device memory, and have made it that it does not exceed the boundary.
 
-***virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap
+***Virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap.
 
 ***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation.
 
@@ -255,3 +255,7 @@ The above frameworks have passed the test.
 * If you want to know more or have ideas, you can participate in the [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and the [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
 
 
+## Authors
+
+- Mengxuan Li (limengxuan@4paradigm.com)
+- Zhaoyou Pei (peizhaoyou@4paradigm.com)
