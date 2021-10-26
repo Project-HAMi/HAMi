@@ -1,4 +1,4 @@
-# vGPU scheduler for Kubernetes
+# OpenAIOS vGPU scheduler for Kubernetes
 
 [![build status](https://github.com/4paradigm/k8s-device-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/build.yml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
@@ -287,3 +287,4 @@ $ kubectl logs [pod id]
 - 李孟轩 (limengxuan@4paradigm.com)
 - 裴兆友 (peizhaoyou@4paradigm.com)
 - 石光川 (shiguangchuan@4paradigm.com)
+- 郑曌 (zhengzhao@4paradigm.com)

@@ -1,4 +1,4 @@
-# vGPU scheduler for Kubernetes
+# OpenAIOS vGPU scheduler for Kubernetes
 
 [![build status](https://github.com/4paradigm/k8s-device-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
@@ -260,3 +260,4 @@ The above frameworks have passed the test.
 - Mengxuan Li (limengxuan@4paradigm.com)
 - Zhaoyou Pei (peizhaoyou@4paradigm.com)
 - Guangchuan Shi (shiguangchuan@4paradigm.com)
+- Zhao Zheng (zhengzhao@4paradigm.com)
