@@ -282,3 +282,7 @@ $ kubectl logs [pod id]
 * bug、疑惑、修改欢迎提在 [Github Issues](https://github.com/4paradigm/k8s-vgpu-scheduler/issues/new)
 * 想了解更多或者有想法可以参与到[Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions)和[slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)交流
 
+## 作者
+
+- 李孟轩 (limengxuan@4paradigm.com)
+- 裴兆友 (peizhaoyou@4paradigm.com)
