@@ -286,3 +286,4 @@ $ kubectl logs [pod id]
 
 - 李孟轩 (limengxuan@4paradigm.com)
 - 裴兆友 (peizhaoyou@4paradigm.com)
+- 石光川 (shiguangchuan@4paradigm.com)
