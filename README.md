@@ -134,8 +134,8 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-	        nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
-	        nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
+          nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+          nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
 ```
 
 You should be cautious that if the task can't fit in any GPU node(ie. the number of `nvidia.com/gpu` you request exceeds the number of GPU in any node). The task will get stuck in `pending` state.
