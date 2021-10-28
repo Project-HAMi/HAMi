@@ -9,24 +9,24 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-**4paradigm k8s vgpu scheduler is an "all in one" chart to manage your GPU in k8s cluster**, It has everything you expect for a k8s GPU manager, including:
+**4paradigm k8s vGPU scheduler is an "all in one" chart to manage your GPU in k8s cluster**, it has everything you expect for a k8s GPU manager, including:
 
-***GPU sharing***: Each tasks can allocate a portion of GPU instead of a whole GPU card, Thus GPU can be shared among multiple tasks.
+***GPU sharing***: Each task can allocate a portion of GPU instead of a whole GPU card, thus GPU can be shared among multiple tasks.
 
-***Device Memory Control***: GPUs can be allocated with certain device memory, and have made it that it does not exceed the boundary.
+***Device Memory Control***: GPUs can be allocated with certain device memory and have made it that it does not exceed the boundary.
 
 ***Virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap.
 
 ***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation.
 
-The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), such as splitting the physical GPU, limiting the memory and computing unit. It adds the scheduling module to balance the GPU usage across GPU nodes. In addition, it allow users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
+The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), such as splitting the physical GPU, limiting the memory, and computing unit. It adds the scheduling module to balance the GPU usage across GPU nodes. In addition, it allows users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
 ## When to use
 
-1. Scenarios when pods need to be allocate with certain device memory usage or device cores.
+1. Scenarios when pods need to be allocated with certain device memory usage or device cores.
 2. Needs to balance GPU usage in cluster with mutiple GPU node
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
-4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform that provides small GPU instances.
+4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform that provides small GPU instance.
 5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
 
 ## Prerequisites
@@ -49,7 +49,7 @@ This README assumes that both the NVIDIA drivers and `nvidia-docker` have been i
 
 Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
 
-You will need to enable the nvidia runtime as your default runtime on your node.
+You will need to enable the NVIDIA runtime as your default runtime on your node.
 We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
 
 ```
@@ -66,7 +66,7 @@ We will be editing the docker daemon config file which is usually present at `/e
 
 > *if `runtimes` is not already present, head to the install page of [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
 
-Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it can not be managed by our scheduler.
+Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it cannot be managed by our scheduler.
 
 ```
 kubectl label nodes {nodeid} gpu=on
@@ -84,13 +84,13 @@ $ cd k8s-vgpu-scheduler/deployments
 
 ### Set scheduler image version
 
-Check your kubernetes version by the using the following command
+Check your Kubernetes version by the using the following command
 
 ```
 kubectl version
 ```
 
-Then you need to set the kubernetes scheduler image version according to your kubernetes server version key `scheduler.kubeScheduler.image` in `deployments/values.yaml` file , for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
+Then you need to set the Kubernetes scheduler image version according to your Kubernetes server version key `scheduler.kubeScheduler.image` in `deployments/values.yaml` file , for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
 
 ```
 scheduler:
@@ -102,13 +102,13 @@ scheduler:
 
 You can customize your installation by adjusting [configs](docs/config.md).
 
-After checking those config arguments, you can enable the vGPU support by following command:
+After checking those config arguments, you can enable the vGPU support by the following command:
 
 ```
 $ helm install vgpu vgpu -n kube-system
 ```
 
-You can verify your install by following command:
+You can verify your installation by the following command:
 
 ```
 $ kubectl get pods -n kube-system
@@ -147,7 +147,7 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 ### Upgrade
 
-To Upgrade the k8s-vgpu to the latest version, all you need to do is restart the chart. The latest version will be downloaded automatically.
+To Upgrade the k8s-vGPU to the latest version, all you need to do is restart the chart. The latest version will be downloaded automatically.
 
 ```
 $ helm uninstall vgpu -n kube-system
@@ -202,7 +202,7 @@ Test Result: ![img](./imgs/benchmark_inf.png)
 
 To reproduce:
 
-1. install vGPU-nvidia-device-plugin，and configure properly
+1. install k8s-vGPU-scheduler，and configure properly
 2. run benchmark job
 
 ```
