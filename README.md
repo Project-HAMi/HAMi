@@ -137,7 +137,13 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 ### Monitoring vGPU status
 
-Monitoring is automatically enabled after installation. You can get vGPU status of a node by visiting {nodeip}:{monitorPort}/metrics. Default monitorPort is 31992, other values can be set using `--set deivcePlugin.service.httpPort` during installation.
+Monitoring is automatically enabled after installation. You can get vGPU status of a node by visiting 
+
+```
+{nodeip}:{monitorPort}/metrics
+```
+
+Default monitorPort is 31992, other values can be set using `--set deivcePlugin.service.httpPort` during installation.
 
 ### Upgrade
 
