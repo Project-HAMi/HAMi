@@ -107,32 +107,21 @@ $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
 $ cd k8s-vgpu-scheduler/deployments
 ```
 
-### 设置调度器镜像版本
+### Kubernetes开启vGPU支持
 
-使用下列执行获取集群服务端版本
+使用下列指令获取集群服务端版本
 
 ```
 kubectl version
 ```
 
-随后，根据获得的集群服务端版本，修改 `vgpu/values.yaml` 文件的 `scheduler.kubeScheduler.image` 中调度器镜像版本。例如，如果你的服务端版本为1.16.8，则你需要将镜像版本修改为1.16.8
+你可以通过helm来安装部署vGPU调度器，在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
 
 ```
-scheduler:
-  kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+$ helm install vgpu vgpu --scheduler.kubeScheduler.imaegTag=v1.16.8 -n kube-system
 ```
 
-
-### Kubernetes开启vGPU支持
-
-安装之前，你可以修改这里的[配置](docs/config_cn.md)来定制安装
-
-配置完成后，随后使用helm安装整个chart
-
-```
-$ helm install vgpu vgpu -n kube-system
-```
+你可以修改这里的[配置](docs/config_cn.md)来定制安装
 
 通过kubectl get pods指令看到 `vgpu-device-plugin` 与 `vgpu-scheduler` 两个pod 状态为*Running*  即为安装成功
 
@@ -164,6 +153,11 @@ spec:
 如果你的任务无法运行在任何一个节点上（例如任务的`nvidia.com/gpu`大于集群中任意一个GPU节点的实际GPU数量）,那么任务会卡在`pending`状态
 
 现在你可以在容器执行`nvidia-smi`命令，然后比较vGPU和实际GPU显存大小的不同。
+
+
+### 监控vGPU使用情况
+
+调度器部署成功后，监控默认自动开启，你可以通过{nodeip}:{monitorPort}/metrics来获取监控数据，其中monitorPort可以在Values中进行配置，默认为31992
 
 ### 更新
 

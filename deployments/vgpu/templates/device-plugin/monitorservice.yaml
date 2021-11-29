@@ -1,0 +1,22 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "4pd-vgpu.device-plugin" . }}-monitor
+  labels:
+    app.kubernetes.io/component: 4pd-scheduler
+    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    {{- if .Values.scheduler.service.labels }}
+    {{ toYaml .Values.scheduler.service.labels | indent 4 }}
+    {{- end }}
+  {{- if .Values.scheduler.service.annotations }}
+  annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
+  {{- end }}
+spec:
+  selector:
+    app.kubernetes.io/component: 4pd-device-plugin
+  type: NodePort
+  ports:
+    - name: monitorport
+      port: {{ .Values.devicePlugin.service.httpPort }}
+      targetPort: 9394
+      nodePort: {{ .Values.devicePlugin.service.httpPort }}
