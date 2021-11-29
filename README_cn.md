@@ -165,6 +165,8 @@ http://{nodeip}:{monitorPort}/metrics
 
 来获取监控数据，其中monitorPort可以在Values中进行配置，默认为31992
 
+> **注意** 节点上的vGPU状态只有在其使用vGPU后才会被统计
+
 ### 更新
 
 只需要重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
