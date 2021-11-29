@@ -32,7 +32,7 @@ spec:
       priorityClassName: system-node-critical
       containers:
         - name: kube-scheduler
-          image: {{ .Values.scheduler.kubeScheduler.image | quote }}
+          image: {{ .Values.scheduler.kubeScheduler.image }}:{{ .Values.scheduler.kubeScheduler.imageTag }}
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
           command:
             - kube-scheduler

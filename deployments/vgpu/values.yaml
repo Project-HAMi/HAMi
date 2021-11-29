@@ -19,7 +19,8 @@ global:
 
 scheduler:
   kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.20.6"
+    imageTag: v1.20.0
+    image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
     imagePullPolicy: IfNotPresent
     extraArgs:
       - -v=4
@@ -58,7 +59,10 @@ devicePlugin:
   extraArgs:
     - --device-split-count=10
     - -v=4
-
+  
+  service:
+    httpPort: 31992
+    
   pluginPath: /var/lib/kubelet/device-plugins
   #libPath: /usr/local/vgpu
   #sockPath: /var/lib/vgpu

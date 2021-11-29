@@ -82,31 +82,21 @@ $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
 $ cd k8s-vgpu-scheduler/deployments
 ```
 
-### Set scheduler image version
+### Enabling vGPU Support in Kubernetes
 
-Check your Kubernetes version by the using the following command
+First, you need to heck your Kubernetes version by the using the following command
 
 ```
 kubectl version
 ```
 
-Then you need to set the Kubernetes scheduler image version according to your Kubernetes server version key `scheduler.kubeScheduler.image` in `deployments/values.yaml` file , for example, if your cluster server version is 1.16.8, then you should change image version to 1.16.8
+vGPU scheduler can be deployed using helm. You need to set the Kubernetes scheduler image version according to your Kubernetes server version during installation. For example, if your cluster server version is 1.16.8, then you should use the following command for deployment
 
 ```
-scheduler:
-  kubeScheduler:
-    image: "registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:v1.16.8"
+helm install vgpu vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
-
-### Enabling vGPU Support in Kubernetes
 
 You can customize your installation by adjusting [configs](docs/config.md).
-
-After checking those config arguments, you can enable the vGPU support by the following command:
-
-```
-$ helm install vgpu vgpu -n kube-system
-```
 
 You can verify your installation by the following command:
 
@@ -144,6 +134,10 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 > **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
 > the vGPUs on the machine will be exposed inside your container.*
+
+### Monitoring vGPU status
+
+Monitoring is automatically enabled after installation. You can get vGPU status of a node by visiting {nodeip}:{monitorPort}/metrics. Default monitorPort is 31992, other values can be set using `--set deivcePlugin.service.httpPort` during installation.
 
 ### Upgrade
 
