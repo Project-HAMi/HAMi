@@ -160,7 +160,7 @@ spec:
 调度器部署成功后，监控默认自动开启，你可以通过
 
 ```
-{nodeip}:{monitorPort}/metrics
+http://{nodeip}:{monitorPort}/metrics
 ```
 
 来获取监控数据，其中monitorPort可以在Values中进行配置，默认为31992
