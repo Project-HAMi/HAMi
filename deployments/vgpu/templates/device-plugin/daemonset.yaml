@@ -71,14 +71,14 @@ spec:
             - name: ctrs
               mountPath: /tmp/vgpu/containers
             - name: dockers
-              mountPath: /run/docker
+              mountPath: /run
       volumes:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitorctrPath }}
         - name: dockers
           hostPath:
-            path: /run/docker
+            path: /run
         - name: device-plugin
           hostPath:
             path: {{ .Values.devicePlugin.pluginPath }}
@@ -99,5 +99,3 @@ spec:
       {{- if .Values.devicePlugin.tolerations }}
       tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}
       {{- end }}
-
-

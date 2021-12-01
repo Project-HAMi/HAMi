@@ -12,6 +12,7 @@ metadata:
   annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
   {{- end }}
 spec:
+  externalTrafficPolicy: Local
   selector:
     app.kubernetes.io/component: 4pd-device-plugin
   type: NodePort
