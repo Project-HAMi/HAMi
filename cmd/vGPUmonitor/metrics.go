@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -104,6 +105,46 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		fmt.Println("err=", err.Error())
 	}
 	if clientset != nil {
+		err := nvml.Init()
+		if err != nil {
+			fmt.Println("nvml Init err=", err.Error())
+		}
+		devnum, err := nvml.GetDeviceCount()
+		var ii uint
+		if err != nil {
+			fmt.Println("nvml GetDeviceCount err=", err.Error())
+		} else {
+			for ii = 0; ii < devnum; ii++ {
+				hostGPUdesc := prometheus.NewDesc(
+					"HostGPUMemoryUsage",
+					"GPU device memory usage",
+					[]string{"deviceid", "deviceuuid"}, nil,
+				)
+				hdev, err := nvml.NewDevice(ii)
+				if err != nil {
+					fmt.Println(err.Error())
+				}
+				hstatus, _ := hdev.Status()
+				ch <- prometheus.MustNewConstMetric(
+					hostGPUdesc,
+					prometheus.GaugeValue,
+					float64(*hstatus.Memory.Global.Used),
+					fmt.Sprint(ii), hdev.UUID,
+				)
+				hostGPUUtilizationdesc := prometheus.NewDesc(
+					"HostCoreUtilization",
+					"GPU core utilization",
+					[]string{"deviceid", "deviceuuid"}, nil,
+				)
+				ch <- prometheus.MustNewConstMetric(
+					hostGPUUtilizationdesc,
+					prometheus.GaugeValue,
+					float64(*hstatus.Utilization.GPU),
+					fmt.Sprint(ii), hdev.UUID,
+				)
+			}
+		}
+
 		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), v1.ListOptions{})
 		if err != nil {
 			fmt.Println("err=", err.Error())
@@ -177,13 +218,16 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 func initmetrics() {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
+	fmt.Println("Initializing metrics...")
 	reg := prometheus.NewPedanticRegistry()
 	config, err := rest.InClusterConfig()
 	if err != nil {
+		fmt.Println(err.Error())
 		return
 	}
 	clientset, err = kubernetes.NewForConfig(config)
 	if err != nil {
+		fmt.Println(err.Error())
 		return
 	}
 

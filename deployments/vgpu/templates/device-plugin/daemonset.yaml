@@ -65,8 +65,10 @@ spec:
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
-          command:
-            - vGPUmonitor
+          command: ["vGPUmonitor"]
+          env:
+            - name: NVIDIA_VISIBLE_DEVICES
+              value: "all"
           volumeMounts:
             - name: ctrs
               mountPath: /tmp/vgpu/containers
