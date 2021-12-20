@@ -73,14 +73,19 @@ spec:
             - name: ctrs
               mountPath: /tmp/vgpu/containers
             - name: dockers
-              mountPath: /run
+              mountPath: /run/docker
+            - name: containerds
+              mountPath: /run/containerd
       volumes:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitorctrPath }}
         - name: dockers
           hostPath:
-            path: /run
+            path: /run/docker
+        - name: containerds
+          hostPath:
+            path: /run/containerd
         - name: device-plugin
           hostPath:
             path: {{ .Values.devicePlugin.pluginPath }}
