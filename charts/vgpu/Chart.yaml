@@ -1,6 +1,6 @@
 apiVersion: v2
 name: vgpu
-version: 0.0.1
+version: 0.0.2
 kubeVersion: ">= 1.16.0"
 description: 4paradigm vgpu for kubernetes
 keywords:
@@ -10,4 +10,4 @@ type: application
 maintainers:
   - name: 4pd
     email: opensource@4paradigm.com
-appVersion: 0.0.1
+appVersion: 0.0.2
