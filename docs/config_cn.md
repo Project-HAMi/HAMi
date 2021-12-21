@@ -1,6 +1,6 @@
 # 配置
 
-在这个deployments文件中, 你可以在 `vgpu/values.yaml` 文件的 `devicePlugin.extraArgs` 中使用以下的客制化参数：
+在这个charts文件中, 你可以在 `vgpu/values.yaml` 文件的 `devicePlugin.extraArgs` 中使用以下的客制化参数：
 
 * `device-split-count:` 
   整数类型，预设值是10。GPU的分割数，每一张GPU都不能分配超过其配置数目的任务。若其配置为N的话，每个GPU上最多可以同时存在N个任务。

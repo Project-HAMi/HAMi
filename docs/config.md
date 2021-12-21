@@ -1,6 +1,6 @@
 # Config
 
-In the deployments folder, you can customize your vGPU support by modifying the following keys `devicePlugin.extraArgs` in `values.yaml` file:
+In the charts folder, you can customize your vGPU support by modifying the following keys `devicePlugin.extraArgs` in `values.yaml` file:
 
 * `device-memory-scaling:` 
   Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `device-memory-scaling` argument to *S*, vGPUs splitted by this GPU will totally get `S * M` memory in Kubernetes with our device plugin.
