@@ -16,6 +16,6 @@ entries:
     name: vgpu
     type: application
     urls:
-    - https://4paradigm.github.io/k8s-vgpu-scheduler/vgpu-0.0.1.tgz
+    - https://4paradigm.github.io/k8s-vgpu-scheduler/charts/vgpu-0.0.1.tgz
     version: 0.0.1
 generated: "2021-12-21T15:00:17.582969551+08:00"
