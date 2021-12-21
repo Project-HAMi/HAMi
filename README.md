@@ -75,11 +75,11 @@ kubectl label nodes {nodeid} gpu=on
 ### Download
 
 Once you have configured the options above on all the GPU nodes in your
-cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter deployments folder
+cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter charts folder
 
 ```
 $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu-scheduler/deployments
+$ cd k8s-vgpu-scheduler/charts
 ```
 
 ### Enabling vGPU Support in Kubernetes

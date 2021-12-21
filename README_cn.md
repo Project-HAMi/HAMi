@@ -98,13 +98,13 @@ $ sudo systemctl restart docker
 $ kubectl label nodes {nodeid} gpu=on
 ```
 
-### 下载项目并进入deployments文件夹
+### 下载项目并进入charts文件夹
 
-当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入deployments文件夹
+当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入charts文件夹
 
 ```
 $ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu-scheduler/deployments
+$ cd k8s-vgpu-scheduler/charts
 ```
 
 ### Kubernetes开启vGPU支持

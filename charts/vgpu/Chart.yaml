@@ -1,7 +1,7 @@
 apiVersion: v2
 name: vgpu
 version: 0.0.2
-kubeVersion: ">= 1.16.0"
+kubeVersion: ">= 1.14.0"
 description: 4paradigm vgpu for kubernetes
 keywords:
   - vgpu
