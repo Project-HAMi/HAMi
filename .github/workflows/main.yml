@@ -55,6 +55,11 @@ jobs:
       - run: make tidy
       - run: make proto
       - run: SHORT_VERSION="${BRANCH_NAME}" bash ./hack/build.sh
+
+      - name: Run chart-releaser
+        uses: helm/chart-releaser-action@v1.1.0
+        env:
+          CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
       
       
       
