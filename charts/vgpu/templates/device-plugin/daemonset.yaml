@@ -45,6 +45,9 @@ spec:
             - device-plugin
             - --resource-name={{ .Values.resourceName }}
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
+            - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
+            - --default-mem={{ .Values.devicePlugin.defaultMem }}
+            - --default-cores={{ .Values.devicePlugin.defaultCores }}
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
             {{- end }}
