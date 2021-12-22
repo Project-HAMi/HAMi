@@ -27,10 +27,10 @@ scheduler:
   extender:
     image: "4pdosc/k8s-vgpu:latest"
     imagePullPolicy: Always
+    defaultMem: 5000
+    defaultCores: 0
     extraArgs:
       - --debug
-      - --default-mem=5000
-      - --default-cores=0
       - -v=4
   podAnnotations: {}
   nodeSelector: {}
@@ -58,10 +58,7 @@ devicePlugin:
   imagePullPolicy: Always
   deviceSplitCount: 10
   deviceMemoryScaling: 1
-  defaultMem: 5000
-  defaultCores: 0
   extraArgs:
-    - --device-split-count=10
     - -v=4
   
   service:
