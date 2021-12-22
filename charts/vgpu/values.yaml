@@ -18,6 +18,8 @@ global:
   annotations: {}
 
 scheduler:
+  defaultMem: 5000
+  defaultCores: 0
   kubeScheduler:
     imageTag: v1.20.0
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
@@ -27,8 +29,6 @@ scheduler:
   extender:
     image: "4pdosc/k8s-vgpu:latest"
     imagePullPolicy: Always
-    defaultMem: 5000
-    defaultCores: 0
     extraArgs:
       - --debug
       - -v=4
