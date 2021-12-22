@@ -115,7 +115,7 @@ kubectl version
 在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
 
 ```
-$ helm install vgpu vgpu --scheduler.kubeScheduler.imaegTag=v1.16.8 -n kube-system
+$ helm install vgpu vgpu-charts/vgpu --scheduler.kubeScheduler.imaegTag=v1.16.8 -n kube-system
 ```
 
 你可以修改这里的[配置](docs/config_cn.md)来定制安装
