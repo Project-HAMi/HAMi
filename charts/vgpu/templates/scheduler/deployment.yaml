@@ -58,7 +58,7 @@ spec:
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}
-            - --default-mem= {{ .Values.scheduler.defaultMem }}
+            - --default-mem={{ .Values.scheduler.defaultMem }}
             - --default-cores={{ .Values.scheduler.defaultCores }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
