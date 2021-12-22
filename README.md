@@ -72,16 +72,6 @@ Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-schedul
 kubectl label nodes {nodeid} gpu=on
 ```
 
-### Download
-
-Once you have configured the options above on all the GPU nodes in your
-cluster, remove existing NVIDIA device plugin for Kubernetes if it already exists. Then, you need to clone our project, and enter charts folder
-
-```
-$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu-scheduler/charts
-```
-
 ### Enabling vGPU Support in Kubernetes
 
 First, you need to heck your Kubernetes version by the using the following command
@@ -90,10 +80,16 @@ First, you need to heck your Kubernetes version by the using the following comma
 kubectl version
 ```
 
-vGPU scheduler can be deployed using helm. You need to set the Kubernetes scheduler image version according to your Kubernetes server version during installation. For example, if your cluster server version is 1.16.8, then you should use the following command for deployment
+Then, add our repo in helm
 
 ```
-helm install vgpu vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+helm repo add vgpu-charts https://4paradigm.github.io/k8s-vgpu-scheduler
+```
+
+You need to set the Kubernetes scheduler image version according to your Kubernetes server version during installation. For example, if your cluster server version is 1.16.8, then you should use the following command for deployment
+
+```
+helm install vgpu vgpu-charts/vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
 
 You can customize your installation by adjusting [configs](docs/config.md).
@@ -149,10 +145,11 @@ Default monitorPort is 31992, other values can be set using `--set deivcePlugin.
 
 ### Upgrade
 
-To Upgrade the k8s-vGPU to the latest version, all you need to do is restart the chart. The latest version will be downloaded automatically.
+To Upgrade the k8s-vGPU to the latest version, all you need to do is update the repo and restart the chart.
 
 ```
 $ helm uninstall vgpu -n kube-system
+$ helm repo update
 $ helm install vgpu vgpu -n kube-system
 ```
 
