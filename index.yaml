@@ -3,9 +3,9 @@ entries:
   vgpu:
   - apiVersion: v2
     appVersion: 0.0.2
-    created: "2021-12-22T06:27:10.086552715Z"
+    created: "2021-12-22T09:38:30.524275642Z"
     description: 4paradigm vgpu for kubernetes
-    digest: 956bc49dcf5f7931fc2ba0c6a633fc930ce8ebfb6afc3ce9def3a4e51ee85731
+    digest: 2213eb63458dcfc0df7918c0a928f10649b237ba183853a86c24d8e858311baa
     keywords:
     - vgpu
     - gpu
@@ -18,4 +18,4 @@ entries:
     urls:
     - https://4paradigm.github.io/k8s-vgpu-scheduler/vgpu-2.0.0.tgz
     version: 2.0.0
-generated: "2021-12-22T06:27:10.085640504Z"
+generated: "2021-12-22T09:38:30.522994322Z"
