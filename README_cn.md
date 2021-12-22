@@ -98,24 +98,21 @@ $ sudo systemctl restart docker
 $ kubectl label nodes {nodeid} gpu=on
 ```
 
-### 下载项目并进入charts文件夹
-
-当你在所有GPU节点完成前面提到的准备动作，如果Kubernetes有已经存在的NVIDIA装置插件，需要先将它移除。然后，你需要下载整个项目，并进入charts文件夹
-
-```
-$ git clone https://github.com/4paradigm/k8s-vgpu-scheduler.git
-$ cd k8s-vgpu-scheduler/charts
-```
-
 ### Kubernetes开启vGPU支持
 
-使用下列指令获取集群服务端版本
+首先使用helm添加我们的vgpu repo
+
+```
+helm repo add vgpu-charts https://4paradigm.github.io/k8s-vgpu-scheduler
+```
+
+随后，使用下列指令获取集群服务端版本
 
 ```
 kubectl version
 ```
 
-你可以通过helm来安装部署vGPU调度器，在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
+在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
 
 ```
 $ helm install vgpu vgpu --scheduler.kubeScheduler.imaegTag=v1.16.8 -n kube-system
@@ -169,10 +166,11 @@ http://{nodeip}:{monitorPort}/metrics
 
 ### 更新
 
-只需要重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
+只需要更新helm repo，并重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
 
 ```
 $ helm uninstall vgpu -n kube-system
+$ helm repo update
 $ helm install vgpu vgpu -n kube-system
 ```
 
