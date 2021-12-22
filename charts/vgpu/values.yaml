@@ -56,6 +56,10 @@ devicePlugin:
   monitorimage: "4pdosc/k8s-vgpu:latest"
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
+  deviceSplitCount: 10
+  deviceMemoryScaling: 1
+  defaultMem: 5000
+  defaultCores: 0
   extraArgs:
     - --device-split-count=10
     - -v=4
