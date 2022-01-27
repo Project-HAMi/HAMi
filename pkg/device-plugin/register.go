@@ -65,10 +65,15 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		} else {
 			fmt.Println("nvml registered device id=", dev.ID, "memory=", *ndev.Memory)
 		}
+		registeredmem := int32(*ndev.Memory)
+		if config.DeviceMemoryScaling > 1 {
+			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
+			registeredmem = registeredmem * int32(config.DeviceMemoryScaling)
+		}
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.ID,
 			Count:  int32(config.DeviceSplitCount),
-			Devmem: int32(*ndev.Memory),
+			Devmem: registeredmem,
 			Health: dev.Health == "healthy",
 		})
 	}
