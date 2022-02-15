@@ -115,10 +115,9 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
-				float64(devs.Count),
+				float64(devs.Used),
 				nodeID, devs.Id,
 			)
-		}
 	}
 
 }
