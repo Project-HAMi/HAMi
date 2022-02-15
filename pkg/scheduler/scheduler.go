@@ -42,15 +42,17 @@ type Scheduler struct {
 	nodeManager
 	podManager
 
-	stopCh     chan struct{}
-	kubeClient kubernetes.Interface
-	podLister  listerscorev1.PodLister
-	nodeLister listerscorev1.NodeLister
+	stopCh       chan struct{}
+	kubeClient   kubernetes.Interface
+	podLister    listerscorev1.PodLister
+	nodeLister   listerscorev1.NodeLister
+	cachedstatus map[string]*NodeUsage
 }
 
 func NewScheduler() *Scheduler {
 	s := &Scheduler{
-		stopCh: make(chan struct{}),
+		stopCh:       make(chan struct{}),
+		cachedstatus: make(map[string]*NodeUsage),
 	}
 	s.nodeManager.init()
 	s.podManager.init()
@@ -193,6 +195,11 @@ func (s *Scheduler) GetContainer(_ context.Context, req *api.GetContainerRequest
 	return &rep, nil
 }
 
+// InspectAllNodesUsage is used by metrics monitor
+func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
+	return &s.cachedstatus
+}
+
 func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[string]string, error) {
 	nodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
@@ -206,14 +213,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
-			nodeInfo.devices = append(nodeInfo.devices, &DeviceUsage{
-				id:        d.ID,
-				used:      0,
-				count:     d.Count,
-				usedmem:   0,
-				totalmem:  d.Devmem,
-				usedcores: 0,
-				health:    d.Health,
+			nodeInfo.Devices = append(nodeInfo.Devices, &DeviceUsage{
+				Id:        d.ID,
+				Used:      0,
+				Count:     d.Count,
+				Usedmem:   0,
+				Totalmem:  d.Devmem,
+				Usedcores: 0,
+				Health:    d.Health,
 			})
 		}
 		nodeMap[nodeID] = nodeInfo
@@ -225,17 +232,18 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 		}
 		for _, ds := range p.devices {
 			for _, udevice := range ds {
-				for _, d := range node.devices {
-					if d.id == udevice.UUID {
-						d.used++
-						d.usedmem += udevice.Usedmem
-						d.usedcores += udevice.Usedcores
+				for _, d := range node.Devices {
+					if d.Id == udevice.UUID {
+						d.Used++
+						d.Usedmem += udevice.Usedmem
+						d.Usedcores += udevice.Usedcores
 					}
 				}
 			}
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.name, p.nodeID, p.devices)
 	}
+	s.cachedstatus = nodeMap
 	return &nodeMap, failedNodes, nil
 }
 
@@ -285,6 +293,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	return &res, nil
 }
 
+// addGPUIndexPatch returns the patch adding GPU index
+//func addGPUIndexPatch() string {
+//	return fmt.Sprintf(`[{"op": "add", "path": "/spec/containers/0/env/-", "value":{"name":"asdf","value":"tttt"}}]`)
+//}
+
 func (s *Scheduler) patchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
@@ -306,5 +319,15 @@ func (s *Scheduler) patchPodAnnotations(pod *corev1.Pod, annotations map[string]
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)
 	}
+	/*
+		Can't modify Env of pods here
+
+		patch1 := addGPUIndexPatch()
+		_, err = s.kubeClient.CoreV1().Pods(pod.Namespace).
+			Patch(context.Background(), pod.Name, k8stypes.JSONPatchType, []byte(patch1), metav1.PatchOptions{})
+		if err != nil {
+			klog.Infof("Patch1 pod %v failed, %v", pod.Name, err)
+		}*/
+
 	return err
 }

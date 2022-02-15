@@ -34,19 +34,19 @@ type NodeInfo struct {
 }
 
 type DeviceUsage struct {
-	id        string
-	used      int32
-	count     int32
-	usedmem   int32
-	totalmem  int32
-	usedcores int32
-	health    bool
+	Id        string
+	Used      int32
+	Count     int32
+	Usedmem   int32
+	Totalmem  int32
+	Usedcores int32
+	Health    bool
 }
 
 type DeviceUsageList []*DeviceUsage
 
 type NodeUsage struct {
-	devices DeviceUsageList
+	Devices DeviceUsageList
 }
 
 type nodeManager struct {
@@ -77,4 +77,8 @@ func (m *nodeManager) GetNode(nodeID string) (NodeInfo, error) {
 		return n, nil
 	}
 	return NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+}
+
+func (m *nodeManager) ListNodes() (map[string]NodeInfo, error) {
+	return m.nodes, nil
 }
