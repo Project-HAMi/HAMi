@@ -47,7 +47,7 @@ scheduler:
 
   service:
     httpPort: 443
-    metricshttpPort: 31993
+    monitorhttpPort: 31993
     grpcPort: 1080
     labels: {}
     monitorlabels: {}
