@@ -50,7 +50,9 @@ scheduler:
     metricshttpPort: 31992
     grpcPort: 1080
     labels: {}
+    monitorlabels: {}
     annotations: {}
+    monitorannotations: {}
 
 devicePlugin:
   image: "4pdosc/k8s-vgpu:latest"
