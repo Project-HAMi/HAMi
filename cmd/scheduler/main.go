@@ -35,6 +35,7 @@ import (
 //var version string
 
 var (
+	sher        *scheduler.Scheduler
 	tlsKeyFile  string
 	tlsCertFile string
 	rootCmd     = &cobra.Command{
@@ -62,7 +63,7 @@ func init() {
 }
 
 func start() {
-	sher := scheduler.NewScheduler()
+	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()
 
@@ -77,6 +78,9 @@ func start() {
 			klog.Fatal(err)
 		}
 	}()
+
+	// start monitor metrics
+	go initmetrics()
 
 	// start http server
 	router := httprouter.New()

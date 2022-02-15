@@ -40,7 +40,7 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	return l[i].count-l[i].used < l[j].count-l[j].used
+	return l[i].Count-l[i].Used < l[j].Count-l[j].Used
 }
 
 func (l NodeScoreList) Len() int {
@@ -57,7 +57,7 @@ func (l NodeScoreList) Less(i, j int) bool {
 
 func viewStatus(usage NodeUsage) {
 	fmt.Println("viewing status")
-	for _, val := range usage.devices {
+	for _, val := range usage.Devices {
 		fmt.Println(val)
 	}
 }
@@ -66,7 +66,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
-		dn := len(node.devices)
+		dn := len(node.Devices)
 		score := NodeScore{nodeID: nodeID, score: 0}
 		for _, n := range nums {
 			if n.Nums == 0 {
@@ -76,8 +76,8 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 			if int(n.Nums) > dn {
 				break
 			}
-			sort.Sort(node.devices)
-			if node.devices[dn-int(n.Nums)].count <= node.devices[dn-int(n.Nums)].used {
+			sort.Sort(node.Devices)
+			if node.Devices[dn-int(n.Nums)].Count <= node.Devices[dn-int(n.Nums)].Used {
 				break
 			}
 			total := int32(0)
@@ -85,26 +85,26 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 			//devs := make([]string, 0, n)
 			devs := make([]util.ContainerDevice, 0, n.Nums)
 			countremains := 1
-			for i := len(node.devices) - 1; i >= 0; i-- {
-				if node.devices[i].count <= node.devices[i].used {
+			for i := len(node.Devices) - 1; i >= 0; i-- {
+				if node.Devices[i].Count <= node.Devices[i].Used {
 					countremains = 0
 					break
 				}
-				if node.devices[i].totalmem-node.devices[i].usedmem < n.Memreq {
+				if node.Devices[i].Totalmem-node.Devices[i].Usedmem < n.Memreq {
 					continue
 				}
-				if 100-node.devices[i].usedcores < n.Coresreq {
+				if 100-node.Devices[i].Usedcores < n.Coresreq {
 					continue
 				}
-				total += node.devices[i].count
-				free += node.devices[i].count - node.devices[i].used
+				total += node.Devices[i].Count
+				free += node.Devices[i].Count - node.Devices[i].Used
 				if n.Nums > 0 {
 					n.Nums--
-					node.devices[i].used++
-					node.devices[i].usedmem += n.Memreq
-					node.devices[i].usedcores += n.Coresreq
+					node.Devices[i].Used++
+					node.Devices[i].Usedmem += n.Memreq
+					node.Devices[i].Usedcores += n.Coresreq
 					devs = append(devs, util.ContainerDevice{
-						UUID:      node.devices[i].id,
+						UUID:      node.Devices[i].Id,
 						Usedmem:   n.Memreq,
 						Usedcores: n.Coresreq,
 					})
