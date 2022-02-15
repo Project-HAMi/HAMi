@@ -118,6 +118,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				float64(devs.Used),
 				nodeID, devs.Id,
 			)
+		}
 	}
 
 }
