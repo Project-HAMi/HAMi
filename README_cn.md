@@ -143,8 +143,8 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # 请求2个vGPUs
-	        nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选，整数类型）
-	        nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
+	  nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选，整数类型）
+	  nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
 ```
 
 如果你的任务无法运行在任何一个节点上（例如任务的`nvidia.com/gpu`大于集群中任意一个GPU节点的实际GPU数量）,那么任务会卡在`pending`状态
