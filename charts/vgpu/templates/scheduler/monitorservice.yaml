@@ -1,20 +1,20 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "4pd-vgpu.scheduler" . }}
+  name: {{ include "4pd-vgpu.scheduler" . }}-monitor
   labels:
-    app.kubernetes.io/component: 4pd-scheduler
+    app.kubernetes.io/component: 4pd-scheduler-monitor
     {{- include "4pd-vgpu.labels" . | nindent 4 }}
-    {{- if .Values.scheduler.service.labels }}
-    {{ toYaml .Values.scheduler.service.labels | indent 4 }}
+    {{- if .Values.scheduler.service.monitorlabels }}
+    {{ toYaml .Values.scheduler.service.monitorlabels | indent 4 }}
     {{- end }}
-  {{- if .Values.scheduler.service.annotations }}
-  annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
+  {{- if .Values.scheduler.service.monitorannotations }}
+  annotations: {{ toYaml .Values.scheduler.service.monitorannotations | nindent 4 }}
   {{- end }}
 spec:
   externalTrafficPolicy: Local
   selector:
-    app.kubernetes.io/component: 4pd-scheduler
+    app.kubernetes.io/component: 4pd-scheduler-monitor
     {{- include "4pd-vgpu.selectorLabels" . | nindent 4 }}
   type: NodePort
   ports:
