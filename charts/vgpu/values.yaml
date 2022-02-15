@@ -47,12 +47,10 @@ scheduler:
 
   service:
     httpPort: 443
-    monitorhttpPort: 31993
+    monitorPort: 31993
     grpcPort: 1080
     labels: {}
-    monitorlabels: {}
     annotations: {}
-    monitorannotations: {}
 
 devicePlugin:
   image: "4pdosc/k8s-vgpu:latest"

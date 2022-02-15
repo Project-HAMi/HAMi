@@ -12,7 +12,7 @@ metadata:
   annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
   {{- end }}
 spec:
-  type: ClusterIP
+  type: NodePort
   ports:
     - name: http
       port: {{ .Values.scheduler.service.httpPort }}
@@ -21,6 +21,11 @@ spec:
     - name: grpc
       port: {{ .Values.scheduler.service.grpcPort }}
       targetPort: 1080
+      protocol: TCP
+    - name: monitor
+      port: {{ .Values.scheduler.service.monitorPort }}
+      targetPort: 9395
+      nodePort: {{ .Values.scheduler.service.monitorPort }}
       protocol: TCP
   selector:
     app.kubernetes.io/component: 4pd-scheduler
