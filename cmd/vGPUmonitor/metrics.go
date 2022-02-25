@@ -124,7 +124,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				if err != nil {
 					fmt.Println(err.Error())
 				}
-				hstatus, _ := hdev.Status()
+				hstatus, err := hdev.Status()
+				if err != nil {
+					fmt.Println("hstatus error", err.Error())
+					continue
+				}
 				ch <- prometheus.MustNewConstMetric(
 					hostGPUdesc,
 					prometheus.GaugeValue,

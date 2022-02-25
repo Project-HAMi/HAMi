@@ -59,6 +59,7 @@ devicePlugin:
   imagePullPolicy: Always
   deviceSplitCount: 10
   deviceMemoryScaling: 1
+  migStrategy: "none"
   extraArgs:
     - -v=4
   
