@@ -129,7 +129,6 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
 			}
 			klog.V(3).Infof("register info %v", req.String())
 		case <-closeCh:
-			klog.Infof("register server closed")
 			return fmt.Errorf("register server closed")
 		case <-r.stopCh:
 			return nil
@@ -140,6 +139,7 @@ func (r *DeviceRegister) Register(ctx context.Context) error {
 func (r *DeviceRegister) WatchAndRegister() {
 	//ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	//defer cancel()
+	klog.Infof("into WatchAndRegister")
 	ctx := context.Background()
 	for {
 		err := r.Register(ctx)
