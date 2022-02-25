@@ -115,11 +115,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			fmt.Println("nvml GetDeviceCount err=", err.Error())
 		} else {
 			for ii = 0; ii < devnum; ii++ {
-				hostGPUdesc := prometheus.NewDesc(
-					"HostGPUMemoryUsage",
-					"GPU device memory usage",
-					[]string{"deviceid", "deviceuuid"}, nil,
-				)
 				hdev, err := nvml.NewDevice(ii)
 				if err != nil {
 					fmt.Println(err.Error())
@@ -129,23 +124,32 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					fmt.Println("hstatus error", err.Error())
 					continue
 				}
-				ch <- prometheus.MustNewConstMetric(
-					hostGPUdesc,
-					prometheus.GaugeValue,
-					float64(*hstatus.Memory.Global.Used),
-					fmt.Sprint(ii), hdev.UUID,
-				)
-				hostGPUUtilizationdesc := prometheus.NewDesc(
-					"HostCoreUtilization",
-					"GPU core utilization",
-					[]string{"deviceid", "deviceuuid"}, nil,
-				)
-				ch <- prometheus.MustNewConstMetric(
-					hostGPUUtilizationdesc,
-					prometheus.GaugeValue,
-					float64(*hstatus.Utilization.GPU),
-					fmt.Sprint(ii), hdev.UUID,
-				)
+				if hstatus.Memory.Global.Used != nil {
+					hostGPUdesc := prometheus.NewDesc(
+						"HostGPUMemoryUsage",
+						"GPU device memory usage",
+						[]string{"deviceid", "deviceuuid"}, nil,
+					)
+					ch <- prometheus.MustNewConstMetric(
+						hostGPUdesc,
+						prometheus.GaugeValue,
+						float64(*hstatus.Memory.Global.Used),
+						fmt.Sprint(ii), hdev.UUID,
+					)
+				}
+				if hstatus.Utilization.GPU != nil {
+					hostGPUUtilizationdesc := prometheus.NewDesc(
+						"HostCoreUtilization",
+						"GPU core utilization",
+						[]string{"deviceid", "deviceuuid"}, nil,
+					)
+					ch <- prometheus.MustNewConstMetric(
+						hostGPUUtilizationdesc,
+						prometheus.GaugeValue,
+						float64(*hstatus.Utilization.GPU),
+						fmt.Sprint(ii), hdev.UUID,
+					)
+				}
 			}
 		}
 
