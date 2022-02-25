@@ -55,6 +55,13 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: NVIDIA_MIG_MONITOR_DEVICES
+              value: all
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["SYS_ADMIN"]
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
@@ -68,9 +75,16 @@ spec:
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           command: ["vGPUmonitor"]
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+              add: ["SYS_ADMIN"]
           env:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
+            - name: NVIDIA_MIG_MONITOR_DEVICES
+              value: all
           volumeMounts:
             - name: ctrs
               mountPath: /tmp/vgpu/containers

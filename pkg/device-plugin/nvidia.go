@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"strconv"
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/util"
@@ -52,6 +53,12 @@ type GpuDeviceManager struct {
 	skipMigEnabledGPUs bool
 }
 
+// MigDeviceManager implements the ResourceManager interface for MIG devices
+type MigDeviceManager struct {
+	strategy MigStrategy
+	resource string
+}
+
 func check(err error) {
 	if err != nil {
 		log.Panicln("Fatal:", err)
@@ -62,6 +69,14 @@ func check(err error) {
 func NewGpuDeviceManager(skipMigEnabledGPUs bool) *GpuDeviceManager {
 	return &GpuDeviceManager{
 		skipMigEnabledGPUs: skipMigEnabledGPUs,
+	}
+}
+
+// NewMigDeviceManager returns a reference to a new MigDeviceManager
+func NewMigDeviceManager(strategy MigStrategy, resource string) *MigDeviceManager {
+	return &MigDeviceManager{
+		strategy: strategy,
+		resource: resource,
 	}
 }
 
@@ -91,8 +106,48 @@ func (g *GpuDeviceManager) Devices() []*Device {
 	return devs
 }
 
+// Devices returns a list of devices from the MigDeviceManager
+func (m *MigDeviceManager) Devices() []*Device {
+	n, err := nvml.GetDeviceCount()
+	check(err)
+
+	var devs []*Device
+	for i := uint(0); i < n; i++ {
+		d, err := nvml.NewDeviceLite(i)
+		check(err)
+
+		migEnabled, err := d.IsMigEnabled()
+		check(err)
+
+		if !migEnabled {
+			continue
+		}
+
+		migs, err := d.GetMigDevices()
+		check(err)
+
+		for j, mig := range migs {
+			if !m.strategy.MatchesResource(mig, m.resource) {
+				continue
+			}
+
+			paths, err := GetMigDeviceNodePaths(d, mig)
+			check(err)
+
+			devs = append(devs, buildDevice(mig, paths, fmt.Sprintf("%v:%v", i, j)))
+		}
+	}
+
+	return devs
+}
+
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
 func (g *GpuDeviceManager) CheckHealth(stop <-chan interface{}, devices []*Device, unhealthy chan<- *Device) {
+	checkHealth(stop, devices, unhealthy)
+}
+
+// CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
+func (m *MigDeviceManager) CheckHealth(stop <-chan interface{}, devices []*Device, unhealthy chan<- *Device) {
 	checkHealth(stop, devices, unhealthy)
 }
 
@@ -186,4 +241,29 @@ func checkHealth(stop <-chan interface{}, devices []*Device, unhealthy chan<- *D
 			}
 		}
 	}
+}
+
+// getAdditionalXids returns a list of additional Xids to skip from the specified string.
+// The input is treaded as a comma-separated string and all valid uint64 values are considered as Xid values. Invalid values
+// are ignored.
+func getAdditionalXids(input string) []uint64 {
+	if input == "" {
+		return nil
+	}
+
+	var additionalXids []uint64
+	for _, additionalXid := range strings.Split(input, ",") {
+		trimmed := strings.TrimSpace(additionalXid)
+		if trimmed == "" {
+			continue
+		}
+		xid, err := strconv.ParseUint(trimmed, 10, 64)
+		if err != nil {
+			log.Printf("Ignoring malformed Xid value %v: %v", trimmed, err)
+			continue
+		}
+		additionalXids = append(additionalXids, xid)
+	}
+
+	return additionalXids
 }

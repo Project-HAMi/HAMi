@@ -23,11 +23,13 @@ import (
 	"os"
 	"path"
 	"strconv"
+	"strings"
 	"time"
 
 	"4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"k8s.io/apimachinery/pkg/util/uuid"
+	"k8s.io/klog/v2"
 
 	"github.com/NVIDIA/go-gpuallocator/gpuallocator"
 	"golang.org/x/net/context"
@@ -55,19 +57,20 @@ const (
 
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
-	//ResourceManager
+	ResourceManager
 	//resourceManager  *ResourceManager
-	deviceCache  *DeviceCache
-	resourceName string
-	//deviceListEnvvar string
-	allocatePolicy gpuallocator.Policy
-	socket         string
+	deviceCache      *DeviceCache
+	resourceName     string
+	deviceListEnvvar string
+	allocatePolicy   gpuallocator.Policy
+	socket           string
 
-	server *grpc.Server
-	//cachedDevices []*Device
-	health chan *Device
-	stop   chan interface{}
-	//changed       chan struct{}
+	server        *grpc.Server
+	cachedDevices []*Device
+	health        chan *Device
+	stop          chan interface{}
+	changed       chan struct{}
+	migStrategy   string
 	//devRegister   *DeviceRegister
 	//podManager    *PodManager
 }
@@ -79,6 +82,7 @@ func NewNvidiaDevicePlugin(resourceName string, deviceCache *DeviceCache, alloca
 		resourceName:   resourceName,
 		allocatePolicy: allocatePolicy,
 		socket:         socket,
+		migStrategy:    "none",
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -88,8 +92,30 @@ func NewNvidiaDevicePlugin(resourceName string, deviceCache *DeviceCache, alloca
 	}
 }
 
+// NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
+func NewMIGNvidiaDevicePlugin(resourceName string, resourceManager ResourceManager, deviceListEnvvar string, allocatePolicy gpuallocator.Policy, socket string) *NvidiaDevicePlugin {
+	return &NvidiaDevicePlugin{
+		ResourceManager:  resourceManager,
+		resourceName:     resourceName,
+		deviceListEnvvar: deviceListEnvvar,
+		allocatePolicy:   allocatePolicy,
+		socket:           socket,
+
+		// These will be reinitialized every
+		// time the plugin server is restarted.
+		cachedDevices: nil,
+		server:        nil,
+		health:        nil,
+		stop:          nil,
+		migStrategy:   "mixed",
+	}
+}
+
 func (m *NvidiaDevicePlugin) initialize() {
 	var err error
+	if strings.Compare(m.migStrategy, "mixed") == 0 {
+		m.cachedDevices = m.ResourceManager.Devices()
+	}
 	m.server = grpc.NewServer([]grpc.ServerOption{}...)
 	m.health = make(chan *Device)
 	m.stop = make(chan interface{})
@@ -125,7 +151,13 @@ func (m *NvidiaDevicePlugin) Start() error {
 	}
 	log.Printf("Registered device plugin for '%s' with Kubelet", m.resourceName)
 
-	m.deviceCache.AddNotifyChannel("plugin", m.health)
+	if strings.Compare(m.migStrategy, "none") == 0 {
+		m.deviceCache.AddNotifyChannel("plugin", m.health)
+	} else if strings.Compare(m.migStrategy, "mixed") == 0 {
+		go m.CheckHealth(m.stop, m.cachedDevices, m.health)
+	} else {
+		log.Panicln("migstrategy not recognized", m.migStrategy)
+	}
 	return nil
 }
 
@@ -249,6 +281,38 @@ func (m *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *plug
 	return &pluginapi.PreferredAllocationResponse{}, nil
 }
 
+func (m *NvidiaDevicePlugin) MIGAllocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	responses := pluginapi.AllocateResponse{}
+	for _, req := range reqs.ContainerRequests {
+		for _, id := range req.DevicesIDs {
+			if !m.deviceExists(id) {
+				return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", m.resourceName, id)
+			}
+		}
+
+		response := pluginapi.ContainerAllocateResponse{}
+
+		uuids := req.DevicesIDs
+		deviceIDs := m.deviceIDsFromUUIDs(uuids)
+
+		//if deviceListStrategyFlag == DeviceListStrategyEnvvar {
+		response.Envs = m.apiEnvs(m.deviceListEnvvar, deviceIDs)
+		//}
+		//if deviceListStrategyFlag == DeviceListStrategyVolumeMounts {
+		//	response.Envs = m.apiEnvs(m.deviceListEnvvar, []string{deviceListAsVolumeMountsContainerPathRoot})
+		//	response.Mounts = m.apiMounts(deviceIDs)
+		//}
+		//if passDeviceSpecsFlag {
+		//	response.Devices = m.apiDeviceSpecs(nvidiaDriverRootFlag, uuids)
+		//}
+
+		klog.Infof("response=", response.Envs)
+		responses.ContainerResponses = append(responses.ContainerResponses, &response)
+	}
+
+	return &responses, nil
+}
+
 // Allocate which return list of devices.
 func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 	////reqNums := make([]int, 0, len(reqs.ContainerRequests))
@@ -267,6 +331,9 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 	//    klog.Errorf("%v", err)
 	//    return nil, err
 	//}
+	if strings.Compare(m.migStrategy, "mixed") == 0 {
+		return m.MIGAllocate(ctx, reqs)
+	}
 	responses := pluginapi.AllocateResponse{}
 	for _, _ = range reqs.ContainerRequests {
 		//reqDeviceIDs := req.DevicesIDs
@@ -328,18 +395,46 @@ func (m *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Duration) 
 }
 
 func (m *NvidiaDevicePlugin) Devices() []*Device {
-	return m.deviceCache.GetCache()
+	if strings.Compare(m.migStrategy, "none") == 0 {
+		return m.deviceCache.GetCache()
+	}
+	if strings.Compare(m.migStrategy, "mixed") == 0 {
+		return m.ResourceManager.Devices()
+	}
+	log.Panic("migStrategy not recognized,exiting...")
+	return []*Device{}
 }
 
-//func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
-//    for _, d := range m.deviceCache.GetCache() {
-//        if d.ID == id {
-//            return true
-//        }
-//    }
-//    return false
-//}
-//
+func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
+	//for _, d := range m.deviceCache.GetCache() {
+	for _, d := range m.cachedDevices {
+		if d.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
+func (m *NvidiaDevicePlugin) deviceIDsFromUUIDs(uuids []string) []string {
+	return uuids
+	/*
+		if deviceIDStrategyFlag == DeviceIDStrategyUUID {
+			return uuids
+		}
+
+		var deviceIDs []string
+		if deviceIDStrategyFlag == DeviceIDStrategyIndex {
+			for _, d := range m.cachedDevices {
+				for _, id := range uuids {
+					if d.ID == id {
+						deviceIDs = append(deviceIDs, d.Index)
+					}
+				}
+			}
+		}
+		return deviceIDs*/
+}
+
 //func (m *NvidiaDevicePlugin) getDevices(ids []string) ([]*Device, error) {
 //    var res []*Device
 //    for _, id := range ids {
@@ -359,6 +454,13 @@ func (m *NvidiaDevicePlugin) Devices() []*Device {
 //}
 
 func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
+	if strings.Compare(m.migStrategy, "mixed") == 0 {
+		var pdevs []*pluginapi.Device
+		for _, d := range m.cachedDevices {
+			pdevs = append(pdevs, &d.Device)
+		}
+		return pdevs
+	}
 	devices := m.Devices()
 	var res []*pluginapi.Device
 	for _, dev := range devices {
@@ -374,12 +476,12 @@ func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
 	return res
 }
 
-//func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
-//    return map[string]string{
-//        envvar: strings.Join(deviceIDs, ","),
-//    }
-//}
-//
+func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
+	return map[string]string{
+		envvar: strings.Join(deviceIDs, ","),
+	}
+}
+
 //func (m *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
 //    var mounts []*pluginapi.Mount
 //
