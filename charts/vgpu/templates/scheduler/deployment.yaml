@@ -36,11 +36,15 @@ spec:
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
           command:
             - kube-scheduler
-            - --policy-config-file=/config/config.json
-            - --leader-elect=false
+            {{- if ge (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 22}}
+            {{- range .Values.scheduler.kubeScheduler.extraNewArgs }}
+            - {{ . }}
+            {{- end }}
+            {{- else }}
             - --scheduler-name={{ .Values.schedulerName }}
             {{- range .Values.scheduler.kubeScheduler.extraArgs }}
             - {{ . }}
+            {{- end }}
             {{- end }}
           volumeMounts:
             - name: scheduler-config
@@ -79,7 +83,11 @@ spec:
             secretName: {{ template "4pd-vgpu.scheduler.tls" . }}
         - name: scheduler-config
           configMap:
+            {{- if ge (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 22 }}
+            name: {{ template "4pd-vgpu.scheduler" . }}-newversion
+            {{- else }}
             name: {{ template "4pd-vgpu.scheduler" . }}
+            {{- end }}
       {{- if .Values.scheduler.nodeSelector }}
       nodeSelector: {{ toYaml .Values.scheduler.nodeSelector | nindent 8 }}
       {{- end }}

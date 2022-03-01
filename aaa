@@ -1,0 +1,16 @@
+            #{{- if ge .Values.scheduler.kubeScheduler.majorVersion 22.0 }}
+            #{{- range .Values.scheduler.kubeScheduler.extraNewArgs }}
+            #- {{ . }}
+            #{{- end }}
+            #{{- else }}
+            #- --scheduler-name={{ .Values.schedulerName }}
+            #{{- range .Values.scheduler.kubeScheduler.extraArgs }}
+            #- {{ . }}
+            #{{- end }}
+            #{{- end }}
+
+            #{{- if ge .Values.scheduler.kubeScheduler.majorVersion 22.0 }}
+            name: {{ template "4pd-vgpu.scheduler" . }}-newversion
+            #{{- else }}
+            #name: {{ template "4pd-vgpu.scheduler" . }}
+            #{{- end }}
