@@ -21,10 +21,15 @@ scheduler:
   defaultMem: 5000
   defaultCores: 0
   kubeScheduler:
-    imageTag: v1.20.0
+    imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
     imagePullPolicy: IfNotPresent
+    extraNewArgs:
+      - --config=/config/config.yaml
+      - -v=4
     extraArgs:
+      - --policy-config-file=/config/config.json
+      - --leader-elect=false
       - -v=4
   extender:
     image: "4pdosc/k8s-vgpu:latest"
@@ -38,6 +43,7 @@ scheduler:
   #serviceAccountName: "4pd-vgpu-scheduler-sa"
   patch:
     image: docker.io/jettech/kube-webhook-certgen:v1.5.2
+    imageNew: liangjw/kube-webhook-certgen:v1.1.1
     imagePullPolicy: IfNotPresent
     priorityClassName: ""
     podAnnotations: {}
