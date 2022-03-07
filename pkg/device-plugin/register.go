@@ -68,7 +68,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		registeredmem := int32(*ndev.Memory)
 		if config.DeviceMemoryScaling > 1 {
 			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
-			registeredmem = registeredmem * int32(config.DeviceMemoryScaling)
+			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
 		}
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.ID,
