@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"log"
 
+	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/NVIDIA/go-gpuallocator/gpuallocator"
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -62,7 +63,8 @@ type migStrategyMixed struct{}
 func (s *migStrategyNone) GetPlugins(cache *DeviceCache) []*NvidiaDevicePlugin {
 	return []*NvidiaDevicePlugin{
 		NewNvidiaDevicePlugin(
-			"nvidia.com/gpu",
+			//"nvidia.com/gpu",
+			util.ResourceName,
 			cache,
 			gpuallocator.NewBestEffortPolicy(),
 			pluginapi.DevicePluginPath+"nvidia-gpu.sock"),
@@ -187,7 +189,8 @@ func (s *migStrategyMixed) GetPlugins(cache *DeviceCache) []*NvidiaDevicePlugin 
 
 	plugins := []*NvidiaDevicePlugin{
 		NewNvidiaDevicePlugin(
-			"nvidia.com/gpu",
+			//"nvidia.com/gpu",
+			util.ResourceName,
 			cache,
 			gpuallocator.NewBestEffortPolicy(),
 			pluginapi.DevicePluginPath+"nvidia-gpu.sock"),

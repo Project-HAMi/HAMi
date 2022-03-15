@@ -16,3 +16,9 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   Integer type, by default: 5000. The default device memory of the current task, in MB
 * `scheduler.defaultCores:` 
   Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
+* `resourceName:`
+  String type, vgpu number resource name, default: "nvidia.com/gpu"
+* `resourceMem:`
+  String type, vgpu memory resource name, default: "nvidia.com/gpumem"
+* `resourceCores:`
+  String type, vgpu cores resource name, default: "nvidia.com/cores"

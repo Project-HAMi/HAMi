@@ -23,15 +23,15 @@ data:
                 },
                 "managedResources": [
                     {
-                        "name": "nvidia.com/gpu",
+                        "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
                     },
                     {
-                        "name": "nvidia.com/gpumem",
+                        "name": "{{ .Values.resourceMem }}",
                         "ignoredByScheduler": true
                     },
                     {
-                        "name": "nvidia.com/gpucores",
+                        "name": "{{ .Values.resourceCores }}",
                         "ignoredByScheduler": true
                     }
                 ],
