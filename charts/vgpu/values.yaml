@@ -19,7 +19,7 @@ global:
 
 scheduler:
   defaultMem: 5000
-  defaultCores: 0
+  defaultCores: 5
   kubeScheduler:
     imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler

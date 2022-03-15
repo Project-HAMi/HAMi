@@ -93,7 +93,15 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 				if node.Devices[i].Totalmem-node.Devices[i].Usedmem < n.Memreq {
 					continue
 				}
-				if 100-node.Devices[i].Usedcores <= n.Coresreq {
+				if 100-node.Devices[i].Usedcores < n.Coresreq {
+					continue
+				}
+				// Coresreq=100 indicates it want this card exclusively
+				if n.Coresreq == 100 && node.Devices[i].Used > 0 {
+					continue
+				}
+				// You can't allocate core=0 job to an already full GPU
+				if node.Devices[i].Usedcores == 100 && n.Coresreq == 0 {
 					continue
 				}
 				total += node.Devices[i].Count
