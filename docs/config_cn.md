@@ -16,3 +16,9 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   整数类型，预设值为5000，表示不配置显存时使用的默认显存大小，单位为MB
 * `scheduler.defaultCores:`
   整数类型(0-100)，默认为0，表示默认为每个任务预留的百分比算力。若设置为0，则代表任务可能会被分配到任一满足显存需求的GPU中，若设置为100，代表该任务独享整张显卡
+* `resourceName:`
+  字符串类型, 申请vgpu个数的资源名, 默认: "nvidia.com/gpu"
+* `resourceMem:`
+  字符串类型, 申请vgpu显存资源名, 默认: "nvidia.com/gpumem"
+* `resourceCores:`
+  字符串类型, 申请vgpu算力资源名, 默认: "nvidia.com/cores"

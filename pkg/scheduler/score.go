@@ -93,7 +93,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 				if node.Devices[i].Totalmem-node.Devices[i].Usedmem < n.Memreq {
 					continue
 				}
-				if 100-node.Devices[i].Usedcores < n.Coresreq {
+				if 100-node.Devices[i].Usedcores <= n.Coresreq {
 					continue
 				}
 				total += node.Devices[i].Count
