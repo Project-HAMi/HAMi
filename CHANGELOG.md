@@ -14,10 +14,15 @@ a pod can be scheduled to a node where its core usage is 100 - Fixed
 
 cudevshr.cache can't be modified with non-root users - Fixed
 
+## v1.0.1.2
+
 **Add custom resource name**
 
 A task with cores=100 will allocate all device memory(virtual device memory excluded)
 
+## v1.0.1.3
+
+**nvidia.com/gpucores will limit the core usage inside container**
 
 
 
