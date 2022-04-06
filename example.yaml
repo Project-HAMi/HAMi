@@ -10,6 +10,6 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-          nvidia.com/gpumem: 3000
+          nvidia.com/gpumem: 3000 # Each vGPU containers 3000M device memory
           #nvidia.com/gpumem-percentage: 50 #Each vGPU containers 50% device memory of that GPU. Can not be used with nvidia.com/gpumem
           nvidia.com/gpucores: 100 # Utilization limit of this vGPU is set to 100% of total GPU utilization 
