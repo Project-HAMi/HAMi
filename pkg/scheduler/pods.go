@@ -97,7 +97,7 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 		for _, id := range pi.ctrIDs {
 			delete(m.containers, id)
 		}
-		klog.Infof(pi.name + "deleted")
+		klog.Infof(pi.name + " deleted")
 		delete(m.pods, pod.UID)
 	}
 }

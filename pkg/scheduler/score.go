@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/util"
+	"k8s.io/klog/v2"
 )
 
 type NodeScore struct {
@@ -113,6 +114,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 					countremains = 0
 					break
 				}
+				klog.Info("Scoring pod ", n.Memreq, ":", n.MemPercentagereq, ":", n.Coresreq, ":", n.Nums)
 				if n.MemPercentagereq != 101 {
 					n.Memreq = node.Devices[i].Totalmem * n.MemPercentagereq / 100
 				}

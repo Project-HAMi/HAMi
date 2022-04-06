@@ -49,11 +49,11 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 				mempnum := int32(101)
 				if !ok {
 					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMemPercentage]
-				}
-				if ok {
-					mempnums, ok := mem.AsInt64()
 					if ok {
-						mempnum = int32(mempnums)
+						mempnums, ok := mem.AsInt64()
+						if ok {
+							mempnum = int32(mempnums)
+						}
 					}
 				}
 				corenum := config.DefaultCores
