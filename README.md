@@ -13,11 +13,13 @@ English version|[中文版](README_cn.md)
 
 ***GPU sharing***: Each task can allocate a portion of GPU instead of a whole GPU card, thus GPU can be shared among multiple tasks.
 
-***Device Memory Control***: GPUs can be allocated with certain device memory and have made it that it does not exceed the boundary.
+***Device Memory Control***: GPUs can be allocated with certain device memory size (i.e 3000M) or device memory percentage of whole GPU(i.e 50%) and have made it that it does not exceed the boundary.
 
 ***Virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap.
 
-***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation.
+***GPU Type Specification***: You can specify which type of GPU to use or to avoid for a certain GPU task, by setting "nvidia.com/use-gputype" and "nvidia.com/nouse-gputype" annotations. 
+
+***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation. In addition, you can specify your resource name other than "nvidia.com/gpu" if you wish
 
 The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), such as splitting the physical GPU, limiting the memory, and computing unit. It adds the scheduling module to balance the GPU usage across GPU nodes. In addition, it allows users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
 
@@ -37,7 +39,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 * Kubernetes version >= 1.16
 * glibc >= 2.17
 * kernel version >= 3.10
-* helm
+* helm > 2.0
 
 ## Quick Start
 
@@ -130,6 +132,10 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 > **WARNING:** *if you don't request vGPUs when using the device plugin with NVIDIA images all
 > the vGPUs on the machine will be exposed inside your container.*
+
+### More examples
+
+Click [here](docs/examples)
 
 ### Monitoring vGPU status
 

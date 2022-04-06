@@ -52,7 +52,7 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image | quote }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
-          command: 
+          command:
             - scheduler
             - --resource-name={{ .Values.resourceName }}
             - --resource-mem={{ .Values.resourceMem }}
