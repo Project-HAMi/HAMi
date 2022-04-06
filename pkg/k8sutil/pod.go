@@ -25,6 +25,7 @@ import (
 func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 	resourceName := corev1.ResourceName(util.ResourceName)
 	resourceMem := corev1.ResourceName(util.ResourceMem)
+	resourceMemPercentage := corev1.ResourceName(util.ResourceMemPercentage)
 	resourceCores := corev1.ResourceName(util.ResourceCores)
 	counts = make([]util.ContainerDeviceRequest, len(pod.Spec.Containers))
 	for i := 0; i < len(pod.Spec.Containers); i++ {
@@ -45,6 +46,16 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 						memnum = int32(memnums)
 					}
 				}
+				mempnum := int32(101)
+				if !ok {
+					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMemPercentage]
+				}
+				if ok {
+					mempnums, ok := mem.AsInt64()
+					if ok {
+						mempnum = int32(mempnums)
+					}
+				}
 				corenum := config.DefaultCores
 				core, ok := pod.Spec.Containers[i].Resources.Limits[resourceCores]
 				if !ok {
@@ -57,9 +68,10 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 					}
 				}
 				counts[i] = util.ContainerDeviceRequest{
-					Nums:     int32(n),
-					Memreq:   int32(memnum),
-					Coresreq: int32(corenum),
+					Nums:             int32(n),
+					Memreq:           int32(memnum),
+					MemPercentagereq: int32(mempnum),
+					Coresreq:         int32(corenum),
 				}
 			}
 		}

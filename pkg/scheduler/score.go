@@ -19,6 +19,7 @@ package scheduler
 import (
 	"fmt"
 	"sort"
+	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/util"
 )
@@ -62,7 +63,29 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []util.ContainerDeviceRequest) (*NodeScoreList, error) {
+func checkGPUtype(annos map[string]string, cardtype string) bool {
+	inuse, ok := annos[util.GPUInUse]
+	if ok {
+		for _, val := range strings.Split(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+				return true
+			}
+		}
+		return false
+	}
+	nouse, ok := annos[util.GPUNoUse]
+	if ok {
+		for _, val := range strings.Split(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []util.ContainerDeviceRequest, annos map[string]string) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
@@ -90,6 +113,9 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 					countremains = 0
 					break
 				}
+				if n.MemPercentagereq != 101 {
+					n.Memreq = node.Devices[i].Totalmem * n.MemPercentagereq / 100
+				}
 				if node.Devices[i].Totalmem-node.Devices[i].Usedmem < n.Memreq {
 					continue
 				}
@@ -102,6 +128,9 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 				}
 				// You can't allocate core=0 job to an already full GPU
 				if node.Devices[i].Usedcores == 100 && n.Coresreq == 0 {
+					continue
+				}
+				if !checkGPUtype(annos, node.Devices[i].Type) {
 					continue
 				}
 				total += node.Devices[i].Count

@@ -153,6 +153,7 @@ func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 				ID:     req.Devices[i].GetId(),
 				Count:  req.Devices[i].GetCount(),
 				Devmem: req.Devices[i].GetDevmem(),
+				Type:   req.Devices[i].GetType(),
 				Health: req.Devices[i].GetHealth(),
 			}
 		}
@@ -220,6 +221,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 				Usedmem:   0,
 				Totalmem:  d.Devmem,
 				Usedcores: 0,
+				Type:      d.Type,
 				Health:    d.Health,
 			})
 		}
@@ -262,12 +264,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
+	annos := args.Pod.Annotations
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames)
 	if err != nil {
 		return nil, err
 	}
-	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums)
+	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos)
 	if err != nil {
 		return nil, err
 	}
