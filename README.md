@@ -17,7 +17,7 @@ English version|[中文版](README_cn.md)
 
 ***Virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap.
 
-***GPU Type Specification***: You can specify which type of GPU to use or to avoid for a certain GPU task, by setting "nvidia.com/use-gputype" and "nvidia.com/nouse-gputype" annotations. 
+***GPU Type Specification***: You can specify which type of GPU to use or to avoid for a certain GPU task, by setting "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype" annotations. 
 
 ***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation. In addition, you can specify your resource name other than "nvidia.com/gpu" if you wish
 
