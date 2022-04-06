@@ -25,6 +25,7 @@ type DeviceInfo struct {
 	ID     string
 	Count  int32
 	Devmem int32
+	Type   string
 	Health bool
 }
 
@@ -40,6 +41,7 @@ type DeviceUsage struct {
 	Usedmem   int32
 	Totalmem  int32
 	Usedcores int32
+	Type      string
 	Health    bool
 }
 

@@ -8,10 +8,11 @@ service DeviceService {
 }
 
 message DeviceInfo {
-  string  id = 1;
+  string id = 1;
   int32 count = 2;
   int32 devmem = 3;
-  bool health = 4;
+  string type = 4;
+  bool health = 5;
 }
 
 message RegisterRequest {

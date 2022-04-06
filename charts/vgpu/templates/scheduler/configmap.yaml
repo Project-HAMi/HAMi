@@ -33,6 +33,10 @@ data:
                     {
                         "name": "{{ .Values.resourceCores }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.resourceMemPercentage }}",
+                        "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false

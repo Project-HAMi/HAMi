@@ -59,11 +59,12 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 	res := make([]*api.DeviceInfo, 0, len(devs))
 	for _, dev := range devs {
 		ndev, err := nvml.NewDeviceByUUID(dev.ID)
+		//klog.V(3).Infoln("ndev type=", ndev.Model)
 		if err != nil {
 			fmt.Println("nvml new device by uuid error id=", dev.ID)
 			panic(0)
 		} else {
-			fmt.Println("nvml registered device id=", dev.ID, "memory=", *ndev.Memory)
+			fmt.Println("nvml registered device id=", dev.ID, "memory=", *ndev.Memory, "type=", *ndev.Model)
 		}
 		registeredmem := int32(*ndev.Memory)
 		if config.DeviceMemoryScaling > 1 {
@@ -74,6 +75,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 			Id:     dev.ID,
 			Count:  int32(config.DeviceSplitCount),
 			Devmem: registeredmem,
+			Type:   *ndev.Model,
 			Health: dev.Health == "healthy",
 		})
 	}

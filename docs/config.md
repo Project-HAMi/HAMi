@@ -19,6 +19,8 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `resourceName:`
   String type, vgpu number resource name, default: "nvidia.com/gpu"
 * `resourceMem:`
-  String type, vgpu memory resource name, default: "nvidia.com/gpumem"
+  String type, vgpu memory size resource name, default: "nvidia.com/gpumem"
+* `resourceMemPercentage:`
+  String type, vgpu memory fraction resource name, default: "nvidia.com/gpumem-percentage" 
 * `resourceCores:`
   String type, vgpu cores resource name, default: "nvidia.com/cores"

@@ -29,3 +29,5 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.resourceCores }}
         ignoredByScheduler: true
+      - name: {{ .Values.resourceMemPercentage }}
+        ignoredByScheduler: true

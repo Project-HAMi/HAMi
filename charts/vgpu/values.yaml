@@ -7,6 +7,7 @@ imagePullSecrets: []
 # 
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
+resourceMemPercentage: "nvidia.com/gpumem-percentage"
 resourceCores: "nvidia.com/gpucores"
 schedulerName: "4pd-scheduler"
 

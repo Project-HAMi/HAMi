@@ -23,6 +23,9 @@ const (
 	AssignedIDsAnnotations  = "4pd.io/vgpu-ids-new"
 	AssignedNodeAnnotations = "4pd.io/vgpu-node"
 
+	GPUInUse = "nvidia.com/use-gputype"
+	GPUNoUse = "nvidia.com/nouse-gputype"
+
 	//Set default mem to 5000m
 	//DefaultMem   = 5000
 	//DefaultCores = 0
@@ -33,10 +36,11 @@ const (
 )
 
 var (
-	ResourceName  string
-	ResourceMem   string
-	ResourceCores string
-	DebugMode     bool
+	ResourceName          string
+	ResourceMem           string
+	ResourceCores         string
+	ResourceMemPercentage string
+	DebugMode             bool
 )
 
 //type ContainerDevices struct {
@@ -53,9 +57,10 @@ type ContainerDevice struct {
 }
 
 type ContainerDeviceRequest struct {
-	Nums     int32
-	Memreq   int32
-	Coresreq int32
+	Nums             int32
+	Memreq           int32
+	MemPercentagereq int32
+	Coresreq         int32
 }
 
 type ContainerDevices []ContainerDevice
