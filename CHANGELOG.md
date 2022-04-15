@@ -33,6 +33,11 @@ This resource indicates the device memory percentage of GPU, can not be used wit
 **Add GPU type specification**
 You can set "nvidia.com/use-gputype" annotation to specify which type of GPU to use. "nvidia.com/nouse-gputype" annotation to specify which type of GPU to avoid.
 
+## v1.0.1.5
+
+Fix an monitor "desc not found" error
+
+Add "devicePlugin.sockPath" parameter to set the location of vgpu.sock
 
 
 
