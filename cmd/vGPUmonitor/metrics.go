@@ -59,10 +59,28 @@ type ClusterManagerCollector struct {
 
 // Descriptors used by the ClusterManagerCollector below.
 var (
-	vGPUUsageDesc = prometheus.NewDesc(
+	hostGPUdesc = prometheus.NewDesc(
+		"HostGPUMemoryUsage",
+		"GPU device memory usage",
+		[]string{"deviceid", "deviceuuid"}, nil,
+	)
+
+	hostGPUUtilizationdesc = prometheus.NewDesc(
+		"HostCoreUtilization",
+		"GPU core utilization",
+		[]string{"deviceid", "deviceuuid"}, nil,
+	)
+
+	ctrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
-		"VGPU device usage",
-		[]string{"pid"}, nil,
+		"vGPU device usage",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+
+	ctrvGPUlimitdesc = prometheus.NewDesc(
+		"vGPU_device_memory_limit_in_bytes",
+		"vGPU device limit",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	clientset *kubernetes.Clientset
 )
@@ -71,7 +89,11 @@ var (
 // Collect method will always return the same two metrics with the same two
 // descriptors.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
-	prometheus.DescribeByCollect(cc, ch)
+	ch <- hostGPUdesc
+	ch <- ctrvGPUdesc
+	ch <- ctrvGPUlimitdesc
+	ch <- hostGPUUtilizationdesc
+	//prometheus.DescribeByCollect(cc, ch)
 }
 
 func parseidstr(podusage string) (string, string, error) {
@@ -125,11 +147,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					continue
 				}
 				if hstatus.Memory.Global.Used != nil {
-					hostGPUdesc := prometheus.NewDesc(
-						"HostGPUMemoryUsage",
-						"GPU device memory usage",
-						[]string{"deviceid", "deviceuuid"}, nil,
-					)
 					ch <- prometheus.MustNewConstMetric(
 						hostGPUdesc,
 						prometheus.GaugeValue,
@@ -138,11 +155,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					)
 				}
 				if hstatus.Utilization.GPU != nil {
-					hostGPUUtilizationdesc := prometheus.NewDesc(
-						"HostCoreUtilization",
-						"GPU core utilization",
-						[]string{"deviceid", "deviceuuid"}, nil,
-					)
 					ch <- prometheus.MustNewConstMetric(
 						hostGPUUtilizationdesc,
 						prometheus.GaugeValue,
@@ -174,11 +186,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 								podlabels[idxfix] = valfix
 							}
 							for i := 0; i < int(sr.sr.num); i++ {
-								ctrvGPUdesc := prometheus.NewDesc(
-									"vGPU_device_memory_usage_in_bytes",
-									"vGPU device usage",
-									[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
-								)
 								value, _ := gettotalusage(sr, i)
 								uuid := string(sr.sr.uuids[i].uuid[:])[0:40]
 
@@ -188,11 +195,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 									prometheus.GaugeValue,
 									float64(value),
 									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
-								)
-								ctrvGPUlimitdesc := prometheus.NewDesc(
-									"vGPU_device_memory_limit_in_bytes",
-									"vGPU device limit",
-									[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUlimitdesc,
@@ -227,7 +229,9 @@ func initmetrics() {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	fmt.Println("Initializing metrics...")
-	reg := prometheus.NewPedanticRegistry()
+
+	reg := prometheus.NewRegistry()
+	//reg := prometheus.NewPedanticRegistry()
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		fmt.Println(err.Error())

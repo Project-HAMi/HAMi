@@ -48,6 +48,7 @@ spec:
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
             - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
             - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
+            - --runtime-socket={{ .Values.devicePlugin.sockPath }}/vgpu.sock
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
             {{- end }}
@@ -69,7 +70,8 @@ spec:
             - name: lib
               mountPath: /usr/local/vgpu
             - name: sock
-              mountPath: /var/lib/vgpu
+              #mountPath: /var/lib/vgpu
+              mountPath: {{ .Values.devicePlugin.sockPath }}
             - name: usrbin
               mountPath: /usrbin
         - name: vgpu-monitor
@@ -115,8 +117,8 @@ spec:
             path: /usr/bin
         - name: sock
           hostPath:
-            path: /var/lib/vgpu
-            #path: {{ .Values.devicePlugin.sockPath }}
+            #path: /var/lib/vgpu
+            path: {{ .Values.devicePlugin.sockPath }}
       {{- if .Values.devicePlugin.nodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nodeSelector | nindent 8 }}
       {{- end }}
