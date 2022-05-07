@@ -43,7 +43,7 @@ func checkfiles(fpath string) (sharedRegionT, error) {
 		if err != nil {
 			fmt.Println("err=", err.Error())
 		} else {
-			fmt.Println(sr)
+			fmt.Println("sr=", sr.utilizationSwitch, sr.recentKernel, sr.priority)
 			return sr, nil
 		}
 	}
