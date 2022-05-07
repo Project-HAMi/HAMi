@@ -39,5 +39,17 @@ Fix an monitor "desc not found" error
 
 Add "devicePlugin.sockPath" parameter to set the location of vgpu.sock
 
+## v1.1.0.0
+
+**Major Update: Device Memory will be counted more accurately**
+serveral device memory usage, including cuda context, modules, parameters, reserved addresses will be counted in v1.1.0.0
+
+**Update to be compatable with CUDA 11.6 and Driver 500+**
+
+**Rework monitor strategy**
+Monitor will mmap control file into address space instead of reading it in each query.
+
+
+
 
 

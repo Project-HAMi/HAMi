@@ -23,6 +23,7 @@ func main() {
 		}
 		fmt.Println("devnum=", devnum)*/
 	go initmetrics()
+	go watchAndFeedback()
 	for {
 		err := <-errchannel
 		fmt.Println(err.Error())

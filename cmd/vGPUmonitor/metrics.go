@@ -122,7 +122,7 @@ func gettotalusage(usage podusage, vidx int) (uint64, error) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	fmt.Println("begin collect")
 	srlist, err := monitorpath()
-	fmt.Println("Collect", srlist)
+	//fmt.Println("Collect", srlist)
 	if err != nil {
 		fmt.Println("err=", err.Error())
 	}
