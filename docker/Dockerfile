@@ -4,7 +4,7 @@ FROM $GOLANG_IMAGE AS build
 
 ADD . /k8s-vgpu
 #ENV GOPRIVATE="gitlab.4pd.io/*"
-ARG GOPROXY=https://goproxy.cn,direct
+#ARG GOPROXY=https://goproxy.cn,direct
 ARG VERSION="unknown"
 RUN cd /k8s-vgpu && make all
 
