@@ -30,6 +30,7 @@ spec:
       # serviceAccountName:
       serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
+      hostPID: true
       containers:
         - name: device-plugin
           image: {{ .Values.devicePlugin.image | quote }}
@@ -77,6 +78,7 @@ spec:
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          #command: ["sleep","infinity"]
           command: ["vGPUmonitor"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -95,6 +97,10 @@ spec:
               mountPath: /run/docker
             - name: containerds
               mountPath: /run/containerd
+            - name: sysinfo
+              mountPath: /sysinfo
+            - name: hostvar
+              mountPath: /hostvar
       volumes:
         - name: ctrs
           hostPath:
@@ -115,6 +121,12 @@ spec:
         - name: usrbin
           hostPath:
             path: /usr/bin
+        - name: sysinfo
+          hostPath:
+            path: /sys
+        - name: hostvar
+          hostPath:
+            path: /var
         - name: sock
           hostPath:
             #path: /var/lib/vgpu
