@@ -17,20 +17,20 @@ const containerpath = "/tmp/vgpu/containers"
 
 type podusage struct {
 	idstr string
-	sr    sharedRegionT
+	sr    *sharedRegionT
 }
 
-func checkfiles(fpath string) (sharedRegionT, error) {
+func checkfiles(fpath string) (*sharedRegionT, error) {
 	fmt.Println("Checking path", fpath)
 	files, err := ioutil.ReadDir(fpath)
 	if err != nil {
-		return sharedRegionT{}, err
+		return nil, err
 	}
 	if len(files) > 1 {
-		return sharedRegionT{}, errors.New("cache num not matched")
+		return nil, errors.New("cache num not matched")
 	}
 	if len(files) == 0 {
-		return sharedRegionT{}, nil
+		return nil, nil
 	}
 	for _, val := range files {
 		strings.Contains(val.Name(), ".cache")
@@ -47,7 +47,7 @@ func checkfiles(fpath string) (sharedRegionT, error) {
 			return sr, nil
 		}
 	}
-	return sharedRegionT{}, nil
+	return nil, nil
 }
 
 func monitorpath() ([]podusage, error) {

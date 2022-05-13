@@ -16,8 +16,8 @@ const magic = 19920718
 const maxDevices = 16
 
 type shrregProcSlotT struct {
-	pid         int16
-	hostpid     int16
+	pid         int32
+	hostpid     int32
 	used        [16]uint64
 	monitorused [16]uint64
 	status      int32
@@ -50,7 +50,7 @@ type sharedRegionT struct {
 }
 
 type SharedRegionInfoT struct {
-	pid          int16
+	pid          int32
 	fd           int32
 	initStatus   int16
 	sharedRegion sharedRegionT
@@ -117,12 +117,12 @@ func mmapcachefile(filename string, nc *nvidiaCollector) error {
 	return nil
 }
 
-func getvGPUMemoryInfo(nc *nvidiaCollector) (sharedRegionT, error) {
+func getvGPUMemoryInfo(nc *nvidiaCollector) (*sharedRegionT, error) {
 	if len(nc.cudevshrPath) > 0 {
 		if nc.cudaCache == nil {
 			mmapcachefile(nc.cudevshrPath, nc)
 		}
-		return *nc.cudaCache, nil
+		return nc.cudaCache, nil
 		/*
 			if nc.at == nil {
 				//	fmt.Println("path=", nc.cudevshrPath)
@@ -189,5 +189,5 @@ func getvGPUMemoryInfo(nc *nvidiaCollector) (sharedRegionT, error) {
 				//return sharedregion.limit[idx], deviceused, err
 			}*/
 	}
-	return sharedRegionT{}, errors.New("not found path")
+	return &sharedRegionT{}, errors.New("not found path")
 }

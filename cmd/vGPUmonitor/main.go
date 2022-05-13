@@ -1,15 +1,13 @@
 package main
 
-import (
-	"flag"
-	"fmt"
-)
+import "fmt"
 
-var addr = flag.String("listen-address", ":9394", "The address to listen on for HTTP requests.")
+//var addr = flag.String("listen-address", ":9394", "The address to listen on for HTTP requests.")
 
-const shared_directory = "/usr/local/vgpu/shared"
+//const shared_directory = "/usr/local/vgpu/shared"
 
 func main() {
+	cgroupDriver = 0
 	errchannel := make(chan error)
 	go serveinfo(errchannel)
 	/*
