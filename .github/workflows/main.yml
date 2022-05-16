@@ -53,7 +53,7 @@ jobs:
         uses: arduino/setup-protoc@v1.1.2
 
       - run: make tidy
-      - run: make proto
+        # run: make proto
       - run: SHORT_VERSION="${BRANCH_NAME}" bash ./hack/build.sh
 
       - name: Publish Helm charts
