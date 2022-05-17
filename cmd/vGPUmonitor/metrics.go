@@ -186,7 +186,10 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					for ctridx, ctr := range val.Spec.Containers {
 						if strings.Compare(ctr.Name, ctr_name) == 0 {
 							fmt.Println("container matched", ctr.Name)
-							setHostPid(val, val.Status.ContainerStatuses[ctridx], &srlist[sridx])
+							err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srlist[sridx])
+							if err != nil {
+								fmt.Println("setHostPid filed", err.Error())
+							}
 							fmt.Println("sr.list=", srlist[sridx].sr)
 							podlabels := make(map[string]string)
 							for idx, val := range val.Labels {
