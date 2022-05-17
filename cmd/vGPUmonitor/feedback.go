@@ -95,7 +95,8 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 	}
 	if cgroupDriver == 2 {
 		/* Systemd */
-		filename = fmt.Sprintf("/sysinfo/fs/cgroup/memory/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s/tasks", qos, qos, pod.UID, strings.TrimLeft(ctr.ContainerID, "docker://"))
+		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
+		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimLeft(ctr.ContainerID, "docker://"))
 	}
 	fmt.Println("filename=", filename)
 	content, err := os.ReadFile(filename)
