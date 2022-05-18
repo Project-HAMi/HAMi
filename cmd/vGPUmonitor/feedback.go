@@ -135,8 +135,8 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 		if val.pid == 0 {
 			break
 		}
-		if val.hostpid == 0 {
-			fmt.Println("Assign host pid to pid", usedGPUHostArray[idx].hostGPUPid, val.pid)
+		if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
+			fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
 			sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
 			fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
 		}
