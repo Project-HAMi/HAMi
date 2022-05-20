@@ -16,8 +16,12 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
+	"io/ioutil"
 	"net"
+	"os"
+	"strings"
 	"syscall"
 
 	"4pd.io/k8s-vgpu/pkg/version"
@@ -52,6 +56,15 @@ var (
 	}
 )
 
+type devicePluginConfigs struct {
+	Nodeconfig []struct {
+		Name                string  `json:"name"`
+		Devicememoryscaling float64 `json:"devicememoryscaling"`
+		Devicesplitcount    int     `json:"devicesplitcount"`
+		Migstrategy         string  `json:"migstrategy"`
+	} `json:"nodeconfig"`
+}
+
 func init() {
 	// https://github.com/spf13/viper/issues/461
 	viper.BindEnv("node-name", "NODE_NAME")
@@ -73,6 +86,31 @@ func init() {
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
+func readFromConfigFile() error {
+	jsonbyte, err := ioutil.ReadFile("/config/config.json")
+	if err != nil {
+		return err
+	}
+	var deviceConfigs devicePluginConfigs
+	err = json.Unmarshal(jsonbyte, &deviceConfigs)
+	if err != nil {
+		return err
+	}
+	fmt.Println("json=", deviceConfigs)
+	for _, val := range deviceConfigs.Nodeconfig {
+		if strings.Compare(os.Getenv("NODE_NAME"), val.Name) == 0 {
+			fmt.Println("Reading config from file", val.Name)
+			if val.Devicememoryscaling > 0 {
+				config.DeviceMemoryScaling = val.Devicememoryscaling
+			}
+			if val.Devicesplitcount > 0 {
+				config.DeviceSplitCount = uint(val.Devicesplitcount)
+			}
+		}
+	}
+	return nil
+}
+
 func start() error {
 	klog.Info("Loading NVML")
 	if err := nvml.Init(); err != nil {
@@ -87,6 +125,13 @@ func start() error {
 		select {}
 	}
 	defer func() { klog.Info("Shutdown of NVML returned:", nvml.Shutdown()) }()
+
+	/*Loading config files*/
+	fmt.Println("NodeName=", config.NodeName)
+	err := readFromConfigFile()
+	if err != nil {
+		return fmt.Errorf("failed to load config file %s", err.Error())
+	}
 
 	klog.Info("Starting FS watcher.")
 	watcher, err := NewFSWatcher(pluginapi.DevicePluginPath)
