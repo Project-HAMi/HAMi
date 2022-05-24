@@ -130,7 +130,7 @@ func start() error {
 	fmt.Println("NodeName=", config.NodeName)
 	err := readFromConfigFile()
 	if err != nil {
-		return fmt.Errorf("failed to load config file %s", err.Error())
+		fmt.Printf("failed to load config file %s", err.Error())
 	}
 
 	klog.Info("Starting FS watcher.")
