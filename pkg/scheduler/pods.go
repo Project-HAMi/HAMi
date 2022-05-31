@@ -28,12 +28,12 @@ import (
 )
 
 type podInfo struct {
-	namespace string
-	name      string
-	uid       k8stypes.UID
-	nodeID    string
-	devices   util.PodDevices
-	ctrIDs    []string
+	Namespace string
+	Name      string
+	Uid       k8stypes.UID
+	NodeID    string
+	Devices   util.PodDevices
+	CtrIDs    []string
 }
 
 type containerInfo struct {
@@ -57,15 +57,15 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 	defer m.mutex.Unlock()
 	pi, ok := m.pods[pod.UID]
 	if !ok {
-		pi = &podInfo{name: pod.Name, uid: pod.UID}
+		pi = &podInfo{Name: pod.Name, Uid: pod.UID}
 		m.pods[pod.UID] = pi
-		pi.namespace = pod.Namespace
-		pi.name = pod.Name
-		pi.uid = pod.UID
-		pi.nodeID = nodeID
-		pi.devices = devices
+		pi.Namespace = pod.Namespace
+		pi.Name = pod.Name
+		pi.Uid = pod.UID
+		pi.NodeID = nodeID
+		pi.Devices = devices
 		klog.Info(pod.Name + "Added")
-		pi.ctrIDs = make([]string, len(pod.Spec.Containers))
+		pi.CtrIDs = make([]string, len(pod.Spec.Containers))
 		for i := 0; i < len(pod.Spec.Containers); i++ {
 			c := &pod.Spec.Containers[i]
 			if i >= len(devices) {
@@ -78,11 +78,11 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 						podUID: pod.UID,
 						ctrIdx: i,
 					}
-					pi.ctrIDs[i] = env.Value
+					pi.CtrIDs[i] = env.Value
 					break
 				}
 			}
-			if len(pi.ctrIDs[i]) == 0 {
+			if len(pi.CtrIDs[i]) == 0 {
 				klog.Errorf("not found container uid in container %v/%v/%v", pod.Namespace, pod.Name, c.Name)
 			}
 		}
@@ -94,12 +94,16 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	defer m.mutex.Unlock()
 	pi, ok := m.pods[pod.UID]
 	if ok {
-		for _, id := range pi.ctrIDs {
+		for _, id := range pi.CtrIDs {
 			delete(m.containers, id)
 		}
-		klog.Infof(pi.name + " deleted")
+		klog.Infof(pi.Name + " deleted")
 		delete(m.pods, pod.UID)
 	}
+}
+
+func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+	return m.pods, nil
 }
 
 func (m *podManager) getContainerByUUID(uuid string) (podInfo, int, error) {

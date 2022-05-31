@@ -167,18 +167,18 @@ func (s *Scheduler) GetContainer(_ context.Context, req *api.GetContainerRequest
 	if err != nil {
 		return nil, err
 	}
-	if ctrIdx >= len(pi.devices) {
+	if ctrIdx >= len(pi.Devices) {
 		return nil, fmt.Errorf("container index error")
 	}
-	pod, err := s.podLister.Pods(pi.namespace).Get(pi.name)
+	pod, err := s.podLister.Pods(pi.Namespace).Get(pi.Name)
 	if err != nil {
 		return nil, err
 	}
-	if pod == nil || ctrIdx >= len(pi.devices) {
+	if pod == nil || ctrIdx >= len(pi.Devices) {
 		return nil, fmt.Errorf("container not found")
 	}
 	var devarray []*api.DeviceUsage
-	for _, val := range pi.devices[ctrIdx] {
+	for _, val := range pi.Devices[ctrIdx] {
 		devusage := api.DeviceUsage{}
 		devusage.Id = val.UUID
 		devusage.Devmem = val.Usedmem
@@ -228,11 +228,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 		nodeMap[nodeID] = nodeInfo
 	}
 	for _, p := range s.pods {
-		node, ok := nodeMap[p.nodeID]
+		node, ok := nodeMap[p.NodeID]
 		if !ok {
 			continue
 		}
-		for _, ds := range p.devices {
+		for _, ds := range p.Devices {
 			for _, udevice := range ds {
 				for _, d := range node.Devices {
 					if d.Id == udevice.UUID {
@@ -243,7 +243,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 				}
 			}
 		}
-		klog.V(5).Infof("usage: pod %v assigned %v %v", p.name, p.nodeID, p.devices)
+		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
 	}
 	s.cachedstatus = nodeMap
 	return &nodeMap, failedNodes, nil
