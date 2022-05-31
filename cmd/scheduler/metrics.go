@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -71,46 +72,51 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	fmt.Println("begin collect")
+	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
+		"GPUDeviceMemoryLimit",
+		"Device memory limit for a certain GPU",
+		[]string{"nodeid", "deviceuuid"}, nil,
+	)
+	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
+		"GPUDeviceMemoryAllocated",
+		"Device memory allocated for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "devicecores"}, nil,
+	)
+	nodevGPUSharedNumDesc := prometheus.NewDesc(
+		"GPUDeviceSharedNum",
+		"Number of containers sharing this GPU",
+		[]string{"nodeid", "deviceuuid"}, nil,
+	)
+
+	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
+		"GPUDeviceCoreAllocated",
+		"Device core allocated for a certain GPU",
+		[]string{"nodeid", "deviceuuid"}, nil,
+	)
+	nodeGPUOverview := prometheus.NewDesc(
+		"nodeGPUOverview",
+		"GPU overview on a certain node",
+		[]string{"nodeid", "deviceuuid", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
+	)
+	nodeGPUMemoryPercentage := prometheus.NewDesc(
+		"nodeGPUMemoryPercentage",
+		"GPU Memory Allocated Percentage on a certain GPU",
+		[]string{"nodeid", "deviceuuid"}, nil,
+	)
 	nu := sher.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices {
-			nodevGPUMemoryLimitDesc := prometheus.NewDesc(
-				"vGPUDeviceMemoryLimit",
-				"Device memory limit for a certain GPU",
-				[]string{"nodeid", "deviceuuid"}, nil,
-			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
-				float64(devs.Totalmem),
+				float64(devs.Totalmem*1024*1024),
 				nodeID, devs.Id,
-			)
-			nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
-				"vGPUDeviceMemoryAllocated",
-				"Device memory allocated for a certain GPU",
-				[]string{"nodeid", "deviceuuid"}, nil,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem),
-				nodeID, devs.Id,
-			)
-			nodevGPUCoreAllocatedDesc := prometheus.NewDesc(
-				"vGPUDeviceCoreAllocated",
-				"Device core allocated for a certain GPU",
-				[]string{"nodeid", "deviceuuid"}, nil,
-			)
-			ch <- prometheus.MustNewConstMetric(
-				nodevGPUCoreAllocatedDesc,
-				prometheus.GaugeValue,
-				float64(devs.Usedcores),
-				nodeID, devs.Id,
-			)
-			nodevGPUSharedNumDesc := prometheus.NewDesc(
-				"vGPUDeviceSharedNum",
-				"Number of containers sharing this GPU",
-				[]string{"nodeid", "deviceuuid"}, nil,
+				float64(devs.Usedmem*1024*1024),
+				nodeID, devs.Id, fmt.Sprint(devs.Usedcores),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
@@ -118,9 +124,83 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				float64(devs.Used),
 				nodeID, devs.Id,
 			)
+
+			ch <- prometheus.MustNewConstMetric(
+				nodeGPUCoreAllocatedDesc,
+				prometheus.GaugeValue,
+				float64(devs.Usedcores),
+				nodeID, devs.Id,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				nodeGPUOverview,
+				prometheus.GaugeValue,
+				float64(devs.Usedmem*1024*1024),
+				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				nodeGPUMemoryPercentage,
+				prometheus.GaugeValue,
+				float64(devs.Usedmem)/float64(devs.Totalmem),
+				nodeID, devs.Id,
+			)
 		}
 	}
 
+	ctrvGPUDeviceAllocatedDesc := prometheus.NewDesc(
+		"vGPUPodsDeviceAllocated",
+		"vGPU Allocated from pods",
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
+	)
+	ctrvGPUdeviceAllocatedMemoryPercentageDesc := prometheus.NewDesc(
+		"vGPUMemoryPercentage",
+		"vGPU memory percentage allocated from a container",
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+	)
+	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
+		"vGPUCorePercentage",
+		"vGPU core allocated from a container",
+		[]string{"namespace", "nmodename", "podname", "containeridx", "deviceuuid"}, nil,
+	)
+	schedpods, _ := sher.GetScheduledPods()
+	for _, val := range schedpods {
+		for ctridx, ctrval := range val.Devices {
+			for _, ctrdevval := range ctrval {
+				fmt.Println("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+				ch <- prometheus.MustNewConstMetric(
+					ctrvGPUDeviceAllocatedDesc,
+					prometheus.GaugeValue,
+					float64(ctrdevval.Usedmem*1024*1024),
+					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
+				var totaldev int32
+				found := false
+				for _, ni := range *nu {
+					for _, nodedev := range ni.Devices {
+						fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
+						if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
+							totaldev = nodedev.Totalmem
+							found = true
+							break
+						}
+					}
+					if found {
+						break
+					}
+				}
+				if totaldev > 0 {
+					ch <- prometheus.MustNewConstMetric(
+						ctrvGPUdeviceAllocatedMemoryPercentageDesc,
+						prometheus.GaugeValue,
+						float64(ctrdevval.Usedmem)/float64(totaldev),
+						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+				}
+				ch <- prometheus.MustNewConstMetric(
+					ctrvGPUdeviceAllocateCorePercentageDesc,
+					prometheus.GaugeValue,
+					float64(ctrdevval.Usedcores),
+					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+			}
+		}
+	}
 }
 
 // NewClusterManager first creates a Prometheus-ignorant ClusterManager
@@ -141,7 +221,7 @@ func initmetrics() {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	fmt.Println("Initializing metrics...")
-	reg := prometheus.NewPedanticRegistry()
+	reg := prometheus.NewRegistry()
 	config, err := rest.InClusterConfig()
 	if err != nil {
 		fmt.Println(err.Error())
