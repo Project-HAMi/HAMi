@@ -83,8 +83,8 @@ spec:
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
-          command: ["sleep","infinity"]
-          #command: ["vGPUmonitor"]
+          #command: ["sleep","infinity"]
+          command: ["vGPUmonitor"]
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
