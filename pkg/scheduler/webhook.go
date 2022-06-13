@@ -71,6 +71,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		if nums[i] == 0 {
 			continue
 		}
+
 		//if gpu_mems[i] != 0 {
 		//	fmt.Println("gpu_mem limit is", gpu_mems[i])
 		//}
@@ -80,6 +81,13 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			Name:  api.ContainerUID,
 			Value: fmt.Sprintf("%v/%v", uid, c.Name),
 		})
+		priority, ok := pod.Spec.Containers[i].Resources.Limits[corev1.ResourceName(util.ResourcePriority)]
+		if ok {
+			c.Env = append(c.Env, corev1.EnvVar{
+				Name:  api.TaskPriority,
+				Value: fmt.Sprint(priority.Value()),
+			})
+		}
 	}
 	if total == 0 {
 		return admission.Allowed(fmt.Sprintf("no resource %v", util.ResourceName))

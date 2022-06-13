@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
@@ -22,6 +23,10 @@ type hostGPUPid struct {
 	hostGPUPid int
 	mtime      uint64
 }
+
+type UtilizationPerDevice []int
+
+var mutex sync.Mutex
 
 func setcGgroupDriver() int {
 	// 1 for cgroupfs 2 for systemd
@@ -74,6 +79,9 @@ func getUsedGPUPid() ([]uint, error) {
 
 func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 	var pids []string
+	mutex.Lock()
+	defer mutex.Unlock()
+
 	if cgroupDriver == 0 {
 		cgroupDriver = setcGgroupDriver()
 	}
@@ -128,10 +136,13 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 			}
 		}
 	}
-	fmt.Println("usedHostGPUArray=", usedGPUHostArray)
+	//fmt.Println("usedHostGPUArray=", usedGPUHostArray)
 	sort.Slice(usedGPUHostArray, func(i, j int) bool { return usedGPUHostArray[i].mtime > usedGPUHostArray[j].mtime })
+	if sr == nil || sr.sr == nil {
+		return nil
+	}
 	for idx, val := range sr.sr.procs {
-		fmt.Println("pid=", val.pid)
+		//fmt.Println("pid=", val.pid)
 		if val.pid == 0 {
 			break
 		}
@@ -147,10 +158,75 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 
 }
 
+func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
+	for _, devuuid := range pu.sr.uuids {
+		_, ok := utSwitchOn[string(devuuid.uuid[:])]
+		if ok {
+			for i := 0; i < p; i++ {
+				if utSwitchOn[string(devuuid.uuid[:])][i] > 0 {
+					return true
+				}
+			}
+			if utSwitchOn[string(devuuid.uuid[:])][p] > 1 {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func Observe(srlist *[]podusage) error {
+	utSwitchOn := map[string]UtilizationPerDevice{}
+
+	for idx, val := range *srlist {
+		if val.sr == nil {
+			continue
+		}
+		//fmt.Println("idx=", idx)
+		/*for ii, _ := range val.sr.uuids {
+			fmt.Println("using uuid=", string(val.sr.uuids[ii].uuid[:]))
+		}*/
+		if val.sr.recentKernel > 0 {
+			(*srlist)[idx].sr.recentKernel--
+			if (*srlist)[idx].sr.recentKernel > 0 {
+				for _, devuuid := range val.sr.uuids {
+					// Null device condition
+					if devuuid.uuid[0] == 0 {
+						continue
+					}
+					if len(utSwitchOn[string(devuuid.uuid[:])]) == 0 {
+						utSwitchOn[string(devuuid.uuid[:])] = []int{0, 0}
+					}
+					utSwitchOn[string(devuuid.uuid[:])][val.sr.priority]++
+				}
+			}
+		}
+	}
+	fmt.Println("utSwitchon=", utSwitchOn)
+	for idx, val := range *srlist {
+		if val.sr == nil {
+			continue
+		}
+		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
+			fmt.Println("Setting UtilizationSwitch to on")
+			(*srlist)[idx].sr.utilizationSwitch = 1
+		} else {
+			fmt.Println("Setting UtilizationSwitch to off")
+			(*srlist)[idx].sr.utilizationSwitch = 0
+		}
+	}
+	return nil
+}
+
 func watchAndFeedback() {
+	nvml.Init()
 	for {
-		time.Sleep(time.Second * 5)
+		time.Sleep(time.Second * 2)
+		//if len(srlist) == 0 {
+		srlist, _ = monitorpath()
+		//}
 		//fmt.Println("watchAndFeedback", srlist)
+		Observe(&srlist)
 		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
 		if err != nil {
 			fmt.Println("err=", err.Error())

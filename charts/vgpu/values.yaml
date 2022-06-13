@@ -9,6 +9,7 @@ resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
 resourceMemPercentage: "nvidia.com/gpumem-percentage"
 resourceCores: "nvidia.com/gpucores"
+resourcePriority: "nvidia.com/priority"
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -33,8 +34,8 @@ scheduler:
       - --leader-elect=false
       - -v=4
   extender:
-    image: "4pdosc/k8s-vgpu:latest"
-    #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+    #image: "4pdosc/k8s-vgpu:latest"
+    image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
     imagePullPolicy: Always
     extraArgs:
       - --debug
@@ -61,10 +62,10 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vgpu:latest"
-  #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
-  monitorimage: "4pdosc/k8s-vgpu:latest"
-  #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+  #image: "4pdosc/k8s-vgpu:latest"
+  image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+  #monitorimage: "4pdosc/k8s-vgpu:latest"
+  monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: Always
   deviceSplitCount: 10

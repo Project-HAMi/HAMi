@@ -40,6 +40,7 @@ var (
 	ResourceMem           string
 	ResourceCores         string
 	ResourceMemPercentage string
+	ResourcePriority      string
 	DebugMode             bool
 )
 

@@ -32,6 +32,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
+	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
 	klog.InitFlags(fs)
 	return fs

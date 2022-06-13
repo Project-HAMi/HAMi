@@ -35,6 +35,8 @@ github.com/BurntSushi/xgb v0.0.0-20160522181843-27f122750802/go.mod h1:IVnqGOEym
 github.com/Masterminds/semver v1.5.0/go.mod h1:MB6lktGJrhw8PrUyiEoblNEGEQ+RzHPF078ddwwvV3Y=
 github.com/NVIDIA/go-gpuallocator v0.2.1 h1:8EodCWEPjDl5Q+2ONB2EdwFJpcGnmACmlgLB8RkP/W0=
 github.com/NVIDIA/go-gpuallocator v0.2.1/go.mod h1:+2ke2/CGym+5xSxHfkIFi9Oof1Kj0KMSXgQDpk39ikk=
+github.com/NVIDIA/go-nvml v0.11.6-0 h1:tugQzmaX84Y/6+03wZ/MAgcpfSKDkvkAWeuxFNLHmxY=
+github.com/NVIDIA/go-nvml v0.11.6-0/go.mod h1:hy7HYeQy335x6nEss0Ne3PYqleRa6Ct+VKD9RQ4nyFs=
 github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52 h1:GaJrAt0sWaBLk4hB6juBCYlhi9Otng/EpgD4QLqp/T4=
 github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52/go.mod h1:oKPJa5eOTkWvlT4/Y4D8Nds44Fzmww5HUK+xwO+DwTA=
 github.com/NVIDIA/gpu-monitoring-tools/bindings/go/dcgm v0.0.0-20210325210537-29b4f1784f18/go.mod h1:8qXwltEzU3idjUcVpMOv3FNgxxbDeXZPGMLyc/khWiY=
