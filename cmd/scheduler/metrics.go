@@ -109,13 +109,13 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
-				float64(devs.Totalmem*1024*1024),
+				float64(devs.Totalmem)*float64(1024)*float64(1024),
 				nodeID, devs.Id,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem*1024*1024),
+				float64(devs.Usedmem)*float64(1024)*float64(1024),
 				nodeID, devs.Id, fmt.Sprint(devs.Usedcores),
 			)
 			ch <- prometheus.MustNewConstMetric(
@@ -134,7 +134,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem*1024*1024),
+				float64(devs.Usedmem)*float64(1024)*float64(1024),
 				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
@@ -169,7 +169,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				ch <- prometheus.MustNewConstMetric(
 					ctrvGPUDeviceAllocatedDesc,
 					prometheus.GaugeValue,
-					float64(ctrdevval.Usedmem*1024*1024),
+					float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
 					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
 				var totaldev int32
 				found := false

@@ -58,6 +58,7 @@ spec:
             - --resource-mem={{ .Values.resourceMem }}
             - --resource-cores={{ .Values.resourceCores }}
             - --resource-mem-percentage={{ .Values.resourceMemPercentage }}
+            - --resource-priority={{ .Values.resourcePriority }}
             - --http_bind=0.0.0.0:443
             - --grpc_bind=0.0.0.0:1080
             - --cert_file=/tls/tls.crt

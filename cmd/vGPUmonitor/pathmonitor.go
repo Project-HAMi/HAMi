@@ -8,6 +8,7 @@ import (
 	"net"
 	"os"
 	"strings"
+	"sync"
 
 	vGPUmonitor "4pd.io/k8s-vgpu/cmd/vGPUmonitor/noderpc"
 	"google.golang.org/grpc"
@@ -19,6 +20,8 @@ type podusage struct {
 	idstr string
 	sr    *sharedRegionT
 }
+
+var lock sync.Mutex
 
 func checkfiles(fpath string) (*sharedRegionT, error) {
 	fmt.Println("Checking path", fpath)
@@ -43,7 +46,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 		if err != nil {
 			fmt.Println("err=", err.Error())
 		} else {
-			fmt.Println("sr=", sr.utilizationSwitch, sr.recentKernel, sr.priority)
+			//fmt.Println("sr=", sr.utilizationSwitch, sr.recentKernel, sr.priority)
 			return sr, nil
 		}
 	}
@@ -51,13 +54,15 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 }
 
 func monitorpath() ([]podusage, error) {
+	lock.Lock()
+	defer lock.Unlock()
 	srlist := []podusage{}
 	files, err := ioutil.ReadDir(containerpath)
 	if err != nil {
 		return srlist, err
 	}
 	for _, val := range files {
-		fmt.Println("val=", val.Name())
+		//fmt.Println("val=", val.Name())
 		dirname := containerpath + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
 		if err1 != nil {

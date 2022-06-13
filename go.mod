@@ -7,7 +7,6 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.2.1
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52
 	github.com/fsnotify/fsnotify v1.4.9
-	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/google/uuid v1.2.0 // indirect
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
