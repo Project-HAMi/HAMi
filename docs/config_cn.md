@@ -24,3 +24,5 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   字符串类型，申请vgpu显存比例资源名，默认: "nvidia.com/gpumem-percentage"
 * `resourceCores:`
   字符串类型, 申请vgpu算力资源名, 默认: "nvidia.com/cores"
+* `resourcePriority:`
+  字符串类型，表示申请任务的任务优先级，默认: "nvidia.com/priority"
