@@ -110,11 +110,10 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 			devs := make([]util.ContainerDevice, 0, n.Nums)
 			countremains := 1
 			for i := len(node.Devices) - 1; i >= 0; i-- {
-				if node.Devices[i].Count <= node.Devices[i].Used {
-					countremains = 0
-					break
-				}
 				klog.Info("Scoring pod ", n.Memreq, ":", n.MemPercentagereq, ":", n.Coresreq, ":", n.Nums)
+				if node.Devices[i].Count <= node.Devices[i].Used {
+					continue
+				}
 				if n.MemPercentagereq != 101 {
 					n.Memreq = node.Devices[i].Totalmem * n.MemPercentagereq / 100
 				}
@@ -147,6 +146,9 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []u
 						Usedmem:   n.Memreq,
 						Usedcores: n.Coresreq,
 					})
+				}
+				if n.Nums == 0 {
+					break
 				}
 			}
 			if countremains == 0 || n.Nums > 0 {
