@@ -1,4 +1,4 @@
-# 配置
+# 全局配置
 
 你可以在安装过程中，通过`-set`来修改以下的客制化参数，例如：
 
@@ -26,3 +26,12 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   字符串类型, 申请vgpu算力资源名, 默认: "nvidia.com/cores"
 * `resourcePriority:`
   字符串类型，表示申请任务的任务优先级，默认: "nvidia.com/priority"
+
+# 容器配置（在容器的环境变量中指定）
+
+* `GPU_CORE_UTILIZATION_POLICY:`
+  字符串类型，"default", "force", "disable"
+  代表容器算力限制策略， "default"为默认，"force"为强制限制算力，一般用于测试算力限制的功能，"disable"为忽略算力限制
+* `ACTIVE_OOM_KILLER:`
+  字符串类型，"true", "false"
+  代表容器是否会因为超用显存而被终止执行，"true"为会，"false"为不会

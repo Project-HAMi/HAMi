@@ -1,4 +1,4 @@
-# Config
+# Global Config
 
 you can customize your vGPU support by setting the following parameters using `-set`, for example
 
@@ -26,3 +26,18 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   String type, vgpu cores resource name, default: "nvidia.com/cores"
 * `resourcePriority:`
   String type, vgpu task priority name, default: "nvidia.com/priority"
+
+# Container config envs
+
+* `GPU_CORE_UTILIZATION_POLICY:`
+  String type, "default", "force", "disable"
+  "default" means the dafault utilization policy
+  "force" means the container will always limit the core utilization below "nvidia.com/gpucores"
+  "disable" means the container will ignore the utilization limitation set by "nvidia.com/gpucores" during task execution
+
+* `ACTIVE_OOM_KILLER:`
+  String type, "true","false"
+  "true" means the task may be killed if exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
+  "false" means the task will not be killed even it exceeds the limitation.
+
+  
