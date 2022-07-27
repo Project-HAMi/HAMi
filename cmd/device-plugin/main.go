@@ -81,6 +81,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.SchedulerEndpoint, "scheduler-endpoint", "127.0.0.1:9090", "scheduler extender endpoint")
 	rootCmd.Flags().IntVar(&config.SchedulerTimeout, "scheduler-timeout", 10, "scheduler connection timeout")
 	rootCmd.Flags().StringVar(&config.NodeName, "node-name", viper.GetString("node-name"), "node name")
+	rootCmd.Flags().BoolVar(&config.DisableCoreLimit, "disable-core-limit", false, "If set, the core utilization limit will be ignored")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
