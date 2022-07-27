@@ -12,6 +12,8 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   Integer type, by default: equals 10. Maximum tasks assigned to a simple GPU device.
 * `devicePlugin.migstrategy:`
   String type, "none" for ignoring MIG features or "mixed" for allocating MIG device by seperate resources. Default "none"
+* `devicePlugin.disablecorelimit:`
+  String type, "true" for disable core limit, "false" for enable core limit, default: false
 * `scheduler.defaultMem:` 
   Integer type, by default: 5000. The default device memory of the current task, in MB
 * `scheduler.defaultCores:` 

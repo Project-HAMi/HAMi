@@ -360,6 +360,9 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 		}
 		response.Envs[api.PluginRuntimeSocket] = fmt.Sprintf("unix://%v", config.RuntimeSocketFlag)
+		if config.DisableCoreLimit {
+			response.Envs[api.CoreLimitSwitch] = "disable"
+		}
 		response.Mounts = append(response.Mounts,
 			&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
 				HostPath: "/usr/local/vgpu/libvgpu.so",
