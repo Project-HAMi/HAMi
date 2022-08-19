@@ -1,0 +1,97 @@
+# Default values for 4pd-vgpu.
+
+nameOverride: ""
+fullnameOverride: ""
+
+imagePullSecrets: []
+
+#Nvidia GPU Parameters
+resourceName: "nvidia.com/gpu"
+resourceMem: "nvidia.com/gpumem"
+resourceMemPercentage: "nvidia.com/gpumem-percentage"
+resourceCores: "nvidia.com/gpucores"
+resourcePriority: "nvidia.com/priority"
+
+#MLU Parameters
+mluResourceName: "cambricon.com/mlunum"
+mluResourceMem: "cambricon.com/mlumem"
+
+schedulerName: "4pd-scheduler"
+
+podSecurityPolicy:
+  enabled: false
+
+global:
+  labels: {}
+  annotations: {}
+
+scheduler:
+  defaultMem: 5000
+  defaultCores: 5
+  kubeScheduler:
+    imageTag: "v1.20.0"
+    image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
+    imagePullPolicy: IfNotPresent
+    extraNewArgs:
+      - --config=/config/config.yaml
+      - -v=4
+    extraArgs:
+      - --policy-config-file=/config/config.json
+      - --leader-elect=false
+      - -v=4
+  extender:
+    image: "4pdosc/k8s-vgpu:latest"
+    #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+    imagePullPolicy: Always
+    extraArgs:
+      - --debug
+      - -v=4
+  podAnnotations: {}
+  nodeSelector: {}
+  tolerations: []
+  #serviceAccountName: "4pd-vgpu-scheduler-sa"
+  patch:
+    image: docker.io/jettech/kube-webhook-certgen:v1.5.2
+    imageNew: liangjw/kube-webhook-certgen:v1.1.1
+    imagePullPolicy: IfNotPresent
+    priorityClassName: ""
+    podAnnotations: {}
+    nodeSelector: {}
+    tolerations: []
+    runAsUser: 2000
+
+  service:
+    httpPort: 443
+    monitorPort: 31993
+    grpcPort: 1080
+    labels: {}
+    annotations: {}
+
+devicePlugin:
+  image: "4pdosc/k8s-vgpu:latest"
+  #image: "m7-ieg-pico-test01:5000/k8s-vgpu-0727:latest"
+  monitorimage: "4pdosc/k8s-vgpu:latest"
+  #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+  monitorctrPath: /tmp/vgpu/containers
+  imagePullPolicy: Always
+  deviceSplitCount: 10
+  deviceMemoryScaling: 1
+  migStrategy: "none"
+  disablecorelimit: "false"
+  extraArgs:
+    - -v=4
+  
+  service:
+    httpPort: 31992
+    
+  pluginPath: /var/lib/kubelet/device-plugins
+  #libPath: /usr/local/vgpu
+  sockPath: /var/lib/4pdvgpu
+
+  podAnnotations: {}
+  nvidianodeSelector:
+    gpu: "on"
+  mlunodeSelector:
+    mlu: "on"
+  tolerations: []
+

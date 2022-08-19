@@ -1,0 +1,57 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "4pd-vgpu.scheduler" . }}
+  labels:
+    app.kubernetes.io/component: 4pd-scheduler
+    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+data:
+  config.json: |
+    {
+        "kind": "Policy",
+        "apiVersion": "v1",
+        "extenders": [
+            {
+                "urlPrefix": "https://127.0.0.1:443",
+                "filterVerb": "filter",
+                "enableHttps": true,
+                "weight": 1,
+                "nodeCacheCapable": true,
+                "httpTimeout": 30000000000,
+                "tlsConfig": {
+                    "insecure": true
+                },
+                "managedResources": [
+                    {
+                        "name": "{{ .Values.resourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.resourceMem }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.resourceCores }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.resourceMemPercentage }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.resourcePriority }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceMem }}",
+                        "ignoredByScheduler": true   
+                    }
+                ],
+                "ignoreable": false
+            }
+        ]
+    }

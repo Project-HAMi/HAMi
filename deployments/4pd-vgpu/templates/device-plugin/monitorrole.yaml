@@ -12,4 +12,16 @@ rules:
       - create
       - watch
       - list
+      - update
+      - patch
+  - apiGroups:
+      - ""
+    resources:
+      - nodes
+    verbs:
+      - get
+      - update
+      - list
+      - patch
+    
     
