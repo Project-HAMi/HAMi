@@ -170,13 +170,13 @@ func (s *migStrategyMixed) GetPlugins(cache *DeviceCache) []*NvidiaDevicePlugin 
 	devices := NewMIGCapableDevices()
 
 	if err := devices.AssertAllMigEnabledDevicesAreValid(); err != nil {
-		panic(fmt.Errorf("At least one device with migEnabled=true was not configured correctly: %v", err))
+		panic(fmt.Errorf("at least one device with migEnabled=true was not configured correctly: %v", err))
 	}
 
 	resources := make(MigStrategyResourceSet)
 	migs, err := devices.GetAllMigDevices()
 	if err != nil {
-		panic(fmt.Errorf("Unable to retrieve list of MIG devices: %v", err))
+		panic(fmt.Errorf("unable to retrieve list of MIG devices: %v", err))
 	}
 	for _, mig := range migs {
 		r := s.getResourceName(mig)

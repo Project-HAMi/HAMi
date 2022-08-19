@@ -4,11 +4,18 @@ nameOverride: ""
 fullnameOverride: ""
 
 imagePullSecrets: []
+
+#Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
 resourceMemPercentage: "nvidia.com/gpumem-percentage"
 resourceCores: "nvidia.com/gpucores"
 resourcePriority: "nvidia.com/priority"
+
+#MLU Parameters
+mluResourceName: "cambricon.com/mlunum"
+mluResourceMem: "cambricon.com/mlumem"
+
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -82,7 +89,9 @@ devicePlugin:
   sockPath: /var/lib/4pdvgpu
 
   podAnnotations: {}
-  nodeSelector:
+  nvidianodeSelector:
     gpu: "on"
+  mlunodeSelector:
+    mlu: "on"
   tolerations: []
 

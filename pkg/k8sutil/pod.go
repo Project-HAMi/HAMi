@@ -20,14 +20,16 @@ import (
 	"4pd.io/k8s-vgpu/pkg/scheduler/config"
 	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
-func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
+func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 	resourceName := corev1.ResourceName(util.ResourceName)
 	resourceMem := corev1.ResourceName(util.ResourceMem)
 	resourceMemPercentage := corev1.ResourceName(util.ResourceMemPercentage)
 	resourceCores := corev1.ResourceName(util.ResourceCores)
-	counts = make([]util.ContainerDeviceRequest, len(pod.Spec.Containers))
+	counts = make([][]util.ContainerDeviceRequest, len(pod.Spec.Containers))
+	//Count Nvidia GPU
 	for i := 0; i < len(pod.Spec.Containers); i++ {
 		v, ok := pod.Spec.Containers[i].Resources.Limits[resourceName]
 		if !ok {
@@ -67,15 +69,46 @@ func Resourcereqs(pod *corev1.Pod) (counts []util.ContainerDeviceRequest) {
 						corenum = int32(corenums)
 					}
 				}
-				counts[i] = util.ContainerDeviceRequest{
+				counts[i] = append(counts[i], util.ContainerDeviceRequest{
 					Nums:             int32(n),
+					Type:             util.NvidiaGPUDevice,
 					Memreq:           int32(memnum),
 					MemPercentagereq: int32(mempnum),
 					Coresreq:         int32(corenum),
+				})
+			}
+		}
+		//Count Cambricon MLU
+		klog.Infof("Counting mlu devices")
+		mluResourceCount := corev1.ResourceName(util.MLUResourceCount)
+		mluResourceMem := corev1.ResourceName(util.MLUResourceMemory)
+		v, ok = pod.Spec.Containers[i].Resources.Limits[mluResourceCount]
+		if !ok {
+			v, ok = pod.Spec.Containers[i].Resources.Requests[mluResourceCount]
+		}
+		if ok {
+			if n, ok := v.AsInt64(); ok {
+				klog.Info("Found mlu devices")
+				memnum := 0
+				mem, ok := pod.Spec.Containers[i].Resources.Limits[mluResourceMem]
+				if !ok {
+					mem, ok = pod.Spec.Containers[i].Resources.Requests[mluResourceMem]
 				}
+				if ok {
+					memnums, ok := mem.AsInt64()
+					if ok {
+						memnum = int(memnums)
+					}
+				}
+				counts[i] = append(counts[i], util.ContainerDeviceRequest{
+					Nums:   int32(n),
+					Type:   util.CambriconMLUDevice,
+					Memreq: int32(memnum),
+				})
 			}
 		}
 	}
+	klog.Infoln("counts=", counts)
 	return counts
 }
 

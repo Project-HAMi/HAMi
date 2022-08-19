@@ -1,6 +1,7 @@
 GO=go
 GO111MODULE=on
-CMDS=scheduler device-plugin vGPUmonitor nvidia-container-runtime
+CMDS=scheduler vGPUmonitor
+DEVICES=mlu nvidia
 OUTPUT_DIR=bin
 
 VERSION ?= unknown
@@ -17,10 +18,13 @@ proto:
 	$(GO) get github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
 	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
 
-build: $(CMDS)
+build: $(CMDS) $(DEVICES)
 
 $(CMDS):
 	$(GO) build -ldflags '-s -w -X 4pd.io/k8s-vgpu/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
+
+$(DEVICES):
+	$(GO) build -ldflags '-s -w -X 4pd.io/k8s-vgpu/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
 
 clean:
 	$(GO) clean -r -x ./cmd/...

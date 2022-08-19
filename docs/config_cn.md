@@ -3,7 +3,7 @@
 你可以在安装过程中，通过`-set`来修改以下的客制化参数，例如：
 
 ```
-helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
+helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 ```
 
 * `devicePlugin.deviceSplitCount:` 
@@ -12,6 +12,8 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   浮点数类型，预设值是1。NVIDIA装置显存使用比例，可以大于1（启用虚拟显存，实验功能）。对于有*M*显存大小的NVIDIA GPU，如果我们配置`devicePlugin.deviceMemoryScaling`参数为*S*，在部署了我们装置插件的Kubenetes集群中，这张GPU分出的vGPU将总共包含 `S * M` 显存。
 * `devicePlugin.migStrategy:`
   字符串类型，目前支持"none“与“mixed“两种工作方式，前者忽略MIG设备，后者使用专门的资源名称指定MIG设备，使用详情请参考mix_example.yaml，默认为"none"
+* `devicePlugin.disablecorelimit:`
+  字符串类型，"true"为关闭算力限制，"false"为启动算力限制，默认为"false"
 * `scheduler.defaultMem:`
   整数类型，预设值为5000，表示不配置显存时使用的默认显存大小，单位为MB
 * `scheduler.defaultCores:`

@@ -23,7 +23,6 @@ import (
 	"net/http"
 
 	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/k8sutil"
 	"4pd.io/k8s-vgpu/pkg/scheduler/config"
 	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
@@ -62,34 +61,64 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	//klog.V(1).Infof("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
 	fmt.Printf("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
-	nums := k8sutil.ResourceNums(pod, corev1.ResourceName(util.ResourceName))
-	//gpu_mems := k8sutil.ResourceNums(pod, corev1.ResourceName("nvidia.com/gpu_device_memory"))
-	total := 0
-	// use request uid
-	uid := req.UID
-	for i := 0; i < len(nums); i++ {
-		if nums[i] == 0 {
-			continue
+	hasResource := false
+	for idx, ctr := range pod.Spec.Containers {
+		c := &pod.Spec.Containers[idx]
+		if ctr.SecurityContext != nil {
+			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
+				continue
+			}
+		}
+		/*mlu related */
+		n, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceMemory)]
+		if ok {
+			pass := true
+			gpushare, ok := ctr.Resources.Limits[corev1.ResourceName(util.ResourceMem)]
+			if ok {
+				if gpushare.Value() > 0 {
+					pass = false
+				}
+			}
+			if pass {
+				if c.Lifecycle == nil {
+					c.Lifecycle = &corev1.Lifecycle{PostStart: nil}
+				}
+				c.Lifecycle.PostStart = &corev1.Handler{
+					Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
+				if !n.ToDec().IsZero() {
+					privileged := true
+					if c.SecurityContext == nil {
+						c.SecurityContext = &corev1.SecurityContext{Privileged: &privileged}
+					}
+					c.SecurityContext.Privileged = &privileged
+				}
+			}
 		}
 
-		//if gpu_mems[i] != 0 {
-		//	fmt.Println("gpu_mem limit is", gpu_mems[i])
-		//}
-		total += nums[i]
-		c := &pod.Spec.Containers[i]
-		c.Env = append(c.Env, corev1.EnvVar{
-			Name:  api.ContainerUID,
-			Value: fmt.Sprintf("%v/%v", uid, c.Name),
-		})
-		priority, ok := pod.Spec.Containers[i].Resources.Limits[corev1.ResourceName(util.ResourcePriority)]
+		/*gpu related */
+		priority, ok := ctr.Resources.Limits[corev1.ResourceName(util.ResourcePriority)]
 		if ok {
 			c.Env = append(c.Env, corev1.EnvVar{
 				Name:  api.TaskPriority,
 				Value: fmt.Sprint(priority.Value()),
 			})
 		}
+		_, ok = ctr.Resources.Limits[corev1.ResourceName(util.ResourceName)]
+		if !ok {
+			_, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceCount)]
+			if !ok {
+				continue
+			}
+		}
+		hasResource = true
+		/*
+			c.Env = append(c.Env, corev1.EnvVar{
+				Name:  api.ContainerUID,
+				Value: fmt.Sprintf("%v/%v", req.UID, c.Name),
+			})*/
 	}
-	if total == 0 {
+
+	if !hasResource {
 		return admission.Allowed(fmt.Sprintf("no resource %v", util.ResourceName))
 	}
 	if len(config.SchedulerName) > 0 {

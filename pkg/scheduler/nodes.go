@@ -52,18 +52,26 @@ type NodeUsage struct {
 }
 
 type nodeManager struct {
-	nodes map[string]NodeInfo
+	nodes map[string]*NodeInfo
 	mutex sync.Mutex
 }
 
 func (m *nodeManager) init() {
-	m.nodes = make(map[string]NodeInfo)
+	m.nodes = make(map[string]*NodeInfo)
 }
 
-func (m *nodeManager) addNode(nodeID string, nodeInfo NodeInfo) {
+func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.nodes[nodeID] = nodeInfo
+	_, ok := m.nodes[nodeID]
+	if ok {
+		tmp := make([]DeviceInfo, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
+		tmp = append(tmp, m.nodes[nodeID].Devices...)
+		tmp = append(tmp, nodeInfo.Devices...)
+		m.nodes[nodeID].Devices = tmp
+	} else {
+		m.nodes[nodeID] = nodeInfo
+	}
 }
 
 func (m *nodeManager) delNode(nodeID string) {
@@ -72,15 +80,15 @@ func (m *nodeManager) delNode(nodeID string) {
 	delete(m.nodes, nodeID)
 }
 
-func (m *nodeManager) GetNode(nodeID string) (NodeInfo, error) {
+func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	if n, ok := m.nodes[nodeID]; ok {
 		return n, nil
 	}
-	return NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	return &NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 }
 
-func (m *nodeManager) ListNodes() (map[string]NodeInfo, error) {
+func (m *nodeManager) ListNodes() (map[string]*NodeInfo, error) {
 	return m.nodes, nil
 }

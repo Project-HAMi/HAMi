@@ -41,6 +41,14 @@ data:
                     {
                         "name": "{{ .Values.resourcePriority }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceMem }}",
+                        "ignoredByScheduler": true   
                     }
                 ],
                 "ignoreable": false
