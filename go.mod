@@ -7,17 +7,21 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.2.1
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20210624153948-4902944b3b52
 	github.com/fsnotify/fsnotify v1.4.9
+	github.com/gogo/protobuf v1.3.2 // indirect
+	github.com/golang/mock v1.4.1
 	github.com/google/uuid v1.2.0 // indirect
+	github.com/jessevdk/go-flags v1.4.0
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/onsi/ginkgo v1.16.4
+	github.com/onsi/gomega v1.13.0
 	github.com/opencontainers/runtime-spec v1.0.3-0.20210326190908-1c3f411f0417
-	github.com/pelletier/go-toml v1.8.1
+	github.com/pelletier/go-toml v1.8.1 // indirect
 	github.com/prometheus/client_golang v1.11.0
 	github.com/sirupsen/logrus v1.8.1
 	github.com/spf13/cobra v1.1.3
 	github.com/spf13/jwalterweatherman v1.1.0 // indirect
 	github.com/spf13/viper v1.7.0
 	github.com/stretchr/testify v1.7.0
-	github.com/tsaikd/KDGoLib v0.0.0-20191001134900-7f3cf518e07d
 	golang.org/x/exp v0.0.0-20200224162631-6cc2880d07d6
 	golang.org/x/net v0.0.0-20210428140749-89ef3d95e781
 	google.golang.org/grpc v1.39.0

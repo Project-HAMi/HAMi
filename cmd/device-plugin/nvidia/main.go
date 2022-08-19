@@ -19,14 +19,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
-	"net"
 	"os"
 	"strings"
 	"syscall"
 
 	"4pd.io/k8s-vgpu/pkg/version"
 
-	"4pd.io/k8s-vgpu/pkg/api"
 	device_plugin "4pd.io/k8s-vgpu/pkg/device-plugin"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/util"
@@ -34,7 +32,6 @@ import (
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
-	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -151,23 +148,6 @@ func start() error {
 	register := device_plugin.NewDeviceRegister(cache)
 	register.Start()
 	defer register.Stop()
-	rt := device_plugin.NewVGPURuntimeService(cache)
-
-	// start runtime grpc server
-	lisGrpc, err := net.Listen("unix", config.RuntimeSocketFlag)
-	if err != nil {
-		klog.Fatalf("bind unix socket %v failed, %v", err)
-	}
-	defer lisGrpc.Close()
-	runtimeServer := grpc.NewServer()
-	api.RegisterVGPURuntimeServiceServer(runtimeServer, rt)
-	go func() {
-		err := runtimeServer.Serve(lisGrpc)
-		if err != nil {
-			klog.Fatal(err)
-		}
-	}()
-	defer runtimeServer.Stop()
 
 	var plugins []*device_plugin.NvidiaDevicePlugin
 restart:
@@ -176,7 +156,6 @@ restart:
 	for _, p := range plugins {
 		p.Stop()
 	}
-
 	klog.Info("Retreiving plugins.")
 	migStrategy, err := device_plugin.NewMigStrategy(migStrategyFlag)
 	if err != nil {

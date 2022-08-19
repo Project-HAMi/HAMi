@@ -17,68 +17,115 @@
 package routes
 
 import (
-    "4pd.io/k8s-vgpu/pkg/scheduler"
-    "bytes"
-    "encoding/json"
-    "io"
-    "net/http"
+	"bytes"
+	"encoding/json"
+	"fmt"
+	"io"
+	"net/http"
 
-    "github.com/julienschmidt/httprouter"
-    "k8s.io/klog/v2"
-    extenderv1 "k8s.io/kube-scheduler/extender/v1"
+	"4pd.io/k8s-vgpu/pkg/scheduler"
+
+	"github.com/julienschmidt/httprouter"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/klog/v2"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
 
 func checkBody(w http.ResponseWriter, r *http.Request) {
-    if r.Body == nil {
-        http.Error(w, "Please send a request body", 400)
-        return
-    }
+	if r.Body == nil {
+		http.Error(w, "Please send a request body", 400)
+		return
+	}
 }
 
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
-    return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-        checkBody(w, r)
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		checkBody(w, r)
 
-        var buf bytes.Buffer
-        body := io.TeeReader(r.Body, &buf)
+		var buf bytes.Buffer
+		body := io.TeeReader(r.Body, &buf)
 
-        var extenderArgs extenderv1.ExtenderArgs
-        var extenderFilterResult *extenderv1.ExtenderFilterResult
+		var extenderArgs extenderv1.ExtenderArgs
+		var extenderFilterResult *extenderv1.ExtenderFilterResult
 
-        if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
-            extenderFilterResult = &extenderv1.ExtenderFilterResult{
-                Error: err.Error(),
-            }
-        } else {
-            extenderFilterResult, err = s.Filter(extenderArgs)
-            if err != nil {
-                klog.Errorf("pod %v filter error, %v", extenderArgs.Pod.Name, err)
-                extenderFilterResult = &extenderv1.ExtenderFilterResult{
-                    Error: err.Error(),
-                }
-            }
-        }
+		if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: err.Error(),
+			}
+		} else {
+			extenderFilterResult, err = s.Filter(extenderArgs)
+			if err != nil {
+				klog.Errorf("pod %v filter error, %v", extenderArgs.Pod.Name, err)
+				extenderFilterResult = &extenderv1.ExtenderFilterResult{
+					Error: err.Error(),
+				}
+			}
+		}
 
-        if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
-            klog.Errorf("Failed to marshal extenderFilterResult: %+v, %+v",
-                err, extenderFilterResult)
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusInternalServerError)
-            w.Write([]byte(err.Error()))
-        } else {
-            w.Header().Set("Content-Type", "application/json")
-            w.WriteHeader(http.StatusOK)
-            w.Write(resultBody)
-        }
-    }
+		if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
+			klog.Errorf("Failed to marshal extenderFilterResult: %+v, %+v",
+				err, extenderFilterResult)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(err.Error()))
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write(resultBody)
+		}
+	}
+}
+
+func Bind(s *scheduler.Scheduler) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		var buf bytes.Buffer
+		body := io.TeeReader(r.Body, &buf)
+		var extenderBindingArgs extenderv1.ExtenderBindingArgs
+		var extenderBindingResult *extenderv1.ExtenderBindingResult
+
+		if err := json.NewDecoder(body).Decode(&extenderBindingArgs); err != nil {
+			klog.ErrorS(err, "Decode extender binding args")
+			extenderBindingResult = &extenderv1.ExtenderBindingResult{
+				Error: err.Error(),
+			}
+		} else {
+			extenderBindingResult, err = s.Bind(extenderBindingArgs)
+		}
+
+		if response, err := json.Marshal(extenderBindingResult); err != nil {
+			klog.ErrorS(err, "Marshal binding result", "result", extenderBindingResult)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
+			w.Write([]byte(errMsg))
+		} else {
+			klog.V(5).InfoS("Return bind response", "result", extenderBindingResult)
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusOK)
+			w.Write(response)
+		}
+	}
+}
+
+func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, types.UID, string) error) *extenderv1.ExtenderBindingResult {
+	err := bindFunc(args.PodName, args.PodNamespace, args.PodUID, args.Node)
+	errMsg := ""
+	if err != nil {
+		klog.ErrorS(err, "Bind", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node, "uid", args.PodUID)
+		errMsg = err.Error()
+	}
+	return &extenderv1.ExtenderBindingResult{
+		Error: errMsg,
+	}
 }
 
 func WebHookRoute() httprouter.Handle {
-    h, err := scheduler.NewWebHook()
-    if err != nil {
-        klog.Fatalf("new web hook error, %v", err)
-    }
-    return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-        h.ServeHTTP(w, r)
-    }
+	h, err := scheduler.NewWebHook()
+	if err != nil {
+		klog.Fatalf("new web hook error, %v", err)
+	}
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.Infof("Into webhookfunc")
+		h.ServeHTTP(w, r)
+	}
 }
