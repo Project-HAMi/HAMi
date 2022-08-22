@@ -200,15 +200,8 @@ func (m *CambriconDevicePlugin) PrepareResponse(uuids []string) pluginapi.Contai
 		})
 	}
 
-	if m.options.Mode == mluShare {
-		resp.Mounts = append(resp.Mounts, &pluginapi.Mount{
-			ContainerPath: mluMemBinaryPath,
-			HostPath:      mluMemBinaryPath,
-			ReadOnly:      true,
-		})
-		if m.deviceList.hasSplitDev {
-			addDevice(&resp, mluSplitDeviceName, mluSplitDeviceName)
-		}
+	if m.deviceList.hasSplitDev {
+		addDevice(&resp, mluSplitDeviceName, mluSplitDeviceName)
 	}
 
 	devpaths := m.uuidToPath(uuids)

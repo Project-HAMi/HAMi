@@ -70,29 +70,13 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 		}
 		/*mlu related */
-		n, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceMemory)]
+		_, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceMemory)]
 		if ok {
-			pass := true
-			gpushare, ok := ctr.Resources.Limits[corev1.ResourceName(util.ResourceMem)]
-			if ok {
-				if gpushare.Value() > 0 {
-					pass = false
-				}
+			if c.Lifecycle == nil {
+				c.Lifecycle = &corev1.Lifecycle{PostStart: nil}
 			}
-			if pass {
-				if c.Lifecycle == nil {
-					c.Lifecycle = &corev1.Lifecycle{PostStart: nil}
-				}
-				c.Lifecycle.PostStart = &corev1.Handler{
-					Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
-				if !n.ToDec().IsZero() {
-					privileged := true
-					if c.SecurityContext == nil {
-						c.SecurityContext = &corev1.SecurityContext{Privileged: &privileged}
-					}
-					c.SecurityContext.Privileged = &privileged
-				}
-			}
+			c.Lifecycle.PostStart = &corev1.Handler{
+				Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
 		}
 
 		/*gpu related */

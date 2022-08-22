@@ -52,7 +52,6 @@ spec:
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
             - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
             - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
-            - --runtime-socket={{ .Values.devicePlugin.sockPath }}/vgpu.sock
             - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
