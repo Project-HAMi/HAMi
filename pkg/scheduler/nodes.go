@@ -18,7 +18,10 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+
+	"k8s.io/klog/v2"
 )
 
 type DeviceInfo struct {
@@ -65,7 +68,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		tmp := make([]DeviceInfo, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
+		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
 		tmp = append(tmp, m.nodes[nodeID].Devices...)
 		tmp = append(tmp, nodeInfo.Devices...)
 		m.nodes[nodeID].Devices = tmp
@@ -74,10 +77,28 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	}
 }
 
-func (m *nodeManager) delNode(nodeID string) {
+func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	delete(m.nodes, nodeID)
+	_, ok := m.nodes[nodeID]
+	if ok {
+		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
+		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
+		for _, val := range m.nodes[nodeID].Devices {
+			found := false
+			for _, rmval := range nodeInfo.Devices {
+				if strings.Compare(val.ID, rmval.ID) == 0 {
+					found = true
+					break
+				}
+			}
+			if !found && len(val.ID) > 0 {
+				tmp = append(tmp, val)
+			}
+		}
+		m.nodes[nodeID].Devices = tmp
+	}
+	klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 }
 
 func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {

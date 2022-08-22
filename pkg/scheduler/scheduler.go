@@ -133,18 +133,21 @@ func (s *Scheduler) Stop() {
 //}
 func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 	var nodeID string
+	var nodeInfoCopy NodeInfo
+	nodeInfo := &NodeInfo{}
+	nodeInfoCopy = *nodeInfo
+	klog.Infoln("into register")
 	for {
 		req, err := stream.Recv()
 		if err != nil {
 			/* Need to update */
-			s.delNode(nodeID)
-			klog.Infof("node %v leave, %v", nodeID, err)
+			s.rmNodeDevice(nodeID, &nodeInfoCopy)
+			klog.Infof("node %v leave, %v remaining devices:%v", nodeID, err, s.nodes[nodeID].Devices)
 			_ = stream.SendAndClose(&api.RegisterReply{})
 			return err
 		}
 		klog.V(3).Infof("device register %v", req.String())
 		nodeID = req.GetNode()
-		nodeInfo := &NodeInfo{}
 		nodeInfo.ID = nodeID
 		nodeInfo.Devices = make([]DeviceInfo, len(req.Devices))
 		for i := 0; i < len(req.Devices); i++ {
@@ -159,6 +162,7 @@ func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 		if s.nodes[nodeID] != nil {
 			klog.Infoln("before=", s.nodes[nodeID].Devices)
 		}
+		nodeInfoCopy = *nodeInfo
 		s.addNode(nodeID, nodeInfo)
 		klog.Infof("node %v come node info=%v total=%v", nodeID, nodeInfo, s.nodes[nodeID].Devices)
 	}
