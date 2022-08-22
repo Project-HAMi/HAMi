@@ -16,6 +16,7 @@ data:
     extenders:
     - urlPrefix: "https://127.0.0.1:443"
       filterVerb: filter
+      bindVerb: bind
       nodeCacheCapable: true
       weight: 1
       httpTimeout: 30s

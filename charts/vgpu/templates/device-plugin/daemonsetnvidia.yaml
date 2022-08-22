@@ -39,14 +39,11 @@ spec:
             postStart:
               exec:
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
-          #  preStop:
-          #    exec:
-          #      command: ["/bin/sh","-c","mv /usrbin/nvidia-container-4pdbackup /usrbin/nvidia-container-runtime"]
           #command:
           #  - sleep
           #  - infinity
           command:
-            - device-plugin
+            - nvidia-device-plugin
             - --resource-name={{ .Values.resourceName }}
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}

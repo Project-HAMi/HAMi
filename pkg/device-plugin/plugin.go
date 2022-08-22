@@ -380,7 +380,6 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 		)
 		responses.ContainerResponses = append(responses.ContainerResponses, &response)
 	}
-	time.Sleep(time.Second * 5)
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
 	util.PodAllocationTrySuccess(nodename, current)
 	return &responses, nil
