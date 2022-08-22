@@ -2,7 +2,6 @@
 
 nameOverride: ""
 fullnameOverride: ""
-
 imagePullSecrets: []
 
 #Nvidia GPU Parameters
@@ -39,7 +38,7 @@ scheduler:
       - --leader-elect=false
       - -v=4
   extender:
-    image: "4pdosc/k8s-vgpu:latest"
+    image: "4pdosc/k8s-vdevice:v2.0"
     #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
     imagePullPolicy: IfNotPresent
     extraArgs:
@@ -67,9 +66,9 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vgpu:latest"
+  image: "4pdosc/k8s-vdevice:v2.0"
   #image: "m7-ieg-pico-test01:5000/k8s-vgpu-0727:latest"
-  monitorimage: "4pdosc/k8s-vgpu:latest"
+  monitorimage: "4pdosc/k8s-vdevice:v2.0"
   #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
   monitorctrPath: /tmp/vgpu/containers
   imagePullPolicy: IfNotPresent

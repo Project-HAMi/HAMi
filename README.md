@@ -39,7 +39,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 * Kubernetes version >= 1.16
 * glibc >= 2.17
 * kernel version >= 3.10
-* helm > 2.0
+* helm > 3.0
 
 ## Quick Start
 
