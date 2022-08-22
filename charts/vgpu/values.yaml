@@ -2,13 +2,18 @@
 
 nameOverride: ""
 fullnameOverride: ""
-
 imagePullSecrets: []
+
+#Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
 resourceMemPercentage: "nvidia.com/gpumem-percentage"
 resourceCores: "nvidia.com/gpucores"
 resourcePriority: "nvidia.com/priority"
+
+#MLU Parameters
+mluResourceName: "cambricon.com/mlunum"
+mluResourceMem: "cambricon.com/mlumem"
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -33,9 +38,9 @@ scheduler:
       - --leader-elect=false
       - -v=4
   extender:
-    image: "4pdosc/k8s-vgpu:latest"
+    image: "4pdosc/k8s-vdevice:v2.0"
     #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     extraArgs:
       - --debug
       - -v=4
@@ -61,12 +66,12 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vgpu:latest"
+  image: "4pdosc/k8s-vdevice:v2.0"
   #image: "m7-ieg-pico-test01:5000/k8s-vgpu-0727:latest"
-  monitorimage: "4pdosc/k8s-vgpu:latest"
+  monitorimage: "4pdosc/k8s-vdevice:v2.0"
   #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
   monitorctrPath: /tmp/vgpu/containers
-  imagePullPolicy: Always
+  imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   migStrategy: "none"
@@ -82,7 +87,9 @@ devicePlugin:
   sockPath: /var/lib/4pdvgpu
 
   podAnnotations: {}
-  nodeSelector:
+  nvidianodeSelector:
     gpu: "on"
+  mlunodeSelector:
+    mlu: "on"
   tolerations: []
 

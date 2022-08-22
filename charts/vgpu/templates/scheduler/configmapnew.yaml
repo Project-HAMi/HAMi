@@ -16,6 +16,7 @@ data:
     extenders:
     - urlPrefix: "https://127.0.0.1:443"
       filterVerb: filter
+      bindVerb: bind
       nodeCacheCapable: true
       weight: 1
       httpTimeout: 30s
@@ -32,4 +33,8 @@ data:
       - name: {{ .Values.resourceMemPercentage }}
         ignoredByScheduler: true
       - name: {{ .Values.resourcePriority }}
+        ignoredByScheduler: true
+      - name: {{ .Values.mluResourceName }}
+        ignoredByScheduler: true
+      - name: {{ .Values.mluResourceMem }}
         ignoredByScheduler: true

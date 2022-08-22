@@ -38,21 +38,17 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c","mv /usrbin/nvidia-container-runtime /usrbin/nvidia-container-runtime-4pdbackup;cp /k8s-vgpu/bin/nvidia-container-runtime /usrbin/;cp -f /k8s-vgpu/lib/* /usr/local/vgpu/"]
-          #  preStop:
-          #    exec:
-          #      command: ["/bin/sh","-c","mv /usrbin/nvidia-container-4pdbackup /usrbin/nvidia-container-runtime"]
+                command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
           #command:
           #  - sleep
           #  - infinity
           command:
-            - device-plugin
+            - nvidia-device-plugin
             - --resource-name={{ .Values.resourceName }}
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
             - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
             - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
-            - --runtime-socket={{ .Values.devicePlugin.sockPath }}/vgpu.sock
             - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
@@ -141,7 +137,7 @@ spec:
             #path: /var/lib/vgpu
             path: {{ .Values.devicePlugin.sockPath }}
       {{- if .Values.devicePlugin.nodeSelector }}
-      nodeSelector: {{ toYaml .Values.devicePlugin.nodeSelector | nindent 8 }}
+      nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
       {{- end }}
       {{- if .Values.devicePlugin.tolerations }}
       tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}

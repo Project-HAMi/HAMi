@@ -18,8 +18,6 @@ package scheduler
 
 import (
 	"context"
-	"encoding/json"
-	"fmt"
 	"sort"
 	"strconv"
 	"time"
@@ -29,7 +27,6 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -50,6 +47,7 @@ type Scheduler struct {
 }
 
 func NewScheduler() *Scheduler {
+	klog.Infof("New Scheduler")
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
@@ -135,17 +133,21 @@ func (s *Scheduler) Stop() {
 //}
 func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 	var nodeID string
+	var nodeInfoCopy NodeInfo
+	nodeInfo := &NodeInfo{}
+	nodeInfoCopy = *nodeInfo
+	klog.Infoln("into register")
 	for {
 		req, err := stream.Recv()
 		if err != nil {
-			s.delNode(nodeID)
-			klog.Infof("node %v leave, %v", nodeID, err)
+			/* Need to update */
+			s.rmNodeDevice(nodeID, &nodeInfoCopy)
+			klog.Infof("node %v leave, %v remaining devices:%v", nodeID, err, s.nodes[nodeID].Devices)
 			_ = stream.SendAndClose(&api.RegisterReply{})
 			return err
 		}
 		klog.V(3).Infof("device register %v", req.String())
 		nodeID = req.GetNode()
-		nodeInfo := NodeInfo{}
 		nodeInfo.ID = nodeID
 		nodeInfo.Devices = make([]DeviceInfo, len(req.Devices))
 		for i := 0; i < len(req.Devices); i++ {
@@ -157,43 +159,13 @@ func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 				Health: req.Devices[i].GetHealth(),
 			}
 		}
+		if s.nodes[nodeID] != nil {
+			klog.Infoln("before=", s.nodes[nodeID].Devices)
+		}
+		nodeInfoCopy = *nodeInfo
 		s.addNode(nodeID, nodeInfo)
-		klog.Infof("node %v come node info=", nodeID, nodeInfo)
+		klog.Infof("node %v come node info=%v total=%v", nodeID, nodeInfo, s.nodes[nodeID].Devices)
 	}
-}
-
-func (s *Scheduler) GetContainer(_ context.Context, req *api.GetContainerRequest) (*api.GetContainerReply, error) {
-	pi, ctrIdx, err := s.getContainerByUUID(req.Uuid)
-	if err != nil {
-		return nil, err
-	}
-	if ctrIdx >= len(pi.Devices) {
-		return nil, fmt.Errorf("container index error")
-	}
-	pod, err := s.podLister.Pods(pi.Namespace).Get(pi.Name)
-	if err != nil {
-		return nil, err
-	}
-	if pod == nil || ctrIdx >= len(pi.Devices) {
-		return nil, fmt.Errorf("container not found")
-	}
-	var devarray []*api.DeviceUsage
-	for _, val := range pi.Devices[ctrIdx] {
-		devusage := api.DeviceUsage{}
-		devusage.Id = val.UUID
-		devusage.Devmem = val.Usedmem
-		devusage.Cores = val.Usedcores
-		devarray = append(devarray, &devusage)
-	}
-	rep := api.GetContainerReply{
-		//DevList:      pi.devices[ctrIdx],
-		DevList:      devarray,
-		PodUID:       string(pod.UID),
-		CtrName:      pod.Spec.Containers[ctrIdx].Name,
-		PodNamespace: pod.Namespace,
-		PodName:      pod.Name,
-	}
-	return &rep, nil
 }
 
 // InspectAllNodesUsage is used by metrics monitor
@@ -208,7 +180,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 		node, err := s.GetNode(nodeID)
 		if err != nil {
 			klog.Errorf("get node %v device error, %v", nodeID, err)
-			failedNodes[nodeID] = fmt.Sprintf("node unregisterd")
+			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
 
@@ -249,15 +221,59 @@ func (s *Scheduler) getNodesUsage(nodes *[]string) (*map[string]*NodeUsage, map[
 	return &nodeMap, failedNodes, nil
 }
 
+func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
+	klog.InfoS("Bind", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
+	var err error
+	var res *extenderv1.ExtenderBindingResult
+	binding := &corev1.Binding{
+		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
+		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
+	}
+	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
+	if err != nil {
+		klog.ErrorS(err, "Get pod failed")
+	}
+	err = util.LockNode(args.Node)
+	if err != nil {
+		klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+	}
+	//defer util.ReleaseNodeLock(args.Node)
+
+	tmppatch := make(map[string]string)
+	tmppatch[util.DeviceBindPhase] = "allocating"
+	tmppatch[util.BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+
+	err = util.PatchPodAnnotations(current, tmppatch)
+	if err != nil {
+		klog.ErrorS(err, "patch pod annotation failed")
+	}
+	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
+		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
+	}
+	if err == nil {
+		res = &extenderv1.ExtenderBindingResult{
+			Error: "",
+		}
+	} else {
+		res = &extenderv1.ExtenderBindingResult{
+			Error: err.Error(),
+		}
+	}
+	klog.Infoln("After Binding Process")
+	return res, nil
+}
+
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.Infof("schedule pod %v/%v[%v]", args.Pod.Namespace, args.Pod.Name, args.Pod.UID)
 	nums := k8sutil.Resourcereqs(args.Pod)
 	total := 0
 	for _, n := range nums {
-		total += int(n.Nums)
+		for _, k := range n {
+			total += int(k.Nums)
+		}
 	}
 	if total == 0 {
-		klog.V(1).Infof("pod %v not find resource %v", args.Pod.Name, util.ResourceName)
+		klog.V(1).Infof("pod %v not find resource %v or %v", args.Pod.Name, util.ResourceName, util.MLUResourceCount)
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
@@ -286,8 +302,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations[util.AssignedNodeAnnotations] = m.nodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 	annotations[util.AssignedIDsAnnotations] = util.EncodePodDevices(m.devices)
+	annotations[util.AssignedIDsToAllocateAnnotations] = annotations[util.AssignedIDsAnnotations]
 	s.addPod(args.Pod, m.nodeID, m.devices)
-	err = s.patchPodAnnotations(args.Pod, annotations)
+	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.delPod(args.Pod)
 		return nil, err
@@ -300,37 +317,3 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 //func addGPUIndexPatch() string {
 //	return fmt.Sprintf(`[{"op": "add", "path": "/spec/containers/0/env/-", "value":{"name":"asdf","value":"tttt"}}]`)
 //}
-
-func (s *Scheduler) patchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
-	type patchMetadata struct {
-		Annotations map[string]string `json:"annotations,omitempty"`
-	}
-	type patchPod struct {
-		Metadata patchMetadata `json:"metadata"`
-		//Spec     patchSpec     `json:"spec,omitempty"`
-	}
-
-	p := patchPod{}
-	p.Metadata.Annotations = annotations
-
-	bytes, err := json.Marshal(p)
-	if err != nil {
-		return err
-	}
-	_, err = s.kubeClient.CoreV1().Pods(pod.Namespace).
-		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
-	if err != nil {
-		klog.Infof("patch pod %v failed, %v", pod.Name, err)
-	}
-	/*
-		Can't modify Env of pods here
-
-		patch1 := addGPUIndexPatch()
-		_, err = s.kubeClient.CoreV1().Pods(pod.Namespace).
-			Patch(context.Background(), pod.Name, k8stypes.JSONPatchType, []byte(patch1), metav1.PatchOptions{})
-		if err != nil {
-			klog.Infof("Patch1 pod %v failed, %v", pod.Name, err)
-		}*/
-
-	return err
-}
