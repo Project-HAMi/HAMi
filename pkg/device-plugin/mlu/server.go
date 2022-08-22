@@ -340,23 +340,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 func (m *CambriconDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 
 	klog.Infof("Into Allocate")
-	//if m.options.Mode == mluShare {
 	return m.allocateMLUShare(ctx, reqs)
-	//}
-	/*
-		responses := pluginapi.AllocateResponse{}
-		for _, req := range reqs.ContainerRequests {
-			for _, id := range req.DevicesIDs {
-				if !deviceExists(m.devs, id) {
-					return nil, fmt.Errorf("invalid allocation request: unknown device: %s", id)
-				}
-			}
-			car := m.PrepareResponse(req.DevicesIDs)
-			responses.ContainerResponses = append(responses.ContainerResponses, &car)
-		}
-		time.Sleep(time.Second * 5)
-		klog.Infoln("response=", responses)
-		return &responses, nil*/
 }
 
 func (m *CambriconDevicePlugin) uuidToPath(uuids []string) []string {

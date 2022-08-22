@@ -15,7 +15,6 @@ resourcePriority: "nvidia.com/priority"
 #MLU Parameters
 mluResourceName: "cambricon.com/mlunum"
 mluResourceMem: "cambricon.com/mlumem"
-
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -42,7 +41,7 @@ scheduler:
   extender:
     image: "4pdosc/k8s-vgpu:latest"
     #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
-    imagePullPolicy: Always
+    imagePullPolicy: IfNotPresent
     extraArgs:
       - --debug
       - -v=4
@@ -73,7 +72,7 @@ devicePlugin:
   monitorimage: "4pdosc/k8s-vgpu:latest"
   #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
   monitorctrPath: /tmp/vgpu/containers
-  imagePullPolicy: Always
+  imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   migStrategy: "none"
