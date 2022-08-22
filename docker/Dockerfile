@@ -22,6 +22,8 @@ COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=build /k8s-vgpu/bin /k8s-vgpu/bin
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
+COPY ./lib/mlu/cntopo /usr/bin/
+COPY ./lib/mlu/libcndev.so /usr/lib/
 
 ENV PATH="/k8s-vgpu/bin:${PATH}"
 

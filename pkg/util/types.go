@@ -19,12 +19,19 @@ package util
 const (
 	//ResourceName = "nvidia.com/gpu"
 	//ResourceName = "4pd.io/vgpu"
-	AssignedTimeAnnotations = "4pd.io/vgpu-time"
-	AssignedIDsAnnotations  = "4pd.io/vgpu-ids-new"
-	AssignedNodeAnnotations = "4pd.io/vgpu-node"
+	AssignedTimeAnnotations          = "4pd.io/vgpu-time"
+	AssignedIDsAnnotations           = "4pd.io/vgpu-ids-new"
+	AssignedIDsToAllocateAnnotations = "4pd.io/devices-to-allocate"
+	AssignedNodeAnnotations          = "4pd.io/vgpu-node"
+	BindTimeAnnotations              = "4pd.io/bind-time"
+	DeviceBindPhase                  = "4pd.io/bind-phase"
 
 	GPUInUse = "nvidia.com/use-gputype"
 	GPUNoUse = "nvidia.com/nouse-gputype"
+
+	DeviceBindAllocating = "allocating"
+	DeviceBindFailed     = "failed"
+	DeviceBindSuccess    = "success"
 
 	//Set default mem to 5000m
 	//DefaultMem   = 5000
@@ -33,6 +40,21 @@ const (
 	DeviceLimit = 100
 	//TimeLayout = "ANSIC"
 	//DefaultTimeout = time.Second * 60
+
+	BestEffort string = "best-effort"
+	Restricted string = "restricted"
+	Guaranteed string = "guaranteed"
+
+	NvidiaGPUDevice     = "NVIDIA"
+	NvidiaGPUCommonWord = "GPU"
+
+	CambriconMLUDevice     = "MLU"
+	CambriconMLUCommonWord = "MLU"
+	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
+	MluMemSplitIndex       = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
+	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
+	NodeLockTime           = "4pd.io/mutex.lock"
+	MaxLockRetry           = 5
 )
 
 var (
@@ -42,6 +64,9 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
+
+	MLUResourceCount  string
+	MLUResourceMemory string
 )
 
 //type ContainerDevices struct {
@@ -53,12 +78,14 @@ var (
 //}
 type ContainerDevice struct {
 	UUID      string
+	Type      string
 	Usedmem   int32
 	Usedcores int32
 }
 
 type ContainerDeviceRequest struct {
 	Nums             int32
+	Type             string
 	Memreq           int32
 	MemPercentagereq int32
 	Coresreq         int32

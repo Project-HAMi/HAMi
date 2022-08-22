@@ -86,77 +86,111 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums []util.ContainerDeviceRequest, annos map[string]string) (*NodeScoreList, error) {
+func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceRequest) bool {
+	if !strings.ContainsAny(d.Type, n.Type) {
+		return false
+	}
+	if strings.Compare(n.Type, util.NvidiaGPUDevice) == 0 {
+		return checkGPUtype(annos, d.Type)
+	}
+	if strings.Compare(n.Type, util.CambriconMLUDevice) == 0 {
+		if !strings.ContainsAny(d.Type, "370") && n.Memreq != 0 {
+			return false
+		}
+		return true
+	}
+	klog.Infof("Unrecognized device", n.Type)
+	return false
+}
+
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][]util.ContainerDeviceRequest, annos map[string]string) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
 		dn := len(node.Devices)
 		score := NodeScore{nodeID: nodeID, score: 0}
 		for _, n := range nums {
-			if n.Nums == 0 {
+			sums := 0
+			for _, k := range n {
+				sums += int(k.Nums)
+			}
+			if sums == 0 {
 				score.devices = append(score.devices, util.ContainerDevices{})
 				continue
 			}
-			if int(n.Nums) > dn {
-				break
-			}
-			sort.Sort(node.Devices)
-			if node.Devices[dn-int(n.Nums)].Count <= node.Devices[dn-int(n.Nums)].Used {
-				break
-			}
+			devs := make([]util.ContainerDevice, 0, sums)
+			fit := true
 			total := int32(0)
 			free := int32(0)
-			//devs := make([]string, 0, n)
-			devs := make([]util.ContainerDevice, 0, n.Nums)
-			countremains := 1
-			for i := len(node.Devices) - 1; i >= 0; i-- {
-				klog.Info("Scoring pod ", n.Memreq, ":", n.MemPercentagereq, ":", n.Coresreq, ":", n.Nums)
-				if node.Devices[i].Count <= node.Devices[i].Used {
-					continue
+			for _, k := range n {
+				if int(k.Nums) > dn {
+					fit = false
+					break
 				}
-				if n.MemPercentagereq != 101 {
-					n.Memreq = node.Devices[i].Totalmem * n.MemPercentagereq / 100
+				sort.Sort(node.Devices)
+				//If this node has no devices available
+				if node.Devices[dn-int(k.Nums)].Count <= node.Devices[dn-int(k.Nums)].Used {
+					fit = false
+					break
 				}
-				if node.Devices[i].Totalmem-node.Devices[i].Usedmem < n.Memreq {
-					continue
+				//devs := make([]string, 0, n)
+				klog.Infoln("Allocating device for container request", k)
+				for i := len(node.Devices) - 1; i >= 0; i-- {
+					klog.Info("Scoring pod ", k.Memreq, ":", k.MemPercentagereq, ":", k.Coresreq, ":", k.Nums, "i", i, "device:", node.Devices[i].Id)
+					if node.Devices[i].Count <= node.Devices[i].Used {
+						continue
+					}
+					if k.MemPercentagereq != 101 && k.Memreq == 0 {
+						k.Memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
+					}
+					if node.Devices[i].Totalmem-node.Devices[i].Usedmem < k.Memreq {
+						continue
+					}
+					if 100-node.Devices[i].Usedcores < k.Coresreq {
+						continue
+					}
+					// Coresreq=100 indicates it want this card exclusively
+					if k.Coresreq == 100 && node.Devices[i].Used > 0 {
+						continue
+					}
+					// You can't allocate core=0 job to an already full GPU
+					if node.Devices[i].Usedcores == 100 && k.Coresreq == 0 {
+						continue
+					}
+					if !checkType(annos, *node.Devices[i], k) {
+						continue
+					}
+					total += node.Devices[i].Count
+					free += node.Devices[i].Count - node.Devices[i].Used
+					if k.Nums > 0 {
+						klog.Infoln("device", node.Devices[i].Id, "fitted")
+						k.Nums--
+						node.Devices[i].Used++
+						node.Devices[i].Usedmem += k.Memreq
+						node.Devices[i].Usedcores += k.Coresreq
+						devs = append(devs, util.ContainerDevice{
+							UUID:      node.Devices[i].Id,
+							Type:      k.Type,
+							Usedmem:   k.Memreq,
+							Usedcores: k.Coresreq,
+						})
+					}
+					if k.Nums == 0 {
+						break
+					}
 				}
-				if 100-node.Devices[i].Usedcores < n.Coresreq {
-					continue
-				}
-				// Coresreq=100 indicates it want this card exclusively
-				if n.Coresreq == 100 && node.Devices[i].Used > 0 {
-					continue
-				}
-				// You can't allocate core=0 job to an already full GPU
-				if node.Devices[i].Usedcores == 100 && n.Coresreq == 0 {
-					continue
-				}
-				if !checkGPUtype(annos, node.Devices[i].Type) {
-					continue
-				}
-				total += node.Devices[i].Count
-				free += node.Devices[i].Count - node.Devices[i].Used
-				if n.Nums > 0 {
-					n.Nums--
-					node.Devices[i].Used++
-					node.Devices[i].Usedmem += n.Memreq
-					node.Devices[i].Usedcores += n.Coresreq
-					devs = append(devs, util.ContainerDevice{
-						UUID:      node.Devices[i].Id,
-						Usedmem:   n.Memreq,
-						Usedcores: n.Coresreq,
-					})
-				}
-				if n.Nums == 0 {
+				if k.Nums > 0 {
+					fit = false
 					break
 				}
 			}
-			if countremains == 0 || n.Nums > 0 {
+			if fit {
+				score.devices = append(score.devices, devs)
+				score.score += float32(free) / float32(total)
+				score.score += float32(dn - int(sums))
+			} else {
 				break
 			}
-			score.devices = append(score.devices, devs)
-			score.score += float32(free) / float32(total)
-			score.score += float32(dn - int(n.Nums))
 		}
 		if len(score.devices) == len(nums) {
 			res = append(res, &score)

@@ -14,6 +14,7 @@ data:
             {
                 "urlPrefix": "https://127.0.0.1:443",
                 "filterVerb": "filter",
+                "bindVerb": "bind",
                 "enableHttps": true,
                 "weight": 1,
                 "nodeCacheCapable": true,
@@ -41,6 +42,14 @@ data:
                     {
                         "name": "{{ .Values.resourcePriority }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.mluResourceMem }}",
+                        "ignoredByScheduler": true   
                     }
                 ],
                 "ignoreable": false

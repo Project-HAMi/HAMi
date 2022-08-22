@@ -85,6 +85,7 @@ func start() {
 	// start http server
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(sher))
+	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	klog.Info("listen on ", config.HttpBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {

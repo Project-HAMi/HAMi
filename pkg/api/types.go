@@ -17,8 +17,6 @@
 package api
 
 const (
-	ContainerUID        = "VGPU_4PD_UUID"
-	PluginRuntimeSocket = "VGPU_4PD_SOCKET"
-	TaskPriority        = "CUDA_TASK_PRIORITY"
-	CoreLimitSwitch     = "GPU_CORE_UTILIZATION_POLICY"
+	TaskPriority    = "CUDA_TASK_PRIORITY"
+	CoreLimitSwitch = "GPU_CORE_UTILIZATION_POLICY"
 )

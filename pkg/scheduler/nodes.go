@@ -18,7 +18,10 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"sync"
+
+	"k8s.io/klog/v2"
 )
 
 type DeviceInfo struct {
@@ -52,35 +55,61 @@ type NodeUsage struct {
 }
 
 type nodeManager struct {
-	nodes map[string]NodeInfo
+	nodes map[string]*NodeInfo
 	mutex sync.Mutex
 }
 
 func (m *nodeManager) init() {
-	m.nodes = make(map[string]NodeInfo)
+	m.nodes = make(map[string]*NodeInfo)
 }
 
-func (m *nodeManager) addNode(nodeID string, nodeInfo NodeInfo) {
+func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	m.nodes[nodeID] = nodeInfo
+	_, ok := m.nodes[nodeID]
+	if ok {
+		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
+		tmp = append(tmp, m.nodes[nodeID].Devices...)
+		tmp = append(tmp, nodeInfo.Devices...)
+		m.nodes[nodeID].Devices = tmp
+	} else {
+		m.nodes[nodeID] = nodeInfo
+	}
 }
 
-func (m *nodeManager) delNode(nodeID string) {
+func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-	delete(m.nodes, nodeID)
+	_, ok := m.nodes[nodeID]
+	if ok {
+		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
+		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
+		for _, val := range m.nodes[nodeID].Devices {
+			found := false
+			for _, rmval := range nodeInfo.Devices {
+				if strings.Compare(val.ID, rmval.ID) == 0 {
+					found = true
+					break
+				}
+			}
+			if !found && len(val.ID) > 0 {
+				tmp = append(tmp, val)
+			}
+		}
+		m.nodes[nodeID].Devices = tmp
+	}
+	klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 }
 
-func (m *nodeManager) GetNode(nodeID string) (NodeInfo, error) {
+func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	if n, ok := m.nodes[nodeID]; ok {
 		return n, nil
 	}
-	return NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	return &NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 }
 
-func (m *nodeManager) ListNodes() (map[string]NodeInfo, error) {
+func (m *nodeManager) ListNodes() (map[string]*NodeInfo, error) {
 	return m.nodes, nil
 }
