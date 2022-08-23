@@ -43,8 +43,8 @@ spec:
           #  - infinity
           command:
             - mlu-device-plugin
-            - --mode=default #device plugin mode: default, sriov, env-share, mlu-share or topology-aware
-            - --virtualization-num=1 #  virtualization number for each MLU, used only in sriov mode or env-share mode
+            - --mode=env-share #device plugin mode: default, sriov, env-share, mlu-share or topology-aware
+            - --virtualization-num=10 #  virtualization number for each MLU, used only in sriov mode or env-share mode
             - --mlulink-policy=best-effort # MLULink topology policy: best-effort, guaranteed or restricted, used only in topology-aware mode
             - --cnmon-path=/usr/bin/cnmon # host machine cnmon path, must be absolute path. comment out this line to avoid mounting cnmon.
             - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
