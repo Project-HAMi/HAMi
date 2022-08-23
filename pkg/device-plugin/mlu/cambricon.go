@@ -109,6 +109,7 @@ func getDevices(mode string, fakeNum int) ([]*pluginapi.Device, map[string]*cnde
 			for k, v := range infos {
 				devsInfo[k] = v
 			}
+			devsInfo[d.UUID] = d
 		case sriov:
 			err = d.EnableSriov(fakeNum)
 			check(err)
