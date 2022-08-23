@@ -87,14 +87,17 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 }
 
 func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceRequest) bool {
-	if !strings.ContainsAny(d.Type, n.Type) {
+	if !strings.Contains(d.Type, n.Type) {
 		return false
 	}
 	if strings.Compare(n.Type, util.NvidiaGPUDevice) == 0 {
 		return checkGPUtype(annos, d.Type)
 	}
 	if strings.Compare(n.Type, util.CambriconMLUDevice) == 0 {
-		if !strings.ContainsAny(d.Type, "370") && n.Memreq != 0 {
+		if !strings.Contains(d.Type, "370") && n.Memreq != 0 {
+			return false
+		}
+		if strings.Contains(d.Type, "370") && n.Memreq == 0 && d.Used > 0 {
 			return false
 		}
 		return true
