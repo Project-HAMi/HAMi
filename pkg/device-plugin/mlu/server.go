@@ -302,7 +302,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 			deviceToMount = append(deviceToMount, val.UUID)
 		}
 
-		reqMem := devreq[0].Usedmem
+		reqMem := devreq[0].Usedmem / 1024
 		resp := m.PrepareResponse(deviceToMount)
 		idxval := ""
 		for i, v := range devreq {
