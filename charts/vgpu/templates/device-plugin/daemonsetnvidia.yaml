@@ -136,7 +136,7 @@ spec:
           hostPath:
             #path: /var/lib/vgpu
             path: {{ .Values.devicePlugin.sockPath }}
-      {{- if .Values.devicePlugin.nodeSelector }}
+      {{- if .Values.devicePlugin.nvidianodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
       {{- end }}
       {{- if .Values.devicePlugin.tolerations }}

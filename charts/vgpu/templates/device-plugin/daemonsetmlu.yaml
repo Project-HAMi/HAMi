@@ -91,7 +91,7 @@ spec:
         - name: lib
           hostPath:
             path: /usr/local/vgpu
-      {{- if .Values.devicePlugin.nodeSelector }}
+      {{- if .Values.devicePlugin.mlunodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.mlunodeSelector | nindent 8 }}
       {{- end }}
       {{- if .Values.devicePlugin.tolerations }}
