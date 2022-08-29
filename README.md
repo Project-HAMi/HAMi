@@ -137,7 +137,7 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 ### More examples
 
-Click [here](docs/examples)
+Click [here](docs/examples/nvidia/)
 
 ### Monitoring vGPU status
 

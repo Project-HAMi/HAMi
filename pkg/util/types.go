@@ -29,6 +29,9 @@ const (
 	GPUInUse = "nvidia.com/use-gputype"
 	GPUNoUse = "nvidia.com/nouse-gputype"
 
+	MLUInUse = "cambricon.com/use-mlutype"
+	MLUNoUse = "cambricon.com/nouse-mlutype"
+
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
 	DeviceBindSuccess    = "success"
