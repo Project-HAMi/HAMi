@@ -87,10 +87,29 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 }
 
 func checkMLUtype(annos map[string]string, cardtype string) bool {
+	inuse, ok := annos[util.MLUInUse]
+	if ok {
+		for _, val := range strings.Split(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+				return true
+			}
+		}
+		return false
+	}
+	nouse, ok := annos[util.MLUNoUse]
+	if ok {
+		for _, val := range strings.Split(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+				return false
+			}
+		}
+		return true
+	}
 	return true
 }
 
 func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceRequest) bool {
+	//General type check, NVIDIA->NVIDIA MLU->MLU
 	if !strings.Contains(d.Type, n.Type) {
 		return false
 	}
@@ -104,7 +123,7 @@ func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceReq
 		if strings.Contains(d.Type, "370") && n.Memreq == 0 && d.Used > 0 {
 			return false
 		}
-		return true
+		return checkMLUtype(annos, d.Type)
 	}
 	klog.Infof("Unrecognized device", n.Type)
 	return false
