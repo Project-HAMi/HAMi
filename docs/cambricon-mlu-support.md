@@ -42,12 +42,21 @@ spec:
       resources:
         limits:
           cambricon.com/mlunum: 1 # requesting 1 MLU
-          cambricon.com/mlumem: 10 # requesting 10G MLU device memory
+          cambricon.com/mlumem: 10240 # requesting 10G MLU device memory
     - name: ubuntu-container1
       image: ubuntu:18.04
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
           cambricon.com/mlunum: 1 # requesting 1 MLU
-          cambricon.com/mlumem: 10 # requesting 10G MLU device memory
+          cambricon.com/mlumem: 10240 # requesting 10G MLU device memory
 ```
+
+## Notes
+
+1. Mlu-sharing in init container is not supported, pods with "combricon.com/mlumem" in init container will never be scheduled.
+
+2. Mlu-sharing with containerd is not supported, the container may not start successfully.
+
+3. Mlu-sharing can only be applied on MLU-370
+   

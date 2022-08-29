@@ -6,7 +6,7 @@
 
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）来分配MLU，本组件会确保任务使用的显存不会超过分配数值，注意只有MLU-370型号的MLU支持可配显存
 
-***指定MLU型号***：当前任务可以通过设置annotation的方式，来选择使用或者不使用某些具体型号的MLU
+***指定MLU型号***：当前任务可以通过设置annotation("cambricon.com/use-mlutype","cambricon.com/nouse-mlutype")的方式，来选择使用或者不使用某些具体型号的MLU
 
 ***方便易用***:  部署本组件后，你只需要给MLU节点打上tag即可使用MLU复用功能
 
@@ -40,12 +40,20 @@ spec:
       resources:
         limits:
           cambricon.com/mlunum: 1 # requesting 1 MLU
-          cambricon.com/mlumem: 10 # requesting 10G MLU device memory
+          cambricon.com/mlumem: 10240 # requesting 10G MLU device memory
     - name: ubuntu-container1
       image: ubuntu:18.04
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
           cambricon.com/mlunum: 1 # requesting 1 MLU
-          cambricon.com/mlumem: 10 # requesting 10G MLU device memory
+          cambricon.com/mlumem: 10240 # requesting 10G MLU device memory
 ```
+
+## 注意事项
+
+1. 在init container中无法使用MLU复用功能，否则该任务不会被调度
+
+2. MLU复用功能目前不支持containerd，在containerd中使用会导致任务失败
+
+3. 只有MLU-370可以使用MLU复用功能

@@ -86,6 +86,10 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
+func checkMLUtype(annos map[string]string, cardtype string) bool {
+	return true
+}
+
 func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceRequest) bool {
 	if !strings.Contains(d.Type, n.Type) {
 		return false
