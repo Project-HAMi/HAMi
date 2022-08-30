@@ -17,7 +17,7 @@
 
 ## Enabling MLU-sharing Support
 
-* Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](../Readme.md)
+* Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/4paradigm/k8s-vgpu-scheduler#enabling-vgpu-support-in-kubernetes)
 
 * Tag MLU node with the following command
 ```
