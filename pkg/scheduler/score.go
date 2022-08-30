@@ -67,18 +67,30 @@ func viewStatus(usage NodeUsage) {
 func checkGPUtype(annos map[string]string, cardtype string) bool {
 	inuse, ok := annos[util.GPUInUse]
 	if ok {
-		for _, val := range strings.Split(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+		if !strings.Contains(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
+			}
+		} else {
+			for _, val := range strings.Split(inuse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return true
+				}
 			}
 		}
 		return false
 	}
 	nouse, ok := annos[util.GPUNoUse]
 	if ok {
-		for _, val := range strings.Split(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-				return false
+		if !strings.Contains(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
+				return true
+			}
+		} else {
+			for _, val := range strings.Split(nouse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return false
+				}
 			}
 		}
 		return true
@@ -89,18 +101,30 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 func checkMLUtype(annos map[string]string, cardtype string) bool {
 	inuse, ok := annos[util.MLUInUse]
 	if ok {
-		for _, val := range strings.Split(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+		if !strings.Contains(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
+			}
+		} else {
+			for _, val := range strings.Split(inuse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return true
+				}
 			}
 		}
 		return false
 	}
 	nouse, ok := annos[util.MLUNoUse]
 	if ok {
-		for _, val := range strings.Split(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-				return false
+		if !strings.Contains(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
+				return true
+			}
+		} else {
+			for _, val := range strings.Split(nouse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return false
+				}
 			}
 		}
 		return true
