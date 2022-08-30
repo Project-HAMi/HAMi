@@ -32,7 +32,7 @@ spec:
       hostPID: true
       containers:
         - name: cambricon-device-plugin-ctr
-          image: {{ .Values.devicePlugin.image | quote }}
+          image: {{ .Values.devicePlugin.image | quote }}:{{ .Values.version | quote}}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           lifecycle:
             postStart:

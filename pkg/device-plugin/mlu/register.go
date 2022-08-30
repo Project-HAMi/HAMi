@@ -71,7 +71,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 			Id:     dev.dev.ID,
 			Count:  int32(config.DeviceSplitCount),
 			Devmem: registeredmem,
-			Type:   fmt.Sprint("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
+			Type:   fmt.Sprintf("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
 			Health: dev.dev.Health == "healthy",
 		})
 	}
