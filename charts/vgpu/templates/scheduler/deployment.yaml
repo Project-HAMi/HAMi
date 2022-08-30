@@ -50,7 +50,7 @@ spec:
             - name: scheduler-config
               mountPath: /config
         - name: vgpu-scheduler-extender
-          image: {{ .Values.scheduler.extender.image | quote }}:{{ .Values.version }}
+          image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
           command:
             - scheduler

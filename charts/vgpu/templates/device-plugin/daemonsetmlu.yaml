@@ -32,15 +32,12 @@ spec:
       hostPID: true
       containers:
         - name: cambricon-device-plugin-ctr
-          image: {{ .Values.devicePlugin.image | quote }}:{{ .Values.version | quote}}
+          image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           lifecycle:
             postStart:
               exec:
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/mlu/smlu-containerd /usr/local/vgpu/"]
-          #command:
-          #  - sleep
-          #  - infinity
           command:
             - mlu-device-plugin
             - --mode=env-share #device plugin mode: default, sriov, env-share, mlu-share or topology-aware
