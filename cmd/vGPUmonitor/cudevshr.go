@@ -15,10 +15,18 @@ import (
 const magic = 19920718
 const maxDevices = 16
 
+type deviceMemory struct {
+	contextSize uint64
+	moduleSize  uint64
+	bufferSize  uint64
+	offset      uint64
+	total       uint64
+}
+
 type shrregProcSlotT struct {
 	pid         int32
 	hostpid     int32
-	used        [16]uint64
+	used        [16]deviceMemory
 	monitorused [16]uint64
 	status      int32
 }
@@ -81,8 +89,8 @@ func setProcSlot(offset int64, at *mmap.ReaderAt) (shrregProcSlotT, error) {
 		at.ReadAt(buff, offset+8+8*16+8*int64(i))
 		bytesbuffer = bytes.NewBuffer(buff)
 		binary.Read(bytesbuffer, binary.LittleEndian, &monitorused)
-		if monitorused > temp.used[i] {
-			temp.used[i] = monitorused
+		if monitorused > temp.used[i].total {
+			temp.used[i].total = monitorused
 		}
 	}
 	//fmt.Println("used=", temp.used)
@@ -96,7 +104,7 @@ func getDeviceUsedMemory(idx int, sharedregion sharedRegionT) (uint64, error) {
 		return 0, errors.New("out of device idx")
 	}
 	for _, val := range sharedregion.procs {
-		sum += val.used[idx]
+		sum += val.used[idx].total
 	}
 	return sum, nil
 }

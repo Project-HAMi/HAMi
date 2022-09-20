@@ -333,7 +333,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 	}
 
 	for idx := range reqs.ContainerRequests {
-		devreq, err := util.GetNextDeviceRequest(util.NvidiaGPUDevice, *current)
+		currentCtr, devreq, err := util.GetNextDeviceRequest(util.NvidiaGPUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
 			util.PodAllocationFailed(nodename, current)
@@ -363,13 +363,14 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			}
 		}
 		response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-		response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/%v.cache", uuid.NewUUID())
+		response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/vgpu/%v.cache", uuid.NewUUID())
 		if config.DeviceMemoryScaling > 1 {
 			response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 		}
 		if config.DisableCoreLimit {
 			response.Envs[api.CoreLimitSwitch] = "disable"
 		}
+		cacheFileHostDirectory := "/tmp/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
 		response.Mounts = append(response.Mounts,
 			&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
 				HostPath: "/usr/local/vgpu/libvgpu.so",
@@ -377,6 +378,9 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
 				HostPath: "/usr/local/vgpu/ld.so.preload",
 				ReadOnly: true},
+			&pluginapi.Mount{ContainerPath: "/tmp/vgpu",
+				HostPath: cacheFileHostDirectory,
+				ReadOnly: false},
 		)
 		responses.ContainerResponses = append(responses.ContainerResponses, &response)
 	}
