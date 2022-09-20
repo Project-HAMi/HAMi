@@ -131,11 +131,11 @@ func DecodePodDevices(str string) PodDevices {
 	return pd
 }
 
-func GetNextDeviceRequest(dtype string, p v1.Pod) (ContainerDevices, error) {
+func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevices, error) {
 	pdevices := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
 	klog.Infoln("pdevices=", pdevices)
 	res := ContainerDevices{}
-	for _, val := range pdevices {
+	for idx, val := range pdevices {
 		found := false
 		for _, dev := range val {
 			if strings.Compare(dtype, dev.Type) == 0 {
@@ -144,10 +144,10 @@ func GetNextDeviceRequest(dtype string, p v1.Pod) (ContainerDevices, error) {
 			}
 		}
 		if found {
-			return res, nil
+			return p.Spec.Containers[idx], res, nil
 		}
 	}
-	return res, errors.New("device request not found")
+	return v1.Container{}, res, errors.New("device request not found")
 }
 
 func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {

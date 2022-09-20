@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -12,6 +13,7 @@ import (
 
 	vGPUmonitor "4pd.io/k8s-vgpu/cmd/vGPUmonitor/noderpc"
 	"google.golang.org/grpc"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const containerpath = "/tmp/vgpu/containers"
@@ -53,6 +55,19 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	return nil, nil
 }
 
+func checkpodvalid(name string) bool {
+	pods, err := clientset.CoreV1().Pods("").List(context.Background(), v1.ListOptions{})
+	if err != nil {
+		return true
+	}
+	for _, val := range pods.Items {
+		if strings.Contains(name, string(val.UID)) {
+			return true
+		}
+	}
+	return false
+}
+
 func monitorpath() ([]podusage, error) {
 	lock.Lock()
 	defer lock.Unlock()
@@ -65,7 +80,7 @@ func monitorpath() ([]podusage, error) {
 		//fmt.Println("val=", val.Name())
 		dirname := containerpath + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
-		if err1 != nil {
+		if err1 != nil || !checkpodvalid(info.Name()) {
 			fmt.Println("removing" + dirname)
 			err2 := os.RemoveAll(dirname)
 			if err2 != nil {

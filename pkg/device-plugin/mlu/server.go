@@ -280,7 +280,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 		return &pluginapi.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
-		devreq, err := util.GetNextDeviceRequest(util.CambriconMLUDevice, *current)
+		_, devreq, err := util.GetNextDeviceRequest(util.CambriconMLUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
 			util.PodAllocationFailed(nodename, current)

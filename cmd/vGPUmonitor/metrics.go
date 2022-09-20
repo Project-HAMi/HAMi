@@ -110,7 +110,7 @@ func gettotalusage(usage podusage, vidx int) (uint64, error) {
 	var added uint64
 	added = 0
 	for _, val := range usage.sr.procs {
-		added += uint64(val.used[vidx])
+		added += uint64(val.used[vidx].total)
 	}
 	return added, nil
 }
