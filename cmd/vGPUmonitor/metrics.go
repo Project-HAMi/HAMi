@@ -82,6 +82,11 @@ var (
 		"vGPU device limit",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
+	ctrDeviceMemorydesc = prometheus.NewDesc(
+		"Device_memory_desc_of_container",
+		"Container device meory description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
+	)
 	clientset *kubernetes.Clientset
 	srlist    []podusage
 )
@@ -106,11 +111,20 @@ func parseidstr(podusage string) (string, string, error) {
 	}
 }
 
-func gettotalusage(usage podusage, vidx int) (uint64, error) {
-	var added uint64
-	added = 0
+func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
+	added := deviceMemory{
+		bufferSize:  0,
+		contextSize: 0,
+		moduleSize:  0,
+		offset:      0,
+		total:       0,
+	}
 	for _, val := range usage.sr.procs {
-		added += uint64(val.used[vidx].total)
+		added.bufferSize += val.used[vidx].bufferSize
+		added.contextSize += val.used[vidx].contextSize
+		added.moduleSize += val.used[vidx].moduleSize
+		added.offset += val.used[vidx].offset
+		added.total += val.used[vidx].total
 	}
 	return added, nil
 }
@@ -205,7 +219,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUdesc,
 									prometheus.GaugeValue,
-									float64(value),
+									float64(value.total),
 									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
@@ -213,6 +227,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 									prometheus.GaugeValue,
 									float64(srlist[sridx].sr.limit[i]),
 									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+								)
+								ch <- prometheus.MustNewConstMetric(
+									ctrDeviceMemorydesc,
+									prometheus.CounterValue,
+									float64(value.total),
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
 								)
 							}
 						}
