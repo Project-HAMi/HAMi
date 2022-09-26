@@ -381,6 +381,9 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			&pluginapi.Mount{ContainerPath: "/tmp/vgpu",
 				HostPath: cacheFileHostDirectory,
 				ReadOnly: false},
+			&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",
+				HostPath: "/tmp/vgpulock",
+				ReadOnly: false},
 		)
 		responses.ContainerResponses = append(responses.ContainerResponses, &response)
 	}
