@@ -88,7 +88,6 @@ var (
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	clientset *kubernetes.Clientset
-	srlist    []podusage
 )
 
 // Describe is implemented with DescribeByCollect. That's possible because the
@@ -129,8 +128,8 @@ func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
 	return added, nil
 }
 
-func getsrlist() []podusage {
-	return srlist
+func getsrlist() map[string]podusage {
+	return srPodList
 }
 
 // Collect first triggers the ReallyExpensiveAssessmentOfTheSystemState. Then it
@@ -140,10 +139,13 @@ func getsrlist() []podusage {
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	fmt.Println("begin collect")
-	srlist, _ = monitorpath()
-	/*if err != nil {
+	if srPodList == nil {
+		srPodList = make(map[string]podusage)
+	}
+	err := monitorpath(srPodList)
+	if err != nil {
 		fmt.Println("err=", err.Error())
-	}*/
+	}
 	if clientset != nil {
 		err := nvml.Init()
 		if err != nil {
@@ -188,32 +190,32 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			fmt.Println("err=", err.Error())
 		}
 		for _, val := range pods.Items {
-			for sridx, _ := range srlist {
-				if srlist[sridx].sr == nil {
+			for sridx, _ := range srPodList {
+				if srPodList[sridx].sr == nil {
 					continue
 				}
-				pod_uid := strings.Split(srlist[sridx].idstr, "_")[0]
-				ctr_name := strings.Split(srlist[sridx].idstr, "_")[1]
+				pod_uid := strings.Split(srPodList[sridx].idstr, "_")[0]
+				ctr_name := strings.Split(srPodList[sridx].idstr, "_")[1]
 				fmt.Println("compareing", val.UID, pod_uid)
 				if strings.Compare(string(val.UID), pod_uid) == 0 {
 					fmt.Println("Pod matched!", val.Name, val.Namespace, val.Labels)
-					for ctridx, ctr := range val.Spec.Containers {
+					for _, ctr := range val.Spec.Containers {
 						if strings.Compare(ctr.Name, ctr_name) == 0 {
 							fmt.Println("container matched", ctr.Name)
-							err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srlist[sridx])
-							if err != nil {
-								fmt.Println("setHostPid filed", err.Error())
-							}
-							fmt.Println("sr.list=", srlist[sridx].sr)
+							//err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[sridx])
+							//if err != nil {
+							//	fmt.Println("setHostPid filed", err.Error())
+							//}
+							//fmt.Println("sr.list=", srPodList[sridx].sr)
 							podlabels := make(map[string]string)
 							for idx, val := range val.Labels {
 								idxfix := strings.ReplaceAll(idx, "-", "_")
 								valfix := strings.ReplaceAll(val, "-", "_")
 								podlabels[idxfix] = valfix
 							}
-							for i := 0; i < int(srlist[sridx].sr.num); i++ {
-								value, _ := gettotalusage(srlist[sridx], i)
-								uuid := string(srlist[sridx].sr.uuids[i].uuid[:])[0:40]
+							for i := 0; i < int(srPodList[sridx].sr.num); i++ {
+								value, _ := gettotalusage(srPodList[sridx], i)
+								uuid := string(srPodList[sridx].sr.uuids[i].uuid[:])[0:40]
 
 								//fmt.Println("uuid=", uuid, "length=", len(uuid))
 								ch <- prometheus.MustNewConstMetric(
@@ -225,7 +227,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUlimitdesc,
 									prometheus.GaugeValue,
-									float64(srlist[sridx].sr.limit[i]),
+									float64(srPodList[sridx].sr.limit[i]),
 									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(

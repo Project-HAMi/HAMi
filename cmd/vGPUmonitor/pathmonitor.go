@@ -68,13 +68,12 @@ func checkpodvalid(name string) bool {
 	return false
 }
 
-func monitorpath() ([]podusage, error) {
+func monitorpath(podmap map[string]podusage) error {
 	lock.Lock()
 	defer lock.Unlock()
-	srlist := []podusage{}
 	files, err := ioutil.ReadDir(containerpath)
 	if err != nil {
-		return srlist, err
+		return err
 	}
 	for _, val := range files {
 		//fmt.Println("val=", val.Name())
@@ -82,23 +81,28 @@ func monitorpath() ([]podusage, error) {
 		info, err1 := os.Stat(dirname)
 		if err1 != nil || !checkpodvalid(info.Name()) {
 			fmt.Println("removing" + dirname)
+			//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
+			delete(podmap, dirname)
 			err2 := os.RemoveAll(dirname)
 			if err2 != nil {
-				return srlist, err2
+				return err2
 			}
 		} else {
-			fmt.Println(info.IsDir())
-			sr, err2 := checkfiles(dirname)
-			if err2 != nil {
-				return srlist, err2
+			_, ok := podmap[dirname]
+			if !ok {
+				fmt.Println("Adding ctr", dirname)
+				sr, err2 := checkfiles(dirname)
+				if err2 != nil {
+					return err2
+				}
+				podmap[dirname] = podusage{
+					idstr: val.Name(),
+					sr:    sr,
+				}
 			}
-			srlist = append(srlist, podusage{
-				idstr: val.Name(),
-				sr:    sr,
-			})
 		}
 	}
-	return srlist, nil
+	return nil
 }
 
 type server struct {
