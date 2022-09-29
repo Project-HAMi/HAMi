@@ -110,11 +110,12 @@ func getDeviceUsedMemory(idx int, sharedregion sharedRegionT) (uint64, error) {
 }
 
 func mmapcachefile(filename string, nc *nvidiaCollector) error {
+	var m = &sharedRegionT{}
 	f, err := os.OpenFile(filename, os.O_RDWR, 0666)
 	if err != nil {
+		fmt.Println("openfile error=", err.Error())
 		return err
 	}
-	var m = &sharedRegionT{}
 	data, err := syscall.Mmap(int(f.Fd()), 0, int(unsafe.Sizeof(*m)), syscall.PROT_WRITE|syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return err

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var cgroupDriver int
@@ -27,6 +25,11 @@ type hostGPUPid struct {
 type UtilizationPerDevice []int
 
 var mutex sync.Mutex
+var srPodList map[string]podusage
+
+func init() {
+	srPodList = make(map[string]podusage)
+}
 
 func setcGgroupDriver() int {
 	// 1 for cgroupfs 2 for systemd
@@ -223,15 +226,18 @@ func watchAndFeedback() {
 	for {
 		time.Sleep(time.Second * 2)
 		//if len(srlist) == 0 {
-		srlist, _ = monitorpath()
+		err := monitorpath(srPodList)
+		if err != nil {
+			fmt.Println("monitorPath failed", err.Error())
+		}
 		//}
 		//fmt.Println("watchAndFeedback", srlist)
-		Observe(&srlist)
-		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
-		if err != nil {
-			fmt.Println("err=", err.Error())
-		}
-		for _, val := range pods.Items {
+		//Observe(&srPodList)
+		//pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+		//if err != nil {
+		//	fmt.Println("err=", err.Error())
+		//}
+		/*for _, val := range pods.Items {
 			for idx, _ := range srlist {
 				pod_uid := strings.Split(srlist[idx].idstr, "_")[0]
 				ctr_name := strings.Split(srlist[idx].idstr, "_")[1]
@@ -243,6 +249,6 @@ func watchAndFeedback() {
 					}
 				}
 			}
-		}
+		}*/
 	}
 }
