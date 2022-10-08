@@ -10,6 +10,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	vGPUmonitor "4pd.io/k8s-vgpu/cmd/vGPUmonitor/noderpc"
 	"google.golang.org/grpc"
@@ -80,12 +81,14 @@ func monitorpath(podmap map[string]podusage) error {
 		dirname := containerpath + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
 		if err1 != nil || !checkpodvalid(info.Name()) {
-			fmt.Println("removing" + dirname)
-			//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
-			delete(podmap, dirname)
-			err2 := os.RemoveAll(dirname)
-			if err2 != nil {
-				return err2
+			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
+				fmt.Println("removing" + dirname)
+				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
+				delete(podmap, dirname)
+				err2 := os.RemoveAll(dirname)
+				if err2 != nil {
+					return err2
+				}
 			}
 		} else {
 			_, ok := podmap[dirname]

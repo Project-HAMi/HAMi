@@ -53,6 +53,8 @@ spec:
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName
+            - name: HOOK_PATH
+              value: {{ .Values.devicePlugin.libPath }}
           securityContext:
             privileged: true
             allowPrivilegeEscalation: true
@@ -87,7 +89,7 @@ spec:
             path: {{ .Values.devicePlugin.sockPath }}
         - name: lib
           hostPath:
-            path: /usr/local/vgpu
+            path: {{ .Values.devicePlugin.libPath }}
       {{- if .Values.devicePlugin.mlunodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.mlunodeSelector | nindent 8 }}
       {{- end }}

@@ -325,7 +325,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 		if reqMem > 0 {
 			resp.Mounts = append(resp.Mounts, &pluginapi.Mount{
 				ContainerPath: "/usr/bin/smlu-containerd",
-				HostPath:      "/usr/local/vgpu/smlu-containerd",
+				HostPath:      os.Getenv("HOOK_PATH") + "/smlu-containerd",
 				ReadOnly:      true,
 			})
 		}
