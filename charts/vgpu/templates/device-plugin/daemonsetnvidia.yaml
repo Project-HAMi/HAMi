@@ -60,6 +60,8 @@ spec:
                   fieldPath: spec.nodeName
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
+            - name: HOOK_PATH
+              value: {{ .Values.devicePlugin.libPath }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -123,8 +125,8 @@ spec:
             path: {{ .Values.devicePlugin.pluginPath }}
         - name: lib
           hostPath:
-            path: /usr/local/vgpu
-            #path: {{ .Values.devicePlugin.libPath }}
+            #path: /usr/local/vgpu
+            path: {{ .Values.devicePlugin.libPath }}
         - name: usrbin
           hostPath:
             path: /usr/bin
