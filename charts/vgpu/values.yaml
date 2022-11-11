@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: []
-version: "v2.2.5"
+version: "v2.2.6"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -26,7 +26,7 @@ global:
 
 scheduler:
   defaultMem: 5000
-  defaultCores: 5
+  defaultCores: 0
   kubeScheduler:
     imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
@@ -55,7 +55,8 @@ scheduler:
     imagePullPolicy: IfNotPresent
     priorityClassName: ""
     podAnnotations: {}
-    nodeSelector: {}
+    nodeSelector: 
+      gpu: "on"
     tolerations: []
     runAsUser: 2000
 
