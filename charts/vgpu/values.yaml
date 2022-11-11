@@ -46,7 +46,8 @@ scheduler:
       - --debug
       - -v=4
   podAnnotations: {}
-  nodeSelector: {}
+  nodeSelector: 
+    gpu: "on"
   tolerations: []
   #serviceAccountName: "4pd-vgpu-scheduler-sa"
   patch:
@@ -55,8 +56,7 @@ scheduler:
     imagePullPolicy: IfNotPresent
     priorityClassName: ""
     podAnnotations: {}
-    nodeSelector: 
-      gpu: "on"
+    nodeSelector: {}
     tolerations: []
     runAsUser: 2000
 
