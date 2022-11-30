@@ -37,7 +37,7 @@ func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 		}
 		if ok {
 			if n, ok := v.AsInt64(); ok {
-				memnum := config.DefaultMem
+				memnum := 0
 				mem, ok := pod.Spec.Containers[i].Resources.Limits[resourceMem]
 				if !ok {
 					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMem]
@@ -45,10 +45,11 @@ func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 				if ok {
 					memnums, ok := mem.AsInt64()
 					if ok {
-						memnum = int32(memnums)
+						memnum = int(memnums)
 					}
 				}
 				mempnum := int32(101)
+				mem, ok = pod.Spec.Containers[i].Resources.Limits[resourceMemPercentage]
 				if !ok {
 					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMemPercentage]
 					if ok {
@@ -57,6 +58,9 @@ func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 							mempnum = int32(mempnums)
 						}
 					}
+				}
+				if mempnum == 101 && memnum == 0 {
+					memnum = int(config.DefaultMem)
 				}
 				corenum := config.DefaultCores
 				core, ok := pod.Spec.Containers[i].Resources.Limits[resourceCores]
