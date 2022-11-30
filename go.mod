@@ -1,6 +1,6 @@
 module 4pd.io/k8s-vgpu
 
-go 1.19
+go 1.18
 
 require (
 	4pd.io/k8s-vgpu/pkg/api v0.0.0
