@@ -61,6 +61,27 @@ See exmaple.yaml for more details
 **Add Container Core Utilization policy**
 See details in docs/config.md(docs/config_cn.md)
 
+## v2.2
+
+**Update device memory counting mechanism to compat with CUDA 11.3+ task**
+sometimes vgpu-scheduler won't able to collect device memory usage when running cuda11.3+ compiled tasks in v1.x version of vgpu-scheduler. We solve this problem by reworking device memory counting mechanism.
+
+**Use node annotation instead of grpc to communicate between scheduler and device-plugin**
+In v1.x version of vgpu-scheduler, we use grpc to communicate between scheduler and device-plugin, but we reimplement this communication in v2.x by using node annotation, to make it more stable and readable.
+
+**modified nvidia-container-runtime is no longer needed**
+We remove self-modified nvidia-container-runtime in v1.x, because we now use node lock to track pod and container information. so this nvidia-container-runtime is no longer needed.
+
+## v2.2.7
+
+**fix gpumem-percentage not working**
+
+**Adjust certain logs**
+
+**update go modules to more recent version in order to support k8s v1.25**
+
+**fix dead lock when a process die with its lock not released**
+
 
 
 

@@ -75,7 +75,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			if c.Lifecycle == nil {
 				c.Lifecycle = &corev1.Lifecycle{PostStart: nil}
 			}
-			c.Lifecycle.PostStart = &corev1.Handler{
+			c.Lifecycle.PostStart = &corev1.LifecycleHandler{
 				Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
 		}
 
