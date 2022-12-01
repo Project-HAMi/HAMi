@@ -52,11 +52,11 @@ func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 				mem, ok = pod.Spec.Containers[i].Resources.Limits[resourceMemPercentage]
 				if !ok {
 					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMemPercentage]
+				}
+				if ok {
+					mempnums, ok := mem.AsInt64()
 					if ok {
-						mempnums, ok := mem.AsInt64()
-						if ok {
-							mempnum = int32(mempnums)
-						}
+						mempnum = int32(mempnums)
 					}
 				}
 				if mempnum == 101 && memnum == 0 {
