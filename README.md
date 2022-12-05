@@ -7,6 +7,8 @@
 
 English version|[中文版](README_cn.md)
 
+## Feel free to contact me by adding wechat 'xuanzong4493'
+
 ## Introduction
 
 **Cambricon.com/mlu sharing is now supported click [here](docs/cambricon-mlu-support.md) to check this out!!**
