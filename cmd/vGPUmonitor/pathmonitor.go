@@ -96,7 +96,12 @@ func monitorpath(podmap map[string]podusage) error {
 				fmt.Println("Adding ctr", dirname)
 				sr, err2 := checkfiles(dirname)
 				if err2 != nil {
+					//fmt.Println("err2=", err2.Error())
 					return err2
+				}
+				if sr == nil {
+					/* This container haven't use any gpu-related operations */
+					continue
 				}
 				podmap[dirname] = podusage{
 					idstr: val.Name(),
