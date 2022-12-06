@@ -74,13 +74,23 @@ We remove self-modified nvidia-container-runtime in v1.x, because we now use nod
 
 ## v2.2.7
 
-**fix gpumem-percentage not working**
+**BUG fix**
+
+fix tasks with "gpumem-percentage" not working properly
+
+fix dead lock when a process die with its lock not released
 
 **Adjust certain logs**
 
 **update go modules to more recent version in order to support k8s v1.25**
 
-**fix dead lock when a process die with its lock not released**
+## v2.2.8
+
+**BUG fix**
+
+fix vGPUmonitor not working properly with containerd
+
+fix installation error on k8s v1.25+
 
 
 
