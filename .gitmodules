@@ -1,0 +1,3 @@
+[submodule "benchmarks/ai-benchmark/ai-benchmark"]
+	path = benchmarks/ai-benchmark/ai-benchmark
+	url = https://github.com/niconical/ai-benchmark.git
