@@ -92,6 +92,28 @@ fix vGPUmonitor not working properly with containerd
 
 fix installation error on k8s v1.25+
 
+## v2.2.9
+
+**BUG fix**
+
+fix non-root user in container can't access /tmp/vgpulock, result in "unified lock error"
+
+**Rework device registration**
+
+device registration used to be done in gRpc between device-plugin and scheduler. However, in some cluster, this communication may be blocked by firewall or selinux configuration. So, we reimplement device registration mechanism by using node annotations:
+A-device-plugin will put its usable device and its status in "Node-A-device-register" annotation
+scheduler will read from this annotation and acknowledge this registration. So, gRpc will no longer be used.
+
+**Optimization in code**
+
+Put nvidia-device-plugin related code in a seperate directory "nvidiadevice"
+
+**Libvgpu log adjusting**
+
+Downgrade the following API from LOG:WARN to LOG:INFO
+cuFuncSetCacheConfig, cuFuncSetCacheConfig ,cuModuleGetTexRef, cuModuleGetSurfRef
+
+
 
 
 

@@ -26,6 +26,7 @@ import (
 	"strconv"
 	"strings"
 
+	"4pd.io/k8s-vgpu/pkg/api"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -44,6 +45,11 @@ func GlobalFlagSet() *flag.FlagSet {
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
 	klog.InitFlags(fs)
 	return fs
+}
+
+func GetNode(nodename string) (*v1.Node, error) {
+	n, err := GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	return n, err
 }
 
 func GetPendingPod(node string) (*v1.Pod, error) {
@@ -71,6 +77,40 @@ func GetPendingPod(node string) (*v1.Pod, error) {
 		}
 	}
 	return nil, nil
+}
+
+func DecodeNodeDevices(str string) []*api.DeviceInfo {
+	if !strings.Contains(str, ":") {
+		return []*api.DeviceInfo{}
+	}
+	tmp := strings.Split(str, ":")
+	var retval []*api.DeviceInfo
+	for _, val := range tmp {
+		if strings.Contains(val, ",") {
+			items := strings.Split(val, ",")
+			count, _ := strconv.Atoi(items[1])
+			devmem, _ := strconv.Atoi(items[2])
+			health, _ := strconv.ParseBool(items[4])
+			i := api.DeviceInfo{
+				Id:     items[0],
+				Count:  int32(count),
+				Devmem: int32(devmem),
+				Type:   items[3],
+				Health: health,
+			}
+			retval = append(retval, &i)
+		}
+	}
+	return retval
+}
+
+func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
+	tmp := ""
+	for _, val := range dlist {
+		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + val.Type + "," + strconv.FormatBool(val.Health) + ":"
+	}
+	klog.V(3).Infoln("Encoded node Devices", tmp)
+	return tmp
 }
 
 func EncodeContainerDevices(cd ContainerDevices) string {
@@ -217,6 +257,30 @@ func PodAllocationFailed(nodeName string, pod *v1.Pod) {
 	if err != nil {
 		klog.Errorf("release lock failed:%v", err.Error())
 	}
+}
+
+func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
+	type patchMetadata struct {
+		Annotations map[string]string `json:"annotations,omitempty"`
+	}
+	type patchPod struct {
+		Metadata patchMetadata `json:"metadata"`
+		//Spec     patchSpec     `json:"spec,omitempty"`
+	}
+
+	p := patchPod{}
+	p.Metadata.Annotations = annotations
+
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = kubeClient.CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.Infof("patch pod %v failed, %v", node.Name, err)
+	}
+	return err
 }
 
 func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {

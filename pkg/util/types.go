@@ -58,6 +58,11 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	NodeLockTime           = "4pd.io/mutex.lock"
 	MaxLockRetry           = 5
+
+	NodeHandshake              = "4pd.io/node-handshake"
+	NodeNvidiaDeviceRegistered = "4pd.io/node-nvidia-register"
+	NodeMLUHandshake           = "4pd.io/node-handshake-mlu"
+	NodeMLUDeviceRegistered    = "4pd.io/node-mlu-register"
 )
 
 var (
@@ -70,15 +75,20 @@ var (
 
 	MLUResourceCount  string
 	MLUResourceMemory string
+
+	KnownDevice = map[string]string{
+		NodeHandshake:    NodeNvidiaDeviceRegistered,
+		NodeMLUHandshake: NodeMLUDeviceRegistered,
+	}
 )
 
-//type ContainerDevices struct {
-//    Devices []string `json:"devices,omitempty"`
-//}
+//	type ContainerDevices struct {
+//	   Devices []string `json:"devices,omitempty"`
+//	}
 //
-//type PodDevices struct {
-//    Containers []ContainerDevices `json:"containers,omitempty"`
-//}
+//	type PodDevices struct {
+//	   Containers []ContainerDevices `json:"containers,omitempty"`
+//	}
 type ContainerDevice struct {
 	UUID      string
 	Type      string

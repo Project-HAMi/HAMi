@@ -27,6 +27,7 @@ import (
 	"4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"4pd.io/k8s-vgpu/pkg/util"
 	"google.golang.org/grpc"
 )
 
@@ -136,19 +137,41 @@ func (r *DeviceRegister) Register(ctx context.Context, endpoint string) error {
 	}
 }
 
+func (r *DeviceRegister) RegistrInAnnotation() error {
+	devices := r.apiDevices()
+	annos := make(map[string]string)
+	node, err := util.GetNode(config.NodeName)
+	if err != nil {
+		klog.Errorln("get node error", err.Error())
+		return err
+	}
+	encodeddevices := util.EncodeNodeDevices(*devices)
+	annos[util.NodeMLUHandshake] = "Reported " + time.Now().String()
+	annos[util.NodeMLUDeviceRegistered] = encodeddevices
+	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
+	err = util.PatchNodeAnnotations(node, annos)
+
+	if err != nil {
+		klog.Errorln("patch node error", err.Error())
+	}
+	return err
+}
+
 func (r *DeviceRegister) WatchAndRegister(opt Options) {
 	//ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
 	//defer cancel()
 	klog.Infof("into WatchAndRegister")
-	ctx := context.Background()
+	//ctx := context.Background()
 	for {
-		err := r.Register(ctx, opt.SchedulerEndpoint)
+		err := r.RegistrInAnnotation()
+		//err := r.Register(ctx)
 		if err != nil {
 			klog.Errorf("register error, %v", err)
 			time.Sleep(time.Second * 5)
 		} else {
-			klog.Infof("register stopped")
-			break
+			time.Sleep(time.Second * 30)
+			//klog.Infof("register stopped")
+			//break
 		}
 	}
 }
