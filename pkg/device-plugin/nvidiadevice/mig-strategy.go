@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package device_plugin
+package nvidiadevice
 
 import (
 	"fmt"
@@ -52,7 +52,7 @@ func NewMigStrategy(strategy string) (MigStrategy, error) {
 	case MigStrategyMixed:
 		return &migStrategyMixed{}, nil
 	}
-	return nil, fmt.Errorf("Unknown strategy: %v", strategy)
+	return nil, fmt.Errorf("unknown strategy: %v", strategy)
 }
 
 type migStrategyNone struct{}

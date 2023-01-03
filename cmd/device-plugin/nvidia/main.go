@@ -25,8 +25,8 @@ import (
 
 	"4pd.io/k8s-vgpu/pkg/version"
 
-	device_plugin "4pd.io/k8s-vgpu/pkg/device-plugin"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	nvidiadevice "4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice"
 	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	"github.com/fsnotify/fsnotify"
@@ -141,15 +141,15 @@ func start() error {
 	klog.Info("Starting OS watcher.")
 	sigs := NewOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	cache := device_plugin.NewDeviceCache()
+	cache := nvidiadevice.NewDeviceCache()
 	cache.Start()
 	defer cache.Stop()
 
-	register := device_plugin.NewDeviceRegister(cache)
+	register := nvidiadevice.NewDeviceRegister(cache)
 	register.Start()
 	defer register.Stop()
 
-	var plugins []*device_plugin.NvidiaDevicePlugin
+	var plugins []*nvidiadevice.NvidiaDevicePlugin
 restart:
 	// If we are restarting, idempotently stop any running plugins before
 	// recreating them below.
@@ -157,7 +157,7 @@ restart:
 		p.Stop()
 	}
 	klog.Info("Retreiving plugins.")
-	migStrategy, err := device_plugin.NewMigStrategy(migStrategyFlag)
+	migStrategy, err := nvidiadevice.NewMigStrategy(migStrategyFlag)
 	if err != nil {
 		return fmt.Errorf("error creating MIG strategy: %v", err)
 	}

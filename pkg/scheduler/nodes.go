@@ -64,6 +64,9 @@ func (m *nodeManager) init() {
 }
 
 func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
+	if nodeInfo == nil || len(nodeInfo.Devices) == 0 {
+		return
+	}
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
@@ -82,6 +85,9 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
+		if m.nodes[nodeID].Devices == nil || len(m.nodes[nodeID].Devices) == 0 {
+			return
+		}
 		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
 		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
 		for _, val := range m.nodes[nodeID].Devices {
@@ -97,8 +103,8 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 			}
 		}
 		m.nodes[nodeID].Devices = tmp
+		klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 	}
-	klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 }
 
 func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {

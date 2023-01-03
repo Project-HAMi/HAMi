@@ -62,14 +62,8 @@ func init() {
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
-func start() {
-	sher = scheduler.NewScheduler()
-	sher.Start()
-	defer sher.Stop()
-
-	// start grpc server
+func startGrpcServer() {
 	lisGrpc, _ := net.Listen("tcp", config.GrpcBind)
-	defer lisGrpc.Close()
 	s := grpc.NewServer()
 	pb.RegisterDeviceServiceServer(s, sher)
 	go func() {
@@ -78,8 +72,18 @@ func start() {
 			klog.Fatal(err)
 		}
 	}()
+}
+
+func start() {
+	sher = scheduler.NewScheduler()
+	sher.Start()
+	defer sher.Stop()
+
+	// start grpc server
+	// startGrpcServer()
 
 	// start monitor metrics
+	go sher.RegisterFromNodeAnnotatons()
 	go initmetrics()
 
 	// start http server

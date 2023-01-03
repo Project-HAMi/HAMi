@@ -140,6 +140,93 @@ func (s *Scheduler) Stop() {
 //	   }
 //	   return ""
 //	}
+func (s *Scheduler) RegisterFromNodeAnnotatons() error {
+	nodeInfoCopy := make(map[string]*NodeInfo)
+	for {
+		nodes, err := s.kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
+			//LabelSelector: "gpu=on",
+		})
+		if err != nil {
+			klog.Errorln("nodes list failed", err.Error())
+			return err
+		}
+		for _, val := range nodes.Items {
+			for devhandsk, devreg := range util.KnownDevice {
+				_, ok := val.Annotations[devreg]
+				if !ok {
+					continue
+				}
+				nodedevices := util.DecodeNodeDevices(val.Annotations[devreg])
+				if len(nodedevices) == 0 {
+					continue
+				}
+				klog.V(5).Infoln("nodedevices=", nodedevices)
+				handshake := val.Annotations[devhandsk]
+				if strings.Contains(handshake, "Requesting") {
+					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+					if time.Now().After(formertime.Add(time.Second * 60)) {
+						_, ok := s.nodes[val.Name]
+						if ok {
+							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
+							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
+
+							tmppat := make(map[string]string)
+							tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+							n, err := util.GetNode(val.Name)
+							if err != nil {
+								klog.Errorln("get node failed", err.Error())
+							}
+							util.PatchNodeAnnotations(n, tmppat)
+							continue
+						}
+					}
+					continue
+				} else if strings.Contains(handshake, "Deleted") {
+					continue
+				} else {
+					tmppat := make(map[string]string)
+					tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					n, err := util.GetNode(val.Name)
+					if err != nil {
+						klog.Errorln("get node failed", err.Error())
+					}
+					util.PatchNodeAnnotations(n, tmppat)
+				}
+				nodeInfo := &NodeInfo{}
+				nodeInfo.ID = val.Name
+				nodeInfo.Devices = make([]DeviceInfo, 0)
+				found := false
+				for _, deviceinfo := range nodedevices {
+					_, ok := s.nodes[val.Name]
+					if ok {
+						for _, val := range s.nodes[val.Name].Devices {
+							if strings.Compare(val.ID, deviceinfo.Id) == 0 {
+								found = true
+								break
+							}
+						}
+					}
+					if !found {
+						nodeInfo.Devices = append(nodeInfo.Devices, DeviceInfo{
+							ID:     deviceinfo.Id,
+							Count:  deviceinfo.Count,
+							Devmem: deviceinfo.Devmem,
+							Type:   deviceinfo.Type,
+							Health: deviceinfo.Health,
+						})
+					}
+				}
+				s.addNode(val.Name, nodeInfo)
+				nodeInfoCopy[devhandsk] = nodeInfo
+				if s.nodes[val.Name] != nil && nodeInfo != nil && len(nodeInfo.Devices) > 0 {
+					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
+				}
+			}
+		}
+		time.Sleep(time.Second * 15)
+	}
+}
+
 func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
 	var nodeID string
 	var nodeInfoCopy NodeInfo

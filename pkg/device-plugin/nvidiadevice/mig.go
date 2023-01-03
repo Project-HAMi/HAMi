@@ -1,5 +1,5 @@
 // Copyright (c) 2021, NVIDIA CORPORATION. All rights reserved.
-package device_plugin
+package nvidiadevice
 
 import (
 	"bufio"
@@ -92,7 +92,7 @@ func (devices *MIGCapableDevices) AssertAllMigEnabledDevicesAreValid() error {
 			return err
 		}
 		if len(migs) == 0 {
-			return fmt.Errorf("No MIG devices associated with %v: %v", d.Path, d.UUID)
+			return fmt.Errorf("no MIG devices associated with %v: %v", d.Path, d.UUID)
 		}
 	}
 	return nil
