@@ -39,7 +39,9 @@ func checkBody(w http.ResponseWriter, r *http.Request) {
 }
 
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
+	klog.Infoln("Into Predicate Route outer func")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.Infoln("Into Predicate Route inner func")
 		checkBody(w, r)
 
 		var buf bytes.Buffer
@@ -49,6 +51,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		var extenderFilterResult *extenderv1.ExtenderFilterResult
 
 		if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
+			klog.Errorln("decode error", err.Error())
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
 			}

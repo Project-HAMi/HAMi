@@ -141,6 +141,7 @@ func (s *Scheduler) Stop() {
 //	   return ""
 //	}
 func (s *Scheduler) RegisterFromNodeAnnotatons() error {
+	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*NodeInfo)
 	for {
 		nodes, err := s.kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{

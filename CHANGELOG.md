@@ -113,6 +113,17 @@ Put nvidia-device-plugin related code in a seperate directory "nvidiadevice"
 Downgrade the following API from LOG:WARN to LOG:INFO
 cuFuncSetCacheConfig, cuFuncSetCacheConfig ,cuModuleGetTexRef, cuModuleGetSurfRef
 
+## v2.2.10
+
+**BUG fix**
+
+fix process can't initialize properly in driver 440
+
+fix cuCtxCreate failed in some tensorRT task
+
+fix env CUDA_VISIBLE_DEVICES not working properly sometimes.
+
+
 
 
 

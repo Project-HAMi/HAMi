@@ -36,8 +36,10 @@ func NewClient() (kubernetes.Interface, error) {
 	}
 	config, err := rest.InClusterConfig()
 	if err != nil {
+		klog.Infoln("InClusterConfig failed", err.Error())
 		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
 		if err != nil {
+			klog.Errorln("BuildFromFlags failed", err.Error())
 			return nil, err
 		}
 	}
