@@ -371,8 +371,8 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			response.Envs[api.CoreLimitSwitch] = "disable"
 		}
 		cacheFileHostDirectory := "/tmp/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
-		os.MkdirAll(cacheFileHostDirectory, 0755)
-		os.MkdirAll("/tmp/vgpulock", 0755)
+		os.MkdirAll(cacheFileHostDirectory, 0777)
+		os.MkdirAll("/tmp/vgpulock", 0777)
 		hostHookPath := os.Getenv("HOOK_PATH")
 		response.Mounts = append(response.Mounts,
 			&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",

@@ -123,7 +123,13 @@ fix cuCtxCreate failed in some tensorRT task
 
 fix env CUDA_VISIBLE_DEVICES not working properly sometimes.
 
+## v2.2.11
 
+**BUG fix**
+
+fix initialization failed with non-root uers
+
+fix core limitation not working properly on A30
 
 
 
