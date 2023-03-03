@@ -131,6 +131,9 @@ fix initialization failed with non-root uers
 
 fix core limitation not working properly on A30
 
+## v2.2.12
+
+Downgrade core control output from LOG:WARN to LOG:DEBUG
 
 
 
