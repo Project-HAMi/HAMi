@@ -46,7 +46,6 @@ spec:
             - nvidia-device-plugin
             - --resource-name={{ .Values.resourceName }}
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
-            - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
             - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
             - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
             - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}

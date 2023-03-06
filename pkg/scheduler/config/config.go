@@ -18,7 +18,6 @@ package config
 
 var (
 	HttpBind      string
-	GrpcBind      string
 	SchedulerName string
 	DefaultMem    int32
 	DefaultCores  int32

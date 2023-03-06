@@ -44,7 +44,6 @@ spec:
             - --virtualization-num=10 #  virtualization number for each MLU, used only in sriov mode or env-share mode
             - --mlulink-policy=best-effort # MLULink topology policy: best-effort, guaranteed or restricted, used only in topology-aware mode
             - --cnmon-path=/usr/bin/cnmon # host machine cnmon path, must be absolute path. comment out this line to avoid mounting cnmon.
-            - --scheduler-endpoint={{ printf "%s:%d" ( include "4pd-vgpu.scheduler" . ) ( int .Values.scheduler.service.grpcPort ) }}
             #- --enable-console #uncomment to enable UART console device(/dev/ttyMS) in container
             #- --disable-health-check #uncomment to disable health check
             #- --enable-device-type #uncomment to enable device registration with type info

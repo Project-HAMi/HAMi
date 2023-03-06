@@ -32,7 +32,6 @@ type Options struct {
 	EnableConsole      bool   `long:"enable-console" description:"enable UART console device(/dev/ttyMS) in container"`
 	EnableDeviceType   bool   `long:"enable-device-type" description:"enable device registration with type info"`
 	CnmonPath          string `long:"cnmon-path" description:"host cnmon path"`
-	SchedulerEndpoint  string `long:"scheduler-endpoint" description:"endpoint for device plugin to register"`
 	SocketPath         string `long:"socket-path" description:"socket path for communication between deviceplugin and container runtime"`
 }
 
@@ -59,7 +58,6 @@ func ParseFlags() Options {
 	}
 	config.DeviceSplitCount = options.VirtualizationNum
 	config.RuntimeSocketFlag = options.SocketPath
-	config.SchedulerEndpoint = options.SchedulerEndpoint
 	log.Printf("Parsed options: %v\n", options)
 	return options
 }
