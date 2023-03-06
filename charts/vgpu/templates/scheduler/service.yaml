@@ -18,10 +18,6 @@ spec:
       port: {{ .Values.scheduler.service.httpPort }}
       targetPort: 443
       protocol: TCP
-    - name: grpc
-      port: {{ .Values.scheduler.service.grpcPort }}
-      targetPort: 1080
-      protocol: TCP
     - name: monitor
       port: {{ .Values.scheduler.service.monitorPort }}
       targetPort: 9395

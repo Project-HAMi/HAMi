@@ -60,7 +60,6 @@ spec:
             - --resource-mem-percentage={{ .Values.resourceMemPercentage }}
             - --resource-priority={{ .Values.resourcePriority }}
             - --http_bind=0.0.0.0:443
-            - --grpc_bind=0.0.0.0:1080
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}
@@ -72,9 +71,6 @@ spec:
           ports:
             - name: http
               containerPort: 443
-              protocol: TCP
-            - name: grpc
-              containerPort: 1080
               protocol: TCP
           volumeMounts:
             - name: tls-config
