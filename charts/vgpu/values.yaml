@@ -63,7 +63,6 @@ scheduler:
   service:
     httpPort: 443
     monitorPort: 31993
-    grpcPort: 1080
     labels: {}
     annotations: {}
 

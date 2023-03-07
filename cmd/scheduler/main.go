@@ -16,19 +16,16 @@
 package main
 
 import (
-	"net"
 	"net/http"
 
 	"4pd.io/k8s-vgpu/pkg/util"
 	"4pd.io/k8s-vgpu/pkg/version"
 
-	pb "4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/scheduler"
 	"4pd.io/k8s-vgpu/pkg/scheduler/config"
 	"4pd.io/k8s-vgpu/pkg/scheduler/routes"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
-	"google.golang.org/grpc"
 	"k8s.io/klog/v2"
 )
 
@@ -51,7 +48,6 @@ func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
 
-	rootCmd.Flags().StringVar(&config.GrpcBind, "grpc_bind", "127.0.0.1:9090", "grpc server bind address")
 	rootCmd.Flags().StringVar(&config.HttpBind, "http_bind", "127.0.0.1:8080", "http server bind address")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
@@ -62,25 +58,10 @@ func init() {
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
-func startGrpcServer() {
-	lisGrpc, _ := net.Listen("tcp", config.GrpcBind)
-	s := grpc.NewServer()
-	pb.RegisterDeviceServiceServer(s, sher)
-	go func() {
-		err := s.Serve(lisGrpc)
-		if err != nil {
-			klog.Fatal(err)
-		}
-	}()
-}
-
 func start() {
 	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()
-
-	// start grpc server
-	// startGrpcServer()
 
 	// start monitor metrics
 	go sher.RegisterFromNodeAnnotatons()

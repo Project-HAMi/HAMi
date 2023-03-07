@@ -17,7 +17,6 @@
 package mlu
 
 import (
-	"context"
 	"fmt"
 	"time"
 
@@ -28,7 +27,6 @@ import (
 	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
 	"4pd.io/k8s-vgpu/pkg/util"
-	"google.golang.org/grpc"
 )
 
 type DevListFunc func() []*pluginapi.Device
@@ -79,64 +77,6 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 	return &res
 }
 
-func (r *DeviceRegister) Register(ctx context.Context, endpoint string) error {
-	klog.Infof("Into Register")
-	conn, err := grpc.DialContext(
-		ctx,
-		endpoint,
-		grpc.WithInsecure(),
-		grpc.WithBlock(),
-		//grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
-	)
-	if err != nil {
-		return fmt.Errorf("connect scheduler error, %v", err)
-	}
-	client := api.NewDeviceServiceClient(conn)
-	register, err := client.Register(ctx)
-	if err != nil {
-		klog.Errorf("register error %v", err)
-		err = fmt.Errorf("client register error, %v", err)
-		return err
-	}
-	klog.Infof("after client register")
-	req := api.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
-	err = register.Send(&req)
-	if err != nil {
-		klog.Errorf("register send error, %v", err)
-		return err
-	}
-	klog.V(3).Infof("register info %v", req.String())
-	closeCh := make(chan struct{})
-	go func() {
-		reply := api.RegisterReply{}
-		err := register.RecvMsg(reply)
-		if err != nil {
-			klog.Errorf("register recv error, %v", err)
-		} else {
-			klog.Errorf("register recv closed")
-		}
-		closeCh <- struct{}{}
-	}()
-	for {
-		select {
-		case <-r.unhealthy:
-			err = register.Send(&api.RegisterRequest{
-				Node:    config.NodeName,
-				Devices: *r.apiDevices(),
-			})
-			if err != nil {
-				klog.Errorf("register send error, %v", err)
-				return err
-			}
-			klog.V(3).Infof("register info %v", req.String())
-		case <-closeCh:
-			return fmt.Errorf("register server closed")
-		case <-r.stopCh:
-			return nil
-		}
-	}
-}
-
 func (r *DeviceRegister) RegistrInAnnotation() error {
 	devices := r.apiDevices()
 	annos := make(map[string]string)
@@ -158,20 +98,14 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 }
 
 func (r *DeviceRegister) WatchAndRegister(opt Options) {
-	//ctx, cancel := context.WithTimeout(context.Background(), time.Second*30)
-	//defer cancel()
 	klog.Infof("into WatchAndRegister")
-	//ctx := context.Background()
 	for {
 		err := r.RegistrInAnnotation()
-		//err := r.Register(ctx)
 		if err != nil {
 			klog.Errorf("register error, %v", err)
 			time.Sleep(time.Second * 5)
 		} else {
 			time.Sleep(time.Second * 30)
-			//klog.Infof("register stopped")
-			//break
 		}
 	}
 }
