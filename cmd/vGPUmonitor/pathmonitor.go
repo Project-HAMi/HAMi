@@ -17,7 +17,7 @@ import (
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const containerpath = "/tmp/vgpu/containers"
+const containerpath = "/usr/local/vgpu/containers"
 
 type podusage struct {
 	idstr string

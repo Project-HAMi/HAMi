@@ -97,7 +97,7 @@ spec:
               value: all
           volumeMounts:
             - name: ctrs
-              mountPath: /tmp/vgpu/containers
+              mountPath: {{ .Values.devicePlugin.monitorctrPath }}
             - name: dockers
               mountPath: /run/docker
             - name: containerds

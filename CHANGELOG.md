@@ -135,6 +135,10 @@ fix core limitation not working properly on A30
 
 Downgrade core control output from LOG:WARN to LOG:DEBUG
 
+## v2.2.13
 
+Adjust default memory to 0, which means use 100% device memory
+
+Move cache file directory from /tmp/vgpu/containers to /usr/local/vgpu/containers
 
 

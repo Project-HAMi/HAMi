@@ -370,7 +370,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 		if config.DisableCoreLimit {
 			response.Envs[api.CoreLimitSwitch] = "disable"
 		}
-		cacheFileHostDirectory := "/tmp/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
+		cacheFileHostDirectory := "/usr/local/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
 		os.MkdirAll(cacheFileHostDirectory, 0777)
 		os.Chmod(cacheFileHostDirectory, 0777)
 		os.MkdirAll("/tmp/vgpulock", 0777)
@@ -441,41 +441,7 @@ func (m *NvidiaDevicePlugin) deviceExists(id string) bool {
 
 func (m *NvidiaDevicePlugin) deviceIDsFromUUIDs(uuids []string) []string {
 	return uuids
-	/*
-		if deviceIDStrategyFlag == DeviceIDStrategyUUID {
-			return uuids
-		}
-
-		var deviceIDs []string
-		if deviceIDStrategyFlag == DeviceIDStrategyIndex {
-			for _, d := range m.cachedDevices {
-				for _, id := range uuids {
-					if d.ID == id {
-						deviceIDs = append(deviceIDs, d.Index)
-					}
-				}
-			}
-		}
-		return deviceIDs*/
 }
-
-//func (m *NvidiaDevicePlugin) getDevices(ids []string) ([]*Device, error) {
-//    var res []*Device
-//    for _, id := range ids {
-//        found := false
-//        for _, dev := range m.deviceCache.GetCache() {
-//            if id == dev.ID {
-//                res = append(res, dev)
-//                found = true
-//                break
-//            }
-//        }
-//        if !found {
-//            return res, fmt.Errorf("device %v not found", id)
-//        }
-//    }
-//    return res, nil
-//}
 
 func (m *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
 	if strings.Compare(m.migStrategy, "mixed") == 0 {
@@ -505,56 +471,3 @@ func (m *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[stri
 		envvar: strings.Join(deviceIDs, ","),
 	}
 }
-
-//func (m *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
-//    var mounts []*pluginapi.Mount
-//
-//    for _, id := range deviceIDs {
-//        mount := &pluginapi.Mount{
-//            HostPath:      deviceListAsVolumeMountsHostPath,
-//            ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
-//        }
-//        mounts = append(mounts, mount)
-//    }
-//
-//    return mounts
-//}
-
-//func (m *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, uuids []string) []*pluginapi.DeviceSpec {
-//    var specs []*pluginapi.DeviceSpec
-//
-//    paths := []string{
-//        "/dev/nvidiactl",
-//        "/dev/nvidia-uvm",
-//        "/dev/nvidia-uvm-tools",
-//        "/dev/nvidia-modeset",
-//    }
-//
-//    for _, p := range paths {
-//        if _, err := os.Stat(p); err == nil {
-//            spec := &pluginapi.DeviceSpec{
-//                ContainerPath: p,
-//                HostPath:      filepath.Join(driverRoot, p),
-//                Permissions:   "rw",
-//            }
-//            specs = append(specs, spec)
-//        }
-//    }
-//
-//    for _, d := range m.deviceCache.GetCache() {
-//        for _, id := range uuids {
-//            if d.ID == id {
-//                for _, p := range d.Paths {
-//                    spec := &pluginapi.DeviceSpec{
-//                        ContainerPath: p,
-//                        HostPath:      filepath.Join(driverRoot, p),
-//                        Permissions:   "rw",
-//                    }
-//                    specs = append(specs, spec)
-//                }
-//            }
-//        }
-//    }
-//
-//    return specs
-//}
