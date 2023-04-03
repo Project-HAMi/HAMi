@@ -190,7 +190,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			fmt.Println("err=", err.Error())
 		}
 		for _, val := range pods.Items {
-			for sridx, _ := range srPodList {
+			for sridx := range srPodList {
 				if srPodList[sridx].sr == nil {
 					continue
 				}

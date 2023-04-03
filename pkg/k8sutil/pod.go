@@ -60,7 +60,11 @@ func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
 					}
 				}
 				if mempnum == 101 && memnum == 0 {
-					memnum = int(config.DefaultMem)
+					if config.DefaultMem != 0 {
+						memnum = int(config.DefaultMem)
+					} else {
+						mempnum = 100
+					}
 				}
 				corenum := config.DefaultCores
 				core, ok := pod.Spec.Containers[i].Resources.Limits[resourceCores]

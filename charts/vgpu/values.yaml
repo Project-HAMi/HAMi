@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: []
-version: "v2.2.12"
+version: "v2.2.13"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -25,7 +25,7 @@ global:
   annotations: {}
 
 scheduler:
-  defaultMem: 5000
+  defaultMem: 0
   defaultCores: 0
   kubeScheduler:
     imageTag: "v1.20.0"
@@ -71,7 +71,7 @@ devicePlugin:
   #image: "m7-ieg-pico-test01:5000/k8s-vgpu-0727:latest"
   monitorimage: "4pdosc/k8s-vdevice"
   #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
-  monitorctrPath: /tmp/vgpu/containers
+  monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
   deviceMemoryScaling: 1
