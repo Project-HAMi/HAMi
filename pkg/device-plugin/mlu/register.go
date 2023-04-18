@@ -62,7 +62,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		memory, _ := cndev.GetDeviceMemory(uint(i))
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
-		if config.DeviceMemoryScaling > 1 {
+		if config.DeviceMemoryScaling != 1 {
 			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
 			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
 		}
