@@ -141,4 +141,10 @@ Adjust default memory to 0, which means use 100% device memory
 
 Move cache file directory from /tmp/vgpu/containers to /usr/local/vgpu/containers
 
+## v2.2.14
 
+Fix device memory calculation error after container crashloop
+
+Fix env cuda_oversubscribe not set properly when MemoryScaling < 1
+
+Fix MemoryScaling not working when set < 1
