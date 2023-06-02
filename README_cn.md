@@ -69,20 +69,21 @@
 
 ### GPU节点准备
 
-以下步骤要在所有GPU节点执行。这份README文档假定GPU节点已经安装NVIDIA驱动和`nvidia-docker`套件。
+以下步骤要在所有GPU节点执行,这份README文档假定GPU节点已经安装NVIDIA驱动。它还假设您已经安装docker或container并且需要将nvidia-container-runtime配置为要使用的默认低级运行时。
 
-注意你需要安装的是`nvidia-docker2`而非`nvidia-container-toolkit`。因为新的`--gpus`选项kubernetes尚不支持。安装步骤举例：
+安装步骤举例：
 
+####
 ```
 # 加入套件仓库
-$ distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-$ curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-$ curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/libnvidia-container.list
 
-$ sudo apt-get update && sudo apt-get install -y nvidia-docker2
-$ sudo systemctl restart docker
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 ```
 
+##### 配置docker
 你需要在节点上将nvidia runtime做为你的docker runtime预设值。我们将编辑docker daemon的配置文件，此文件通常在`/etc/docker/daemon.json`路径：
 
 ```
@@ -96,8 +97,30 @@ $ sudo systemctl restart docker
     }
 }
 ```
+```
+systemctl daemon-reload && systemctl restart docker
+```
+##### 配置containerd
+你需要在节点上将nvidia runtime做为你的containerd runtime预设值。我们将编辑containerd daemon的配置文件，此文件通常在`/etc/containerd/config.toml`路径
+```
+version = 2
+[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    [plugins."io.containerd.grpc.v1.cri".containerd]
+      default_runtime_name = "nvidia"
 
-> *如果 `runtimes` 字段没有出现, 前往的安装页面执行安装操作 [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+          privileged_without_host_devices = false
+          runtime_engine = ""
+          runtime_root = ""
+          runtime_type = "io.containerd.runc.v2"
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+            BinaryName = "/usr/bin/nvidia-container-runtime"
+```
+```
+systemctl daemon-reload && systemctl restart containerd
+```
 
 最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
 
