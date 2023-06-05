@@ -75,6 +75,7 @@ devicePlugin:
   imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
   deviceMemoryScaling: 1
+  runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
   extraArgs:
