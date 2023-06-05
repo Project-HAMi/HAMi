@@ -108,6 +108,7 @@ version = 2
 And then restart `containerd`:
 ```
 $ sudo systemctl daemon-reload && systemctl restart containerd
+```
 
 Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it cannot be managed by our scheduler.
 
