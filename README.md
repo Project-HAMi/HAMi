@@ -48,17 +48,28 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 ## Quick Start
 
 ### Preparing your GPU Nodes
-
-
 The following steps need to be executed on all your GPU nodes.
-This README assumes that both the NVIDIA drivers and `nvidia-docker` have been installed.
+This README assumes that the NVIDIA drivers and the `nvidia-container-toolkit` have been pre-installed.
+It also assumes that you have configured the `nvidia-container-runtime` as the default low-level runtime to use.
 
-Note that you need to install the `nvidia-docker2` package and not the `nvidia-container-toolkit`.
+Please see: https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html
 
-You will need to enable the NVIDIA runtime as your default runtime on your node.
-We will be editing the docker daemon config file which is usually present at `/etc/docker/daemon.json`:
+#### Example for debian-based systems with `docker` and `containerd`
 
+##### Install the `nvidia-container-toolkit`
+```bash
+distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
+curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/libnvidia-container.list
+
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 ```
+
+##### Configure `docker`
+When running `kubernetes` with `docker`, edit the config file which is usually
+present at `/etc/docker/daemon.json` to set up `nvidia-container-runtime` as
+the default low-level runtime:
+```json
 {
     "default-runtime": "nvidia",
     "runtimes": {
@@ -69,8 +80,34 @@ We will be editing the docker daemon config file which is usually present at `/e
     }
 }
 ```
+And then restart `docker`:
+```
+$ sudo systemctl daemon-reload && systemctl restart docker
+```
 
-> *if `runtimes` is not already present, head to the install page of [nvidia-docker](https://github.com/NVIDIA/nvidia-docker)*
+##### Configure `containerd`
+When running `kubernetes` with `containerd`, edit the config file which is
+usually present at `/etc/containerd/config.toml` to set up
+`nvidia-container-runtime` as the default low-level runtime:
+```
+version = 2
+[plugins]
+  [plugins."io.containerd.grpc.v1.cri"]
+    [plugins."io.containerd.grpc.v1.cri".containerd]
+      default_runtime_name = "nvidia"
+
+      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
+        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
+          privileged_without_host_devices = false
+          runtime_engine = ""
+          runtime_root = ""
+          runtime_type = "io.containerd.runc.v2"
+          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
+            BinaryName = "/usr/bin/nvidia-container-runtime"
+```
+And then restart `containerd`:
+```
+$ sudo systemctl daemon-reload && systemctl restart containerd
 
 Then, you need to label your GPU nodes which can be scheduled by 4pd-k8s-scheduler by adding "gpu=on", otherwise, it cannot be managed by our scheduler.
 
