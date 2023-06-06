@@ -26,9 +26,9 @@ spec:
       annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
-      {{ - if .Values.devicePlugin.runtimeClassName }}
+      {{- if .Values.devicePlugin.runtimeClassName }}
       runtimeClassName: {{ .Values.devicePlugin.runtimeClassName }}
-      {{ - end }}
+      {{- end }}
       {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
       # serviceAccountName:
       serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
