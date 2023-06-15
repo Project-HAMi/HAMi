@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	"log"
 	"net/http"
 	"strings"
@@ -75,73 +76,74 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "gpuid"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryAllocated",
 		"Device memory allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "devicecores"}, nil,
+		[]string{"nodeid", "deviceuuid", "devicecores", "gpuid"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"GPUDeviceSharedNum",
 		"Number of containers sharing this GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "gpuid"}, nil,
 	)
 
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceCoreAllocated",
 		"Device core allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "gpuid"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"nodeGPUOverview",
 		"GPU overview on a certain node",
-		[]string{"nodeid", "deviceuuid", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
+		[]string{"nodeid", "deviceuuid", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype", "gpuid"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"nodeGPUMemoryPercentage",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "gpuid"}, nil,
 	)
 	nu := sher.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices {
+			gpuid := GetNodeGpuNumByUUID(devs.Id)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Totalmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id,
+				nodeID, devs.Id, gpuid,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Usedcores),
+				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), gpuid,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
 				float64(devs.Used),
-				nodeID, devs.Id,
+				nodeID, devs.Id, gpuid,
 			)
 
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedcores),
-				nodeID, devs.Id,
+				nodeID, devs.Id, gpuid,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
+				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type, gpuid,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUMemoryPercentage,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)/float64(devs.Totalmem),
-				nodeID, devs.Id,
+				nodeID, devs.Id, gpuid,
 			)
 		}
 	}
@@ -246,4 +248,27 @@ func initmetrics() {
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	log.Fatal(http.ListenAndServe(":9395", nil))
+}
+
+func GetNodeGpuNumByUUID(uuid string) string {
+	nvml.Init()
+	defer nvml.Shutdown()
+
+	count, err := nvml.GetDeviceCount()
+	if err != nil {
+		fmt.Println("Error getting device count:", err)
+		return ""
+	}
+
+	for Num := uint(0); Num < count; Num++ {
+		device, err := nvml.NewDevice(Num)
+		if err != nil {
+			fmt.Println("Error getting device %d: %v\n", Num, err)
+		}
+		if uuid != device.UUID {
+			continue
+		}
+		return fmt.Sprintf("%d", Num)
+	}
+	return ""
 }
