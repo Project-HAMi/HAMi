@@ -74,13 +74,13 @@ var (
 	ctrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
 		"vGPU device usage",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "gpuid"}, nil,
 	)
 
 	ctrvGPUlimitdesc = prometheus.NewDesc(
 		"vGPU_device_memory_limit_in_bytes",
 		"vGPU device limit",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "gpuid"}, nil,
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
@@ -216,19 +216,19 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							for i := 0; i < int(srPodList[sridx].sr.num); i++ {
 								value, _ := gettotalusage(srPodList[sridx], i)
 								uuid := string(srPodList[sridx].sr.uuids[i].uuid[:])[0:40]
-
+								GpuNum := GetNodeGpuNumByUUID(uuid)
 								//fmt.Println("uuid=", uuid, "length=", len(uuid))
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUdesc,
 									prometheus.GaugeValue,
 									float64(value.total),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, GpuNum, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUlimitdesc,
 									prometheus.GaugeValue,
 									float64(srPodList[sridx].sr.limit[i]),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, GpuNum, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrDeviceMemorydesc,
@@ -290,4 +290,27 @@ func initmetrics() {
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	log.Fatal(http.ListenAndServe(":9394", nil))
+}
+
+func GetNodeGpuNumByUUID(uuid string) string {
+	nvml.Init()
+	defer nvml.Shutdown()
+
+	count, err := nvml.GetDeviceCount()
+	if err != nil {
+		fmt.Println("Error getting device count:", err)
+		return ""
+	}
+
+	for Num := uint(0); Num < count; Num++ {
+		device, err := nvml.NewDevice(Num)
+		if err != nil {
+			fmt.Println("Error getting device %d: %v\n", Num, err)
+		}
+		if uuid != device.UUID {
+			continue
+		}
+		return fmt.Sprintf("%d", Num)
+	}
+	return ""
 }
