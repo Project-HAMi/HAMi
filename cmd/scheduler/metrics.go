@@ -75,33 +75,33 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryAllocated",
 		"Device memory allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "devicecores"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"GPUDeviceSharedNum",
 		"Number of containers sharing this GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceCoreAllocated",
 		"Device core allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"nodeGPUOverview",
 		"GPU overview on a certain node",
-		[]string{"nodeid", "deviceuuid", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"nodeGPUMemoryPercentage",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"nodeid", "deviceuuid"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nu := sher.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
@@ -110,38 +110,38 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Totalmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id,
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Usedcores),
+				nodeID, devs.Id, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
 				float64(devs.Used),
-				nodeID, devs.Id,
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedcores),
-				nodeID, devs.Id,
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
+				nodeID, devs.Id, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUMemoryPercentage,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)/float64(devs.Totalmem),
-				nodeID, devs.Id,
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 		}
 	}
@@ -149,17 +149,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUDeviceAllocatedDesc := prometheus.NewDesc(
 		"vGPUPodsDeviceAllocated",
 		"vGPU Allocated from pods",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceidx", "deviceusedcore"}, nil,
 	)
 	ctrvGPUdeviceAllocatedMemoryPercentageDesc := prometheus.NewDesc(
 		"vGPUMemoryPercentage",
 		"vGPU memory percentage allocated from a container",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceidx"}, nil,
 	)
 	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
 		"vGPUCorePercentage",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "nmodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"namespace", "nmodename", "podname", "containeridx", "deviceuuid", "deviceidx"}, nil,
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
