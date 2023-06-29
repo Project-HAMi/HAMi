@@ -363,7 +363,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			}
 		}
 		response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-		response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/tmp/vgpu/%v.cache", uuid.NewUUID())
+		response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/usr/local/vgpu/%v.cache", uuid.NewUUID())
 		if config.DeviceMemoryScaling > 1 {
 			response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 		}
@@ -383,7 +383,7 @@ func (m *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.Alloc
 			&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
 				HostPath: hostHookPath + "/ld.so.preload",
 				ReadOnly: true},
-			&pluginapi.Mount{ContainerPath: "/tmp/vgpu",
+			&pluginapi.Mount{ContainerPath: "/usr/local/vgpu",
 				HostPath: cacheFileHostDirectory,
 				ReadOnly: false},
 			&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",

@@ -197,7 +197,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]DeviceInfo, 0)
 				found := false
-				for _, deviceinfo := range nodedevices {
+				for index, deviceinfo := range nodedevices {
 					_, ok := s.nodes[val.Name]
 					if ok {
 						for _, val := range s.nodes[val.Name].Devices {
@@ -210,6 +210,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, DeviceInfo{
 							ID:     deviceinfo.Id,
+							Index:  uint(index),
 							Count:  deviceinfo.Count,
 							Devmem: deviceinfo.Devmem,
 							Type:   deviceinfo.Type,

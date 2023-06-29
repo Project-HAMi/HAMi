@@ -26,6 +26,7 @@ import (
 
 type DeviceInfo struct {
 	ID     string
+	Index  uint
 	Count  int32
 	Devmem int32
 	Type   string
@@ -39,6 +40,7 @@ type NodeInfo struct {
 
 type DeviceUsage struct {
 	Id        string
+	Index     uint
 	Used      int32
 	Count     int32
 	Usedmem   int32
