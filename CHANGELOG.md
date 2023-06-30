@@ -148,3 +148,9 @@ Fix device memory calculation error after container crashloop
 Fix env cuda_oversubscribe not set properly when MemoryScaling < 1
 
 Fix MemoryScaling not working when set < 1
+
+## v2.2.15
+
+Move shared-memory from from /tmp/xxx.cache to /usr/local/vgpu/xxx.cache inside container
+
+Add Deviceidx to scheduler monitor apis(31993)
