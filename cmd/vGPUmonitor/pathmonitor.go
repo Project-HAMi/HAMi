@@ -32,7 +32,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(files) > 1 {
+	if len(files) > 2 {
 		return nil, errors.New("cache num not matched")
 	}
 	if len(files) == 0 {
