@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var cgroupDriver int
@@ -178,7 +180,7 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusag
 	return false
 }
 
-func Observe(srlist *[]podusage) error {
+func Observe(srlist *map[string]podusage) error {
 	utSwitchOn := map[string]UtilizationPerDevice{}
 
 	for idx, val := range *srlist {
@@ -224,31 +226,32 @@ func Observe(srlist *[]podusage) error {
 func watchAndFeedback() {
 	nvml.Init()
 	for {
-		time.Sleep(time.Second * 2)
+		time.Sleep(time.Second * 5)
 		//if len(srlist) == 0 {
 		err := monitorpath(srPodList)
 		if err != nil {
 			fmt.Println("monitorPath failed", err.Error())
 		}
 		//}
-		//fmt.Println("watchAndFeedback", srlist)
-		//Observe(&srPodList)
-		//pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
-		//if err != nil {
-		//	fmt.Println("err=", err.Error())
-		//}
-		/*for _, val := range pods.Items {
-			for idx, _ := range srlist {
-				pod_uid := strings.Split(srlist[idx].idstr, "_")[0]
-				ctr_name := strings.Split(srlist[idx].idstr, "_")[1]
+
+		fmt.Println("watchAndFeedback", srPodList)
+		Observe(&srPodList)
+		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
+		if err != nil {
+			fmt.Println("err=", err.Error())
+		}
+		for _, val := range pods.Items {
+			for idx, _ := range srPodList {
+				pod_uid := strings.Split(srPodList[idx].idstr, "_")[0]
+				ctr_name := strings.Split(srPodList[idx].idstr, "_")[1]
 				if strings.Compare(string(val.UID), pod_uid) == 0 {
-					for ctridx, ctr := range val.Spec.Containers {
+					for _, ctr := range val.Spec.Containers {
 						if strings.Compare(ctr.Name, ctr_name) == 0 {
-							setHostPid(val, val.Status.ContainerStatuses[ctridx], &srlist[idx])
+							//setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[idx])
 						}
 					}
 				}
 			}
-		}*/
+		}
 	}
 }

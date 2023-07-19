@@ -1,5 +1,5 @@
 ARG GOLANG_IMAGE=golang:1.18.8-buster
-ARG NVIDIA_IMAGE=nvidia/cuda:11.2.1-base-ubuntu20.04
+ARG NVIDIA_IMAGE=nvidia/cuda:11.2.2-base-ubuntu20.04
 FROM $GOLANG_IMAGE AS build
 
 ADD . /k8s-vgpu
