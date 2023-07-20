@@ -154,3 +154,7 @@ Fix MemoryScaling not working when set < 1
 Move shared-memory from from /tmp/xxx.cache to /usr/local/vgpu/xxx.cache inside container
 
 Add Deviceidx to scheduler monitor apis(31993)
+
+## v2.2.16
+
+Fix crash during initlization in vGPUmonitor

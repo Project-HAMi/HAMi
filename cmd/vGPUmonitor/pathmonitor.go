@@ -42,7 +42,9 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 		if strings.Contains(val.Name(), "libvgpu.so") {
 			continue
 		}
-		strings.Contains(val.Name(), ".cache")
+		if !strings.Contains(val.Name(), ".cache") {
+			continue
+		}
 		cachefile := fpath + "/" + val.Name()
 		nc := nvidiaCollector{
 			cudevshrPath: cachefile,
