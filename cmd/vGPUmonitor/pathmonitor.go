@@ -39,6 +39,9 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 		return nil, nil
 	}
 	for _, val := range files {
+		if strings.Contains(val.Name(), "libvgpu.so") {
+			continue
+		}
 		strings.Contains(val.Name(), ".cache")
 		cachefile := fpath + "/" + val.Name()
 		nc := nvidiaCollector{
