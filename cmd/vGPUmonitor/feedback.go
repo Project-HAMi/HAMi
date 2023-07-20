@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io/ioutil"
@@ -14,7 +13,6 @@ import (
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 var cgroupDriver int
@@ -163,6 +161,22 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 
 }
 
+func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
+	for _, devuuid := range pu.sr.uuids {
+		_, ok := utSwitchOn[string(devuuid.uuid[:])]
+		if ok {
+			for i := 0; i < p; i++ {
+				if utSwitchOn[string(devuuid.uuid[:])][i] > 0 {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
+// Check whether task with higher priority use GPU or there are other tasks with the same priority
 func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
 	for _, devuuid := range pu.sr.uuids {
 		_, ok := utSwitchOn[string(devuuid.uuid[:])]
@@ -187,7 +201,6 @@ func Observe(srlist *map[string]podusage) error {
 		if val.sr == nil {
 			continue
 		}
-		//fmt.Println("idx=", idx)
 		/*for ii, _ := range val.sr.uuids {
 			fmt.Println("using uuid=", string(val.sr.uuids[ii].uuid[:]))
 		}*/
@@ -207,17 +220,35 @@ func Observe(srlist *map[string]podusage) error {
 			}
 		}
 	}
-	fmt.Println("utSwitchon=", utSwitchOn)
 	for idx, val := range *srlist {
 		if val.sr == nil {
 			continue
 		}
-		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
-			fmt.Println("Setting UtilizationSwitch to on")
-			(*srlist)[idx].sr.utilizationSwitch = 1
+		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
+			if (*srlist)[idx].sr.recentKernel >= 0 {
+				fmt.Println("utSwitchon=", utSwitchOn)
+				fmt.Println("Setting Blocking to on", idx)
+				(*srlist)[idx].sr.recentKernel = -1
+			}
 		} else {
-			fmt.Println("Setting UtilizationSwitch to off")
-			(*srlist)[idx].sr.utilizationSwitch = 0
+			if (*srlist)[idx].sr.recentKernel < 0 {
+				fmt.Println("utSwitchon=", utSwitchOn)
+				fmt.Println("Setting Blocking to off", idx)
+				(*srlist)[idx].sr.recentKernel = 0
+			}
+		}
+		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
+			if (*srlist)[idx].sr.utilizationSwitch != 1 {
+				fmt.Println("utSwitchon=", utSwitchOn)
+				fmt.Println("Setting UtilizationSwitch to on", idx)
+				(*srlist)[idx].sr.utilizationSwitch = 1
+			}
+		} else {
+			if (*srlist)[idx].sr.utilizationSwitch != 0 {
+				fmt.Println("utSwitchon=", utSwitchOn)
+				fmt.Println("Setting UtilizationSwitch to off", idx)
+				(*srlist)[idx].sr.utilizationSwitch = 0
+			}
 		}
 	}
 	return nil
@@ -227,31 +258,12 @@ func watchAndFeedback() {
 	nvml.Init()
 	for {
 		time.Sleep(time.Second * 5)
-		//if len(srlist) == 0 {
 		err := monitorpath(srPodList)
 		if err != nil {
 			fmt.Println("monitorPath failed", err.Error())
 		}
-		//}
-
-		fmt.Println("watchAndFeedback", srPodList)
+		//fmt.Println("watchAndFeedback", srPodList)
 		Observe(&srPodList)
-		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), metav1.ListOptions{})
-		if err != nil {
-			fmt.Println("err=", err.Error())
-		}
-		for _, val := range pods.Items {
-			for idx, _ := range srPodList {
-				pod_uid := strings.Split(srPodList[idx].idstr, "_")[0]
-				ctr_name := strings.Split(srPodList[idx].idstr, "_")[1]
-				if strings.Compare(string(val.UID), pod_uid) == 0 {
-					for _, ctr := range val.Spec.Containers {
-						if strings.Compare(ctr.Name, ctr_name) == 0 {
-							//setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[idx])
-						}
-					}
-				}
-			}
-		}
+
 	}
 }
