@@ -24,7 +24,6 @@ import (
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
 	"4pd.io/k8s-vgpu/pkg/util"
 )
@@ -62,13 +61,12 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		memory, _ := cndev.GetDeviceMemory(uint(i))
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
-		if config.DeviceMemoryScaling != 1 {
-			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
-			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
+		if *util.DeviceMemoryScaling != float64(1) {
+			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.dev.ID,
-			Count:  int32(config.DeviceSplitCount),
+			Count:  int32(*util.DeviceSplitCount),
 			Devmem: registeredmem,
 			Type:   fmt.Sprintf("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
 			Health: dev.dev.Health == "healthy",
@@ -80,7 +78,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 func (r *DeviceRegister) RegistrInAnnotation() error {
 	devices := r.apiDevices()
 	annos := make(map[string]string)
-	node, err := util.GetNode(config.NodeName)
+	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return err

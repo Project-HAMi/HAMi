@@ -42,21 +42,22 @@ spec:
             postStart:
               exec:
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
-          #command:
-          #  - sleep
-          #  - infinity
           command:
-            - nvidia-device-plugin
-            - --resource-name={{ .Values.resourceName }}
-            - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
-            - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
-            - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
-            - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
-            {{- range .Values.devicePlugin.extraArgs }}
-            - {{ . }}
-            {{- end }}
+            - sleep
+            - infinity
+          #command:
+          #  - nvidia-device-plugin
+          #  - --resource-name={{ .Values.resourceName }}
+          #  - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
+          #  - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
+          #  - --device-cores-scaling={{ .Values.devicePlugin.deviceCoreScaling }}
+          #  - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
+          #  - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
+          #  {{- range .Values.devicePlugin.extraArgs }}
+          #  - {{ . }}
+          #  {{- end }}
           env:
-            - name: NODE_NAME
+            - name: NodeName
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName

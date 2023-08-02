@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-package nvidiadevice
+package plugin
 
 import (
 	"fmt"
@@ -24,67 +24,42 @@ import (
 	"k8s.io/klog/v2"
 
 	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/util"
 )
 
-type DevListFunc func() []*Device
-
-type DeviceRegister struct {
-	deviceCache *DeviceCache
-	unhealthy   chan *Device
-	stopCh      chan struct{}
-}
-
-func NewDeviceRegister(deviceCache *DeviceCache) *DeviceRegister {
-	return &DeviceRegister{
-		deviceCache: deviceCache,
-		unhealthy:   make(chan *Device),
-		stopCh:      make(chan struct{}),
-	}
-}
-
-func (r *DeviceRegister) Start() {
-	r.deviceCache.AddNotifyChannel("register", r.unhealthy)
-	go r.WatchAndRegister()
-}
-
-func (r *DeviceRegister) Stop() {
-	close(r.stopCh)
-}
-
-func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
-	devs := r.deviceCache.GetCache()
+func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
+	devs := r.Devices()
+	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
 	for _, dev := range devs {
 		ndev, err := nvml.NewDeviceByUUID(dev.ID)
 		//klog.V(3).Infoln("ndev type=", ndev.Model)
 		if err != nil {
-			fmt.Println("nvml new device by uuid error id=", dev.ID)
+			fmt.Println("nvml new device by uuid error id=", dev.ID, "err=", err.Error())
 			panic(0)
 		} else {
 			klog.V(3).Infoln("nvml registered device id=", dev.ID, "memory=", *ndev.Memory, "type=", *ndev.Model)
 		}
 		registeredmem := int32(*ndev.Memory)
-		if config.DeviceMemoryScaling > 1 {
-			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
-			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
+		if *util.DeviceMemoryScaling != 1 {
+			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
 		res = append(res, &api.DeviceInfo{
-			Id:     dev.ID,
-			Count:  int32(config.DeviceSplitCount),
-			Devmem: registeredmem,
-			Type:   fmt.Sprintf("%v-%v", "NVIDIA", *ndev.Model),
-			Health: dev.Health == "healthy",
+			Id:      dev.ID,
+			Count:   int32(*util.DeviceSplitCount),
+			Devmem:  registeredmem,
+			Devcore: int32(*util.DeviceCoresScaling * 100),
+			Type:    fmt.Sprintf("%v-%v", "NVIDIA", *ndev.Model),
+			Health:  dev.Health == "healthy",
 		})
 	}
 	return &res
 }
 
-func (r *DeviceRegister) RegistrInAnnotation() error {
-	devices := r.apiDevices()
+func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
+	devices := r.getApiDevices()
 	annos := make(map[string]string)
-	node, err := util.GetNode(config.NodeName)
+	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return err
@@ -101,7 +76,7 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 	return err
 }
 
-func (r *DeviceRegister) WatchAndRegister() {
+func (r *NvidiaDevicePlugin) WatchAndRegister() {
 	klog.Infof("into WatchAndRegister")
 	for {
 		err := r.RegistrInAnnotation()

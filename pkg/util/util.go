@@ -20,9 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 
@@ -32,20 +30,6 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
-
-func GlobalFlagSet() *flag.FlagSet {
-	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
-	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
-	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
-	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
-	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
-	fs.StringVar(&MLUResourceCount, "mlu-name", "cambricon.com/mlunum", "mlu resource count name ")
-	fs.StringVar(&MLUResourceMemory, "mlu-memory", "cambricon.com/mlumem", "mlu resource memory name")
-	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
-	klog.InitFlags(fs)
-	return fs
-}
 
 func GetNode(nodename string) (*v1.Node, error) {
 	n, err := GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
@@ -88,17 +72,34 @@ func DecodeNodeDevices(str string) []*api.DeviceInfo {
 	for _, val := range tmp {
 		if strings.Contains(val, ",") {
 			items := strings.Split(val, ",")
-			count, _ := strconv.Atoi(items[1])
-			devmem, _ := strconv.Atoi(items[2])
-			health, _ := strconv.ParseBool(items[4])
-			i := api.DeviceInfo{
-				Id:     items[0],
-				Count:  int32(count),
-				Devmem: int32(devmem),
-				Type:   items[3],
-				Health: health,
+			if len(items) == 6 {
+				count, _ := strconv.Atoi(items[1])
+				devmem, _ := strconv.Atoi(items[2])
+				devcore, _ := strconv.Atoi(items[3])
+				health, _ := strconv.ParseBool(items[5])
+				i := api.DeviceInfo{
+					Id:      items[0],
+					Count:   int32(count),
+					Devmem:  int32(devmem),
+					Devcore: int32(devcore),
+					Type:    items[4],
+					Health:  health,
+				}
+				retval = append(retval, &i)
+			} else {
+				count, _ := strconv.Atoi(items[1])
+				devmem, _ := strconv.Atoi(items[2])
+				health, _ := strconv.ParseBool(items[4])
+				i := api.DeviceInfo{
+					Id:      items[0],
+					Count:   int32(count),
+					Devmem:  int32(devmem),
+					Devcore: 100,
+					Type:    items[3],
+					Health:  health,
+				}
+				retval = append(retval, &i)
 			}
-			retval = append(retval, &i)
 		}
 	}
 	return retval
@@ -107,7 +108,7 @@ func DecodeNodeDevices(str string) []*api.DeviceInfo {
 func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
 	tmp := ""
 	for _, val := range dlist {
-		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + val.Type + "," + strconv.FormatBool(val.Health) + ":"
+		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.FormatBool(val.Health) + ":"
 	}
 	klog.V(3).Infoln("Encoded node Devices", tmp)
 	return tmp
@@ -131,21 +132,24 @@ func EncodePodDevices(pd PodDevices) string {
 	return strings.Join(ss, ";")
 }
 
-func DecodeContainerDevices(str string) ContainerDevices {
+func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	if len(str) == 0 {
-		return ContainerDevices{}
+		return ContainerDevices{}, nil
 	}
 	cd := strings.Split(str, ":")
 	contdev := ContainerDevices{}
 	tmpdev := ContainerDevice{}
 	//fmt.Println("before container device", str)
 	if len(str) == 0 {
-		return contdev
+		return ContainerDevices{}, nil
 	}
 	for _, val := range cd {
 		if strings.Contains(val, ",") {
 			//fmt.Println("cd is ", val)
 			tmpstr := strings.Split(val, ",")
+			if len(tmpstr) < 4 {
+				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
+			}
 			tmpdev.UUID = tmpstr[0]
 			tmpdev.Type = tmpstr[1]
 			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
@@ -156,23 +160,29 @@ func DecodeContainerDevices(str string) ContainerDevices {
 		}
 	}
 	//fmt.Println("Decoded container device", contdev)
-	return contdev
+	return contdev, nil
 }
 
-func DecodePodDevices(str string) PodDevices {
+func DecodePodDevices(str string) (PodDevices, error) {
 	if len(str) == 0 {
-		return PodDevices{}
+		return PodDevices{}, nil
 	}
 	var pd PodDevices
 	for _, s := range strings.Split(str, ";") {
-		cd := DecodeContainerDevices(s)
+		cd, err := DecodeContainerDevices(s)
+		if err != nil {
+			return PodDevices{}, nil
+		}
 		pd = append(pd, cd)
 	}
-	return pd
+	return pd, nil
 }
 
 func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevices, error) {
-	pdevices := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	if err != nil {
+		return v1.Container{}, ContainerDevices{}, err
+	}
 	klog.Infoln("pdevices=", pdevices)
 	res := ContainerDevices{}
 	for idx, val := range pdevices {
@@ -190,8 +200,19 @@ func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevice
 	return v1.Container{}, res, errors.New("device request not found")
 }
 
+func GetContainerDeviceStrArray(c ContainerDevices) []string {
+	tmp := []string{}
+	for _, val := range c {
+		tmp = append(tmp, val.UUID)
+	}
+	return tmp
+}
+
 func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
-	pdevices := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	if err != nil {
+		return err
+	}
 	res := PodDevices{}
 	found := false
 	for _, val := range pdevices {

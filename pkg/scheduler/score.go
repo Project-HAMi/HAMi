@@ -190,21 +190,24 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][
 					if node.Devices[i].Count <= node.Devices[i].Used {
 						continue
 					}
+					if k.Coresreq > 100 {
+						return nil, fmt.Errorf("core limit can't exceed 100")
+					}
 					if k.MemPercentagereq != 101 && k.Memreq == 0 {
 						k.Memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
 					}
 					if node.Devices[i].Totalmem-node.Devices[i].Usedmem < k.Memreq {
 						continue
 					}
-					if 100-node.Devices[i].Usedcores < k.Coresreq {
+					if node.Devices[i].Totalcore-node.Devices[i].Usedcores < k.Coresreq {
 						continue
 					}
 					// Coresreq=100 indicates it want this card exclusively
-					if k.Coresreq == 100 && node.Devices[i].Used > 0 {
+					if node.Devices[i].Totalcore == 100 && k.Coresreq == 100 && node.Devices[i].Used > 0 {
 						continue
 					}
 					// You can't allocate core=0 job to an already full GPU
-					if node.Devices[i].Usedcores == 100 && k.Coresreq == 0 {
+					if node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
 						continue
 					}
 					if !checkType(annos, *node.Devices[i], k) {

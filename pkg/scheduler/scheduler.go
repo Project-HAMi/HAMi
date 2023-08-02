@@ -18,30 +18,22 @@ package scheduler
 
 import (
 	"context"
-	"fmt"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
-	"4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/k8sutil"
 	"4pd.io/k8s-vgpu/pkg/util"
-	"4pd.io/k8s-vgpu/pkg/util/k8s"
-	corev1 "k8s.io/api/core/v1"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
-	"k8s.io/kubernetes/pkg/scheduler/apis/config"
 	"k8s.io/kubernetes/pkg/scheduler/framework"
-	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeaffinity"
-	"k8s.io/kubernetes/pkg/scheduler/framework/plugins/nodeunschedulable"
 )
 
 type Scheduler struct {
@@ -73,7 +65,7 @@ func check(err error) {
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
+	pod, ok := obj.(*v1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -90,7 +82,7 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 		s.delPod(pod)
 		return
 	}
-	podDev := util.DecodePodDevices(ids)
+	podDev, _ := util.DecodePodDevices(ids)
 	s.addPod(pod, nodeID, podDev)
 }
 
@@ -99,7 +91,7 @@ func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
 }
 
 func (s *Scheduler) onDelPod(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
+	pod, ok := obj.(*v1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -134,12 +126,6 @@ func (s *Scheduler) Stop() {
 	close(s.stopCh)
 }
 
-//	func (s *Scheduler) assignedNode(pod *corev1.Pod) string {
-//	   if node, ok := pod.ObjectMeta.Annotations[util.AssignedNodeAnnotations]; ok {
-//	       return node
-//	   }
-//	   return ""
-//	}
 func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*NodeInfo)
@@ -200,21 +186,24 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				for index, deviceinfo := range nodedevices {
 					_, ok := s.nodes[val.Name]
 					if ok {
-						for _, val := range s.nodes[val.Name].Devices {
-							if strings.Compare(val.ID, deviceinfo.Id) == 0 {
+						for i1, val1 := range s.nodes[val.Name].Devices {
+							if strings.Compare(val1.ID, deviceinfo.Id) == 0 {
 								found = true
+								s.nodes[val.Name].Devices[i1].Devmem = deviceinfo.Devmem
+								s.nodes[val.Name].Devices[i1].Devcore = deviceinfo.Devcore
 								break
 							}
 						}
 					}
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, DeviceInfo{
-							ID:     deviceinfo.Id,
-							Index:  uint(index),
-							Count:  deviceinfo.Count,
-							Devmem: deviceinfo.Devmem,
-							Type:   deviceinfo.Type,
-							Health: deviceinfo.Health,
+							ID:      deviceinfo.Id,
+							Index:   uint(index),
+							Count:   deviceinfo.Count,
+							Devmem:  deviceinfo.Devmem,
+							Devcore: deviceinfo.Devcore,
+							Type:    deviceinfo.Type,
+							Health:  deviceinfo.Health,
 						})
 					}
 				}
@@ -229,50 +218,13 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	}
 }
 
-func (s *Scheduler) Register(stream api.DeviceService_RegisterServer) error {
-	var nodeID string
-	var nodeInfoCopy NodeInfo
-	nodeInfo := &NodeInfo{}
-	nodeInfoCopy = *nodeInfo
-	klog.Infoln("into register")
-	for {
-		req, err := stream.Recv()
-		if err != nil {
-			/* Need to update */
-			s.rmNodeDevice(nodeID, &nodeInfoCopy)
-			klog.Infof("node %v leave, %v remaining devices:%v", nodeID, err, s.nodes[nodeID].Devices)
-			_ = stream.SendAndClose(&api.RegisterReply{})
-			return err
-		}
-		klog.V(3).Infof("device register %v", req.String())
-		nodeID = req.GetNode()
-		nodeInfo.ID = nodeID
-		nodeInfo.Devices = make([]DeviceInfo, len(req.Devices))
-		for i := 0; i < len(req.Devices); i++ {
-			nodeInfo.Devices[i] = DeviceInfo{
-				ID:     req.Devices[i].GetId(),
-				Count:  req.Devices[i].GetCount(),
-				Devmem: req.Devices[i].GetDevmem(),
-				Type:   req.Devices[i].GetType(),
-				Health: req.Devices[i].GetHealth(),
-			}
-		}
-		if s.nodes[nodeID] != nil {
-			klog.Infoln("before=", s.nodes[nodeID].Devices)
-		}
-		nodeInfoCopy = *nodeInfo
-		s.addNode(nodeID, nodeInfo)
-		klog.Infof("node %v come node info=%v total=%v", nodeID, nodeInfo, s.nodes[nodeID].Devices)
-	}
-}
-
 // InspectAllNodesUsage is used by metrics monitor
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.cachedstatus
 }
 
 // GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
-func GenerateNodeMapAndSlice(nodes []*corev1.Node) map[string]*framework.NodeInfo {
+func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
 	nodeMap := make(map[string]*framework.NodeInfo)
 	for _, node := range nodes {
 		nodeInfo := framework.NewNodeInfo()
@@ -282,71 +234,9 @@ func GenerateNodeMapAndSlice(nodes []*corev1.Node) map[string]*framework.NodeInf
 	return nodeMap
 }
 
-// nodeSelector and Nodeaffinity should already be sweaped out by default-scheduler, we don't need
-// to do it ourselves
-func (s *Scheduler) checkNodeValidity(ni *corev1.Node, pod *corev1.Pod) bool {
-	if len(pod.Spec.NodeName) > 0 {
-		if strings.Compare(ni.Name, pod.Spec.NodeName) == 0 {
-			fmt.Println("nodename matched", ni.Name)
-		} else {
-			klog.Infoln("nodeName not matched", ni.Name, pod.Spec.NodeName)
-			return false
-		}
-	}
-	if len(pod.Spec.NodeSelector) > 0 {
-		for idx, val := range pod.Spec.NodeSelector {
-			str1, ok := ni.Labels[idx]
-			if !ok {
-				klog.Infoln("nodeselector check failed")
-				return false
-			}
-			if strings.Compare(str1, val) != 0 {
-				klog.Infoln("nodeselector check failed")
-				return false
-			}
-		}
-		klog.Infoln("nodeselector check passed")
-	}
-
-	nodes, err := s.nodeLister.List(labels.Everything())
-	if err != nil {
-		klog.Errorf("nodeLister not worked")
-		return true
-	}
-	nodeMap := GenerateNodeMapAndSlice(nodes)
-	handle := k8s.NewFrameworkHandle(nodeMap, s.kubeClient, informers.NewSharedInformerFactory(s.kubeClient, 0))
-
-	// 1. NodeUnschedulable
-	plugin, _ := nodeunschedulable.New(nil, handle)
-	nodeUnscheduleFilter := plugin.(*nodeunschedulable.NodeUnschedulable)
-	// 2. NodeAffinity
-	nodeAffinityArgs := config.NodeAffinityArgs{
-		AddedAffinity: &v1.NodeAffinity{},
-	}
-	plugin, _ = nodeaffinity.New(&nodeAffinityArgs, handle)
-	nodeAffinityFilter := plugin.(*nodeaffinity.NodeAffinity)
-
-	state := framework.NewCycleState()
-	// CheckNodeUnschedulable
-	status := nodeUnscheduleFilter.Filter(context.TODO(), state, pod, nodeMap[ni.Name])
-	if !status.IsSuccess() {
-		klog.Infof("plugin %s predicates failed %s", nodeunschedulable.Name, status.Message())
-		return false
-	}
-
-	// Check NodeAffinity
-	status = nodeAffinityFilter.Filter(context.TODO(), state, pod, nodeMap[ni.Name])
-	if !status.IsSuccess() {
-		klog.Infof("plugin %s predicates failed %s", nodeaffinity.Name, status.Message())
-		return false
-	}
-
-	return true
-}
-
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName
-func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
+func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
 	nodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
 	for _, nodeID := range *nodes {
@@ -356,13 +246,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
-		/*
-			ni, _ := s.kubeClient.CoreV1().Nodes().Get(context.TODO(), nodeID, metav1.GetOptions{})
-			if !s.checkNodeValidity(ni, task) {
-				klog.Errorf("node validity check failed")
-				failedNodes[nodeID] = "node validity check failed"
-				continue
-			}*/
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
 			nodeInfo.Devices = append(nodeInfo.Devices, &DeviceUsage{
@@ -372,6 +255,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				Count:     d.Count,
 				Usedmem:   0,
 				Totalmem:  d.Devmem,
+				Totalcore: d.Devcore,
 				Usedcores: 0,
 				Type:      d.Type,
 				Health:    d.Health,
@@ -405,9 +289,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	klog.InfoS("Bind", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
 	var err error
 	var res *extenderv1.ExtenderBindingResult
-	binding := &corev1.Binding{
+	binding := &v1.Binding{
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
-		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
+		Target:     v1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
 	if err != nil {

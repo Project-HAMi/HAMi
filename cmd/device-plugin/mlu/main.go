@@ -21,9 +21,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/fsnotify/fsnotify"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -31,7 +31,7 @@ import (
 func main() {
 	options := mlu.ParseFlags()
 
-	config.NodeName = os.Getenv("NODE_NAME")
+	util.NodeName = os.Getenv("NODE_NAME")
 	log.Println("Loading CNDEV")
 	if err := cndev.Init(); err != nil {
 		log.Printf("Failed to initialize CNDEV, err: %v", err)
