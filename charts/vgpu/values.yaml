@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: []
-version: "v2.2.16"
+version: "v2.3.0"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -80,7 +80,7 @@ devicePlugin:
   migStrategy: "none"
   disablecorelimit: "false"
   extraArgs:
-    - -v=4
+    - -v=false
   
   service:
     httpPort: 31992
