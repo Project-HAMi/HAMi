@@ -4,7 +4,11 @@
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
-[![cambricon MLU](https://img.shields.io/badge/cambricon%20mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+
+
+Supperted devices
+[![nvidia GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![cambricon MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
 
 English version|[中文版](README_cn.md)
 
