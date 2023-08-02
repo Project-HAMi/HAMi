@@ -6,8 +6,8 @@
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
 
 支持设备：
-[![nvidia GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
-[![cambricon MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+[![英伟达 GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![寒武纪 MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
 
 ## 有任何问题欢迎加微信'xuanzong4493'
 
@@ -19,7 +19,7 @@
 - [快速入门](#快速入门)
   - [GPU节点准备](#GPU节点准备)
   - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
-  - [运行GPU任务](#运行GPU任务
+  - [运行GPU任务](#运行GPU任务)
 - [调度策略](#调度策略)
 - [性能测试](#性能测试)
 - [功能](#功能)
@@ -32,8 +32,6 @@
 
 
 ## 简介
-
-**本组件已经支持寒武纪MLU复用，点击[这里](docs/cambricon-mlu-support_cn.md) 了解详情**
 
 第四范式vGPU调度器满足了所有你对于管理GPU集群所需要的能力，包括：
 
