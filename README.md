@@ -16,8 +16,6 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-**Cambricon.com/mlu sharing is now supported click [here](docs/cambricon-mlu-support.md) to check this out!!**
-
 **4paradigm k8s vGPU scheduler is an "all in one" chart to manage your GPU in k8s cluster**, it has everything you expect for a k8s GPU manager, including:
 
 ***GPU sharing***: Each task can allocate a portion of GPU instead of a whole GPU card, thus GPU can be shared among multiple tasks.

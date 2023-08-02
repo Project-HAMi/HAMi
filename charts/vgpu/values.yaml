@@ -87,7 +87,6 @@ devicePlugin:
     
   pluginPath: /var/lib/kubelet/device-plugins
   libPath: /usr/local/vgpu
-  sockPath: /var/lib/4pdvgpu
 
   podAnnotations: {}
   nvidianodeSelector:

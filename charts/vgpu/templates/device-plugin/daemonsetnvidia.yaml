@@ -43,19 +43,19 @@ spec:
               exec:
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
           command:
-            - sleep
-            - infinity
-          #command:
-          #  - nvidia-device-plugin
-          #  - --resource-name={{ .Values.resourceName }}
-          #  - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
-          #  - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
-          #  - --device-cores-scaling={{ .Values.devicePlugin.deviceCoreScaling }}
-          #  - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
-          #  - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
-          #  {{- range .Values.devicePlugin.extraArgs }}
-          #  - {{ . }}
-          #  {{- end }}
+          #  - sleep
+          #  - infinity
+          command:
+            - nvidia-device-plugin
+            - --resource-name={{ .Values.resourceName }}
+            - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
+            - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
+            - --device-cores-scaling={{ .Values.devicePlugin.deviceCoreScaling }}
+            - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
+            - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
+            {{- range .Values.devicePlugin.extraArgs }}
+            - {{ . }}
+            {{- end }}
           env:
             - name: NodeName
               valueFrom:
@@ -75,9 +75,6 @@ spec:
               mountPath: /var/lib/kubelet/device-plugins
             - name: lib
               mountPath: /usr/local/vgpu
-            - name: sock
-              #mountPath: /var/lib/vgpu
-              mountPath: {{ .Values.devicePlugin.sockPath }}
             - name: usrbin
               mountPath: /usrbin
             - name: deviceconfig
