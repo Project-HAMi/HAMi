@@ -25,12 +25,13 @@ import (
 )
 
 type DeviceInfo struct {
-	ID     string
-	Index  uint
-	Count  int32
-	Devmem int32
-	Type   string
-	Health bool
+	ID      string
+	Index   uint
+	Count   int32
+	Devmem  int32
+	Devcore int32
+	Type    string
+	Health  bool
 }
 
 type NodeInfo struct {
@@ -45,6 +46,7 @@ type DeviceUsage struct {
 	Count     int32
 	Usedmem   int32
 	Totalmem  int32
+	Totalcore int32
 	Usedcores int32
 	Type      string
 	Health    bool

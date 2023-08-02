@@ -1,5 +1,5 @@
 /*
- * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
+ * Copyright (c) 2023, NVIDIA CORPORATION.  All rights reserved.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,13 +14,23 @@
  * limitations under the License.
  */
 
-package config
+package cdi
 
-var (
-	DeviceSplitCount    uint
-	DeviceMemoryScaling float64
-	DeviceCoresScaling  float64
-	NodeName            string
-	RuntimeSocketFlag   string
-	DisableCoreLimit    bool
+import (
+	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/info"
+
+	"k8s.io/klog/v2"
 )
+
+// New is a factory method that creates a CDI handler for creating CDI specs.
+func New(opts ...Option) (Interface, error) {
+	infolib := info.New()
+
+	hasNVML, _ := infolib.HasNvml()
+	if !hasNVML {
+		klog.Warning("No valid resources detected, creating a null CDI handler")
+		return NewNullHandler(), nil
+	}
+
+	return newHandler(opts...)
+}

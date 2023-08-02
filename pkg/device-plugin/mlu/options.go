@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	"4pd.io/k8s-vgpu/pkg/util"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -56,8 +56,8 @@ func ParseFlags() Options {
 		}
 		os.Exit(code)
 	}
-	config.DeviceSplitCount = options.VirtualizationNum
-	config.RuntimeSocketFlag = options.SocketPath
+	util.DeviceSplitCount = &options.VirtualizationNum
+	util.RuntimeSocketFlag = options.SocketPath
 	log.Printf("Parsed options: %v\n", options)
 	return options
 }

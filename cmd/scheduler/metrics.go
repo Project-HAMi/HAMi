@@ -8,9 +8,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -53,11 +50,6 @@ type ClusterManagerCollector struct {
 	ClusterManager *ClusterManager
 }
 
-// Descriptors used by the ClusterManagerCollector below.
-var (
-	clientset *kubernetes.Clientset
-)
-
 // Describe is implemented with DescribeByCollect. That's possible because the
 // Collect method will always return the same two metrics with the same two
 // descriptors.
@@ -75,6 +67,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+	)
+	nodevGPUCoreLimitDesc := prometheus.NewDesc(
+		"GPUDeviceCoreLimit",
+		"Device memory core limit for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
@@ -110,6 +107,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Totalmem)*float64(1024)*float64(1024),
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
+			)
+			ch <- prometheus.MustNewConstMetric(
+				nodevGPUCoreLimitDesc,
+				prometheus.GaugeValue,
+				float64(devs.Totalcore),
 				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
@@ -222,16 +225,6 @@ func initmetrics() {
 	// be a good idea to try it out with a pedantic registry.
 	fmt.Println("Initializing metrics...")
 	reg := prometheus.NewRegistry()
-	config, err := rest.InClusterConfig()
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
-	clientset, err = kubernetes.NewForConfig(config)
-	if err != nil {
-		fmt.Println(err.Error())
-		return
-	}
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.

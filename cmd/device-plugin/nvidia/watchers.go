@@ -17,31 +17,32 @@
 package main
 
 import (
-    "github.com/fsnotify/fsnotify"
-    "os"
-    "os/signal"
+	"os"
+	"os/signal"
+
+	"github.com/fsnotify/fsnotify"
 )
 
-func NewFSWatcher(files ...string) (*fsnotify.Watcher, error) {
-    watcher, err := fsnotify.NewWatcher()
-    if err != nil {
-        return nil, err
-    }
+func newFSWatcher(files ...string) (*fsnotify.Watcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
 
-    for _, f := range files {
-        err = watcher.Add(f)
-        if err != nil {
-            watcher.Close()
-            return nil, err
-        }
-    }
+	for _, f := range files {
+		err = watcher.Add(f)
+		if err != nil {
+			watcher.Close()
+			return nil, err
+		}
+	}
 
-    return watcher, nil
+	return watcher, nil
 }
 
-func NewOSWatcher(sigs ...os.Signal) chan os.Signal {
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, sigs...)
+func newOSWatcher(sigs ...os.Signal) chan os.Signal {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, sigs...)
 
-    return sigChan
+	return sigChan
 }
