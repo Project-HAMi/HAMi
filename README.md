@@ -4,7 +4,7 @@
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
-[![Contact Me](https://img.shields.io/badge/Contact%20Me)](hhttps://github.com/4paradigm/k8s-vgpu-scheduler#contact)
+[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#contact)
 
 English version|[中文版](README_cn.md)
 
