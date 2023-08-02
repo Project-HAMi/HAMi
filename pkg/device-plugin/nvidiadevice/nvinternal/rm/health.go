@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,6 +36,13 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY Type, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package rm
@@ -38,7 +53,11 @@ import (
 	"strconv"
 	"strings"
 
+<<<<<<< HEAD
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+=======
+	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"k8s.io/klog/v2"
 )
 
@@ -48,6 +67,7 @@ const (
 	// disabled entirely. If set, the envvar is treated as a comma-separated list of Xids to ignore. Note that
 	// this is in addition to the Application errors that are already ignored.
 	envDisableHealthChecks = "DP_DISABLE_HEALTHCHECKS"
+<<<<<<< HEAD
 	// envEnableHealthChecks defines the environment variable that is checked to
 	// determine which XIDs should be explicitly enabled. XIDs specified here
 	// override the ones specified in the `DP_DISABLE_HEALTHCHECKS`.
@@ -60,6 +80,21 @@ const (
 func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devices, unhealthy chan<- *Device, disableNVML <-chan bool) error {
 	xids := getHealthCheckXids()
 	if xids.IsAllDisabled() {
+=======
+	allHealthChecks        = "xids"
+
+	// maxSuccessiveEventErrorCount sets the number of errors waiting for events before marking all devices as unhealthy.
+	maxSuccessiveEventErrorCount = 3
+)
+
+// CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
+func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devices, unhealthy chan<- *Device) error {
+	disableHealthChecks := strings.ToLower(os.Getenv(envDisableHealthChecks))
+	if disableHealthChecks == "all" {
+		disableHealthChecks = allHealthChecks
+	}
+	if strings.Contains(disableHealthChecks, "xids") {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		return nil
 	}
 
@@ -77,12 +112,35 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 	}()
 
+<<<<<<< HEAD
 	klog.Infof("Using XIDs for health checks: %v", xids)
+=======
+	// FIXME: formalize the full list and document it.
+	// http://docs.nvidia.com/deploy/xid-errors/index.html#topic_4
+	// Application errors: the GPU should still be healthy
+	applicationErrorXids := []uint64{
+		13, // Graphics Engine Exception
+		31, // GPU memory page fault
+		43, // GPU stopped processing
+		45, // Preemptive cleanup, due to previous errors
+		68, // Video processor exception
+	}
+
+	skippedXids := make(map[uint64]bool)
+	for _, id := range applicationErrorXids {
+		skippedXids[id] = true
+	}
+
+	for _, additionalXid := range getAdditionalXids(disableHealthChecks) {
+		skippedXids[additionalXid] = true
+	}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	eventSet, ret := r.nvml.EventSetCreate()
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("failed to create event set: %v", ret)
 	}
+<<<<<<< HEAD
 	defer func() {
 		_ = eventSet.Free()
 	}()
@@ -90,6 +148,13 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 	parentToDeviceMap := make(map[string]*Device)
 	deviceIDToGiMap := make(map[string]uint32)
 	deviceIDToCiMap := make(map[string]uint32)
+=======
+	defer eventSet.Free()
+
+	parentToDeviceMap := make(map[string]*Device)
+	deviceIDToGiMap := make(map[string]int)
+	deviceIDToCiMap := make(map[string]int)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	eventMask := uint64(nvml.EventTypeXidCriticalError | nvml.EventTypeDoubleBitEccError | nvml.EventTypeSingleBitEccError)
 	for _, d := range devices {
@@ -112,7 +177,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 
 		supportedEvents, ret := gpu.GetSupportedEventTypes()
 		if ret != nvml.SUCCESS {
+<<<<<<< HEAD
 			klog.Infof("unable to determine the supported events for %v: %v; marking it as unhealthy", d.ID, ret)
+=======
+			klog.Infof("Unable to determine the supported events for %v: %v; marking it as unhealthy", d.ID, ret)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			unhealthy <- d
 			continue
 		}
@@ -131,11 +200,14 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		select {
 		case <-stop:
 			return nil
+<<<<<<< HEAD
 		case signal := <-disableNVML:
 			if signal {
 				klog.Info("Check Health has been  received close signal")
 				return fmt.Errorf("close signal received")
 			}
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		default:
 		}
 
@@ -156,7 +228,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 			continue
 		}
 
+<<<<<<< HEAD
 		if xids.IsDisabled(e.EventData) {
+=======
+		if skippedXids[e.EventData] {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			klog.Infof("Skipping event %+v", e)
 			continue
 		}
@@ -181,7 +257,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		if d.IsMigDevice() && e.GpuInstanceId != 0xFFFFFFFF && e.ComputeInstanceId != 0xFFFFFFFF {
 			gi := deviceIDToGiMap[d.ID]
 			ci := deviceIDToCiMap[d.ID]
+<<<<<<< HEAD
 			if gi != e.GpuInstanceId || ci != e.ComputeInstanceId {
+=======
+			if !(uint32(gi) == e.GpuInstanceId && uint32(ci) == e.ComputeInstanceId) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 				continue
 			}
 			klog.Infof("Event for mig device %v (gi=%v, ci=%v)", d.ID, gi, ci)
@@ -192,6 +272,7 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 	}
 }
 
+<<<<<<< HEAD
 const allXIDs = 0
 
 // disabledXIDs stores a map of explicitly disabled XIDs.
@@ -287,20 +368,48 @@ func newHealthCheckXIDs(xids ...string) disabledXIDs {
 			continue
 		}
 		id, err := strconv.ParseUint(trimmed, 10, 64)
+=======
+// getAdditionalXids returns a list of additional Xids to skip from the specified string.
+// The input is treaded as a comma-separated string and all valid uint64 values are considered as Xid values. Invalid values
+// are ignored.
+func getAdditionalXids(input string) []uint64 {
+	if input == "" {
+		return nil
+	}
+
+	var additionalXids []uint64
+	for _, additionalXid := range strings.Split(input, ",") {
+		trimmed := strings.TrimSpace(additionalXid)
+		if trimmed == "" {
+			continue
+		}
+		xid, err := strconv.ParseUint(trimmed, 10, 64)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		if err != nil {
 			klog.Infof("Ignoring malformed Xid value %v: %v", trimmed, err)
 			continue
 		}
+<<<<<<< HEAD
 
 		output[id] = true
 	}
 	return output
+=======
+		additionalXids = append(additionalXids, xid)
+	}
+
+	return additionalXids
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // getDevicePlacement returns the placement of the specified device.
 // For a MIG device the placement is defined by the 3-tuple <parent UUID, GI, CI>
 // For a full device the returned 3-tuple is the device's uuid and 0xFFFFFFFF for the other two elements.
+<<<<<<< HEAD
 func (r *nvmlResourceManager) getDevicePlacement(d *Device) (string, uint32, uint32, error) {
+=======
+func (r *nvmlResourceManager) getDevicePlacement(d *Device) (string, int, int, error) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if !d.IsMigDevice() {
 		return d.GetUUID(), 0xFFFFFFFF, 0xFFFFFFFF, nil
 	}
@@ -308,7 +417,11 @@ func (r *nvmlResourceManager) getDevicePlacement(d *Device) (string, uint32, uin
 }
 
 // getMigDeviceParts returns the parent GI and CI ids of the MIG device.
+<<<<<<< HEAD
 func (r *nvmlResourceManager) getMigDeviceParts(d *Device) (string, uint32, uint32, error) {
+=======
+func (r *nvmlResourceManager) getMigDeviceParts(d *Device) (string, int, int, error) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if !d.IsMigDevice() {
 		return "", 0, 0, fmt.Errorf("cannot get GI and CI of full device")
 	}
@@ -335,21 +448,33 @@ func (r *nvmlResourceManager) getMigDeviceParts(d *Device) (string, uint32, uint
 		if ret != nvml.SUCCESS {
 			return "", 0, 0, fmt.Errorf("failed to get Compute Instance ID: %v", ret)
 		}
+<<<<<<< HEAD
 		//nolint:gosec  // We know that the values returned from Get*InstanceId are within the valid uint32 range.
 		return parentUUID, uint32(gi), uint32(ci), nil
+=======
+		return parentUUID, gi, ci, nil
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 	return parseMigDeviceUUID(uuid)
 }
 
 // parseMigDeviceUUID splits the MIG device UUID into the parent device UUID and ci and gi
+<<<<<<< HEAD
 func parseMigDeviceUUID(mig string) (string, uint32, uint32, error) {
 	tokens := strings.SplitN(mig, "-", 2)
 	if len(tokens) != 2 || tokens[0] != "MIG" {
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
+=======
+func parseMigDeviceUUID(mig string) (string, int, int, error) {
+	tokens := strings.SplitN(mig, "-", 2)
+	if len(tokens) != 2 || tokens[0] != "MIG" {
+		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 
 	tokens = strings.SplitN(tokens[1], "/", 3)
 	if len(tokens) != 3 || !strings.HasPrefix(tokens[0], "GPU-") {
+<<<<<<< HEAD
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
@@ -361,10 +486,24 @@ func parseMigDeviceUUID(mig string) (string, uint32, uint32, error) {
 	ci, err := toUint32(tokens[2])
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
+=======
+		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+	}
+
+	gi, err := strconv.Atoi(tokens[1])
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+	}
+
+	ci, err := strconv.Atoi(tokens[2])
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 
 	return tokens[0], gi, ci, nil
 }
+<<<<<<< HEAD
 
 func toUint32(s string) (uint32, error) {
 	u, err := strconv.ParseUint(s, 10, 32)
@@ -374,3 +513,5 @@ func toUint32(s string) (uint32, error) {
 	//nolint:gosec  // Since we parse s with a 32-bit size this will not overflow.
 	return uint32(u), nil
 }
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

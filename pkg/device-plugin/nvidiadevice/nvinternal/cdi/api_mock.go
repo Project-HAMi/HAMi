@@ -17,9 +17,12 @@ var _ Interface = &InterfaceMock{}
 //
 //		// make and configure a mocked Interface
 //		mockedInterface := &InterfaceMock{
+<<<<<<< HEAD
 //			AdditionalDevicesFunc: func() []string {
 //				panic("mock out the AdditionalDevices method")
 //			},
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 //			CreateSpecFileFunc: func() error {
 //				panic("mock out the CreateSpecFile method")
 //			},
@@ -33,9 +36,12 @@ var _ Interface = &InterfaceMock{}
 //
 //	}
 type InterfaceMock struct {
+<<<<<<< HEAD
 	// AdditionalDevicesFunc mocks the AdditionalDevices method.
 	AdditionalDevicesFunc func() []string
 
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	// CreateSpecFileFunc mocks the CreateSpecFile method.
 	CreateSpecFileFunc func() error
 
@@ -44,9 +50,12 @@ type InterfaceMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+<<<<<<< HEAD
 		// AdditionalDevices holds details about calls to the AdditionalDevices method.
 		AdditionalDevices []struct {
 		}
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		// CreateSpecFile holds details about calls to the CreateSpecFile method.
 		CreateSpecFile []struct {
 		}
@@ -58,6 +67,7 @@ type InterfaceMock struct {
 			S2 string
 		}
 	}
+<<<<<<< HEAD
 	lockAdditionalDevices sync.RWMutex
 	lockCreateSpecFile    sync.RWMutex
 	lockQualifiedName     sync.RWMutex
@@ -91,6 +101,10 @@ func (mock *InterfaceMock) AdditionalDevicesCalls() []struct {
 	calls = mock.calls.AdditionalDevices
 	mock.lockAdditionalDevices.RUnlock()
 	return calls
+=======
+	lockCreateSpecFile sync.RWMutex
+	lockQualifiedName  sync.RWMutex
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // CreateSpecFile calls CreateSpecFileFunc.

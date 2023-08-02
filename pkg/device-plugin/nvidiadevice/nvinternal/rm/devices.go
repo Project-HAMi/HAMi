@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,6 +36,13 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY Type, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package rm
@@ -37,6 +52,7 @@ import (
 	"strconv"
 	"strings"
 
+<<<<<<< HEAD
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -51,6 +67,17 @@ type Device struct {
 	// Replicas stores the total number of times this device is replicated.
 	// If this is 0 or 1 then the device is not shared.
 	Replicas int
+=======
+	"4pd.io/k8s-vgpu/pkg/util"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+)
+
+// Device wraps pluginapi.Device with extra metadata and functions.
+type Device struct {
+	pluginapi.Device
+	Paths []string
+	Index string
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // deviceInfo defines the information the required to construct a Device
@@ -58,8 +85,11 @@ type deviceInfo interface {
 	GetUUID() (string, error)
 	GetPaths() ([]string, error)
 	GetNumaNode() (bool, int, error)
+<<<<<<< HEAD
 	GetTotalMemory() (uint64, error)
 	GetComputeCapability() (string, error)
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // Devices wraps a map[string]*Device with some functions.
@@ -88,6 +118,7 @@ func BuildDevice(index string, d deviceInfo) (*Device, error) {
 		return nil, fmt.Errorf("error getting device NUMA node: %v", err)
 	}
 
+<<<<<<< HEAD
 	totalMemory, err := d.GetTotalMemory()
 	if err != nil {
 		klog.Warningf("Ignoring error getting device memory: %v", err)
@@ -109,6 +140,16 @@ func BuildDevice(index string, d deviceInfo) (*Device, error) {
 	if hasNuma {
 		dev.Topology = &kubeletdevicepluginv1beta1.TopologyInfo{
 			Nodes: []*kubeletdevicepluginv1beta1.NUMANode{
+=======
+	dev := Device{}
+	dev.ID = uuid
+	dev.Index = index
+	dev.Paths = paths
+	dev.Health = pluginapi.Healthy
+	if hasNuma {
+		dev.Topology = &pluginapi.TopologyInfo{
+			Nodes: []*pluginapi.NUMANode{
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 				{
 					ID: int64(numa),
 				},
@@ -176,6 +217,7 @@ func (ds Devices) GetIDs() []string {
 	return res
 }
 
+<<<<<<< HEAD
 // GetUUIDs returns the uuids associated with the Device in the set.
 func (ds Devices) GetUUIDs() []string {
 	var res []string
@@ -200,6 +242,17 @@ func (ds Devices) GetPluginDevices(count uint) []*kubeletdevicepluginv1beta1.Dev
 			for i := uint(0); i < count; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
 				res = append(res, &kubeletdevicepluginv1beta1.Device{
+=======
+// GetPluginDevices returns the plugin Devices from all devices in the Devices
+func (ds Devices) GetPluginDevices() []*pluginapi.Device {
+	var res []*pluginapi.Device
+
+	if !strings.Contains(ds.GetIDs()[0], "MIG") {
+		for _, dev := range ds {
+			for i := uint(0); i < *util.DeviceSplitCount; i++ {
+				id := fmt.Sprintf("%v-%v", dev.ID, i)
+				res = append(res, &pluginapi.Device{
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 					ID:       id,
 					Health:   dev.Health,
 					Topology: nil,
@@ -234,7 +287,11 @@ func (ds Devices) GetPaths() []string {
 	return res
 }
 
+<<<<<<< HEAD
 // AlignedAllocationSupported checks whether all devices support an aligned allocation
+=======
+// AlignedAllocationSupported checks whether all devices support an alligned allocation
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 func (ds Devices) AlignedAllocationSupported() bool {
 	for _, d := range ds {
 		if !d.AlignedAllocationSupported() {
@@ -244,7 +301,11 @@ func (ds Devices) AlignedAllocationSupported() bool {
 	return true
 }
 
+<<<<<<< HEAD
 // AlignedAllocationSupported checks whether the device supports an aligned allocation
+=======
+// AlignedAllocationSupported checks whether the device supports an alligned allocation
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 func (d Device) AlignedAllocationSupported() bool {
 	if d.IsMigDevice() {
 		return false
@@ -277,7 +338,14 @@ func NewAnnotatedID(id string, replica int) AnnotatedID {
 // HasAnnotations checks if an AnnotatedID has any annotations or not.
 func (r AnnotatedID) HasAnnotations() bool {
 	split := strings.SplitN(string(r), "::", 2)
+<<<<<<< HEAD
 	return len(split) == 2
+=======
+	if len(split) != 2 {
+		return false
+	}
+	return true
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // Split splits a AnnotatedID into its ID and replica number parts.

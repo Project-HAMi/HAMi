@@ -150,6 +150,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
 					continue
 				}
+<<<<<<< HEAD
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
 				// found certain deviceType, fill missing empty allocation for containers before this
@@ -160,6 +161,55 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 						emptyPodSingleDevice := device.PodSingleDevice{}
 						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
 						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+=======
+				//devs := make([]string, 0, n)
+				klog.Infoln("Allocating device for container request", k)
+				for i := len(node.Devices) - 1; i >= 0; i-- {
+					klog.Info("Scoring pod ", k.Memreq, ":", k.MemPercentagereq, ":", k.Coresreq, ":", k.Nums, "i", i, "device:", node.Devices[i].Id)
+					if node.Devices[i].Count <= node.Devices[i].Used {
+						continue
+					}
+					if k.Coresreq > 100 {
+						return nil, fmt.Errorf("core limit can't exceed 100")
+					}
+					if k.MemPercentagereq != 101 && k.Memreq == 0 {
+						k.Memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
+					}
+					if node.Devices[i].Totalmem-node.Devices[i].Usedmem < k.Memreq {
+						continue
+					}
+					if node.Devices[i].Totalcore-node.Devices[i].Usedcores < k.Coresreq {
+						continue
+					}
+					// Coresreq=100 indicates it want this card exclusively
+					if node.Devices[i].Totalcore == 100 && k.Coresreq == 100 && node.Devices[i].Used > 0 {
+						continue
+					}
+					// You can't allocate core=0 job to an already full GPU
+					if node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
+						continue
+					}
+					if !checkType(annos, *node.Devices[i], k) {
+						continue
+					}
+					total += node.Devices[i].Count
+					free += node.Devices[i].Count - node.Devices[i].Used
+					if k.Nums > 0 {
+						klog.Infoln("device", node.Devices[i].Id, "fitted")
+						k.Nums--
+						node.Devices[i].Used++
+						node.Devices[i].Usedmem += k.Memreq
+						node.Devices[i].Usedcores += k.Coresreq
+						devs = append(devs, util.ContainerDevice{
+							UUID:      node.Devices[i].Id,
+							Type:      k.Type,
+							Usedmem:   k.Memreq,
+							Usedcores: k.Coresreq,
+						})
+					}
+					if k.Nums == 0 {
+						break
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 					}
 				}
 				ctrfit = fit

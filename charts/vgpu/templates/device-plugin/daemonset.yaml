@@ -39,6 +39,7 @@ spec:
             postStart:
               exec:
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
+<<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
           #  preStop:
           #    exec:
           #      command: ["/bin/sh","-c","mv /usrbin/nvidia-container-4pdbackup /usrbin/nvidia-container-runtime"]
@@ -57,8 +58,24 @@ spec:
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
             {{- end }}
+=======
+          command:
+            - sleep
+            - infinity
+          #command:
+          #  - nvidia-device-plugin
+          #  - --resource-name={{ .Values.resourceName }}
+          #  - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
+          #  - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
+          #  - --device-cores-scaling={{ .Values.devicePlugin.deviceCoreScaling }}
+          #  - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
+          #  - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
+          #  {{- range .Values.devicePlugin.extraArgs }}
+          #  - {{ . }}
+          #  {{- end }}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0):charts/vgpu/templates/device-plugin/daemonsetnvidia.yaml
           env:
-            - name: NODE_NAME
+            - name: NodeName
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName

@@ -25,7 +25,6 @@ import (
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
 	"google.golang.org/grpc"
 )
@@ -63,13 +62,18 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		memory, _ := cndev.GetDeviceMemory(uint(i))
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
+<<<<<<< HEAD
 		if config.DeviceMemoryScaling > 1 {
 			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
 			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
+=======
+		if *util.DeviceMemoryScaling != float64(1) {
+			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.dev.ID,
-			Count:  int32(config.DeviceSplitCount),
+			Count:  int32(*util.DeviceSplitCount),
 			Devmem: registeredmem,
 			Type:   cndev.GetDeviceModel(uint(i)),
 			Health: dev.dev.Health == "healthy",
@@ -78,6 +82,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 	return &res
 }
 
+<<<<<<< HEAD
 func (r *DeviceRegister) Register(ctx context.Context, endpoint string) error {
 	klog.Infof("Into Register")
 	conn, err := grpc.DialContext(
@@ -87,6 +92,12 @@ func (r *DeviceRegister) Register(ctx context.Context, endpoint string) error {
 		grpc.WithBlock(),
 		//grpc.WithConnectParams(grpc.ConnectParams{MinConnectTimeout: 3}),
 	)
+=======
+func (r *DeviceRegister) RegistrInAnnotation() error {
+	devices := r.apiDevices()
+	annos := make(map[string]string)
+	node, err := util.GetNode(util.NodeName)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		return fmt.Errorf("connect scheduler error, %v", err)
 	}

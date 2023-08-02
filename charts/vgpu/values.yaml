@@ -76,6 +76,11 @@ devicePlugin:
   imagePullPolicy: Always
   deviceSplitCount: 10
   deviceMemoryScaling: 1
+<<<<<<< HEAD
+=======
+  deviceCoreScaling: 1
+  runtimeClassName: ""
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
   migStrategy: "none"
   disablecorelimit: "false"
   extraArgs:

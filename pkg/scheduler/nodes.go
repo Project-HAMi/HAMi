@@ -27,6 +27,39 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
 
+<<<<<<< HEAD
+=======
+type DeviceInfo struct {
+	ID      string
+	Index   uint
+	Count   int32
+	Devmem  int32
+	Devcore int32
+	Type    string
+	Health  bool
+}
+
+type NodeInfo struct {
+	ID      string
+	Devices []DeviceInfo
+}
+
+type DeviceUsage struct {
+	Id        string
+	Index     uint
+	Used      int32
+	Count     int32
+	Usedmem   int32
+	Totalmem  int32
+	Totalcore int32
+	Usedcores int32
+	Type      string
+	Health    bool
+}
+
+type DeviceUsageList []*DeviceUsage
+
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 type NodeUsage struct {
 	Node    *corev1.Node
 	Devices policy.DeviceUsageList

@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright (c) 2019, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,18 +36,29 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package plugin
 
 import (
+<<<<<<< HEAD
 	"bytes"
 	"context"
 	"encoding/json"
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"errors"
 	"fmt"
 	"net"
 	"os"
+<<<<<<< HEAD
 	"os/exec"
 	"path"
 	"path/filepath"
@@ -64,12 +83,33 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+=======
+	"path"
+	"path/filepath"
+	"strings"
+	"time"
+
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"4pd.io/k8s-vgpu/pkg/util"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
+
+	"github.com/google/uuid"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+
+	"k8s.io/klog/v2"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
 const (
 	deviceListAsVolumeMountsHostPath          = "/dev/null"
 	deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
+<<<<<<< HEAD
 	NodeLockNvidia                            = "hami.io/mutex.lock"
 	ConfigFilePath                            = "/config/config.json"
 	deviceListEnvVar                          = "NVIDIA_VISIBLE_DEVICES"
@@ -193,23 +233,67 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		operatingMode:              mode,
 		migCurrent:                 nvidia.MigPartedSpec{},
 		deviceCache:                "",
+=======
+)
+
+// NvidiaDevicePlugin implements the Kubernetes device plugin API
+type NvidiaDevicePlugin struct {
+	rm                   rm.ResourceManager
+	config               *util.DeviceConfig
+	deviceListEnvvar     string
+	deviceListStrategies spec.DeviceListStrategies
+	socket               string
+
+	cdiHandler          cdi.Interface
+	cdiEnabled          bool
+	cdiAnnotationPrefix string
+
+	server *grpc.Server
+	health chan *rm.Device
+	stop   chan interface{}
+}
+
+// NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
+func NewNvidiaDevicePlugin(config *util.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool) *NvidiaDevicePlugin {
+	_, name := resourceManager.Resource().Split()
+
+	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+
+	return &NvidiaDevicePlugin{
+		rm:                   resourceManager,
+		config:               config,
+		deviceListEnvvar:     "NVIDIA_VISIBLE_DEVICES",
+		deviceListStrategies: deviceListStrategies,
+		socket:               pluginapi.DevicePluginPath + "nvidia-" + name + ".sock",
+		cdiHandler:           cdiHandler,
+		cdiEnabled:           cdiEnabled,
+		cdiAnnotationPrefix:  *config.Flags.Plugin.CDIAnnotationPrefix,
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
 		server: nil,
 		health: nil,
 		stop:   nil,
+<<<<<<< HEAD
 	}, nil
+=======
+	}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 func (plugin *NvidiaDevicePlugin) initialize() {
 	plugin.server = grpc.NewServer([]grpc.ServerOption{}...)
 	plugin.health = make(chan *rm.Device)
+<<<<<<< HEAD
 	plugin.stop = make(chan any)
 	plugin.disableHealthChecks = make(chan bool, 1)
 	plugin.ackDisableHealthChecks = make(chan bool, 1)
 	plugin.disableWatchAndRegister = make(chan bool, 1)
 	plugin.ackDisableWatchAndRegister = make(chan bool, 1)
+=======
+	plugin.stop = make(chan interface{})
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 func (plugin *NvidiaDevicePlugin) cleanup() {
@@ -217,10 +301,13 @@ func (plugin *NvidiaDevicePlugin) cleanup() {
 	plugin.server = nil
 	plugin.health = nil
 	plugin.stop = nil
+<<<<<<< HEAD
 	plugin.disableHealthChecks = nil
 	plugin.ackDisableHealthChecks = nil
 	plugin.disableWatchAndRegister = nil
 	plugin.ackDisableWatchAndRegister = nil
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // Devices returns the full set of devices associated with the plugin.
@@ -230,6 +317,7 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 
 // Start starts the gRPC server, registers the device plugin with the Kubelet,
 // and starts the device healthchecks.
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
 
@@ -244,6 +332,12 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 
 	err = plugin.Serve()
+=======
+func (plugin *NvidiaDevicePlugin) Start() error {
+	plugin.initialize()
+
+	err := plugin.Serve()
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
 		plugin.cleanup()
@@ -251,13 +345,18 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 	klog.Infof("Starting to serve '%s' on %s", plugin.rm.Resource(), plugin.socket)
 
+<<<<<<< HEAD
 	err = plugin.Register(kubeletSocket)
+=======
+	err = plugin.Register()
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		klog.Infof("Could not register device plugin: %s", err)
 		plugin.Stop()
 		return err
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
+<<<<<<< HEAD
 	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
 	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
 	err = CreateMigApplyLockDir()
@@ -317,12 +416,18 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
+=======
+
+	go func() {
+		err := plugin.rm.CheckHealth(plugin.stop, plugin.health)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		if err != nil {
 			klog.Infof("Failed to start health check: %v; continuing with health checks disabled", err)
 		}
 	}()
 
 	go func() {
+<<<<<<< HEAD
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
 
@@ -330,6 +435,11 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		plugin.ApplyMigTemplate()
 	}
 
+=======
+		plugin.WatchAndRegister()
+	}()
+
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	return nil
 }
 
@@ -355,12 +465,17 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 		return err
 	}
 
+<<<<<<< HEAD
 	kubeletdevicepluginv1beta1.RegisterDevicePluginServer(plugin.server, plugin)
+=======
+	pluginapi.RegisterDevicePluginServer(plugin.server, plugin)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	go func() {
 		lastCrashTime := time.Now()
 		restartCount := 0
 		for {
+<<<<<<< HEAD
 			// restart if it has not been too often
 			// i.e. if server has crashed more than 5 times and it didn't last more than one hour each time
 			if restartCount > 5 {
@@ -368,6 +483,8 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 				klog.Fatalf("GRPC server for '%s' has repeatedly crashed recently. Quitting", plugin.rm.Resource())
 			}
 
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			klog.Infof("Starting GRPC server for '%s'", plugin.rm.Resource())
 			err := plugin.server.Serve(sock)
 			if err == nil {
@@ -376,12 +493,25 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 
 			klog.Infof("GRPC server for '%s' crashed with error: %v", plugin.rm.Resource(), err)
 
+<<<<<<< HEAD
+=======
+			// restart if it has not been too often
+			// i.e. if server has crashed more than 5 times and it didn't last more than one hour each time
+			if restartCount > 5 {
+				// quit
+				klog.Fatalf("GRPC server for '%s' has repeatedly crashed recently. Quitting", plugin.rm.Resource())
+			}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			timeSinceLastCrash := time.Since(lastCrashTime).Seconds()
 			lastCrashTime = time.Now()
 			if timeSinceLastCrash > 3600 {
 				// it has been one hour since the last crash.. reset the count
 				// to reflect on the frequency
+<<<<<<< HEAD
 				restartCount = 0
+=======
+				restartCount = 1
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			} else {
 				restartCount++
 			}
@@ -399,6 +529,7 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 }
 
 // Register registers the device plugin for the given resourceName with Kubelet.
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 	if kubeletSocket == "" {
 		klog.Info("Skipping registration with Kubelet")
@@ -406,11 +537,16 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 	}
 
 	conn, err := plugin.dial(kubeletSocket, 5*time.Second)
+=======
+func (plugin *NvidiaDevicePlugin) Register() error {
+	conn, err := plugin.dial(pluginapi.KubeletSocket, 5*time.Second)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
+<<<<<<< HEAD
 	client := kubeletdevicepluginv1beta1.NewRegistrationClient(conn)
 	reqt := &kubeletdevicepluginv1beta1.RegisterRequest{
 		Version:      kubeletdevicepluginv1beta1.Version,
@@ -418,6 +554,15 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 		ResourceName: string(plugin.rm.Resource()),
 		Options: &kubeletdevicepluginv1beta1.DevicePluginOptions{
 			GetPreferredAllocationAvailable: false,
+=======
+	client := pluginapi.NewRegistrationClient(conn)
+	reqt := &pluginapi.RegisterRequest{
+		Version:      pluginapi.Version,
+		Endpoint:     path.Base(plugin.socket),
+		ResourceName: string(plugin.rm.Resource()),
+		Options: &pluginapi.DevicePluginOptions{
+			GetPreferredAllocationAvailable: true,
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		},
 	}
 
@@ -429,16 +574,27 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 }
 
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
 		GetPreferredAllocationAvailable: false,
+=======
+func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
+	options := &pluginapi.DevicePluginOptions{
+		GetPreferredAllocationAvailable: true,
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 	return options, nil
 }
 
 // ListAndWatch lists devices and update that list according to the health status
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
 	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+=======
+func (plugin *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
+	s.Send(&pluginapi.ListAndWatchResponse{Devices: plugin.apiDevices()})
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	for {
 		select {
@@ -446,23 +602,38 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			return nil
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
+<<<<<<< HEAD
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
 			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+=======
+			d.Health = pluginapi.Unhealthy
+			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
+			s.Send(&pluginapi.ListAndWatchResponse{Devices: plugin.apiDevices()})
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
 	}
 }
 
 // GetPreferredAllocation returns the preferred allocation from the set of devices specified in the request
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *kubeletdevicepluginv1beta1.PreferredAllocationRequest) (*kubeletdevicepluginv1beta1.PreferredAllocationResponse, error) {
 	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
+=======
+func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
+	response := &pluginapi.PreferredAllocationResponse{}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	/*for _, req := range r.ContainerRequests {
 		devices, err := plugin.rm.GetPreferredAllocation(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, int(req.AllocationSize))
 		if err != nil {
 			return nil, fmt.Errorf("error getting list of preferred allocation devices: %v", err)
 		}
 
+<<<<<<< HEAD
 		resp := &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
+=======
+		resp := &pluginapi.ContainerPreferredAllocationResponse{
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			DeviceIDs: devices,
 		}
 
@@ -472,6 +643,7 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 }
 
 // Allocate which return list of devices.
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
@@ -482,33 +654,57 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+=======
+func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	klog.Infoln("Allocate", reqs.ContainerRequests)
+	responses := pluginapi.AllocateResponse{}
+	nodename := os.Getenv("NodeName")
+	current, err := util.GetPendingPod(nodename)
+	if err != nil {
+		util.ReleaseNodeLock(nodename)
+		return &pluginapi.AllocateResponse{}, err
+	}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
 		// error out if more than one resource is being allocated.
 
 		if strings.Contains(req.DevicesIDs[0], "MIG") {
+<<<<<<< HEAD
 			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
 				if len(req.DevicesIDs) > 1 {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
+=======
+
+			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
+				if len(req.DevicesIDs) > 1 {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIDs))
 				}
 			}
 
 			for _, id := range req.DevicesIDs {
 				if !plugin.rm.Devices().Contains(id) {
+<<<<<<< HEAD
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
 			response, err := plugin.getAllocateResponse(req.DevicesIDs)
 			if err != nil {
+<<<<<<< HEAD
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
+<<<<<<< HEAD
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
@@ -520,10 +716,25 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
+=======
+			currentCtr, devreq, err := util.GetNextDeviceRequest(util.NvidiaGPUDevice, *current)
+			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
+			if err != nil {
+				util.PodAllocationFailed(nodename, current)
+				return &pluginapi.AllocateResponse{}, err
+			}
+			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
+				util.PodAllocationFailed(nodename, current)
+				return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
+			}
+			klog.Infoln("[][[]]")
+			response, err := plugin.getAllocateResponse(util.GetContainerDeviceStrArray(devreq))
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
+<<<<<<< HEAD
 			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -596,11 +807,71 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						ReadOnly:      true,
 					})
 				}
+=======
+			err = util.EraseNextDeviceTypeFromAnnotation(util.NvidiaGPUDevice, *current)
+			if err != nil {
+				util.PodAllocationFailed(nodename, current)
+				return &pluginapi.AllocateResponse{}, err
+			}
+
+			for i, dev := range devreq {
+				limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
+				response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
+
+				/*tmp := response.Envs["NVIDIA_VISIBLE_DEVICES"]
+				if i > 0 {
+					response.Envs["NVIDIA_VISIBLE_DEVICES"] = fmt.Sprintf("%v,%v", tmp, dev.UUID)
+				} else {
+					response.Envs["NVIDIA_VISIBLE_DEVICES"] = dev.UUID
+				}*/
+			}
+			response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
+			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/usr/local/vgpu/%v.cache", uuid.New().String())
+			if *util.DeviceMemoryScaling > 1 {
+				response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+			}
+			if *util.DisableCoreLimit {
+				response.Envs[api.CoreLimitSwitch] = "disable"
+			}
+			cacheFileHostDirectory := "/usr/local/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
+			os.MkdirAll(cacheFileHostDirectory, 0777)
+			os.Chmod(cacheFileHostDirectory, 0777)
+			os.MkdirAll("/tmp/vgpulock", 0777)
+			os.Chmod("/tmp/vgpulock", 0777)
+			hostHookPath := os.Getenv("HOOK_PATH")
+			response.Mounts = append(response.Mounts,
+				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
+					HostPath: hostHookPath + "/libvgpu.so",
+					ReadOnly: true},
+				&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
+					HostPath: hostHookPath + "/ld.so.preload",
+					ReadOnly: true},
+				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu",
+					HostPath: cacheFileHostDirectory,
+					ReadOnly: false},
+				&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",
+					HostPath: "/tmp/vgpulock",
+					ReadOnly: false},
+			)
+			_, err = os.Stat("/usr/local/vgpu/license")
+			if err == nil {
+				response.Mounts = append(response.Mounts, &pluginapi.Mount{
+					ContainerPath: "/vgpu/",
+					HostPath:      "/usr/local/vgpu/license",
+					ReadOnly:      true,
+				})
+				response.Mounts = append(response.Mounts, &pluginapi.Mount{
+					ContainerPath: "/usr/bin/vgpuvalidator",
+					HostPath:      hostHookPath + "/vgpuvalidator",
+					ReadOnly:      true,
+				})
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
+<<<<<<< HEAD
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
@@ -649,10 +920,57 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*kub
 // updateResponseForCDI updates the specified response for the given device IDs.
 // This response contains the annotations required to trigger CDI injection in the container engine or nvidia-container-runtime.
 func (plugin *NvidiaDevicePlugin) updateResponseForCDI(response *kubeletdevicepluginv1beta1.ContainerAllocateResponse, responseID string, deviceIDs ...string) error {
+=======
+	util.PodAllocationTrySuccess(nodename, current)
+	return &responses, nil
+}
+
+func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*pluginapi.ContainerAllocateResponse, error) {
+	deviceIDs := plugin.deviceIDsFromAnnotatedDeviceIDs(requestIds)
+
+	responseID := uuid.New().String()
+	response, err := plugin.getAllocateResponseForCDI(responseID, deviceIDs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get allocate response for CDI: %v", err)
+	}
+
+	response.Envs = plugin.apiEnvs(plugin.deviceListEnvvar, deviceIDs)
+	//if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyVolumeMounts) || plugin.deviceListStrategies.Includes(spec.DeviceListStrategyEnvvar) {
+	//	response.Envs = plugin.apiEnvs(plugin.deviceListEnvvar, deviceIDs)
+	//}
+	/*
+		if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyVolumeMounts) {
+			response.Envs = plugin.apiEnvs(plugin.deviceListEnvvar, []string{deviceListAsVolumeMountsContainerPathRoot})
+			response.Mounts = plugin.apiMounts(deviceIDs)
+		}*/
+	if *plugin.config.Flags.Plugin.PassDeviceSpecs {
+		response.Devices = plugin.apiDeviceSpecs(*plugin.config.Flags.NvidiaDriverRoot, requestIds)
+	}
+	if *plugin.config.Flags.GDSEnabled {
+		response.Envs["NVIDIA_GDS"] = "enabled"
+	}
+	if *plugin.config.Flags.MOFEDEnabled {
+		response.Envs["NVIDIA_MOFED"] = "enabled"
+	}
+
+	return &response, nil
+}
+
+// getAllocateResponseForCDI returns the allocate response for the specified device IDs.
+// This response contains the annotations required to trigger CDI injection in the container engine or nvidia-container-runtime.
+func (plugin *NvidiaDevicePlugin) getAllocateResponseForCDI(responseID string, deviceIDs []string) (pluginapi.ContainerAllocateResponse, error) {
+	response := pluginapi.ContainerAllocateResponse{}
+
+	if !plugin.cdiEnabled {
+		return response, nil
+	}
+
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	var devices []string
 	for _, id := range deviceIDs {
 		devices = append(devices, plugin.cdiHandler.QualifiedName("gpu", id))
 	}
+<<<<<<< HEAD
 	for _, channel := range plugin.imexChannels {
 		devices = append(devices, plugin.cdiHandler.QualifiedName("imex-channel", channel.ID))
 	}
@@ -683,6 +1001,32 @@ func (plugin *NvidiaDevicePlugin) updateResponseForCDI(response *kubeletdevicepl
 }
 
 func (plugin *NvidiaDevicePlugin) getCDIDeviceAnnotations(id string, devices ...string) (map[string]string, error) {
+=======
+
+	if *plugin.config.Flags.GDSEnabled {
+		devices = append(devices, plugin.cdiHandler.QualifiedName("gds", "all"))
+	}
+	if *plugin.config.Flags.MOFEDEnabled {
+		devices = append(devices, plugin.cdiHandler.QualifiedName("mofed", "all"))
+	}
+
+	if len(devices) == 0 {
+		return response, nil
+	}
+
+	if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyCDIAnnotations) {
+		annotations, err := plugin.getCDIDeviceAnnotations(responseID, devices)
+		if err != nil {
+			return response, err
+		}
+		response.Annotations = annotations
+	}
+
+	return response, nil
+}
+
+func (plugin *NvidiaDevicePlugin) getCDIDeviceAnnotations(id string, devices []string) (map[string]string, error) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	annotations, err := cdiapi.UpdateAnnotations(map[string]string{}, "nvidia-device-plugin", id, devices)
 	if err != nil {
 		return nil, fmt.Errorf("failed to add CDI annotations: %v", err)
@@ -703,12 +1047,18 @@ func (plugin *NvidiaDevicePlugin) getCDIDeviceAnnotations(id string, devices ...
 }
 
 // PreStartContainer is unimplemented for this plugin
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) PreStartContainer(context.Context, *kubeletdevicepluginv1beta1.PreStartContainerRequest) (*kubeletdevicepluginv1beta1.PreStartContainerResponse, error) {
 	return &kubeletdevicepluginv1beta1.PreStartContainerResponse{}, nil
+=======
+func (plugin *NvidiaDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
+	return &pluginapi.PreStartContainerResponse{}, nil
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 // dial establishes the gRPC communication with the registered device plugin.
 func (plugin *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, error) {
+<<<<<<< HEAD
 	ctx, cancel := context.WithTimeout(plugin.ctx, timeout)
 	defer cancel()
 	//nolint:staticcheck  // TODO: Switch to grpc.NewClient
@@ -720,6 +1070,15 @@ func (plugin *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Durat
 			return (&net.Dialer{}).DialContext(ctx, "unix", addr)
 		}),
 	)
+=======
+	c, err := grpc.Dial(unixSocketPath, grpc.WithInsecure(), grpc.WithBlock(),
+		grpc.WithTimeout(timeout),
+		grpc.WithDialer(func(addr string, timeout time.Duration) (net.Conn, error) {
+			return net.DialTimeout("unix", addr, timeout)
+		}),
+	)
+
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		return nil, err
 	}
@@ -727,7 +1086,11 @@ func (plugin *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Durat
 	return c, nil
 }
 
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) uniqueDeviceIDsFromAnnotatedDeviceIDs(ids []string) []string {
+=======
+func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) []string {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	var deviceIDs []string
 	if *plugin.config.Flags.Plugin.DeviceIDStrategy == spec.DeviceIDStrategyUUID {
 		deviceIDs = rm.AnnotatedIDs(ids).GetIDs()
@@ -735,6 +1098,7 @@ func (plugin *NvidiaDevicePlugin) uniqueDeviceIDsFromAnnotatedDeviceIDs(ids []st
 	if *plugin.config.Flags.Plugin.DeviceIDStrategy == spec.DeviceIDStrategyIndex {
 		deviceIDs = plugin.rm.Devices().Subset(ids).GetIndices()
 	}
+<<<<<<< HEAD
 	var uniqueIDs []string
 	seen := make(map[string]bool)
 	for _, id := range deviceIDs {
@@ -784,6 +1148,37 @@ func (plugin *NvidiaDevicePlugin) updateResponseForDeviceMounts(response *kubele
 }
 
 func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) []*kubeletdevicepluginv1beta1.DeviceSpec {
+=======
+	return deviceIDs
+}
+
+func (plugin *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
+	return plugin.rm.Devices().GetPluginDevices()
+}
+
+func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
+	return map[string]string{
+		envvar: strings.Join(deviceIDs, ","),
+	}
+}
+
+/*
+func (plugin *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
+	var mounts []*pluginapi.Mount
+
+	for _, id := range deviceIDs {
+		mount := &pluginapi.Mount{
+			HostPath:      deviceListAsVolumeMountsHostPath,
+			ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
+		}
+		mounts = append(mounts, mount)
+	}
+
+	return mounts
+}*/
+
+func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string) []*pluginapi.DeviceSpec {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	optional := map[string]bool{
 		"/dev/nvidiactl":        true,
 		"/dev/nvidia-uvm":       true,
@@ -793,21 +1188,32 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 
 	paths := plugin.rm.GetDevicePaths(ids)
 
+<<<<<<< HEAD
 	var specs []*kubeletdevicepluginv1beta1.DeviceSpec
+=======
+	var specs []*pluginapi.DeviceSpec
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	for _, p := range paths {
 		if optional[p] {
 			if _, err := os.Stat(p); err != nil {
 				continue
 			}
 		}
+<<<<<<< HEAD
 		spec := &kubeletdevicepluginv1beta1.DeviceSpec{
 			ContainerPath: p,
 			HostPath:      filepath.Join(devRoot, p),
+=======
+		spec := &pluginapi.DeviceSpec{
+			ContainerPath: p,
+			HostPath:      filepath.Join(driverRoot, p),
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 			Permissions:   "rw",
 		}
 		specs = append(specs, spec)
 	}
 
+<<<<<<< HEAD
 	for _, channel := range plugin.imexChannels {
 		spec := &kubeletdevicepluginv1beta1.DeviceSpec{
 			ContainerPath: channel.Path,
@@ -873,3 +1279,7 @@ func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia
 
 	return transformConfigs()
 }
+=======
+	return specs
+}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

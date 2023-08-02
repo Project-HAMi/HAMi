@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+<<<<<<< HEAD
 	"context"
 	"testing"
 
@@ -516,4 +517,42 @@ func Test_AllContainersCreated(t *testing.T) {
 			assert.Equal(t, test.want, got)
 		})
 	}
+=======
+	"fmt"
+	"testing"
+
+	"gotest.tools/v3/assert"
+)
+
+func TestEmptyContainerDevicesCoding(t *testing.T) {
+	cd1 := ContainerDevices{}
+	s := EncodeContainerDevices(cd1)
+	fmt.Println(s)
+	cd2, _ := DecodeContainerDevices(s)
+	assert.DeepEqual(t, cd1, cd2)
+}
+
+func TestEmptyPodDeviceCoding(t *testing.T) {
+	pd1 := PodDevices{}
+	s := EncodePodDevices(pd1)
+	fmt.Println(s)
+	pd2, _ := DecodePodDevices(s)
+	assert.DeepEqual(t, pd1, pd2)
+}
+
+func TestPodDevicesCoding(t *testing.T) {
+	pd1 := PodDevices{
+		ContainerDevices{
+			ContainerDevice{"UUID1", "Type1", 1000, 30},
+		},
+		ContainerDevices{},
+		ContainerDevices{
+			ContainerDevice{"UUID1", "Type1", 1000, 30},
+		},
+	}
+	s := EncodePodDevices(pd1)
+	fmt.Println(s)
+	pd2, _ := DecodePodDevices(s)
+	assert.DeepEqual(t, pd1, pd2)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }

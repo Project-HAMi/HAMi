@@ -35,10 +35,14 @@ package main
 
 import (
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"os"
 	"os/signal"
 
 	"github.com/fsnotify/fsnotify"
+<<<<<<< HEAD
 )
 
 func newFSWatcher(files ...string) (*fsnotify.Watcher, error) {
@@ -67,29 +71,35 @@ func newOSWatcher(sigs ...os.Signal) chan os.Signal {
     "github.com/fsnotify/fsnotify"
     "os"
     "os/signal"
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
-func NewFSWatcher(files ...string) (*fsnotify.Watcher, error) {
-    watcher, err := fsnotify.NewWatcher()
-    if err != nil {
-        return nil, err
-    }
+func newFSWatcher(files ...string) (*fsnotify.Watcher, error) {
+	watcher, err := fsnotify.NewWatcher()
+	if err != nil {
+		return nil, err
+	}
 
-    for _, f := range files {
-        err = watcher.Add(f)
-        if err != nil {
-            watcher.Close()
-            return nil, err
-        }
-    }
+	for _, f := range files {
+		err = watcher.Add(f)
+		if err != nil {
+			watcher.Close()
+			return nil, err
+		}
+	}
 
-    return watcher, nil
+	return watcher, nil
 }
 
-func NewOSWatcher(sigs ...os.Signal) chan os.Signal {
-    sigChan := make(chan os.Signal, 1)
-    signal.Notify(sigChan, sigs...)
+func newOSWatcher(sigs ...os.Signal) chan os.Signal {
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, sigs...)
 
+<<<<<<< HEAD
     return sigChan
 >>>>>>> 6d02e30 (major architect update: remove grpc)
+=======
+	return sigChan
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }

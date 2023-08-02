@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,11 +36,19 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package plugin
 
 import (
+<<<<<<< HEAD
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -167,19 +183,62 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			Health:  health,
 		})
 		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
+=======
+	"fmt"
+	"time"
+
+	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
+	"k8s.io/klog/v2"
+
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/util"
+)
+
+func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
+	devs := r.Devices()
+	nvml.Init()
+	res := make([]*api.DeviceInfo, 0, len(devs))
+	for _, dev := range devs {
+		ndev, err := nvml.NewDeviceByUUID(dev.ID)
+		//klog.V(3).Infoln("ndev type=", ndev.Model)
+		if err != nil {
+			fmt.Println("nvml new device by uuid error id=", dev.ID, "err=", err.Error())
+			panic(0)
+		} else {
+			klog.V(3).Infoln("nvml registered device id=", dev.ID, "memory=", *ndev.Memory, "type=", *ndev.Model)
+		}
+		registeredmem := int32(*ndev.Memory)
+		if *util.DeviceMemoryScaling != 1 {
+			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
+		}
+		res = append(res, &api.DeviceInfo{
+			Id:      dev.ID,
+			Count:   int32(*util.DeviceSplitCount),
+			Devmem:  registeredmem,
+			Devcore: int32(*util.DeviceCoresScaling * 100),
+			Type:    fmt.Sprintf("%v-%v", "NVIDIA", *ndev.Model),
+			Health:  dev.Health == "healthy",
+		})
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 	return &res
 }
 
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 	devices := plugin.getAPIDevices()
 	klog.InfoS("start working on the devices", "devices", devices)
+=======
+func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
+	devices := r.getApiDevices()
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
+<<<<<<< HEAD
 	encodeddevices := device.MarshalNodeDevices(*devices)
 	if encodeddevices == plugin.deviceCache {
 		return nil
@@ -205,6 +264,12 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		annos[nvidia.RegisterGPUPairScore] = string(data)
 	}
 	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
+=======
+	encodeddevices := util.EncodeNodeDevices(*devices)
+	annos[util.NodeHandshake] = "Reported " + time.Now().String()
+	annos[util.NodeNvidiaDeviceRegistered] = encodeddevices
+	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	err = util.PatchNodeAnnotations(node, annos)
 
 	if err != nil {
@@ -213,6 +278,7 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 	return err
 }
 
+<<<<<<< HEAD
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
 	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
@@ -247,6 +313,17 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 		} else {
 			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval)
 			time.Sleep(successSleepInterval)
+=======
+func (r *NvidiaDevicePlugin) WatchAndRegister() {
+	klog.Infof("into WatchAndRegister")
+	for {
+		err := r.RegistrInAnnotation()
+		if err != nil {
+			klog.Errorf("register error, %v", err)
+			time.Sleep(time.Second * 5)
+		} else {
+			time.Sleep(time.Second * 30)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
 	}
 }

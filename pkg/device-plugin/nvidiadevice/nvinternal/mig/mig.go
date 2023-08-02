@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -29,6 +30,9 @@
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
  */
+=======
+// Copyright (c) 2021 - 2022, NVIDIA CORPORATION. All rights reserved.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 package mig
 
@@ -49,7 +53,11 @@ const (
 	nvcapsDevicePath     = "/dev/nvidia-caps"
 )
 
+<<<<<<< HEAD
 // GetMigCapabilityDevicePaths returns a mapping of MIG capability path to device node path.
+=======
+// GetMigCapabilityDevicePaths returns a mapping of MIG capability path to device node path
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 func GetMigCapabilityDevicePaths() (map[string]string, error) {
 	// Open nvcapsMigMinorsPath for walking.
 	// If the nvcapsMigMinorsPath does not exist, then we are not on a MIG

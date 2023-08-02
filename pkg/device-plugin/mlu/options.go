@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/config"
+	"4pd.io/k8s-vgpu/pkg/util"
 	flags "github.com/jessevdk/go-flags"
 )
 
@@ -57,9 +57,14 @@ func ParseFlags() Options {
 		}
 		os.Exit(code)
 	}
+<<<<<<< HEAD
 	config.DeviceSplitCount = options.VirtualizationNum
 	config.RuntimeSocketFlag = options.SocketPath
 	config.SchedulerEndpoint = options.SchedulerEndpoint
+=======
+	util.DeviceSplitCount = &options.VirtualizationNum
+	util.RuntimeSocketFlag = options.SocketPath
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	log.Printf("Parsed options: %v\n", options)
 	return options
 }

@@ -18,8 +18,11 @@ package scheduler
 
 import (
 	"context"
+<<<<<<< HEAD
 	"fmt"
 	"maps"
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"sort"
 	"strconv"
 	"strings"
@@ -27,10 +30,17 @@ import (
 	"sync/atomic"
 	"time"
 
+<<<<<<< HEAD
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
+=======
+	"4pd.io/k8s-vgpu/pkg/k8sutil"
+	"4pd.io/k8s-vgpu/pkg/util"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
@@ -39,6 +49,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+<<<<<<< HEAD
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -52,6 +63,9 @@ import (
 const (
 	defaultResync    = 1 * time.Hour
 	syncedPollPeriod = 100 * time.Millisecond
+=======
+	"k8s.io/kubernetes/pkg/scheduler/framework"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 type Scheduler struct {
@@ -132,8 +146,13 @@ func (s *Scheduler) doNodeNotify() {
 	}
 }
 
+<<<<<<< HEAD
 func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
+=======
+func (s *Scheduler) onAddPod(obj interface{}) {
+	pod, ok := obj.(*v1.Pod)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if !ok {
 		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
 		return
@@ -155,12 +174,18 @@ func (s *Scheduler) onAddPod(obj any) {
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
+<<<<<<< HEAD
+=======
+	podDev, _ := util.DecodePodDevices(ids)
+	s.addPod(pod, nodeID, podDev)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 func (s *Scheduler) onUpdatePod(_, newObj any) {
 	s.onAddPod(newObj)
 }
 
+<<<<<<< HEAD
 func (s *Scheduler) onDelPod(obj any) {
 	var pod *corev1.Pod
 	var ok bool
@@ -177,6 +202,12 @@ func (s *Scheduler) onDelPod(obj any) {
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
+=======
+func (s *Scheduler) onDelPod(obj interface{}) {
+	pod, ok := obj.(*v1.Pod)
+	if !ok {
+		klog.Errorf("unknown add object type")
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		return
 	}
 
@@ -317,6 +348,7 @@ func (s *Scheduler) Stop() {
 	close(s.stopCh)
 }
 
+<<<<<<< HEAD
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.InfoS("Entering RegisterFromNodeAnnotations")
 	defer klog.InfoS("Exiting RegisterFromNodeAnnotations")
@@ -327,6 +359,11 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	printedLog := map[string]bool{}
+=======
+func (s *Scheduler) RegisterFromNodeAnnotatons() error {
+	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
+	nodeInfoCopy := make(map[string]*NodeInfo)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	for {
 		select {
 		case <-s.nodeNotify:
@@ -339,14 +376,94 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
 		}
+<<<<<<< HEAD
 		if atomic.LoadUint32(&s.started) == 0 {
 			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
 			continue
+=======
+		for _, val := range nodes.Items {
+			for devhandsk, devreg := range util.KnownDevice {
+				_, ok := val.Annotations[devreg]
+				if !ok {
+					continue
+				}
+				nodedevices := util.DecodeNodeDevices(val.Annotations[devreg])
+				if len(nodedevices) == 0 {
+					continue
+				}
+				klog.V(5).Infoln("nodedevices=", nodedevices)
+				handshake := val.Annotations[devhandsk]
+				if strings.Contains(handshake, "Requesting") {
+					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+					if time.Now().After(formertime.Add(time.Second * 60)) {
+						_, ok := s.nodes[val.Name]
+						if ok {
+							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
+							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
+
+							tmppat := make(map[string]string)
+							tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+							n, err := util.GetNode(val.Name)
+							if err != nil {
+								klog.Errorln("get node failed", err.Error())
+							}
+							util.PatchNodeAnnotations(n, tmppat)
+							continue
+						}
+					}
+					continue
+				} else if strings.Contains(handshake, "Deleted") {
+					continue
+				} else {
+					tmppat := make(map[string]string)
+					tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					n, err := util.GetNode(val.Name)
+					if err != nil {
+						klog.Errorln("get node failed", err.Error())
+					}
+					util.PatchNodeAnnotations(n, tmppat)
+				}
+				nodeInfo := &NodeInfo{}
+				nodeInfo.ID = val.Name
+				nodeInfo.Devices = make([]DeviceInfo, 0)
+				found := false
+				for index, deviceinfo := range nodedevices {
+					_, ok := s.nodes[val.Name]
+					if ok {
+						for i1, val1 := range s.nodes[val.Name].Devices {
+							if strings.Compare(val1.ID, deviceinfo.Id) == 0 {
+								found = true
+								s.nodes[val.Name].Devices[i1].Devmem = deviceinfo.Devmem
+								s.nodes[val.Name].Devices[i1].Devcore = deviceinfo.Devcore
+								break
+							}
+						}
+					}
+					if !found {
+						nodeInfo.Devices = append(nodeInfo.Devices, DeviceInfo{
+							ID:      deviceinfo.Id,
+							Index:   uint(index),
+							Count:   deviceinfo.Count,
+							Devmem:  deviceinfo.Devmem,
+							Devcore: deviceinfo.Devcore,
+							Type:    deviceinfo.Type,
+							Health:  deviceinfo.Health,
+						})
+					}
+				}
+				s.addNode(val.Name, nodeInfo)
+				nodeInfoCopy[devhandsk] = nodeInfo
+				if s.nodes[val.Name] != nil && nodeInfo != nil && len(nodeInfo.Devices) > 0 {
+					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
+				}
+			}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
 		s.register(labelSelector, printedLog)
 	}
 }
 
+<<<<<<< HEAD
 func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[string]bool) {
 	// Lock here to avoid setting s.synced to false, when we lost leadership, while doing register.
 	// 1. lost leadership before register: synced will set to false in callbacks, and register will be skipped because IsLeader() returns false
@@ -452,6 +569,52 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	allNodes, err := s.ListNodes()
 	if err != nil {
 		return &overallnodeMap, failedNodes, err
+=======
+// InspectAllNodesUsage is used by metrics monitor
+func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
+	return &s.cachedstatus
+}
+
+// GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
+func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
+	nodeMap := make(map[string]*framework.NodeInfo)
+	for _, node := range nodes {
+		nodeInfo := framework.NewNodeInfo()
+		nodeInfo.SetNode(node)
+		nodeMap[node.Name] = nodeInfo
+	}
+	return nodeMap
+}
+
+// returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
+// unschedulerable and nodeName
+func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
+	nodeMap := make(map[string]*NodeUsage)
+	failedNodes := make(map[string]string)
+	for _, nodeID := range *nodes {
+		node, err := s.GetNode(nodeID)
+		if err != nil {
+			klog.Errorf("get node %v device error, %v", nodeID, err)
+			failedNodes[nodeID] = "node unregisterd"
+			continue
+		}
+		nodeInfo := &NodeUsage{}
+		for _, d := range node.Devices {
+			nodeInfo.Devices = append(nodeInfo.Devices, &DeviceUsage{
+				Id:        d.ID,
+				Index:     d.Index,
+				Used:      0,
+				Count:     d.Count,
+				Usedmem:   0,
+				Totalmem:  d.Devmem,
+				Totalcore: d.Devcore,
+				Usedcores: 0,
+				Type:      d.Type,
+				Health:    d.Health,
+			})
+		}
+		nodeMap[nodeID] = nodeInfo
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 
 	for _, node := range allNodes {
@@ -584,10 +747,14 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
+<<<<<<< HEAD
 
 	binding := &corev1.Binding{
+=======
+	binding := &v1.Binding{
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
-		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
+		Target:     v1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
 	if err != nil {

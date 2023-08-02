@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright (c) 2019-2022, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,6 +36,13 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY Type, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package rm
@@ -35,6 +50,7 @@ package rm
 import (
 	"fmt"
 
+<<<<<<< HEAD
 	"github.com/NVIDIA/go-gpuallocator/gpuallocator"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
@@ -42,6 +58,11 @@ import (
 	"k8s.io/klog/v2"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+=======
+	"4pd.io/k8s-vgpu/pkg/util"
+	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+	"k8s.io/klog/v2"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 type nvmlResourceManager struct {
@@ -52,7 +73,11 @@ type nvmlResourceManager struct {
 var _ ResourceManager = (*nvmlResourceManager)(nil)
 
 // NewNVMLResourceManagers returns a set of ResourceManagers, one for each NVML resource in 'config'.
+<<<<<<< HEAD
 func NewNVMLResourceManagers(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *spec.Config) ([]ResourceManager, error) {
+=======
+func NewNVMLResourceManagers(nvmllib nvml.Interface, config *util.DeviceConfig) ([]ResourceManager, error) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	ret := nvmllib.Init()
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("failed to initialize NVML: %v", ret)
@@ -64,7 +89,11 @@ func NewNVMLResourceManagers(infolib info.Interface, nvmllib nvml.Interface, dev
 		}
 	}()
 
+<<<<<<< HEAD
 	deviceMap, err := NewDeviceMap(infolib, devicelib, config)
+=======
+	deviceMap, err := NewDeviceMap(nvmllib, config)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
 		return nil, fmt.Errorf("error building device map: %v", err)
 	}
@@ -103,6 +132,7 @@ func (r *nvmlResourceManager) GetDevicePaths(ids []string) []string {
 		"/dev/nvidia-modeset",
 	}
 
+<<<<<<< HEAD
 	return append(paths, r.Devices().Subset(ids).GetPaths()...)
 }
 
@@ -167,4 +197,16 @@ func (r *nvmlResourceManager) alignedAlloc(available, required []string, size in
 	}
 
 	return devices, nil
+=======
+	for _, p := range r.Devices().Subset(ids).GetPaths() {
+		paths = append(paths, p)
+	}
+
+	return paths
+}
+
+// CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
+func (r *nvmlResourceManager) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device) error {
+	return r.checkHealth(stop, r.devices, unhealthy)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }

@@ -16,6 +16,10 @@ limitations under the License.
 
 package util
 
+import (
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+)
+
 const (
 	AssignedTimeAnnotations = "hami.io/vgpu-time"
 	AssignedNodeAnnotations = "hami.io/vgpu-node"
@@ -40,10 +44,51 @@ const (
 	CoreLimitSwitch = "GPU_CORE_UTILIZATION_POLICY"
 )
 
+type DevicePluginConfigs struct {
+	Nodeconfig []struct {
+		Name                string  `json:"name"`
+		Devicememoryscaling float64 `json:"devicememoryscaling"`
+		Devicecorescaling   float64 `json:"devicecorescaling"`
+		Devicesplitcount    uint    `json:"devicesplitcount"`
+		Migstrategy         string  `json:"migstrategy"`
+	} `json:"nodeconfig"`
+}
+
+type DeviceConfig struct {
+	*spec.Config
+
+	ResourceName *string
+	DebugMode    *bool
+}
+
 var (
+<<<<<<< HEAD
 	DebugMode         bool
 	NodeName          string
 	RuntimeSocketFlag string
+=======
+	ResourceName          string
+	ResourceMem           string
+	ResourceCores         string
+	ResourceMemPercentage string
+	ResourcePriority      string
+	DebugMode             bool
+
+	MLUResourceCount  string
+	MLUResourceMemory string
+
+	KnownDevice = map[string]string{
+		NodeHandshake:    NodeNvidiaDeviceRegistered,
+		NodeMLUHandshake: NodeMLUDeviceRegistered,
+	}
+
+	DeviceSplitCount    *uint
+	DeviceMemoryScaling *float64
+	DeviceCoresScaling  *float64
+	NodeName            string
+	RuntimeSocketFlag   string
+	DisableCoreLimit    *bool
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 type SchedulerPolicyName string

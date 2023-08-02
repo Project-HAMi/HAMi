@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
  * SPDX-License-Identifier: Apache-2.0
  *
  * The HAMi Contributors require contributions made to
@@ -13,10 +14,17 @@
  * ownership. NVIDIA CORPORATION licenses this file to you under
  * the Apache License, Version 2.0 (the "License"); you may
  * not use this file except in compliance with the License.
+=======
+ * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  * You may obtain a copy of the License at
  *
  *     http://www.apache.org/licenses/LICENSE-2.0
  *
+<<<<<<< HEAD
  * Unless required by applicable law or agreed to in writing,
  * software distributed under the License is distributed on an
  * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
@@ -28,6 +36,13 @@
 /*
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
+=======
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY Type, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
  */
 
 package rm
@@ -39,9 +54,16 @@ import (
 	"strconv"
 	"strings"
 
+<<<<<<< HEAD
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
+=======
+	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/info"
+	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+
+	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/mig"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 const (
@@ -60,6 +82,7 @@ type nvmlMigDevice nvmlDevice
 var _ deviceInfo = (*nvmlDevice)(nil)
 var _ deviceInfo = (*nvmlMigDevice)(nil)
 
+<<<<<<< HEAD
 func newNvmlGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
 	index := fmt.Sprintf("%v", i)
 	return index, nvmlDevice{gpu}
@@ -68,6 +91,16 @@ func newNvmlGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
 func newWslGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
 	index := fmt.Sprintf("%v", i)
 	return index, wslDevice{gpu}
+=======
+func newGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
+	index := fmt.Sprintf("%v", i)
+	isWsl, _ := info.New().HasDXCore()
+	if isWsl {
+		return index, wslDevice{gpu}
+	}
+
+	return index, nvmlDevice{gpu}
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 func newMigDevice(i int, j int, mig nvml.Device) (string, nvmlMigDevice) {
@@ -99,6 +132,7 @@ func (d nvmlDevice) GetPaths() ([]string, error) {
 	return []string{path}, nil
 }
 
+<<<<<<< HEAD
 // GetComputeCapability returns the CUDA Compute Capability for the device.
 func (d nvmlDevice) GetComputeCapability() (string, error) {
 	major, minor, ret := d.GetCudaComputeCapability()
@@ -117,6 +151,8 @@ func (d nvmlMigDevice) GetComputeCapability() (string, error) {
 	return nvmlDevice{parent}.GetComputeCapability()
 }
 
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 // GetPaths returns the paths for a MIG device
 func (d nvmlMigDevice) GetPaths() ([]string, error) {
 	capDevicePaths, err := mig.GetMigCapabilityDevicePaths()
@@ -171,7 +207,11 @@ func (d nvmlDevice) GetNumaNode() (bool, int, error) {
 	}
 
 	// Discard leading zeros.
+<<<<<<< HEAD
 	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
+=======
+	busID := strings.ToLower(strings.TrimPrefix(int8Slice(info.BusId[:]).String(), "0000"))
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
@@ -180,7 +220,11 @@ func (d nvmlDevice) GetNumaNode() (bool, int, error) {
 
 	node, err := strconv.Atoi(string(bytes.TrimSpace(b)))
 	if err != nil {
+<<<<<<< HEAD
 		return false, 0, fmt.Errorf("error parsing value for NUMA node: %v", err)
+=======
+		return false, 0, fmt.Errorf("eror parsing value for NUMA node: %v", err)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	}
 
 	if node < 0 {
@@ -199,6 +243,7 @@ func (d nvmlMigDevice) GetNumaNode() (bool, int, error) {
 
 	return nvmlDevice{parent}.GetNumaNode()
 }
+<<<<<<< HEAD
 
 // GetTotalMemory returns the total memory available on the device.
 func (d nvmlDevice) GetTotalMemory() (uint64, error) {
@@ -217,3 +262,5 @@ func (d nvmlMigDevice) GetTotalMemory() (uint64, error) {
 	}
 	return info.Total, nil
 }
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

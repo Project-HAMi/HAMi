@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
  * SPDX-License-Identifier: Apache-2.0
  *
@@ -29,13 +30,34 @@
  * Modifications Copyright The HAMi Authors. See
  * GitHub history for details.
  */
+=======
+/**
+# Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+**/
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 package rm
 
 import (
 	"fmt"
 
+<<<<<<< HEAD
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+=======
+	"4pd.io/k8s-vgpu/pkg/util"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 const (
@@ -44,7 +66,11 @@ const (
 
 // buildTegraDeviceMap creates a DeviceMap for the tegra devices in the sytesm.
 // NOTE: At present only a single tegra device is expected.
+<<<<<<< HEAD
 func buildTegraDeviceMap(config *spec.Config) (DeviceMap, error) {
+=======
+func buildTegraDeviceMap(config *util.DeviceConfig) (DeviceMap, error) {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	devices := make(DeviceMap)
 
 	name := tegraDeviceName
@@ -83,6 +109,7 @@ func (d *tegraDevice) GetPaths() ([]string, error) {
 func (d *tegraDevice) GetNumaNode() (bool, int, error) {
 	return false, -1, nil
 }
+<<<<<<< HEAD
 
 // GetTotalMemory is unsupported for a Tegra device.
 func (d *tegraDevice) GetTotalMemory() (uint64, error) {
@@ -93,3 +120,5 @@ func (d *tegraDevice) GetTotalMemory() (uint64, error) {
 func (d *tegraDevice) GetComputeCapability() (string, error) {
 	return "0.0", nil
 }
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

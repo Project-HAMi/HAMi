@@ -24,9 +24,12 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+<<<<<<< HEAD
 	klog "k8s.io/klog/v2"
 
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -73,6 +76,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"GPUDeviceCoreLimit",
 		"Device memory core limit for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+	)
+	nodevGPUCoreLimitDesc := prometheus.NewDesc(
+		"GPUDeviceCoreLimit",
+		"Device memory core limit for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryAllocated",
@@ -135,6 +143,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				prometheus.GaugeValue,
 				float64(devs.Device.Totalcore),
 				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
+			)
+			ch <- prometheus.MustNewConstMetric(
+				nodevGPUCoreLimitDesc,
+				prometheus.GaugeValue,
+				float64(devs.Totalcore),
+				nodeID, devs.Id, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
@@ -268,7 +282,10 @@ func initMetrics(bindAddress string) {
 	// be a good idea to try it out with a pedantic registry.
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
+<<<<<<< HEAD
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
+=======
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.

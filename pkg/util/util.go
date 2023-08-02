@@ -19,8 +19,14 @@ package util
 import (
 	"context"
 	"encoding/json"
+<<<<<<< HEAD
 	"flag"
 	"fmt"
+=======
+	"errors"
+	"fmt"
+	"strconv"
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	"strings"
 	"time"
 
@@ -34,6 +40,7 @@ import (
 	"k8s.io/klog/v2"
 )
 
+<<<<<<< HEAD
 var (
 	HandshakeAnnos map[string]string
 )
@@ -66,6 +73,11 @@ func GetNode(nodename string) (*corev1.Node, error) {
 
 	klog.V(5).InfoS("Successfully fetched node", "nodeName", nodename)
 	return n, nil
+=======
+func GetNode(nodename string) (*v1.Node, error) {
+	n, err := GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	return n, err
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
@@ -129,7 +141,228 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 	return nil, nil
 }
 
+<<<<<<< HEAD
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+=======
+func DecodeNodeDevices(str string) []*api.DeviceInfo {
+	if !strings.Contains(str, ":") {
+		return []*api.DeviceInfo{}
+	}
+	tmp := strings.Split(str, ":")
+	var retval []*api.DeviceInfo
+	for _, val := range tmp {
+		if strings.Contains(val, ",") {
+			items := strings.Split(val, ",")
+			if len(items) == 6 {
+				count, _ := strconv.Atoi(items[1])
+				devmem, _ := strconv.Atoi(items[2])
+				devcore, _ := strconv.Atoi(items[3])
+				health, _ := strconv.ParseBool(items[5])
+				i := api.DeviceInfo{
+					Id:      items[0],
+					Count:   int32(count),
+					Devmem:  int32(devmem),
+					Devcore: int32(devcore),
+					Type:    items[4],
+					Health:  health,
+				}
+				retval = append(retval, &i)
+			} else {
+				count, _ := strconv.Atoi(items[1])
+				devmem, _ := strconv.Atoi(items[2])
+				health, _ := strconv.ParseBool(items[4])
+				i := api.DeviceInfo{
+					Id:      items[0],
+					Count:   int32(count),
+					Devmem:  int32(devmem),
+					Devcore: 100,
+					Type:    items[3],
+					Health:  health,
+				}
+				retval = append(retval, &i)
+			}
+		}
+	}
+	return retval
+}
+
+func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
+	tmp := ""
+	for _, val := range dlist {
+		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.FormatBool(val.Health) + ":"
+	}
+	klog.V(3).Infoln("Encoded node Devices", tmp)
+	return tmp
+}
+
+func EncodeContainerDevices(cd ContainerDevices) string {
+	tmp := ""
+	for _, val := range cd {
+		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + ":"
+	}
+	fmt.Println("Encoded container Devices=", tmp)
+	return tmp
+	//return strings.Join(cd, ",")
+}
+
+func EncodePodDevices(pd PodDevices) string {
+	var ss []string
+	for _, cd := range pd {
+		ss = append(ss, EncodeContainerDevices(cd))
+	}
+	return strings.Join(ss, ";")
+}
+
+func DecodeContainerDevices(str string) (ContainerDevices, error) {
+	if len(str) == 0 {
+		return ContainerDevices{}, nil
+	}
+	cd := strings.Split(str, ":")
+	contdev := ContainerDevices{}
+	tmpdev := ContainerDevice{}
+	//fmt.Println("before container device", str)
+	if len(str) == 0 {
+		return ContainerDevices{}, nil
+	}
+	for _, val := range cd {
+		if strings.Contains(val, ",") {
+			//fmt.Println("cd is ", val)
+			tmpstr := strings.Split(val, ",")
+			if len(tmpstr) < 4 {
+				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
+			}
+			tmpdev.UUID = tmpstr[0]
+			tmpdev.Type = tmpstr[1]
+			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
+			tmpdev.Usedmem = int32(devmem)
+			devcores, _ := strconv.ParseInt(tmpstr[3], 10, 32)
+			tmpdev.Usedcores = int32(devcores)
+			contdev = append(contdev, tmpdev)
+		}
+	}
+	//fmt.Println("Decoded container device", contdev)
+	return contdev, nil
+}
+
+func DecodePodDevices(str string) (PodDevices, error) {
+	if len(str) == 0 {
+		return PodDevices{}, nil
+	}
+	var pd PodDevices
+	for _, s := range strings.Split(str, ";") {
+		cd, err := DecodeContainerDevices(s)
+		if err != nil {
+			return PodDevices{}, nil
+		}
+		pd = append(pd, cd)
+	}
+	return pd, nil
+}
+
+func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevices, error) {
+	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	if err != nil {
+		return v1.Container{}, ContainerDevices{}, err
+	}
+	klog.Infoln("pdevices=", pdevices)
+	res := ContainerDevices{}
+	for idx, val := range pdevices {
+		found := false
+		for _, dev := range val {
+			if strings.Compare(dtype, dev.Type) == 0 {
+				res = append(res, dev)
+				found = true
+			}
+		}
+		if found {
+			return p.Spec.Containers[idx], res, nil
+		}
+	}
+	return v1.Container{}, res, errors.New("device request not found")
+}
+
+func GetContainerDeviceStrArray(c ContainerDevices) []string {
+	tmp := []string{}
+	for _, val := range c {
+		tmp = append(tmp, val.UUID)
+	}
+	return tmp
+}
+
+func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
+	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	if err != nil {
+		return err
+	}
+	res := PodDevices{}
+	found := false
+	for _, val := range pdevices {
+		if found {
+			res = append(res, val)
+			continue
+		} else {
+			tmp := ContainerDevices{}
+			for _, dev := range val {
+				if strings.Compare(dtype, dev.Type) == 0 {
+					found = true
+				} else {
+					tmp = append(tmp, dev)
+				}
+			}
+			if !found {
+				res = append(res, val)
+			} else {
+				res = append(res, tmp)
+			}
+		}
+	}
+	klog.Infoln("After erase res=", res)
+	newannos := make(map[string]string)
+	newannos[AssignedIDsToAllocateAnnotations] = EncodePodDevices(res)
+	return PatchPodAnnotations(&p, newannos)
+}
+
+func PodAllocationTrySuccess(nodeName string, pod *v1.Pod) {
+	refreshed, _ := kubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	annos := refreshed.Annotations[AssignedIDsToAllocateAnnotations]
+	klog.Infoln("TrySuccess:", annos)
+	for _, val := range DevicesToHandle {
+		if strings.Contains(annos, val) {
+			return
+		}
+	}
+	klog.Infoln("AllDevicesAllocateSuccess releasing lock")
+	PodAllocationSuccess(nodeName, pod)
+}
+
+func PodAllocationSuccess(nodeName string, pod *v1.Pod) {
+	newannos := make(map[string]string)
+	newannos[DeviceBindPhase] = DeviceBindSuccess
+	err := PatchPodAnnotations(pod, newannos)
+	if err != nil {
+		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
+	}
+	err = ReleaseNodeLock(nodeName)
+	if err != nil {
+		klog.Errorf("release lock failed:%v", err.Error())
+	}
+}
+
+func PodAllocationFailed(nodeName string, pod *v1.Pod) {
+	newannos := make(map[string]string)
+	newannos[DeviceBindPhase] = DeviceBindFailed
+	err := PatchPodAnnotations(pod, newannos)
+	if err != nil {
+		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
+	}
+	err = ReleaseNodeLock(nodeName)
+	if err != nil {
+		klog.Errorf("release lock failed:%v", err.Error())
+	}
+}
+
+func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}

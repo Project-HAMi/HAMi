@@ -1,6 +1,14 @@
 English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
+<<<<<<< HEAD
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
+=======
+[![build status](https://github.com/4paradigm/k8s-device-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml)
+[![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
+[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
+[![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
+[![cambricon MLU](https://img.shields.io/badge/cambricon%20mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+>>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
