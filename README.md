@@ -7,8 +7,8 @@
 
 
 Supperted devices
-[![nvidia GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
-[![cambricon MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+[![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
 
 English version|[中文版](README_cn.md)
 
