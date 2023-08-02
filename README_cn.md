@@ -5,9 +5,10 @@
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
 
-支持设备：
-[![英伟达 GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
-[![寒武纪 MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+## 支持设备：
+
+[![英伟达 GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![寒武纪 MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](docs/cambricon-mlu-support.md)
 
 ## 有任何问题欢迎加微信'xuanzong4493'
 
