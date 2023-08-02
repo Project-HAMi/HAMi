@@ -4,6 +4,7 @@
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
+[![Contact Me](https://img.shields.io/badge/Contact%20Me)](hhttps://github.com/4paradigm/k8s-vgpu-scheduler#contact)
 
 English version|[中文版](README_cn.md)
 
@@ -11,8 +12,6 @@ English version|[中文版](README_cn.md)
 
 [![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
 [![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
-
-[![Contact Me](https://img.shields.io/badge/Contact%20Me-black)](hhttps://github.com/4paradigm/k8s-vgpu-scheduler#contact)
 
 ## Introduction
 
