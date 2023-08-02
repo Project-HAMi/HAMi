@@ -139,10 +139,6 @@ spec:
         - name: deviceconfig
           configMap:
             name: {{ template "4pd-vgpu.device-plugin" . }}
-        - name: sock
-          hostPath:
-            #path: /var/lib/vgpu
-            path: {{ .Values.devicePlugin.sockPath }}
       {{- if .Values.devicePlugin.nvidianodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
       {{- end }}

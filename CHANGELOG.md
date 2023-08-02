@@ -158,3 +158,11 @@ Add Deviceidx to scheduler monitor apis(31993)
 ## v2.2.16
 
 Fix crash during initlization in vGPUmonitor
+
+# v2.3
+
+## v2.3.0
+
+Fix oom can't be triggered when loading module
+
+Update device-plugin version to v0.14.0

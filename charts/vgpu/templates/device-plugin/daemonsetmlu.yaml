@@ -63,9 +63,6 @@ spec:
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
-            - name: sock
-              #mountPath: /var/lib/vgpu
-              mountPath: {{ .Values.devicePlugin.sockPath }}
             - name: deviceconfig
               mountPath: /config
             - name: sysinfo
@@ -82,10 +79,6 @@ spec:
         - name: deviceconfig
           configMap:
             name: {{ template "4pd-vgpu.device-plugin" . }}
-        - name: sock
-          hostPath:
-            #path: /var/lib/vgpu
-            path: {{ .Values.devicePlugin.sockPath }}
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
