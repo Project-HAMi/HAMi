@@ -5,6 +5,10 @@
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
 
+支持设备：
+[![nvidia GPU](https://img.shields.io/badge/Nvidia%20GPU-66CC00)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![cambricon MLU](https://img.shields.io/badge/Cambricon%20Mlu-8A2BE2)](docs/cambricon-mlu-support.md)
+
 ## 有任何问题欢迎加微信'xuanzong4493'
 
 ## 目录
