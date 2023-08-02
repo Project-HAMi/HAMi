@@ -12,7 +12,7 @@ English version|[中文版](README_cn.md)
 [![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
 [![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
 
-[![Contact Me](https://img.shields.io/badge/Contact-Me)](https://github.com/4paradigm/k8s-vgpu-scheduler#Contact)
+[![Contact Me](https://img.shields.io/badge/Contact%20Me-black)](hhttps://github.com/4paradigm/k8s-vgpu-scheduler#contact)
 
 ## Introduction
 
@@ -315,7 +315,11 @@ The above frameworks have passed the test.
 ## Contact
 
 Owner & Maintainer: Limengxuan
+
 Feel free to reach me by 
+
+```
 email: <limengxuan@4paradigm.com> 
 phone: +86 18810644493
 WeChat: xuanzong4493
+```
