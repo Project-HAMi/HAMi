@@ -181,6 +181,10 @@ You can now execute `nvidia-smi` command in the container and see the difference
 
 Click [here](docs/examples/nvidia/)
 
+### Scheduler Webhook Service NodePort
+
+Default schedulerPort is 31998, other values can be set using `--set deivcePlugin.service.schedulerPort` during installation.
+
 ### Monitoring vGPU status
 
 Monitoring is automatically enabled after installation. You can get vGPU status of a node by visiting 
