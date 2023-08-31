@@ -17,6 +17,7 @@ spec:
     - name: http
       port: {{ .Values.scheduler.service.httpPort }}
       targetPort: 443
+      nodePort: {{ .Values.scheduler.service.schedulerPort }}
       protocol: TCP
     - name: monitor
       port: {{ .Values.scheduler.service.monitorPort }}

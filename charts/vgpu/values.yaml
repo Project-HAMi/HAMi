@@ -50,6 +50,13 @@ scheduler:
     gpu: "on"
   tolerations: []
   #serviceAccountName: "4pd-vgpu-scheduler-sa"
+  customWebhook:
+    enabled: false
+    # must be an endpoint using https.
+    # should generate host certs here
+    host: 127.0.0.1 # hostname or ip, can be your node'IP if you want to use https://<nodeIP>:<schedulerPort>/<path>
+    port: 31998
+    path: /webhook
   patch:
     image: docker.io/jettech/kube-webhook-certgen:v1.5.2
     imageNew: liangjw/kube-webhook-certgen:v1.1.1
@@ -62,6 +69,7 @@ scheduler:
 
   service:
     httpPort: 443
+    schedulerPort: 31998
     monitorPort: 31993
     labels: {}
     annotations: {}

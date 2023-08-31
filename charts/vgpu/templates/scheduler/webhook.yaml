@@ -6,11 +6,15 @@ webhooks:
   - admissionReviewVersions:
     - v1beta1
     clientConfig:
+      {{- if .Values.scheduler.customWebhook.enabled }}
+      url: https://{{ .Values.scheduler.customWebhook.host}}:{{.Values.scheduler.customWebhook.port}}{{.Values.scheduler.customWebhook.path}}
+      {{- else }}
       service:
         name: {{ include "4pd-vgpu.scheduler" . }}
         namespace: {{ .Release.Namespace }}
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
+      {{- end }}
     failurePolicy: Fail
     matchPolicy: Equivalent
     name: vgpu.4pd.io
