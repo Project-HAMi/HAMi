@@ -62,13 +62,13 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceid", "deviceuuid"}, nil,
+		[]string{"deviceidx", "deviceuuid"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceid", "deviceuuid"}, nil,
+		[]string{"deviceidx", "deviceuuid"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(

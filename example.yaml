@@ -25,6 +25,6 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-          nvidia.com/gpumem: 3000
+          nvidia.com/gpumem: 2000
           #nvidia.com/gpucores: 90
 

@@ -18,6 +18,7 @@ package plugin
 
 import (
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
@@ -31,27 +32,40 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 	devs := r.Devices()
 	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
-	for _, dev := range devs {
-		ndev, err := nvml.NewDeviceByUUID(dev.ID)
+	idx := 0
+	for idx < len(devs) {
+		ndev, err := nvml.NewDevice(uint(idx))
 		//klog.V(3).Infoln("ndev type=", ndev.Model)
 		if err != nil {
-			fmt.Println("nvml new device by uuid error id=", dev.ID, "err=", err.Error())
+			fmt.Println("nvml new device by uuid error id=", ndev.UUID, "err=", err.Error())
 			panic(0)
 		} else {
-			klog.V(3).Infoln("nvml registered device id=", dev.ID, "memory=", *ndev.Memory, "type=", *ndev.Model)
+			klog.V(3).Infoln("nvml registered device id=", ndev.UUID, "memory=", *ndev.Memory, "type=", *ndev.Model)
 		}
 		registeredmem := int32(*ndev.Memory)
 		if *util.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
+		health := true
+		for _, val := range devs {
+			if strings.Compare(val.ID, ndev.UUID) == 0 {
+				if strings.Compare(val.Health, "healthy") == 0 {
+					health = true
+				} else {
+					health = false
+				}
+				break
+			}
+		}
 		res = append(res, &api.DeviceInfo{
-			Id:      dev.ID,
+			Id:      ndev.UUID,
 			Count:   int32(*util.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(*util.DeviceCoresScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", *ndev.Model),
-			Health:  dev.Health == "healthy",
+			Health:  health,
 		})
+		idx++
 	}
 	return &res
 }
