@@ -11,6 +11,7 @@ package api
 // A compilation error at this line likely means your copy of the
 // proto package needs to be updated.
 type DeviceInfo struct {
+	Index		int
 	Id                   string   
 	Count                int32    
 	Devmem               int32
