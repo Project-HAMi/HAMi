@@ -34,6 +34,7 @@ spec:
       serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: true
+      hostNetwork: true
       containers:
         - name: device-plugin
           image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
