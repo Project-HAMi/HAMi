@@ -195,7 +195,9 @@ http://{nodeip}:{monitorPort}/metrics
 
 来获取监控数据，其中monitorPort可以在Values中进行配置，默认为31992
 
-> **注意** 节点上的vGPU状态只有在其使用vGPU后才会被统计
+grafana dashboard [示例](docs/dashboard_cn.md)
+
+> **注意** 节点上的vGPU状态只有在其使用vGPU后才会被统计W
 
 ### 更新
 
