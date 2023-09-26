@@ -21,6 +21,7 @@ import (
 	"strings"
 	"sync"
 
+	"4pd.io/k8s-vgpu/pkg/util"
 	"k8s.io/klog/v2"
 )
 
@@ -39,20 +40,7 @@ type NodeInfo struct {
 	Devices []DeviceInfo
 }
 
-type DeviceUsage struct {
-	Id        string
-	Index     uint
-	Used      int32
-	Count     int32
-	Usedmem   int32
-	Totalmem  int32
-	Totalcore int32
-	Usedcores int32
-	Type      string
-	Health    bool
-}
-
-type DeviceUsageList []*DeviceUsage
+type DeviceUsageList []*util.DeviceUsage
 
 type NodeUsage struct {
 	Devices DeviceUsageList

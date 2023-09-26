@@ -15,6 +15,12 @@ resourcePriority: "nvidia.com/priority"
 #MLU Parameters
 mluResourceName: "cambricon.com/mlunum"
 mluResourceMem: "cambricon.com/mlumem"
+
+#Hygon DCU Parameters
+dcuResourceName: "hygon.com/dcunum"
+dcuResourceMem: "hygon.com/dcumem"
+dcuResourceCores: "hygon.com/dcucores"
+
 schedulerName: "4pd-scheduler"
 
 podSecurityPolicy:
@@ -46,8 +52,8 @@ scheduler:
       - --debug
       - -v=4
   podAnnotations: {}
-  nodeSelector: 
-    gpu: "on"
+  #nodeSelector: 
+  #  gpu: "on"
   tolerations: []
   #serviceAccountName: "4pd-vgpu-scheduler-sa"
   customWebhook:
@@ -76,9 +82,8 @@ scheduler:
 
 devicePlugin:
   image: "4pdosc/k8s-vdevice"
-  #image: "m7-ieg-pico-test01:5000/k8s-vgpu-0727:latest"
+  
   monitorimage: "4pdosc/k8s-vdevice"
-  #monitorimage: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
   monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
@@ -89,6 +94,9 @@ devicePlugin:
   disablecorelimit: "false"
   extraArgs:
     - -v=false
+  
+  hygonimage: "4pdosc/vdcu-device-plugin:v1.0"
+  hygondriver: "/root/dcu-driver/dtk-22.10.1-vdcu"
   
   service:
     httpPort: 31992
@@ -101,5 +109,7 @@ devicePlugin:
     gpu: "on"
   mlunodeSelector:
     mlu: "on"
+  hygonnodeSelector:
+    dcu: "on"
   tolerations: []
 

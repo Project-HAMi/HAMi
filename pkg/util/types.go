@@ -30,12 +30,6 @@ const (
 	BindTimeAnnotations              = "4pd.io/bind-time"
 	DeviceBindPhase                  = "4pd.io/bind-phase"
 
-	GPUInUse = "nvidia.com/use-gputype"
-	GPUNoUse = "nvidia.com/nouse-gputype"
-
-	MLUInUse = "cambricon.com/use-mlutype"
-	MLUNoUse = "cambricon.com/nouse-mlutype"
-
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
 	DeviceBindSuccess    = "success"
@@ -51,22 +45,6 @@ const (
 	BestEffort string = "best-effort"
 	Restricted string = "restricted"
 	Guaranteed string = "guaranteed"
-
-	NvidiaGPUDevice     = "NVIDIA"
-	NvidiaGPUCommonWord = "GPU"
-
-	CambriconMLUDevice     = "MLU"
-	CambriconMLUCommonWord = "MLU"
-	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
-	MluMemSplitIndex       = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
-	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
-	NodeLockTime           = "4pd.io/mutex.lock"
-	MaxLockRetry           = 5
-
-	NodeHandshake              = "4pd.io/node-handshake"
-	NodeNvidiaDeviceRegistered = "4pd.io/node-nvidia-register"
-	NodeMLUHandshake           = "4pd.io/node-handshake-mlu"
-	NodeMLUDeviceRegistered    = "4pd.io/node-mlu-register"
 )
 
 type DevicePluginConfigs struct {
@@ -87,20 +65,7 @@ type DeviceConfig struct {
 }
 
 var (
-	ResourceName          string
-	ResourceMem           string
-	ResourceCores         string
-	ResourceMemPercentage string
-	ResourcePriority      string
-	DebugMode             bool
-
-	MLUResourceCount  string
-	MLUResourceMemory string
-
-	KnownDevice = map[string]string{
-		NodeHandshake:    NodeNvidiaDeviceRegistered,
-		NodeMLUHandshake: NodeMLUDeviceRegistered,
-	}
+	DebugMode bool
 
 	DeviceSplitCount    *uint
 	DeviceMemoryScaling *float64
@@ -135,3 +100,16 @@ type ContainerDeviceRequest struct {
 type ContainerDevices []ContainerDevice
 
 type PodDevices []ContainerDevices
+
+type DeviceUsage struct {
+	Id        string
+	Index     uint
+	Used      int32
+	Count     int32
+	Usedmem   int32
+	Totalmem  int32
+	Totalcore int32
+	Usedcores int32
+	Type      string
+	Health    bool
+}

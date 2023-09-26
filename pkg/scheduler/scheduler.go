@@ -23,8 +23,10 @@ import (
 	"strings"
 	"time"
 
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/k8sutil"
 	"4pd.io/k8s-vgpu/pkg/util"
+	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
@@ -120,6 +122,7 @@ func (s *Scheduler) Start() {
 
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+
 }
 
 func (s *Scheduler) Stop() {
@@ -138,7 +141,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 			return err
 		}
 		for _, val := range nodes.Items {
-			for devhandsk, devreg := range util.KnownDevice {
+			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
 					continue
@@ -248,7 +251,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		}
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
-			nodeInfo.Devices = append(nodeInfo.Devices, &DeviceUsage{
+			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
 				Id:        d.ID,
 				Index:     d.Index,
 				Used:      0,
@@ -297,7 +300,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Get pod failed")
 	}
-	err = util.LockNode(args.Node)
+	err = nodelock.LockNode(args.Node)
 	if err != nil {
 		klog.ErrorS(err, "Failed to lock node", "node", args.Node)
 	}
@@ -337,7 +340,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}
 	}
 	if total == 0 {
-		klog.V(1).Infof("pod %v not find resource %v or %v", args.Pod.Name, util.ResourceName, util.MLUResourceCount)
+		klog.V(1).Infof("pod %v not find resource", args.Pod.Name)
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,

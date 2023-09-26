@@ -18,7 +18,7 @@ package main
 import (
 	"net/http"
 
-	"4pd.io/k8s-vgpu/pkg/util"
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/version"
 
 	"4pd.io/k8s-vgpu/pkg/scheduler"
@@ -54,7 +54,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 5000, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
-	rootCmd.PersistentFlags().AddGoFlagSet(util.GlobalFlagSet())
+	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 }
 

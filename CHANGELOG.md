@@ -166,3 +166,17 @@ Fix crash during initlization in vGPUmonitor
 Fix oom can't be triggered when loading module
 
 Update device-plugin version to v0.14.0
+
+## v2.3.1
+
+Fix a bug where a cuda process can't be launched properly
+
+## v2.3.2
+
+Remove node selector for scheduler
+
+Fix an issue where mlu device-plugin can't be launched properly
+
+Major rework on devices-related code
+
+Add support for hygon DCU device

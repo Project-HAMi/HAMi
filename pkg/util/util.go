@@ -25,6 +25,7 @@ import (
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/util/client"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -32,12 +33,12 @@ import (
 )
 
 func GetNode(nodename string) (*v1.Node, error) {
-	n, err := GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	return n, err
 }
 
 func GetPendingPod(node string) (*v1.Pod, error) {
-	podlist, err := GetClient().CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	podlist, err := client.GetClient().CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -222,6 +223,7 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
 		} else {
 			tmp := ContainerDevices{}
 			for _, dev := range val {
+				klog.Infoln("Selecting erase res=", dtype, ":", dev.Type)
 				if strings.Compare(dtype, dev.Type) == 0 {
 					found = true
 				} else {
@@ -241,45 +243,6 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
 	return PatchPodAnnotations(&p, newannos)
 }
 
-func PodAllocationTrySuccess(nodeName string, pod *v1.Pod) {
-	refreshed, _ := kubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	annos := refreshed.Annotations[AssignedIDsToAllocateAnnotations]
-	klog.Infoln("TrySuccess:", annos)
-	for _, val := range DevicesToHandle {
-		if strings.Contains(annos, val) {
-			return
-		}
-	}
-	klog.Infoln("AllDevicesAllocateSuccess releasing lock")
-	PodAllocationSuccess(nodeName, pod)
-}
-
-func PodAllocationSuccess(nodeName string, pod *v1.Pod) {
-	newannos := make(map[string]string)
-	newannos[DeviceBindPhase] = DeviceBindSuccess
-	err := PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
-	}
-	err = ReleaseNodeLock(nodeName)
-	if err != nil {
-		klog.Errorf("release lock failed:%v", err.Error())
-	}
-}
-
-func PodAllocationFailed(nodeName string, pod *v1.Pod) {
-	newannos := make(map[string]string)
-	newannos[DeviceBindPhase] = DeviceBindFailed
-	err := PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
-	}
-	err = ReleaseNodeLock(nodeName)
-	if err != nil {
-		klog.Errorf("release lock failed:%v", err.Error())
-	}
-}
-
 func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
@@ -296,7 +259,7 @@ func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 	if err != nil {
 		return err
 	}
-	_, err = kubeClient.CoreV1().Nodes().
+	_, err = client.GetClient().CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", node.Name, err)
@@ -320,7 +283,7 @@ func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
 	if err != nil {
 		return err
 	}
-	_, err = kubeClient.CoreV1().Pods(pod.Namespace).
+	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)

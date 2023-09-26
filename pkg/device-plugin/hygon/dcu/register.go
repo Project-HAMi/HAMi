@@ -14,76 +14,53 @@
  * limitations under the License.
  */
 
-package mlu
+package dcu
 
 import (
 	"fmt"
+	"os"
 	"time"
 
 	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
-	"4pd.io/k8s-vgpu/pkg/device/cambricon"
+	"4pd.io/k8s-vgpu/pkg/device/hygon"
 	"4pd.io/k8s-vgpu/pkg/util"
 )
 
 type DevListFunc func() []*pluginapi.Device
 
-type DeviceRegister struct {
-	deviceCache *DeviceCache
-	unhealthy   chan *pluginapi.Device
-	stopCh      chan struct{}
-}
-
-func NewDeviceRegister(deviceCache *DeviceCache) *DeviceRegister {
-	return &DeviceRegister{
-		deviceCache: deviceCache,
-		unhealthy:   make(chan *pluginapi.Device),
-		stopCh:      make(chan struct{}),
-	}
-}
-
-func (r *DeviceRegister) Start(opt Options) {
-	r.deviceCache.AddNotifyChannel("register", r.unhealthy)
-	go r.WatchAndRegister(opt)
-}
-
-func (r *DeviceRegister) Stop() {
-	close(r.stopCh)
-}
-
-func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
-	devs := r.deviceCache.GetCache()
-	res := make([]*api.DeviceInfo, 0, len(devs))
-	for i, dev := range devs {
-		//klog.V(3).Infoln("ndev type=", ndev.Model)
-		memory, _ := cndev.GetDeviceMemory(uint(i))
-		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
-		registeredmem := int32(memory)
+func (r *Plugin) apiDevices() *[]*api.DeviceInfo {
+	res := []*api.DeviceInfo{}
+	for idx, val := range r.totalmem {
 		res = append(res, &api.DeviceInfo{
-			Id:     dev.dev.ID,
-			Count:  int32(*util.DeviceSplitCount),
-			Devmem: registeredmem,
-			Type:   fmt.Sprintf("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
-			Health: dev.dev.Health == "healthy",
+			Index:   idx,
+			Id:      "DCU-" + fmt.Sprint(idx),
+			Count:   30,
+			Devmem:  int32(val),
+			Devcore: 100,
+			Type:    r.cardtype[idx],
+			Health:  true,
 		})
 	}
 	return &res
 }
 
-func (r *DeviceRegister) RegistrInAnnotation() error {
+func (r *Plugin) RegistrInAnnotation() error {
 	devices := r.apiDevices()
 	annos := make(map[string]string)
+	if len(util.NodeName) == 0 {
+		util.NodeName = os.Getenv("NodeName")
+	}
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
 	encodeddevices := util.EncodeNodeDevices(*devices)
-	annos[cambricon.HandshakeAnnos] = "Reported " + time.Now().String()
-	annos[cambricon.RegisterAnnos] = encodeddevices
+	annos[hygon.HandshakeAnnos] = "Reported " + time.Now().String()
+	annos[hygon.RegisterAnnos] = encodeddevices
 	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
 	err = util.PatchNodeAnnotations(node, annos)
 
@@ -93,9 +70,10 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 	return err
 }
 
-func (r *DeviceRegister) WatchAndRegister(opt Options) {
+func (r *Plugin) WatchAndRegister() {
 	klog.Infof("into WatchAndRegister")
 	for {
+		r.RefreshContainerDevices()
 		err := r.RegistrInAnnotation()
 		if err != nil {
 			klog.Errorf("register error, %v", err)
