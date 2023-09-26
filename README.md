@@ -196,6 +196,8 @@ http://{nodeip}:{monitorPort}/metrics
 
 Default monitorPort is 31992, other values can be set using `--set deivcePlugin.service.httpPort` during installation.
 
+grafana dashboard [example](docs/dashboard.md)
+
 > **Note** The status of a node won't be collected before any GPU operations
 
 ### Upgrade
