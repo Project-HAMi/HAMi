@@ -27,9 +27,12 @@ import (
 	"time"
 
 	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"4pd.io/k8s-vgpu/pkg/device/nvidia"
 	"4pd.io/k8s-vgpu/pkg/util"
+	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
 
@@ -280,7 +283,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 	nodename := os.Getenv("NodeName")
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
-		util.ReleaseNodeLock(nodename)
+		nodelock.ReleaseNodeLock(nodename)
 		return &pluginapi.AllocateResponse{}, err
 	}
 
@@ -308,25 +311,24 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
-			currentCtr, devreq, err := util.GetNextDeviceRequest(util.NvidiaGPUDevice, *current)
+			currentCtr, devreq, err := util.GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				util.PodAllocationFailed(nodename, current)
+				device.PodAllocationFailed(nodename, current)
 				return &pluginapi.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-				util.PodAllocationFailed(nodename, current)
+				device.PodAllocationFailed(nodename, current)
 				return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
 			}
-			klog.Infoln("[][[]]")
 			response, err := plugin.getAllocateResponse(util.GetContainerDeviceStrArray(devreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			err = util.EraseNextDeviceTypeFromAnnotation(util.NvidiaGPUDevice, *current)
+			err = util.EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				util.PodAllocationFailed(nodename, current)
+				device.PodAllocationFailed(nodename, current)
 				return &pluginapi.AllocateResponse{}, err
 			}
 
@@ -386,7 +388,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	util.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, current)
 	return &responses, nil
 }
 

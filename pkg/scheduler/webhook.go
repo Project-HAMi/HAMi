@@ -22,9 +22,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/scheduler/config"
-	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -69,41 +68,14 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 				continue
 			}
 		}
-		/*mlu related */
-		_, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceMemory)]
-		if ok {
-			if c.Lifecycle == nil {
-				c.Lifecycle = &corev1.Lifecycle{PostStart: nil}
-			}
-			c.Lifecycle.PostStart = &corev1.LifecycleHandler{
-				Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
-		}
 
-		/*gpu related */
-		priority, ok := ctr.Resources.Limits[corev1.ResourceName(util.ResourcePriority)]
-		if ok {
-			c.Env = append(c.Env, corev1.EnvVar{
-				Name:  api.TaskPriority,
-				Value: fmt.Sprint(priority.Value()),
-			})
+		for _, val := range device.GetDevices() {
+			hasResource = hasResource || val.MutateAdmission(c)
 		}
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(util.ResourceName)]
-		if !ok {
-			_, ok := ctr.Resources.Limits[corev1.ResourceName(util.MLUResourceCount)]
-			if !ok {
-				continue
-			}
-		}
-		hasResource = true
-		/*
-			c.Env = append(c.Env, corev1.EnvVar{
-				Name:  api.ContainerUID,
-				Value: fmt.Sprintf("%v/%v", req.UID, c.Name),
-			})*/
 	}
 
 	if !hasResource {
-		return admission.Allowed(fmt.Sprintf("no resource %v", util.ResourceName))
+		return admission.Allowed(fmt.Sprintf("no resource found"))
 	}
 	if len(config.SchedulerName) > 0 {
 		pod.Spec.SchedulerName = config.SchedulerName

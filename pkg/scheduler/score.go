@@ -21,6 +21,7 @@ import (
 	"sort"
 	"strings"
 
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/util"
 	"k8s.io/klog/v2"
 )
@@ -64,90 +65,16 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
-func checkGPUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[util.GPUInUse]
-	if ok {
-		if !strings.Contains(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
-				return true
-			}
-		} else {
-			for _, val := range strings.Split(inuse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	nouse, ok := annos[util.GPUNoUse]
-	if ok {
-		if !strings.Contains(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
-				return true
-			}
-		} else {
-			for _, val := range strings.Split(nouse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	return true
-}
-
-func checkMLUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[util.MLUInUse]
-	if ok {
-		if !strings.Contains(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
-				return true
-			}
-		} else {
-			for _, val := range strings.Split(inuse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	nouse, ok := annos[util.MLUNoUse]
-	if ok {
-		if !strings.Contains(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
-				return true
-			}
-		} else {
-			for _, val := range strings.Split(nouse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	return true
-}
-
-func checkType(annos map[string]string, d DeviceUsage, n util.ContainerDeviceRequest) bool {
+func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) bool {
 	//General type check, NVIDIA->NVIDIA MLU->MLU
 	if !strings.Contains(d.Type, n.Type) {
 		return false
 	}
-	if strings.Compare(n.Type, util.NvidiaGPUDevice) == 0 {
-		return checkGPUtype(annos, d.Type)
-	}
-	if strings.Compare(n.Type, util.CambriconMLUDevice) == 0 {
-		if !strings.Contains(d.Type, "370") && n.Memreq != 0 {
-			return false
+	for _, val := range device.GetDevices() {
+		found, pass := val.CheckType(annos, d, n)
+		if found {
+			return pass
 		}
-		if strings.Contains(d.Type, "370") && n.Memreq == 0 && d.Used > 0 {
-			return false
-		}
-		return checkMLUtype(annos, d.Type)
 	}
 	klog.Infof("Unrecognized device", n.Type)
 	return false
@@ -207,7 +134,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][
 						continue
 					}
 					// You can't allocate core=0 job to an already full GPU
-					if node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
+					if node.Devices[i].Totalcore != 0 && node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
 						continue
 					}
 					if !checkType(annos, *node.Devices[i], k) {

@@ -17,122 +17,25 @@
 package k8sutil
 
 import (
-	"4pd.io/k8s-vgpu/pkg/scheduler/config"
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
 func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
-	resourceName := corev1.ResourceName(util.ResourceName)
-	resourceMem := corev1.ResourceName(util.ResourceMem)
-	resourceMemPercentage := corev1.ResourceName(util.ResourceMemPercentage)
-	resourceCores := corev1.ResourceName(util.ResourceCores)
 	counts = make([][]util.ContainerDeviceRequest, len(pod.Spec.Containers))
 	//Count Nvidia GPU
 	for i := 0; i < len(pod.Spec.Containers); i++ {
-		v, ok := pod.Spec.Containers[i].Resources.Limits[resourceName]
-		if !ok {
-			v, ok = pod.Spec.Containers[i].Resources.Requests[resourceName]
-		}
-		if ok {
-			if n, ok := v.AsInt64(); ok {
-				memnum := 0
-				mem, ok := pod.Spec.Containers[i].Resources.Limits[resourceMem]
-				if !ok {
-					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMem]
-				}
-				if ok {
-					memnums, ok := mem.AsInt64()
-					if ok {
-						memnum = int(memnums)
-					}
-				}
-				mempnum := int32(101)
-				mem, ok = pod.Spec.Containers[i].Resources.Limits[resourceMemPercentage]
-				if !ok {
-					mem, ok = pod.Spec.Containers[i].Resources.Requests[resourceMemPercentage]
-				}
-				if ok {
-					mempnums, ok := mem.AsInt64()
-					if ok {
-						mempnum = int32(mempnums)
-					}
-				}
-				if mempnum == 101 && memnum == 0 {
-					if config.DefaultMem != 0 {
-						memnum = int(config.DefaultMem)
-					} else {
-						mempnum = 100
-					}
-				}
-				corenum := config.DefaultCores
-				core, ok := pod.Spec.Containers[i].Resources.Limits[resourceCores]
-				if !ok {
-					core, ok = pod.Spec.Containers[i].Resources.Requests[resourceCores]
-				}
-				if ok {
-					corenums, ok := core.AsInt64()
-					if ok {
-						corenum = int32(corenums)
-					}
-				}
-				counts[i] = append(counts[i], util.ContainerDeviceRequest{
-					Nums:             int32(n),
-					Type:             util.NvidiaGPUDevice,
-					Memreq:           int32(memnum),
-					MemPercentagereq: int32(mempnum),
-					Coresreq:         int32(corenum),
-				})
-			}
-		}
-		//Count Cambricon MLU
-		klog.Infof("Counting mlu devices")
-		mluResourceCount := corev1.ResourceName(util.MLUResourceCount)
-		mluResourceMem := corev1.ResourceName(util.MLUResourceMemory)
-		v, ok = pod.Spec.Containers[i].Resources.Limits[mluResourceCount]
-		if !ok {
-			v, ok = pod.Spec.Containers[i].Resources.Requests[mluResourceCount]
-		}
-		if ok {
-			if n, ok := v.AsInt64(); ok {
-				klog.Info("Found mlu devices")
-				memnum := 0
-				mem, ok := pod.Spec.Containers[i].Resources.Limits[mluResourceMem]
-				if !ok {
-					mem, ok = pod.Spec.Containers[i].Resources.Requests[mluResourceMem]
-				}
-				if ok {
-					memnums, ok := mem.AsInt64()
-					if ok {
-						memnum = int(memnums)
-					}
-				}
-				counts[i] = append(counts[i], util.ContainerDeviceRequest{
-					Nums:   int32(n),
-					Type:   util.CambriconMLUDevice,
-					Memreq: int32(memnum),
-				})
+		devices := device.GetDevices()
+		for _, val := range devices {
+			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if request.Nums > 0 {
+				counts[i] = append(counts[i], val.GenerateResourceRequests(&pod.Spec.Containers[i]))
 			}
 		}
 	}
 	klog.Infoln("counts=", counts)
-	return counts
-}
-
-func ResourceNums(pod *corev1.Pod, resourceName corev1.ResourceName) (counts []int) {
-	counts = make([]int, len(pod.Spec.Containers))
-	for i := 0; i < len(pod.Spec.Containers); i++ {
-		v, ok := pod.Spec.Containers[i].Resources.Limits[resourceName]
-		if !ok {
-			v, ok = pod.Spec.Containers[i].Resources.Requests[resourceName]
-		}
-		if ok {
-			if n, ok := v.AsInt64(); ok {
-				counts[i] = int(n)
-			}
-		}
-	}
 	return counts
 }
 

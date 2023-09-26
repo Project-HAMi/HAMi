@@ -25,6 +25,7 @@ import (
 
 	"4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"4pd.io/k8s-vgpu/pkg/device/cambricon"
 	"4pd.io/k8s-vgpu/pkg/util"
 )
 
@@ -61,9 +62,6 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		memory, _ := cndev.GetDeviceMemory(uint(i))
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
-		if *util.DeviceMemoryScaling != float64(1) {
-			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
-		}
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.dev.ID,
 			Count:  int32(*util.DeviceSplitCount),
@@ -84,8 +82,8 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 		return err
 	}
 	encodeddevices := util.EncodeNodeDevices(*devices)
-	annos[util.NodeMLUHandshake] = "Reported " + time.Now().String()
-	annos[util.NodeMLUDeviceRegistered] = encodeddevices
+	annos[cambricon.HandshakeAnnos] = "Reported " + time.Now().String()
+	annos[cambricon.RegisterAnnos] = encodeddevices
 	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
 	err = util.PatchNodeAnnotations(node, annos)
 

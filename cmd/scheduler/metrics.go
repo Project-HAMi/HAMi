@@ -178,7 +178,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				found := false
 				for _, ni := range *nu {
 					for _, nodedev := range ni.Devices {
-						fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
+						//fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
 						if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
 							totaldev = nodedev.Totalmem
 							found = true
