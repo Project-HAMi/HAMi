@@ -157,17 +157,20 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					if time.Now().After(formertime.Add(time.Second * 60)) {
 						_, ok := s.nodes[val.Name]
 						if ok {
-							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
-							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
+							_, ok = nodeInfoCopy[devhandsk]
+							if ok && nodeInfoCopy[devhandsk] != nil {
+								s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
+								klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
 
-							tmppat := make(map[string]string)
-							tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
-							n, err := util.GetNode(val.Name)
-							if err != nil {
-								klog.Errorln("get node failed", err.Error())
+								tmppat := make(map[string]string)
+								tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+								n, err := util.GetNode(val.Name)
+								if err != nil {
+									klog.Errorln("get node failed", err.Error())
+								}
+								util.PatchNodeAnnotations(n, tmppat)
+								continue
 							}
-							util.PatchNodeAnnotations(n, tmppat)
-							continue
 						}
 					}
 					continue
