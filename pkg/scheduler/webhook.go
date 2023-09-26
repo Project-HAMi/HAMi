@@ -75,7 +75,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 
 	if !hasResource {
-		return admission.Allowed(fmt.Sprintf("no resource found"))
+		return admission.Allowed("no resource found")
 	}
 	if len(config.SchedulerName) > 0 {
 		pod.Spec.SchedulerName = config.SchedulerName
