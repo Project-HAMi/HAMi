@@ -34,15 +34,17 @@ type DevListFunc func() []*pluginapi.Device
 func (r *Plugin) apiDevices() *[]*api.DeviceInfo {
 	res := []*api.DeviceInfo{}
 	for idx, val := range r.totalmem {
-		res = append(res, &api.DeviceInfo{
-			Index:   idx,
-			Id:      "DCU-" + fmt.Sprint(idx),
-			Count:   30,
-			Devmem:  int32(val),
-			Devcore: 100,
-			Type:    r.cardtype[idx],
-			Health:  true,
-		})
+		if val > 0 {
+			res = append(res, &api.DeviceInfo{
+				Index:   idx,
+				Id:      "DCU-" + fmt.Sprint(idx),
+				Count:   30,
+				Devmem:  int32(val),
+				Devcore: 100,
+				Type:    r.cardtype[idx],
+				Health:  true,
+			})
+		}
 	}
 	return &res
 }
