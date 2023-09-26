@@ -2,13 +2,13 @@
 
 本组件支持复用海光DCU设备，并为此提供以下几种与vGPU类似的复用功能，包括：
 
-*** DCU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
+***DCU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
 
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）来分配DCU，本组件会确保任务使用的显存不会超过分配数值
 
 ***可限制计算单元数量***: 你现在可以指定任务使用的算力比例（例如60即代表使用60%算力）来分配DCU，本组件会确保任务使用的算力不会超过分配数值
 
-***指定MLU型号***：当前任务可以通过设置annotation("hygon.com/use-dcutype","hygon.com/nouse-dcutype")的方式，来选择使用或者不使用某些具体型号的DCU
+***指定DCU型号***：当前任务可以通过设置annotation("hygon.com/use-dcutype","hygon.com/nouse-dcutype")的方式，来选择使用或者不使用某些具体型号的DCU
 
 ## 节点需求
 
@@ -26,7 +26,7 @@
 helm install vgpu vgpu-charts/vgpu --set devicePlugin.hygondriver="/root/dcu-driver/dtk-22.10.1-vdcu" --set scheduler.kubeScheduler.imageTag={your k8s server version} -n kube-system
 ```
 
-* 使用以下指令，为MLU节点打上label
+* 使用以下指令，为DCU节点打上label
 ```
 kubectl label node {dcu-node} dcu=on
 ```
@@ -49,8 +49,8 @@ spec:
       resources:
         limits:
           hygon.com/dcunum: 1 # requesting a GPU
-          hygon.com/dcumem: 2000
-          hygon.com/dcucores: 60
+          hygon.com/dcumem: 2000 # each dcu require 2000 MiB device memory
+          hygon.com/dcucores: 60 # each dcu use 60% of total compute cores
 
 ```
 

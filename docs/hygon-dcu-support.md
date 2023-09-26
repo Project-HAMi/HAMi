@@ -56,8 +56,8 @@ spec:
       resources:
         limits:
           hygon.com/dcunum: 1 # requesting a GPU
-          hygon.com/dcumem: 2000
-          hygon.com/dcucores: 60
+          hygon.com/dcumem: 2000 # each dcu require 2000 MiB device memory
+          hygon.com/dcucores: 60 # each dcu use 60% of total compute cores
 
 ```
 
