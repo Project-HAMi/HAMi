@@ -114,16 +114,21 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][
 				klog.Infoln("Allocating device for container request", k)
 				for i := len(node.Devices) - 1; i >= 0; i-- {
 					klog.Info("Scoring pod ", k.Memreq, ":", k.MemPercentagereq, ":", k.Coresreq, ":", k.Nums, "i", i, "device:", node.Devices[i].Id)
+					memreq := int32(0)
 					if node.Devices[i].Count <= node.Devices[i].Used {
 						continue
 					}
 					if k.Coresreq > 100 {
 						return nil, fmt.Errorf("core limit can't exceed 100")
 					}
-					if k.MemPercentagereq != 101 && k.Memreq == 0 {
-						k.Memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
+					if k.Memreq > 0 {
+						memreq = k.Memreq
 					}
-					if node.Devices[i].Totalmem-node.Devices[i].Usedmem < k.Memreq {
+					if k.MemPercentagereq != 101 && k.Memreq == 0 {
+						//This incurs an issue
+						memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
+					}
+					if node.Devices[i].Totalmem-node.Devices[i].Usedmem < memreq {
 						continue
 					}
 					if node.Devices[i].Totalcore-node.Devices[i].Usedcores < k.Coresreq {
@@ -146,12 +151,12 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][
 						klog.Infoln("device", node.Devices[i].Id, "fitted")
 						k.Nums--
 						node.Devices[i].Used++
-						node.Devices[i].Usedmem += k.Memreq
+						node.Devices[i].Usedmem += memreq
 						node.Devices[i].Usedcores += k.Coresreq
 						devs = append(devs, util.ContainerDevice{
 							UUID:      node.Devices[i].Id,
 							Type:      k.Type,
-							Usedmem:   k.Memreq,
+							Usedmem:   memreq,
 							Usedcores: k.Coresreq,
 						})
 					}
