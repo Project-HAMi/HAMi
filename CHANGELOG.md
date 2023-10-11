@@ -180,3 +180,7 @@ Fix an issue where mlu device-plugin can't be launched properly
 Major rework on devices-related code
 
 Add support for hygon DCU device
+
+## v2.3.3
+
+Fix an issue where pod pending on nodes with multi-architect devices.
