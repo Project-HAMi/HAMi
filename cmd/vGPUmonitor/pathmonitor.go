@@ -14,7 +14,8 @@ import (
 
 	vGPUmonitor "4pd.io/k8s-vgpu/cmd/vGPUmonitor/noderpc"
 	"google.golang.org/grpc"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	v1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 const containerpath = "/usr/local/vgpu/containers"
@@ -61,11 +62,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	return nil, nil
 }
 
-func checkpodvalid(name string) bool {
-	pods, err := clientset.CoreV1().Pods("").List(context.Background(), v1.ListOptions{})
-	if err != nil {
-		return true
-	}
+func checkpodvalid(name string, pods *v1.PodList) bool {
 	for _, val := range pods.Items {
 		if strings.Contains(name, string(val.UID)) {
 			return true
@@ -81,11 +78,15 @@ func monitorpath(podmap map[string]podusage) error {
 	if err != nil {
 		return err
 	}
+	pods, err := clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	if err != nil {
+		return nil
+	}
 	for _, val := range files {
 		//fmt.Println("val=", val.Name())
 		dirname := containerpath + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
-		if err1 != nil || !checkpodvalid(info.Name()) {
+		if err1 != nil || !checkpodvalid(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
 				fmt.Println("removing" + dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
