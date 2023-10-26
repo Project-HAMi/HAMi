@@ -297,7 +297,8 @@ $ kubectl logs [pod id]
 ## 已知问题
 
 - 目前仅支持计算任务，不支持视频编解码处理。
-- 暂时不支持MIG
+- 暂时仅支持MIG的"none"和"mixed"模式，暂时不支持single模式
+- 当任务有字段“nodeName“时会出现无法调度的情况，有类似需求的请使用"nodeSelector"代替
 
 ## 开发计划
 

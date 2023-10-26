@@ -42,11 +42,14 @@ type Scheduler struct {
 	nodeManager
 	podManager
 
-	stopCh       chan struct{}
-	kubeClient   kubernetes.Interface
-	podLister    listerscorev1.PodLister
-	nodeLister   listerscorev1.NodeLister
+	stopCh     chan struct{}
+	kubeClient kubernetes.Interface
+	podLister  listerscorev1.PodLister
+	nodeLister listerscorev1.NodeLister
+	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
+	//Node Overview
+	overviewstatus map[string]*NodeUsage
 }
 
 func NewScheduler() *Scheduler {
@@ -226,7 +229,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 
 // InspectAllNodesUsage is used by metrics monitor
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
-	return &s.cachedstatus
+	return &s.overviewstatus
 }
 
 // GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
@@ -243,15 +246,16 @@ func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
-	nodeMap := make(map[string]*NodeUsage)
+	overallnodeMap := make(map[string]*NodeUsage)
+	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
-	for _, nodeID := range *nodes {
-		node, err := s.GetNode(nodeID)
-		if err != nil {
-			klog.Errorf("get node %v device error, %v", nodeID, err)
-			failedNodes[nodeID] = "node unregisterd"
-			continue
-		}
+	//for _, nodeID := range *nodes {
+	allNodes, err := s.ListNodes()
+	if err != nil {
+		return &overallnodeMap, failedNodes, err
+	}
+
+	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
 			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
@@ -267,10 +271,12 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 				Health:    d.Health,
 			})
 		}
-		nodeMap[nodeID] = nodeInfo
+		overallnodeMap[node.ID] = nodeInfo
+
 	}
+	//}
 	for _, p := range s.pods {
-		node, ok := nodeMap[p.NodeID]
+		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			continue
 		}
@@ -287,8 +293,18 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
 	}
-	s.cachedstatus = nodeMap
-	return &nodeMap, failedNodes, nil
+	s.overviewstatus = overallnodeMap
+	for _, nodeID := range *nodes {
+		node, err := s.GetNode(nodeID)
+		if err != nil {
+			klog.Errorf("get node %v device error, %v", nodeID, err)
+			failedNodes[nodeID] = "node unregisterd"
+			continue
+		}
+		cachenodeMap[node.ID] = overallnodeMap[node.ID]
+	}
+	s.cachedstatus = cachenodeMap
+	return &cachenodeMap, failedNodes, nil
 }
 
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {

@@ -361,9 +361,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
 					HostPath: hostHookPath + "/libvgpu.so",
 					ReadOnly: true},
-				&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
-					HostPath: hostHookPath + "/ld.so.preload",
-					ReadOnly: true},
 				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu",
 					HostPath: cacheFileHostDirectory,
 					ReadOnly: false},
@@ -371,6 +368,19 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 					HostPath: "/tmp/vgpulock",
 					ReadOnly: false},
 			)
+			found := false
+			for _, val := range currentCtr.Env {
+				if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				response.Mounts = append(response.Mounts, &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
+					HostPath: hostHookPath + "/ld.so.preload",
+					ReadOnly: true},
+				)
+			}
 			_, err = os.Stat("/usr/local/vgpu/license")
 			if err == nil {
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
