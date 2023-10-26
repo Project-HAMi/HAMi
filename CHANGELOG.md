@@ -184,3 +184,9 @@ Add support for hygon DCU device
 ## v2.3.3
 
 Fix an issue where pod pending on nodes with multi-architect devices.
+
+## v2.3.4
+
+Fix an issue where 31993 port can't list all GPU nodes
+
+Add a switch on cuda_control by set env "CUDA_DISABLE_ENV=true" in container

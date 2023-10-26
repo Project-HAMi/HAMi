@@ -288,7 +288,8 @@ $ kubectl logs [pod id]
 
 ## Known Issues
 
-- Currently, A100 MIG is not supported 
+- Currently, A100 MIG can only support "none" and "mixed" mode 
+- Currently, task with filed "nodeName" can't be scheduled, please use "nodeSelector" instead
 - Currently, only computing tasks are supported, and video codec processing is not supported.
 
 ## TODO
