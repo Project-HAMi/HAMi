@@ -83,6 +83,7 @@ var (
 //	   Containers []ContainerDevices `json:"containers,omitempty"`
 //	}
 type ContainerDevice struct {
+	Idx       int
 	UUID      string
 	Type      string
 	Usedmem   int32
@@ -110,6 +111,7 @@ type DeviceUsage struct {
 	Totalmem  int32
 	Totalcore int32
 	Usedcores int32
+	Numa      int
 	Type      string
 	Health    bool
 }

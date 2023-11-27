@@ -63,11 +63,13 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
 		res = append(res, &api.DeviceInfo{
-			Id:     dev.dev.ID,
-			Count:  int32(*util.DeviceSplitCount),
-			Devmem: registeredmem,
-			Type:   fmt.Sprintf("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
-			Health: dev.dev.Health == "healthy",
+			Id:      dev.dev.ID,
+			Count:   int32(*util.DeviceSplitCount),
+			Devmem:  registeredmem,
+			Devcore: 0,
+			Numa:    0,
+			Type:    fmt.Sprintf("%v-%v", "MLU", cndev.GetDeviceModel(uint(i))),
+			Health:  dev.dev.Health == "healthy",
 		})
 	}
 	return &res

@@ -16,6 +16,7 @@ type DeviceInfo struct {
 	Count                int32    
 	Devmem               int32
 	Devcore              int32   
-	Type                 string   
+	Type                 string
+	Numa		    int   
 	Health               bool 
 }

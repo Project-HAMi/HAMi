@@ -42,11 +42,11 @@ func TestEmptyPodDeviceCoding(t *testing.T) {
 func TestPodDevicesCoding(t *testing.T) {
 	pd1 := PodDevices{
 		ContainerDevices{
-			ContainerDevice{"UUID1", "Type1", 1000, 30},
+			ContainerDevice{0, "UUID1", "Type1", 1000, 30},
 		},
 		ContainerDevices{},
 		ContainerDevices{
-			ContainerDevice{"UUID1", "Type1", 1000, 30},
+			ContainerDevice{0, "UUID1", "Type1", 1000, 30},
 		},
 	}
 	s := EncodePodDevices(pd1)

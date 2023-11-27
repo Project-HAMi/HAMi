@@ -76,11 +76,11 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
-func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
-		return true, checkDCUtype(annos, d.Type)
+		return true, checkDCUtype(annos, d.Type), false
 	}
-	return false, false
+	return false, false, false
 }
 
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
