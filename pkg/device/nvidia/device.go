@@ -3,6 +3,7 @@ package nvidia
 import (
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/api"
@@ -18,6 +19,7 @@ const (
 	NvidiaGPUCommonWord = "GPU"
 	GPUInUse            = "nvidia.com/use-gputype"
 	GPUNoUse            = "nvidia.com/nouse-gputype"
+	NumaBind            = "nvidia.com/numa-bind"
 )
 
 var (
@@ -57,7 +59,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 	return ok
 }
 
-func checkGPUtype(annos map[string]string, cardtype string) bool {
+func checkGPUtype(annos map[string]string, cardtype string, numa int) bool {
 	inuse, ok := annos[GPUInUse]
 	if ok {
 		if !strings.Contains(inuse, ",") {
@@ -91,11 +93,22 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
-func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
-	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, checkGPUtype(annos, d.Type)
+func assertNuma(annos map[string]string) bool {
+	numabind, ok := annos[NumaBind]
+	if ok {
+		enforce, err := strconv.ParseBool(numabind)
+		if err == nil && enforce {
+			return true
+		}
 	}
-	return false, false
+	return false
+}
+
+func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
+		return true, checkGPUtype(annos, d.Type, d.Numa), assertNuma(annos)
+	}
+	return false, false, false
 }
 
 func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {

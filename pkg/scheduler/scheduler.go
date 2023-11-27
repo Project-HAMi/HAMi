@@ -149,8 +149,8 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				if !ok {
 					continue
 				}
-				nodedevices := util.DecodeNodeDevices(val.Annotations[devreg])
-				if len(nodedevices) == 0 {
+				nodedevices, err := util.DecodeNodeDevices(val.Annotations[devreg])
+				if len(nodedevices) == 0 || err != nil {
 					continue
 				}
 				klog.V(5).Infoln("nodedevices=", nodedevices)
@@ -212,6 +212,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 							Devmem:  deviceinfo.Devmem,
 							Devcore: deviceinfo.Devcore,
 							Type:    deviceinfo.Type,
+							Numa:    deviceinfo.Numa,
 							Health:  deviceinfo.Health,
 						})
 					}
@@ -268,6 +269,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 				Totalcore: d.Devcore,
 				Usedcores: 0,
 				Type:      d.Type,
+				Numa:      d.Numa,
 				Health:    d.Health,
 			})
 		}

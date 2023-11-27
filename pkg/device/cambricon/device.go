@@ -33,6 +33,10 @@ func InitMLUDevice() *CambriconDevices {
 	return &CambriconDevices{}
 }
 
+func (dev *CambriconDevices) AssertNuma(annos map[string]string) bool {
+	return false
+}
+
 func (dev *CambriconDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&MLUResourceCount, "mlu-name", "cambricon.com/mlunum", "mlu resource count")
 	fs.StringVar(&MLUResourceMemory, "mlu-memory", "cambricon.com/mlumem", "mlu memory resource")
@@ -86,17 +90,17 @@ func checkMLUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
-func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Contains(n.Type, CambriconMLUDevice) {
 		if !strings.Contains(d.Type, "370") && n.Memreq != 0 {
-			return true, false
+			return true, false, false
 		}
 		if strings.Contains(d.Type, "370") && n.Memreq == 0 && d.Used > 0 {
-			return true, false
+			return true, false, false
 		}
-		return true, checkMLUtype(annos, d.Type)
+		return true, checkMLUtype(annos, d.Type), false
 	}
-	return false, false
+	return false, false, false
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {

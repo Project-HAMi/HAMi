@@ -17,7 +17,11 @@
 package plugin
 
 import (
+	"errors"
 	"fmt"
+	"log"
+	"os/exec"
+	"strconv"
 	"strings"
 	"time"
 
@@ -29,6 +33,25 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util"
 )
 
+func (r *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
+	cmd := exec.Command("nvidia-smi", "topo", "-m")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Fatalf("cmd.Run() failed with %s\n", err)
+	}
+	for _, val := range strings.Split(string(out), "\n") {
+		if !strings.Contains(val, "GPU") {
+			continue
+		}
+		words := strings.Split(val, "\t")
+		if strings.Contains(words[0], fmt.Sprint(idx)) {
+			return strconv.Atoi(words[len(words)-1])
+		}
+	}
+
+	return 0, errors.New("numa Not found")
+}
+
 func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 	devs := r.Devices()
 	nvml.Init()
@@ -38,7 +61,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 		ndev, err := nvml.NewDevice(uint(idx))
 		//klog.V(3).Infoln("ndev type=", ndev.Model)
 		if err != nil {
-			fmt.Println("nvml new device by uuid error id=", ndev.UUID, "err=", err.Error())
+			klog.Errorln("nvml new device by uuid error id=", ndev.UUID, "err=", err.Error())
 			panic(0)
 		} else {
 			klog.V(3).Infoln("nvml registered device id=", ndev.UUID, "memory=", *ndev.Memory, "type=", *ndev.Model)
@@ -58,12 +81,17 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 				break
 			}
 		}
+		numa, err := r.getNumaInformation(idx)
+		if err != nil {
+			klog.Errorf("Numa information not found")
+		}
 		res = append(res, &api.DeviceInfo{
 			Id:      ndev.UUID,
 			Count:   int32(*util.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(*util.DeviceCoresScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", *ndev.Model),
+			Numa:    numa,
 			Health:  health,
 		})
 		idx++

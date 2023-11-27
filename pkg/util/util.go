@@ -64,52 +64,43 @@ func GetPendingPod(node string) (*v1.Pod, error) {
 	return nil, nil
 }
 
-func DecodeNodeDevices(str string) []*api.DeviceInfo {
+func DecodeNodeDevices(str string) ([]*api.DeviceInfo, error) {
 	if !strings.Contains(str, ":") {
-		return []*api.DeviceInfo{}
+		return []*api.DeviceInfo{}, errors.New("node annotations not decode successfully")
 	}
 	tmp := strings.Split(str, ":")
 	var retval []*api.DeviceInfo
 	for _, val := range tmp {
 		if strings.Contains(val, ",") {
 			items := strings.Split(val, ",")
-			if len(items) == 6 {
+			if len(items) == 7 {
 				count, _ := strconv.Atoi(items[1])
 				devmem, _ := strconv.Atoi(items[2])
 				devcore, _ := strconv.Atoi(items[3])
-				health, _ := strconv.ParseBool(items[5])
+				health, _ := strconv.ParseBool(items[6])
+				numa, _ := strconv.Atoi(items[5])
 				i := api.DeviceInfo{
 					Id:      items[0],
 					Count:   int32(count),
 					Devmem:  int32(devmem),
 					Devcore: int32(devcore),
 					Type:    items[4],
+					Numa:    numa,
 					Health:  health,
 				}
 				retval = append(retval, &i)
 			} else {
-				count, _ := strconv.Atoi(items[1])
-				devmem, _ := strconv.Atoi(items[2])
-				health, _ := strconv.ParseBool(items[4])
-				i := api.DeviceInfo{
-					Id:      items[0],
-					Count:   int32(count),
-					Devmem:  int32(devmem),
-					Devcore: 100,
-					Type:    items[3],
-					Health:  health,
-				}
-				retval = append(retval, &i)
+				return []*api.DeviceInfo{}, errors.New("node annotations not decode successfully")
 			}
 		}
 	}
-	return retval
+	return retval, nil
 }
 
 func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
 	tmp := ""
 	for _, val := range dlist {
-		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.FormatBool(val.Health) + ":"
+		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + ":"
 	}
 	klog.V(3).Infoln("Encoded node Devices", tmp)
 	return tmp

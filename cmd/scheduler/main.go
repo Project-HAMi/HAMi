@@ -52,7 +52,7 @@ func init() {
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
-	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 5000, "default gpu device memory to allocate")
+	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 0, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)

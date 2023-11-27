@@ -41,6 +41,7 @@ func (r *Plugin) apiDevices() *[]*api.DeviceInfo {
 				Count:   30,
 				Devmem:  int32(val),
 				Devcore: 100,
+				Numa:    0,
 				Type:    r.cardtype[idx],
 				Health:  true,
 			})

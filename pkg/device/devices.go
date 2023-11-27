@@ -19,7 +19,7 @@ import (
 
 type Devices interface {
 	MutateAdmission(ctr *v1.Container) bool
-	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool)
+	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
 	GenerateResourceRequests(ctr *v1.Container) util.ContainerDeviceRequest
 	ParseConfig(fs *flag.FlagSet)
 }

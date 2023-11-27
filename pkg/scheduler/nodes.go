@@ -32,6 +32,7 @@ type DeviceInfo struct {
 	Devmem  int32
 	Devcore int32
 	Type    string
+	Numa    int
 	Health  bool
 }
 

@@ -24,7 +24,6 @@ import (
 	"time"
 
 	"4pd.io/k8s-vgpu/pkg/device-plugin/hygon/dcu"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/hygon/dcu/hwloc"
 	"github.com/golang/glog"
 	"github.com/kubevirt/device-plugin-manager/pkg/dpm"
 )
@@ -76,7 +75,6 @@ func main() {
 	versions := [...]string{
 		"DCU device plugin for Kubernetes",
 		fmt.Sprintf("%s version %s", os.Args[0], gitDescribe),
-		fmt.Sprintf("%s", hwloc.GetVersions()),
 	}
 
 	flag.Usage = func() {
