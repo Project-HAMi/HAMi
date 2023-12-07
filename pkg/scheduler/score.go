@@ -17,12 +17,12 @@
 package scheduler
 
 import (
-	"fmt"
 	"sort"
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/util"
+	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -62,9 +62,9 @@ func (l NodeScoreList) Less(i, j int) bool {
 }
 
 func viewStatus(usage NodeUsage) {
-	fmt.Println("viewing status")
+	klog.InfoS("devices status")
 	for _, val := range usage.Devices {
-		fmt.Println(val)
+		klog.InfoS("device status", "device id", val.Id, "device detail", val)
 	}
 }
 
@@ -90,7 +90,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	klog.Infoln("Allocating device for container request", k)
 	tmpDevs := []util.ContainerDevice{}
 	for i := len(node.Devices) - 1; i >= 0; i-- {
-		klog.Info("Scoring pod ", k.Memreq, ":", k.MemPercentagereq, ":", k.Coresreq, ":", k.Nums, "i", i, "device:", node.Devices[i].Id)
+		klog.InfoS("scoring pod", "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices[i].Id)
 		found, numa := checkType(annos, *node.Devices[i], k)
 		if !found {
 			klog.Infoln("card type mismatch,continueing...", node.Devices[i].Type, k.Type)
@@ -180,7 +180,7 @@ func fitInDevices(node *NodeUsage, requests []util.ContainerDeviceRequest, annos
 	return true, float32(total)/float32(free) + float32(len(node.Devices)-sums), devs
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][]util.ContainerDeviceRequest, annos map[string]string) (*NodeScoreList, error) {
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][]util.ContainerDeviceRequest, annos map[string]string, task *v1.Pod) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
@@ -196,13 +196,14 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][
 				score.devices = append(score.devices, util.ContainerDevices{})
 				continue
 			}
+			klog.V(5).InfoS("fitInDevices", "pod name", task.Name, "pod namespace", task.Namespace, "node", nodeID)
 			fit, nodescore, devs := fitInDevices(node, n, annos)
 			if fit {
 				score.devices = append(score.devices, devs)
-				klog.Infoln("node:", nodeID, " score:", nodescore)
+				klog.InfoS("calcScore:pod fit node score results", "pod name", task.Name, "pod namespace", task.Namespace, "node", nodeID, "score", nodescore)
 				score.score += nodescore
 			} else {
-				klog.Infoln("node:", nodeID, " not fitted")
+				klog.InfoS("calcScore:node not fit pod", "pod name", task.Name, "pod namespace", task.Namespace, "node", nodeID)
 				break
 			}
 		}
