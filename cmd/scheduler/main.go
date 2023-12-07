@@ -24,6 +24,7 @@ import (
 	"4pd.io/k8s-vgpu/pkg/scheduler"
 	"4pd.io/k8s-vgpu/pkg/scheduler/config"
 	"4pd.io/k8s-vgpu/pkg/scheduler/routes"
+	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
@@ -56,6 +57,7 @@ func init() {
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
+	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
 func start() {

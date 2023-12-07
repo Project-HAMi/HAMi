@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -290,4 +291,12 @@ func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
 		}*/
 
 	return err
+}
+
+func InitKlogFlags() *flag.FlagSet {
+	// Init log flags
+	flagset := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(flagset)
+
+	return flagset
 }
