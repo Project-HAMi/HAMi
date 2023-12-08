@@ -190,3 +190,7 @@ Fix an issue where pod pending on nodes with multi-architect devices.
 Fix an issue where 31993 port can't list all GPU nodes
 
 Add a switch on cuda_control by set env "CUDA_DISABLE_ENV=true" in container
+
+## v2.3.6
+
+Fix initialization error when using ray
