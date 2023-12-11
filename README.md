@@ -1,9 +1,9 @@
 English version|[中文版](README_cn.md)
 
-# OpenAIOS vGPU scheduler for Kubernetes
+# Heterogeneous AI Computing Virtualization Middleware (Hami)
 
-[![build status](https://github.com/4paradigm/k8s-device-plugin/actions/workflows/build.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml)
-[![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-device-plugin.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
+[![build status](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml)
+[![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#contact)
@@ -16,19 +16,15 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-**4paradigm k8s vGPU scheduler is an "all in one" chart to manage your GPU in k8s cluster**, it has everything you expect for a k8s GPU manager, including:
+**Heterogeneous AI Computing Virtualization Middleware(HAMI), once called(k8s-vGPU-scheduler) is an "all in one" chart to manage your Heterogeneous AI Computing Devices in k8s cluster**, it has everything you expect for, including:
 
-***GPU sharing***: Each task can allocate a portion of GPU instead of a whole GPU card, thus GPU can be shared among multiple tasks.
+***Device sharing***: Each task can allocate a portion of device instead of a whole device, thus a device can be shared among multiple tasks.
 
-***Device Memory Control***: GPUs can be allocated with certain device memory size (i.e 3000M) or device memory percentage of whole GPU(i.e 50%) and have made it that it does not exceed the boundary.
+***Device Memory Control***: Devicess can be allocated with certain device memory size (i.e 3000M) or device memory percentage of whole GPU(i.e 50%) and have made it that it does not exceed the boundary.
 
-***Virtual Device memory***: You can oversubscribe GPU device memory by using host memory as its swap.
+***Device Type Specification***: You can specify which type of Device to use or to avoid for a certain task, by setting annotations such as "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype". 
 
-***GPU Type Specification***: You can specify which type of GPU to use or to avoid for a certain GPU task, by setting "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype" annotations. 
-
-***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your GPU jobs will be automatically supported after installation. In addition, you can specify your resource name other than "nvidia.com/gpu" if you wish
-
-The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-device-plugin ([4paradigm/k8s-device-plugin](https://github.com/4paradigm/k8s-device-plugin)), such as splitting the physical GPU, limiting the memory, and computing unit. It adds the scheduling module to balance the GPU usage across GPU nodes. In addition, it allows users to allocate GPU by specifying the device memory and device core usage. Furthermore, the vGPU scheduler can virtualize the device memory (the used device memory can exceed the physical device memory), run some tasks with large device memory requirements, or increase the number of shared tasks. You can refer to [the benchmarks report](#benchmarks).
+***Easy to use***: You don't need to modify your task yaml to use our scheduler. All your jobs will be automatically supported after installation. In addition, you can specify your resource name other than "nvidia.com/gpu" if you wish
 
 ## When to use
 
@@ -36,15 +32,15 @@ The **k8s vGPU scheduler** is based on retaining features of 4paradigm k8s-devic
 2. Needs to balance GPU usage in cluster with mutiple GPU node
 3. Low utilization of device memory and computing units, such as running 10 tf-servings on one GPU.
 4. Situations that require a large number of small GPUs, such as teaching scenarios where one GPU is provided for multiple students to use, and the cloud platform that provides small GPU instance.
-5. In the case of insufficient physical device memory, virtual device memory can be turned on, such as training of large batches and large models.
 
 ## Prerequisites
 
 The list of prerequisites for running the NVIDIA device plugin is described below:
-* NVIDIA drivers >= 384.81
+* NVIDIA drivers >= 440
+* CUDA Version > 10.2
 * nvidia-docker version > 2.0
 * Kubernetes version >= 1.16
-* glibc >= 2.17
+* glibc >= 2.17 & glibc < 2.3.0
 * kernel version >= 3.10
 * helm > 3.0
 
