@@ -17,7 +17,6 @@
 package rm
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,49 +24,60 @@ import (
 
 func TestGetAdditionalXids(t *testing.T) {
 	testCases := []struct {
-		input    string
-		expected []uint64
+		description string
+		input       string
+		expected    []uint64
 	}{
-		{},
 		{
-			input: ",",
+			description: "Empty input",
 		},
 		{
-			input: "not-an-int",
+			description: "Only comma",
+			input:       ",",
 		},
 		{
-			input:    "68",
-			expected: []uint64{68},
+			description: "Non-integer input",
+			input:       "not-an-int",
 		},
 		{
-			input: "-68",
+			description: "Single integer",
+			input:       "68",
+			expected:    []uint64{68},
 		},
 		{
-			input:    "68  ",
-			expected: []uint64{68},
+			description: "Negative integer",
+			input:       "-68",
 		},
 		{
-			input:    "68,",
-			expected: []uint64{68},
+			description: "Single integer with trailing spaces",
+			input:       "68  ",
+			expected:    []uint64{68},
 		},
 		{
-			input:    ",68",
-			expected: []uint64{68},
+			description: "Single integer followed by comma without trailing number",
+			input:       "68,",
+			expected:    []uint64{68},
 		},
 		{
-			input:    "68,67",
-			expected: []uint64{68, 67},
+			description: "Comma without preceding number followed by single integer",
+			input:       ",68",
+			expected:    []uint64{68},
 		},
 		{
-			input:    "68,not-an-int,67",
-			expected: []uint64{68, 67},
+			description: "Two comma-separated integers",
+			input:       "68,67",
+			expected:    []uint64{68, 67},
+		},
+		{
+			description: "Two integers separated by non-integer",
+			input:       "68,not-an-int,67",
+			expected:    []uint64{68, 67},
 		},
 	}
 
-	for i, tc := range testCases {
-		t.Run(fmt.Sprintf("test case %d", i), func(t *testing.T) {
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
 			xids := getAdditionalXids(tc.input)
-
 			require.EqualValues(t, tc.expected, xids)
 		})
 	}

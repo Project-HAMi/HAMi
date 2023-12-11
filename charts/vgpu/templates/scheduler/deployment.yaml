@@ -63,6 +63,7 @@ spec:
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}
+            - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --default-mem={{ .Values.scheduler.defaultMem }}
             - --default-cores={{ .Values.scheduler.defaultCores }}
             {{- range .Values.scheduler.extender.extraArgs }}
@@ -91,4 +92,7 @@ spec:
       {{- end }}
       {{- if .Values.scheduler.tolerations }}
       tolerations: {{ toYaml .Values.scheduler.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.scheduler.nodeName }}
+      nodeName: {{ .Values.scheduler.nodeName }}
       {{- end }}

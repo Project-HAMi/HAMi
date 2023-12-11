@@ -20,7 +20,7 @@ import (
 	"fmt"
 
 	"4pd.io/k8s-vgpu/pkg/util"
-	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"k8s.io/klog/v2"
 )
 

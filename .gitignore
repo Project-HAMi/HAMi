@@ -1,2 +1,7 @@
 bin/
-*.sh
+run_device_plugin.sh
+run_scheduler.sh
+device_plugin.sh
+libvgpu/build
+updateso.sh
+.idea

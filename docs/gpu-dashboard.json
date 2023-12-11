@@ -1004,7 +1004,7 @@
           ]
         },
         "datasource": "ALL",
-        "definition": "label_values(gpu)",
+        "definition": "label_values(DCGM_FI_DEV_FB_FREE{node_name=\"$node_name\"},gpu)",
         "description": null,
         "error": null,
         "hide": 0,
@@ -1014,7 +1014,7 @@
         "name": "gpu",
         "options": [],
         "query": {
-          "query": "label_values(gpu)",
+          "query": "label_values(DCGM_FI_DEV_FB_FREE{node_name=\"$node_name\"},gpu)",
           "refId": "ALL-gpu-Variable-Query"
         },
         "refresh": 1,

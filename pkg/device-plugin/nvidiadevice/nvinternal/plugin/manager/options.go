@@ -19,7 +19,7 @@ package manager
 import (
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"4pd.io/k8s-vgpu/pkg/util"
-	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 )
 
 // Option is a function that configures a manager

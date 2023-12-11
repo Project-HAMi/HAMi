@@ -29,13 +29,13 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
 type Scheduler struct {
@@ -136,24 +136,29 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*NodeInfo)
 	for {
-		nodes, err := s.kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
-			//LabelSelector: "gpu=on",
-		})
+		nodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
 			return err
 		}
-		for _, val := range nodes.Items {
+		nodeNames := []string{}
+		for _, val := range nodes {
+			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
 					continue
 				}
 				nodedevices, err := util.DecodeNodeDevices(val.Annotations[devreg])
-				if len(nodedevices) == 0 || err != nil {
+				if err != nil {
+					klog.ErrorS(err, "failed to decode node devices", "node", val.Name, "device annotation", val.Annotations[devreg])
 					continue
 				}
-				klog.V(5).Infoln("nodedevices=", nodedevices)
+				if len(nodedevices) == 0 {
+					klog.InfoS("no node gpu device found", "node", val.Name, "device annotation", val.Annotations[devreg])
+					continue
+				}
+				klog.V(5).InfoS("nodes device information", "node", val.Name, "nodedevices", util.EncodeNodeDevices(nodedevices))
 				handshake := val.Annotations[devhandsk]
 				if strings.Contains(handshake, "Requesting") {
 					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
@@ -170,6 +175,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 								n, err := util.GetNode(val.Name)
 								if err != nil {
 									klog.Errorln("get node failed", err.Error())
+									continue
 								}
 								util.PatchNodeAnnotations(n, tmppat)
 								continue
@@ -185,14 +191,15 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
+						continue
 					}
 					util.PatchNodeAnnotations(n, tmppat)
 				}
 				nodeInfo := &NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]DeviceInfo, 0)
-				found := false
 				for index, deviceinfo := range nodedevices {
+					found := false
 					_, ok := s.nodes[val.Name]
 					if ok {
 						for i1, val1 := range s.nodes[val.Name].Devices {
@@ -224,6 +231,11 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				}
 			}
 		}
+		_, _, err = s.getNodesUsage(&nodeNames, nil)
+		if err != nil {
+			klog.Errorln("get node usage failed", err.Error())
+			return err
+		}
 		time.Sleep(time.Second * 15)
 	}
 }
@@ -231,17 +243,6 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 // InspectAllNodesUsage is used by metrics monitor
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.overviewstatus
-}
-
-// GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
-func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
-	nodeMap := make(map[string]*framework.NodeInfo)
-	for _, node := range nodes {
-		nodeInfo := framework.NewNodeInfo()
-		nodeInfo.SetNode(node)
-		nodeMap[node.Name] = nodeInfo
-	}
-	return nodeMap
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
@@ -352,7 +353,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
-	klog.Infof("schedule pod %v/%v[%v]", args.Pod.Namespace, args.Pod.Name, args.Pod.UID)
+	klog.InfoS("begin schedule filter", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespaces", args.Pod.Namespace)
 	nums := k8sutil.Resourcereqs(args.Pod)
 	total := 0
 	for _, n := range nums {
@@ -374,7 +375,10 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if err != nil {
 		return nil, err
 	}
-	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos)
+	if len(failedNodes) != 0 {
+		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
+	}
+	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
 	if err != nil {
 		return nil, err
 	}

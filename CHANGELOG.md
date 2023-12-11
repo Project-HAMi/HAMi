@@ -194,3 +194,23 @@ Add a switch on cuda_control by set env "CUDA_DISABLE_ENV=true" in container
 ## v2.3.6
 
 Fix initialization error when using ray
+
+## v2.3.7
+
+Fix error when "N/A" is shown in command "nvidia-smi topo -m"
+Fix core utilization not working on some cases
+Adjust some documents
+
+## v2.3.8
+
+Fix device-plugin launch error on driver version < 500
+
+support manual config MutatingWebhookConfiguration failurePolicy
+
+add metrics bind address flag for scheduler
+
+Improved log messages
+
+fix: loss of metrics after vdeivce restart
+
+bugfix: device-plugin monitor serves too slowly in big cluster

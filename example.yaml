@@ -9,22 +9,5 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # requesting 2 vGPUs
-          #nvidia.com/gpumem: 3000 # Each vGPU containers 3000M device memory
-          nvidia.com/gpumem-percentage: 50 #Each vGPU containers 50% device memory of that GPU. Can not be used with nvidia.com/gpumem
-          #nvidia.com/gpucores: 90 # Utilization limit of this vGPU is set to 50% of total GPU utilization 
-          #nvidia.com/priority: 0 # We only have two priority class, 0(high) and 1(low), default: 1 
-          #The utilization of high priority task won't be limited to resourceCores unless sharing GPU node with other high priority tasks.
-          #The utilization of low priority task won't be limited to resourceCores if no other tasks sharing its GPU.
-    - name: ubuntu-container0
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-    - name: ubuntu-container1
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          nvidia.com/gpu: 2 # requesting 2 vGPUs
-          nvidia.com/gpumem: 2000
-          #nvidia.com/gpucores: 90
-
+          nvidia.com/gpu: 1 # requesting 2 vGPUs
+          nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
