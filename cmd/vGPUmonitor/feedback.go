@@ -11,8 +11,9 @@ import (
 	"sync"
 	"time"
 
-	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 var cgroupDriver int
@@ -51,19 +52,19 @@ func setcGgroupDriver() int {
 	return 0
 }
 
-func getUsedGPUPid() ([]uint, error) {
-	tmp := []uint{}
-	count, err := nvml.GetDeviceCount()
-	if err != nil {
+func getUsedGPUPid() ([]uint, nvml.Return) {
+	tmp := []nvml.ProcessInfo{}
+	count, err := nvml.DeviceGetCount()
+	if err != nvml.SUCCESS {
 		return []uint{}, err
 	}
-	for i := uint(0); i < count; i++ {
-		device, err := nvml.NewDevice(i)
-		if err != nil {
+	for i := 0; i < count; i++ {
+		device, err := nvml.DeviceGetHandleByIndex(i)
+		if err != nvml.SUCCESS {
 			return []uint{}, err
 		}
-		ids, _, err := device.GetComputeRunningProcesses()
-		if err != nil {
+		ids, err := device.GetComputeRunningProcesses()
+		if err != nvml.SUCCESS {
 			return []uint{}, err
 		}
 		tmp = append(tmp, ids...)
@@ -71,13 +72,13 @@ func getUsedGPUPid() ([]uint, error) {
 	result := make([]uint, 0)
 	m := make(map[uint]bool)
 	for _, v := range tmp {
-		if _, ok := m[v]; !ok {
-			result = append(result, v)
-			m[v] = true
+		if _, ok := m[uint(v.Pid)]; !ok {
+			result = append(result, uint(v.Pid))
+			m[uint(v.Pid)] = true
 		}
 	}
-	sort.Slice(tmp, func(i, j int) bool { return tmp[i] > tmp[j] })
-	return result, nil
+	sort.Slice(tmp, func(i, j int) bool { return tmp[i].Pid > tmp[j].Pid })
+	return result, nvml.SUCCESS
 }
 
 func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
@@ -92,8 +93,8 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 		return errors.New("can not identify cgroup driver")
 	}
 	usedGPUArray, err := getUsedGPUPid()
-	if err != nil {
-		return err
+	if err != nvml.SUCCESS {
+		return errors.New("get usedGPUID failed, ret:" + nvml.ErrorString(err))
 	}
 	if len(usedGPUArray) == 0 {
 		return nil
@@ -110,9 +111,9 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
 	}
 	fmt.Println("filename=", filename)
-	content, err := os.ReadFile(filename)
-	if err != nil {
-		return err
+	content, ferr := os.ReadFile(filename)
+	if ferr != nil {
+		return ferr
 	}
 	pids = strings.Split(string(content), "\n")
 	hostPidArray := []hostGPUPid{}
@@ -226,27 +227,27 @@ func Observe(srlist *map[string]podusage) error {
 		}
 		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.recentKernel >= 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to on %v", idx)
 				(*srlist)[idx].sr.recentKernel = -1
 			}
 		} else {
 			if (*srlist)[idx].sr.recentKernel < 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to off %v", idx)
 				(*srlist)[idx].sr.recentKernel = 0
 			}
 		}
 		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.utilizationSwitch != 1 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to on %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 1
 			}
 		} else {
 			if (*srlist)[idx].sr.utilizationSwitch != 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to off %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 0
 			}
 		}
@@ -260,9 +261,9 @@ func watchAndFeedback() {
 		time.Sleep(time.Second * 5)
 		err := monitorpath(srPodList)
 		if err != nil {
-			fmt.Println("monitorPath failed", err.Error())
+			klog.Errorf("monitorPath failed %v", err.Error())
 		}
-		//fmt.Println("watchAndFeedback", srPodList)
+		klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
 		Observe(&srPodList)
 
 	}

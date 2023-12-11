@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	"k8s.io/klog"
 )
 
 //var addr = flag.String("listen-address", ":9394", "The address to listen on for HTTP requests.")
@@ -9,24 +9,17 @@ import (
 //const shared_directory = "/usr/local/vgpu/shared"
 
 func main() {
+
+	if err := ValidateEnvVars(); err != nil {
+		klog.Fatalf("Failed to validate environment variables: %v", err)
+	}
 	cgroupDriver = 0
 	errchannel := make(chan error)
-	go serveinfo(errchannel)
-	/*
-		ret := nvml.Init()
-		if ret != nil {
-			log.Fatalf("Unable to initialize NVML: %v", ret.Error())
-		}
-		devnum, err := nvml.GetDeviceCount()
-		if err != nil {
-			fmt.Println(err.Error())
-		}
-		fmt.Println("devnum=", devnum)*/
+	go serveInfo(errchannel)
 	go initmetrics()
 	go watchAndFeedback()
 	for {
 		err := <-errchannel
-		fmt.Println(err.Error())
+		klog.Errorf("failed to serve: %v", err)
 	}
-
 }

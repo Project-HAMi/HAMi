@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	"k8s.io/klog/v2"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -63,7 +64,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
-	fmt.Println("begin collect")
+	klog.Infof("Starting to collect metrics for scheduler")
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
@@ -152,17 +153,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUDeviceAllocatedDesc := prometheus.NewDesc(
 		"vGPUPodsDeviceAllocated",
 		"vGPU Allocated from pods",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
 	)
 	ctrvGPUdeviceAllocatedMemoryPercentageDesc := prometheus.NewDesc(
 		"vGPUMemoryPercentage",
 		"vGPU memory percentage allocated from a container",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
 		"vGPUCorePercentage",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "nmodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
@@ -220,10 +221,10 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
-func initmetrics() {
+func initmetrics(bindAddress string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
-	fmt.Println("Initializing metrics...")
+	klog.Infof("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 
 	// Construct cluster managers. In real code, we would assign them to
@@ -238,5 +239,5 @@ func initmetrics() {
 	//)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(":9395", nil))
+	log.Fatal(http.ListenAndServe(bindAddress, nil))
 }

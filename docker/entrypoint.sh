@@ -16,7 +16,6 @@
 #
 
 if [ $1 == "device-plugin" ]; then
-#cp -f /k8s-vgpu/lib/nvidia-container-runtime /usrbin/
-cp -f /k8s-vgpu/lib/* /usr/local/vgpu/
+cp -f /k8s-vgpu/lib/* $DEST_DIR
 fi
 exec "$@"

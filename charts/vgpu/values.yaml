@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: []
-version: "v2.3.6"
+version: "v2.3.8"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -27,12 +27,18 @@ podSecurityPolicy:
   enabled: false
 
 global:
+  gpuHookPath: /usr/local
   labels: {}
   annotations: {}
 
 scheduler:
+  # @param nodeName defines the node name and the nvidia-vgpu-scheduler-scheduler will schedule to the node.
+  # if we install the nvidia-vgpu-scheduler-scheduler as default scheduler, we need to remove the k8s defualt
+  # scheduler pod from the cluster first, we must specified node name to skip the schedule workflow.
+  nodeName: ""
   defaultMem: 0
   defaultCores: 0
+  metricsBindAddress: ":9395"
   kubeScheduler:
     imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
@@ -72,7 +78,8 @@ scheduler:
     nodeSelector: {}
     tolerations: []
     runAsUser: 2000
-
+  mutatingWebhookConfiguration:
+    failurePolicy: Ignore
   service:
     httpPort: 443
     schedulerPort: 31998
