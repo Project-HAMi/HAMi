@@ -150,10 +150,15 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					continue
 				}
 				nodedevices, err := util.DecodeNodeDevices(val.Annotations[devreg])
-				if len(nodedevices) == 0 || err != nil {
+				if err != nil {
+					klog.ErrorS(err, "failed to decode node devices", "node", val.Name, "device annotation", val.Annotations[devreg])
 					continue
 				}
-				klog.V(5).Infoln("nodedevices=", nodedevices)
+				if len(nodedevices) == 0 {
+					klog.InfoS("no node gpu device found", "node", val.Name, "device annotation", val.Annotations[devreg])
+					continue
+				}
+				klog.V(5).InfoS("nodes device information", "node", val.Name, "nodedevices", util.EncodeNodeDevices(nodedevices))
 				handshake := val.Annotations[devhandsk]
 				if strings.Contains(handshake, "Requesting") {
 					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
@@ -352,7 +357,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
-	klog.Infof("schedule pod %v/%v[%v]", args.Pod.Namespace, args.Pod.Name, args.Pod.UID)
+	klog.InfoS("begin schedule filter", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespaces", args.Pod.Namespace)
 	nums := k8sutil.Resourcereqs(args.Pod)
 	total := 0
 	for _, n := range nums {
@@ -374,7 +379,10 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if err != nil {
 		return nil, err
 	}
-	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos)
+	if len(failedNodes) != 0 {
+		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
+	}
+	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
 	if err != nil {
 		return nil, err
 	}

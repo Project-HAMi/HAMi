@@ -83,7 +83,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 		}
 		numa, err := r.getNumaInformation(idx)
 		if err != nil {
-			klog.Errorf("Numa information not found")
+			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
 		res = append(res, &api.DeviceInfo{
 			Id:      ndev.UUID,
@@ -101,6 +101,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 
 func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	devices := r.getApiDevices()
+	klog.InfoS("node devices", "devices", devices)
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
