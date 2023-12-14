@@ -73,7 +73,9 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, ndev.UUID) == 0 {
-				if strings.Compare(val.Health, "healthy") == 0 {
+				// when NVIDIA-Tesla P4, the device info is : ID:GPU-e290caca-2f0c-9582-acab-67a142b61ffa,Health:Healthy,Topology:nil,
+				// it is more reasonable to think of healthy as case-insensitive
+				if strings.EqualFold(val.Health, "healthy") {
 					health = true
 				} else {
 					health = false
