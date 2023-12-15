@@ -48,13 +48,8 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 	defer m.mutex.Unlock()
 	_, ok := m.pods[pod.UID]
 	if !ok {
-		pi := &podInfo{Name: pod.Name, Uid: pod.UID}
+		pi := &podInfo{Name: pod.Name, Uid: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
 		m.pods[pod.UID] = pi
-		pi.Namespace = pod.Namespace
-		pi.Name = pod.Name
-		pi.Uid = pod.UID
-		pi.NodeID = nodeID
-		pi.Devices = devices
 		klog.Info(pod.Name + "Added")
 	}
 }
