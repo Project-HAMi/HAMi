@@ -4,26 +4,26 @@ go 1.19
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.2.3
+	github.com/NVIDIA/go-nvlib v0.0.0-20231212194527-f3264c8a6a7a
 	github.com/NVIDIA/gpu-monitoring-tools v0.0.0-20211102125545-5a2c58442e48
 	github.com/NVIDIA/k8s-device-plugin v0.14.1
-	github.com/NVIDIA/nvidia-container-toolkit v1.13.3
+	github.com/NVIDIA/nvidia-container-toolkit v1.14.4-0.20231115203935-5d7ee25b37e2
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
 	github.com/fsnotify/fsnotify v1.6.0
 	github.com/golang/glog v1.1.0
 	github.com/golang/mock v1.6.0
-	github.com/google/uuid v1.3.0
+	github.com/google/uuid v1.4.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kubevirt/device-plugin-manager v1.19.5
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.24.1
-	github.com/opencontainers/runtime-spec v1.1.0-rc.2
+	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/prometheus/client_golang v1.14.0
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.6.1
-	github.com/stretchr/testify v1.8.2
+	github.com/stretchr/testify v1.8.4
 	github.com/urfave/cli/v2 v2.4.0
-	gitlab.com/nvidia/cloud-native/go-nvlib v0.0.0-20230724091555-2c8c6ab21c7a
 	golang.org/x/exp v0.0.0-20210220032938-85be41e4509f
 	golang.org/x/net v0.10.0
 	google.golang.org/grpc v1.56.0
@@ -38,10 +38,11 @@ require (
 	k8s.io/kubelet v0.19.2
 	k8s.io/kubernetes v1.25.4
 	sigs.k8s.io/controller-runtime v0.13.1
+	tags.cncf.io/container-device-interface v0.6.2
 )
 
 require (
-	github.com/NVIDIA/go-nvml v0.12.0-1 // indirect
+	github.com/NVIDIA/go-nvml v0.12.0-1.0.20231020145430-e06766c5e74f // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/blang/semver/v4 v4.0.0 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
@@ -104,6 +105,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
+	tags.cncf.io/container-device-interface/specs-go v0.6.0 // indirect
 )
 
 replace (
