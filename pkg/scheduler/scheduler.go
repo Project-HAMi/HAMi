@@ -29,6 +29,7 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -136,14 +137,12 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*NodeInfo)
 	for {
-		nodes, err := s.kubeClient.CoreV1().Nodes().List(context.Background(), metav1.ListOptions{
-			//LabelSelector: "gpu=on",
-		})
+		nodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
 			return err
 		}
-		for _, val := range nodes.Items {
+		for _, val := range nodes {
 			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
@@ -191,8 +190,8 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				nodeInfo := &NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]DeviceInfo, 0)
-				found := false
 				for index, deviceinfo := range nodedevices {
+					found := false
 					_, ok := s.nodes[val.Name]
 					if ok {
 						for i1, val1 := range s.nodes[val.Name].Devices {
