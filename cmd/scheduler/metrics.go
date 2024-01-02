@@ -152,17 +152,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUDeviceAllocatedDesc := prometheus.NewDesc(
 		"vGPUPodsDeviceAllocated",
 		"vGPU Allocated from pods",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
 	)
 	ctrvGPUdeviceAllocatedMemoryPercentageDesc := prometheus.NewDesc(
 		"vGPUMemoryPercentage",
 		"vGPU memory percentage allocated from a container",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
 		"vGPUCorePercentage",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
