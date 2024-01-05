@@ -27,7 +27,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/klog/v2/klogr"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 )
 
@@ -40,12 +39,8 @@ func NewWebHook() (*admission.Webhook, error) {
 	if err := clientgoscheme.AddToScheme(schema); err != nil {
 		return nil, err
 	}
-	decoder, err := admission.NewDecoder(schema)
-	if err != nil {
-		return nil, err
-	}
+	decoder := admission.NewDecoder(schema)
 	wh := &admission.Webhook{Handler: &webhook{decoder: decoder}}
-	_ = wh.InjectLogger(klogr.New())
 	return wh, nil
 }
 
