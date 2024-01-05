@@ -194,3 +194,9 @@ Add a switch on cuda_control by set env "CUDA_DISABLE_ENV=true" in container
 ## v2.3.6
 
 Fix initialization error when using ray
+
+## v2.3.7
+
+Fix error when "N/A" is shown in command "nvidia-smi topo -m"
+Fix core utilization not working on some cases
+Adjust some documents
