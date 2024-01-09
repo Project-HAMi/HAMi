@@ -1,6 +1,6 @@
 module 4pd.io/k8s-vgpu
 
-go 1.20
+go 1.21
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.2.3
