@@ -8,13 +8,14 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/NVIDIA/gpu-monitoring-tools/bindings/go/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
+	"k8s.io/klog"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -144,44 +145,49 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	err := monitorpath(srPodList)
 	if err != nil {
-		fmt.Println("err=", err.Error())
+		klog.Error("err=", err.Error())
 	}
 	if clientset != nil {
-		err := nvml.Init()
-		if err != nil {
-			fmt.Println("nvml Init err=", err.Error())
+		nvret := nvml.Init()
+		if nvret != nvml.SUCCESS {
+			klog.Error("nvml Init err=", nvml.ErrorString(nvret))
 		}
-		devnum, err := nvml.GetDeviceCount()
-		var ii uint
-		if err != nil {
-			fmt.Println("nvml GetDeviceCount err=", err.Error())
+		devnum, nvret := nvml.DeviceGetCount()
+		if nvret != nvml.SUCCESS {
+			klog.Error("nvml GetDeviceCount err=", nvml.ErrorString(nvret))
 		} else {
-			for ii = 0; ii < devnum; ii++ {
-				hdev, err := nvml.NewDevice(ii)
-				if err != nil {
-					fmt.Println(err.Error())
+			for ii := 0; ii < devnum; ii++ {
+				hdev, nvret := nvml.DeviceGetHandleByIndex(ii)
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
 				}
-				hstatus, err := hdev.Status()
-				if err != nil {
-					fmt.Println("hstatus error", err.Error())
-					continue
+				memory, nvret := hdev.GetMemoryInfo_v2()
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
 				}
-				if hstatus.Memory.Global.Used != nil {
+				uuid, nvret := hdev.GetUUID()
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
+				} else {
 					ch <- prometheus.MustNewConstMetric(
 						hostGPUdesc,
 						prometheus.GaugeValue,
-						float64(*hstatus.Memory.Global.Used),
-						fmt.Sprint(ii), hdev.UUID,
+						float64(memory.Used),
+						fmt.Sprint(ii), uuid,
 					)
 				}
-				if hstatus.Utilization.GPU != nil {
+				util, nvret := hdev.GetUtilizationRates()
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
+				} else {
 					ch <- prometheus.MustNewConstMetric(
 						hostGPUUtilizationdesc,
 						prometheus.GaugeValue,
-						float64(*hstatus.Utilization.GPU),
-						fmt.Sprint(ii), hdev.UUID,
+						float64(util.Gpu),
+						fmt.Sprint(ii), uuid,
 					)
 				}
+
 			}
 		}
 
