@@ -62,7 +62,7 @@ func GetPendingPod(node string) (*v1.Pod, error) {
 			}
 		}
 	}
-	return nil, nil
+	return nil, fmt.Errorf("no binding pod found on node %s", node)
 }
 
 func DecodeNodeDevices(str string) ([]*api.DeviceInfo, error) {
