@@ -36,7 +36,6 @@ import (
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
-	"k8s.io/kubernetes/pkg/scheduler/framework"
 )
 
 type Scheduler struct {
@@ -235,17 +234,6 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 // InspectAllNodesUsage is used by metrics monitor
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.overviewstatus
-}
-
-// GenerateNodeMapAndSlice returns the nodeMap and nodeSlice generated from ssn
-func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
-	nodeMap := make(map[string]*framework.NodeInfo)
-	for _, node := range nodes {
-		nodeInfo := framework.NewNodeInfo()
-		nodeInfo.SetNode(node)
-		nodeMap[node.Name] = nodeInfo
-	}
-	return nodeMap
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
