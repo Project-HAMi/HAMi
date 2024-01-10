@@ -38,7 +38,7 @@ func (r *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
 	if err != nil {
 		log.Fatalf("cmd.Run() failed with %s\n", err)
 	}
-	klog.InfoS("nvidia-smi topo -m ouput", "result", string(out))
+	klog.V(5).InfoS("nvidia-smi topo -m ouput", "result", string(out))
 	return parseNvidiaNumaInfo(idx, string(out))
 }
 
@@ -53,7 +53,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 		// Many values are separated by two tabs, but this actually represents 5 values instead of 7
 		// So add logic to remove multiple tabs
 		words := strings.Split(strings.ReplaceAll(val, "\t\t", "\t"), "\t")
-		klog.InfoS("parseNumaInfo", "words", words)
+		klog.V(5).InfoS("parseNumaInfo", "words", words)
 		// get numa affinity column number
 		if index == 0 {
 			for columnIndex, headerVal := range words {
@@ -73,13 +73,12 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 				if strings.Contains(headerVal, "NUMA Affinity") {
 					// The header is one column less than the actual row.
 					numaAffinityColumnIndex = columnIndex
-					klog.Infoln("numaAffinityColumn", numaAffinityColumnIndex)
 					continue
 				}
 			}
 			continue
 		}
-		klog.InfoS("nvidia-smi topo -m row output", "row output", words, "length", len(words))
+		klog.V(5).InfoS("nvidia-smi topo -m row output", "row output", words, "length", len(words))
 		if strings.Contains(words[0], fmt.Sprint(idx)) {
 			if words[numaAffinityColumnIndex] == "N/A" {
 				klog.InfoS("current card has not established numa topology", "gpu row info", words, "index", idx)
@@ -122,7 +121,8 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 			klog.Error("nvml get name error ret=", ret)
 			panic(0)
 		}
-		registeredmem := int32(memory.Total)
+
+		registeredmem := int32(memory.Total / 1024 / 1024)
 		if *util.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
