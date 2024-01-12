@@ -47,10 +47,11 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	_, ok := m.pods[pod.UID]
+	klog.Infof("prepare to add pod %s in namespace %s under node %s", pod.Name, pod.Namespace, nodeID)
 	if !ok {
 		pi := &podInfo{Name: pod.Name, Uid: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
 		m.pods[pod.UID] = pi
-		klog.Info(pod.Name + "Added")
+		klog.Infof("finish to add pod %s in namespace %s under node %s", pod.Name, pod.Namespace, nodeID)
 	}
 }
 
@@ -58,12 +59,15 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	pi, ok := m.pods[pod.UID]
+	klog.Infof("prepare to delete pod %s in namespace %s", pod.Name, pod.Namespace)
 	if ok {
 		klog.Infof(pi.Name + " deleted")
 		delete(m.pods, pod.UID)
+		klog.Infof("finish to delete pod %s in namespace %s", pod.Name, pod.Namespace)
 	}
 }
 
 func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+	klog.Infof("prepare to get all scheduled pods with %d pods", len(m.pods))
 	return m.pods, nil
 }

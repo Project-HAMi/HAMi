@@ -18,7 +18,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-const containerpath = "/usr/local/vgpu/containers"
+var containerpath = os.Getenv("HOOK_PATH") + "/vgpu/containers"
 
 type podusage struct {
 	idstr string

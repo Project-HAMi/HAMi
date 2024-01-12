@@ -336,12 +336,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 				response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 
-				/*tmp := response.Envs["NVIDIA_VISIBLE_DEVICES"]
-				if i > 0 {
-					response.Envs["NVIDIA_VISIBLE_DEVICES"] = fmt.Sprintf("%v,%v", tmp, dev.UUID)
-				} else {
-					response.Envs["NVIDIA_VISIBLE_DEVICES"] = dev.UUID
-				}*/
 			}
 			response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/usr/local/vgpu/%v.cache", uuid.New().String())
