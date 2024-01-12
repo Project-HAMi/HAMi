@@ -92,3 +92,6 @@ spec:
       {{- if .Values.scheduler.tolerations }}
       tolerations: {{ toYaml .Values.scheduler.tolerations | nindent 8 }}
       {{- end }}
+      {{- if .Values.scheduler.nodeName }}
+      nodeName: {{ .Values.scheduler.nodeName }}
+      {{- end }}
