@@ -173,6 +173,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 								n, err := util.GetNode(val.Name)
 								if err != nil {
 									klog.Errorln("get node failed", err.Error())
+									continue
 								}
 								util.PatchNodeAnnotations(n, tmppat)
 								continue
@@ -188,6 +189,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
+						continue
 					}
 					util.PatchNodeAnnotations(n, tmppat)
 				}
