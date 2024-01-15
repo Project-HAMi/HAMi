@@ -13,6 +13,7 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 var cgroupDriver int
@@ -109,7 +110,7 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
 		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
 	}
-	fmt.Println("filename=", filename)
+	klog.Infof("filename=%s", filename)
 	content, ferr := os.ReadFile(filename)
 	if ferr != nil {
 		return ferr
@@ -151,9 +152,9 @@ func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
 		}
 		if idx < len(usedGPUHostArray) {
 			if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
-				fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
+				klog.Infof("Assign host pid to pid instead %v %v %v", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
 				sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
-				fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
+				klog.Infof("val=%v %v", val.hostpid, sr.sr.procs[idx].hostpid)
 			}
 		}
 	}
@@ -226,27 +227,27 @@ func Observe(srlist *map[string]podusage) error {
 		}
 		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.recentKernel >= 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to on %v", idx)
 				(*srlist)[idx].sr.recentKernel = -1
 			}
 		} else {
 			if (*srlist)[idx].sr.recentKernel < 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to off %v", idx)
 				(*srlist)[idx].sr.recentKernel = 0
 			}
 		}
 		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.utilizationSwitch != 1 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to on %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 1
 			}
 		} else {
 			if (*srlist)[idx].sr.utilizationSwitch != 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to off %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 0
 			}
 		}
@@ -258,12 +259,11 @@ func watchAndFeedback() {
 	nvml.Init()
 	for {
 		time.Sleep(time.Second * 5)
-		err := monitorpath(srPodList)
+		err := monitorPath(srPodList)
 		if err != nil {
-			fmt.Println("monitorPath failed", err.Error())
+			klog.Error("monitorPath failed", err.Error())
 		}
-		//fmt.Println("watchAndFeedback", srPodList)
+		klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
 		Observe(&srPodList)
-
 	}
 }

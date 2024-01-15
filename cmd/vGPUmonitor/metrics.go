@@ -143,7 +143,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	if srPodList == nil {
 		srPodList = make(map[string]podusage)
 	}
-	err := monitorpath(srPodList)
+	err := monitorPath(srPodList)
 	if err != nil {
 		klog.Error("err=", err.Error())
 	}

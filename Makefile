@@ -1,15 +1,14 @@
-GO=go
-GO111MODULE=on
-CMDS=scheduler vGPUmonitor
-DEVICES=mlu nvidia
-OUTPUT_DIR=bin
+include version.mk
 
-VERSION ?= unknown
 
 all: build
 
 docker:
-	docker build . -f=docker/Dockerfile
+	docker build \
+	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
+	--build-arg TARGET_ARCH=${TARGET_ARCH} \
+	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
+	. -f=docker/Dockerfile -t ${IMG_TAG}
 
 tidy:
 	$(GO) mod tidy

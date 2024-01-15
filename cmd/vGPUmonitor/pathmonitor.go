@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -16,19 +15,37 @@ import (
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
-
-var containerpath = os.Getenv("HOOK_PATH") + "/vgpu/containers"
 
 type podusage struct {
 	idstr string
 	sr    *sharedRegionT
 }
 
-var lock sync.Mutex
+var (
+	containerPath string
+	lock          sync.Mutex
+)
+
+func init() {
+	containerPath = getContainerPath()
+	if containerPath == "" {
+		klog.Fatal("containerPath not set")
+	}
+}
+
+func getContainerPath() string {
+	hookPath := os.Getenv("HOOK_PATH")
+	if hookPath == "" {
+		klog.Fatal("HOOK_PATH not set")
+		return ""
+	}
+	return hookPath + "/containers"
+}
 
 func checkfiles(fpath string) (*sharedRegionT, error) {
-	fmt.Println("Checking path", fpath)
+	klog.Infof("Checking path %s", fpath)
 	files, err := ioutil.ReadDir(fpath)
 	if err != nil {
 		return nil, err
@@ -53,9 +70,9 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 		}
 		sr, err := getvGPUMemoryInfo(&nc)
 		if err != nil {
-			fmt.Println("err=", err.Error())
+			klog.Infof("getvGPUMemoryInfo failed %s", err.Error())
 		} else {
-			fmt.Println("sr=", sr.utilizationSwitch, sr.recentKernel, sr.priority)
+			klog.Infof("getvGPUMemoryInfo sr=%v", sr)
 			return sr, nil
 		}
 	}
@@ -71,10 +88,10 @@ func checkpodvalid(name string, pods *v1.PodList) bool {
 	return false
 }
 
-func monitorpath(podmap map[string]podusage) error {
+func monitorPath(podmap map[string]podusage) error {
 	lock.Lock()
 	defer lock.Unlock()
-	files, err := ioutil.ReadDir(containerpath)
+	files, err := ioutil.ReadDir(getContainerPath())
 	if err != nil {
 		return err
 	}
@@ -83,12 +100,11 @@ func monitorpath(podmap map[string]podusage) error {
 		return nil
 	}
 	for _, val := range files {
-		//fmt.Println("val=", val.Name())
-		dirname := containerpath + "/" + val.Name()
+		dirname := getContainerPath() + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
 		if err1 != nil || !checkpodvalid(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
-				fmt.Println("removing" + dirname)
+				klog.Infof("Removing %s", dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
 				delete(podmap, dirname)
 				err2 := os.RemoveAll(dirname)
@@ -99,10 +115,10 @@ func monitorpath(podmap map[string]podusage) error {
 		} else {
 			_, ok := podmap[dirname]
 			if !ok {
-				fmt.Println("Adding ctr", dirname)
+				klog.Infof("Adding ctr %s", dirname)
 				sr, err2 := checkfiles(dirname)
 				if err2 != nil {
-					//fmt.Println("err2=", err2.Error())
+					klog.Infof("checkfiles failed %s", err2.Error())
 					return err2
 				}
 				if sr == nil {
@@ -130,17 +146,8 @@ func serveinfo(ch chan error) {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	vGPUmonitor.RegisterNodeVGPUInfoServer(s, &server{})
-	fmt.Println("server listening at", lis.Addr())
+	klog.Infof("server listening at", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
-	} /*
-		for {
-			val, err := monitorpath()
-			if err != nil {
-				ch <- err
-				break
-			}
-
-			time.Sleep(time.Second * 10)
-		}*/
+	}
 }
