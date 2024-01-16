@@ -1,19 +1,21 @@
 package main
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog"
 )
@@ -32,6 +34,7 @@ import (
 type ClusterManager struct {
 	Zone string
 	// Contains many more fields not listed in this example.
+	PodLister listerscorev1.PodLister
 }
 
 // ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
@@ -191,18 +194,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 
-		pods, err := clientset.CoreV1().Pods("").List(context.TODO(), v1.ListOptions{})
+		pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
 		if err != nil {
 			fmt.Println("err=", err.Error())
 		}
-		for _, val := range pods.Items {
+		for _, val := range pods {
 			for sridx := range srPodList {
 				if srPodList[sridx].sr == nil {
 					continue
 				}
 				pod_uid := strings.Split(srPodList[sridx].idstr, "_")[0]
 				ctr_name := strings.Split(srPodList[sridx].idstr, "_")[1]
-				fmt.Println("compareing", val.UID, pod_uid)
 				if strings.Compare(string(val.UID), pod_uid) == 0 {
 					fmt.Println("Pod matched!", val.Name, val.Namespace, val.Labels)
 					for _, ctr := range val.Spec.Containers {
@@ -260,6 +262,12 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	c := &ClusterManager{
 		Zone: zone,
 	}
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(clientset, time.Hour*1)
+	c.PodLister = informerFactory.Core().V1().Pods().Lister()
+	stopCh := make(chan struct{})
+	informerFactory.Start(stopCh)
+
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
