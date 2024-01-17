@@ -141,7 +141,9 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 			klog.Errorln("nodes list failed", err.Error())
 			return err
 		}
+		nodeNames := []string{}
 		for _, val := range nodes {
+			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
@@ -228,6 +230,11 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
 				}
 			}
+		}
+		_, _, err = s.getNodesUsage(&nodeNames, nil)
+		if err != nil {
+			klog.Errorln("get node usage failed", err.Error())
+			return err
 		}
 		time.Sleep(time.Second * 15)
 	}
