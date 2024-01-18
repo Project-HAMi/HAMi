@@ -13,6 +13,7 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 var cgroupDriver int
@@ -226,27 +227,27 @@ func Observe(srlist *map[string]podusage) error {
 		}
 		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.recentKernel >= 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to on %v", idx)
 				(*srlist)[idx].sr.recentKernel = -1
 			}
 		} else {
 			if (*srlist)[idx].sr.recentKernel < 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting Blocking to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to off %v", idx)
 				(*srlist)[idx].sr.recentKernel = 0
 			}
 		}
 		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
 			if (*srlist)[idx].sr.utilizationSwitch != 1 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to on", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to on %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 1
 			}
 		} else {
 			if (*srlist)[idx].sr.utilizationSwitch != 0 {
-				fmt.Println("utSwitchon=", utSwitchOn)
-				fmt.Println("Setting UtilizationSwitch to off", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to off %v", idx)
 				(*srlist)[idx].sr.utilizationSwitch = 0
 			}
 		}
@@ -260,9 +261,9 @@ func watchAndFeedback() {
 		time.Sleep(time.Second * 5)
 		err := monitorpath(srPodList)
 		if err != nil {
-			fmt.Println("monitorPath failed", err.Error())
+			klog.Errorf("monitorPath failed %v", err.Error())
 		}
-		//fmt.Println("watchAndFeedback", srPodList)
+		klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
 		Observe(&srPodList)
 
 	}

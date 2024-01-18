@@ -160,10 +160,10 @@ func start(c *cli.Context, flags []cli.Flag) error {
 	defer watcher.Close()
 
 	/*Loading config files*/
-	fmt.Println("NodeName=", util.NodeName)
+	klog.Infof("Start working on node %s", util.NodeName)
 	err = readFromConfigFile()
 	if err != nil {
-		fmt.Printf("failed to load config file %s", err.Error())
+		klog.Errorf("failed to load config file %s", err.Error())
 	}
 
 	klog.Info("Starting OS watcher.")
