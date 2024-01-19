@@ -142,7 +142,7 @@ func getsrlist() map[string]podusage {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
-	fmt.Println("begin collect")
+	klog.Infof("Starting to collect metrics for vGPUMonitor")
 	if srPodList == nil {
 		srPodList = make(map[string]podusage)
 	}
@@ -276,8 +276,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 func initmetrics() {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
-	fmt.Println("Initializing metrics...")
-
+	klog.Infof("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
 	config, err := rest.InClusterConfig()

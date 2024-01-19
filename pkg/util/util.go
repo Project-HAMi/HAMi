@@ -103,7 +103,7 @@ func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
 	for _, val := range dlist {
 		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + ":"
 	}
-	klog.V(6).Infoln("Encoded node Devices", tmp)
+	klog.Infof("Encoded node Devices: %s", tmp)
 	return tmp
 }
 
@@ -112,7 +112,7 @@ func EncodeContainerDevices(cd ContainerDevices) string {
 	for _, val := range cd {
 		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + ":"
 	}
-	fmt.Println("Encoded container Devices=", tmp)
+	klog.Infof("Encoded container Devices: %s", tmp)
 	return tmp
 	//return strings.Join(cd, ",")
 }
@@ -122,6 +122,7 @@ func EncodePodDevices(pd PodDevices) string {
 	for _, cd := range pd {
 		ss = append(ss, EncodeContainerDevices(cd))
 	}
+	klog.Infof("Encoded pod Devices: %s", strings.Join(ss, ";"))
 	return strings.Join(ss, ";")
 }
 
@@ -132,7 +133,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	cd := strings.Split(str, ":")
 	contdev := ContainerDevices{}
 	tmpdev := ContainerDevice{}
-	//fmt.Println("before container device", str)
+	klog.Infof("Start to decode container device %s", str)
 	if len(str) == 0 {
 		return ContainerDevices{}, nil
 	}
@@ -152,7 +153,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			contdev = append(contdev, tmpdev)
 		}
 	}
-	//fmt.Println("Decoded container device", contdev)
+	klog.Infof("Finished decoding container devices. Total devices: %d", len(contdev))
 	return contdev, nil
 }
 
