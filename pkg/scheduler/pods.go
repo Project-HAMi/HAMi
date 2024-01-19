@@ -50,7 +50,7 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 	if !ok {
 		pi := &podInfo{Name: pod.Name, Uid: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
 		m.pods[pod.UID] = pi
-		klog.Info(pod.Name + "Added")
+		klog.Infof("Pod added: Name: %s, Uid: %s, Namespace: %s, NodeID: %s", pod.Name, pod.UID, pod.Namespace, nodeID)
 	}
 }
 
@@ -59,7 +59,7 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	defer m.mutex.Unlock()
 	pi, ok := m.pods[pod.UID]
 	if ok {
-		klog.Infof(pi.Name + " deleted")
+		klog.Infof("Deleted pod %s with node ID %s", pi.Name, pi.NodeID)
 		delete(m.pods, pod.UID)
 	}
 }

@@ -3,7 +3,6 @@ package main
 import (
 	"context"
 	"errors"
-	"fmt"
 	"io/ioutil"
 	"log"
 	"net"
@@ -16,6 +15,7 @@ import (
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
 )
 
 const containerpath = "/usr/local/vgpu/containers"
@@ -28,7 +28,7 @@ type podusage struct {
 var lock sync.Mutex
 
 func checkfiles(fpath string) (*sharedRegionT, error) {
-	fmt.Println("Checking path", fpath)
+	klog.Infof("Checking path %s", fpath)
 	files, err := ioutil.ReadDir(fpath)
 	if err != nil {
 		return nil, err
@@ -53,9 +53,9 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 		}
 		sr, err := getvGPUMemoryInfo(&nc)
 		if err != nil {
-			fmt.Println("err=", err.Error())
+			klog.Errorf("getvGPUMemoryInfo failed: %v", err)
 		} else {
-			fmt.Println("sr=", sr.utilizationSwitch, sr.recentKernel, sr.priority)
+			klog.Infof("getvGPUMemoryInfo success with utilizationSwitch=%d, recentKernel=%d, priority=%d", sr.utilizationSwitch, sr.recentKernel, sr.priority)
 			return sr, nil
 		}
 	}
@@ -88,21 +88,22 @@ func monitorpath(podmap map[string]podusage) error {
 		info, err1 := os.Stat(dirname)
 		if err1 != nil || !checkpodvalid(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
-				fmt.Println("removing" + dirname)
+				klog.Infof("Removing dirname %s in in monitorpath", dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
 				delete(podmap, dirname)
 				err2 := os.RemoveAll(dirname)
 				if err2 != nil {
+					klog.Errorf("Failed to remove dirname: %s , error: %v", dirname, err)
 					return err2
 				}
 			}
 		} else {
 			_, ok := podmap[dirname]
 			if !ok {
-				fmt.Println("Adding ctr", dirname)
+				klog.Infof("Adding ctr dirname %s in monitorpath", dirname)
 				sr, err2 := checkfiles(dirname)
 				if err2 != nil {
-					//fmt.Println("err2=", err2.Error())
+					klog.Errorf("Failed to checkfiles dirname: %s , error: %v", dirname, err)
 					return err2
 				}
 				if sr == nil {
@@ -130,7 +131,7 @@ func serveinfo(ch chan error) {
 		log.Fatalf("failed to listen: %v", err)
 	}
 	vGPUmonitor.RegisterNodeVGPUInfoServer(s, &server{})
-	fmt.Println("server listening at", lis.Addr())
+	klog.Infof("server listening at %v", lis.Addr())
 	if err := s.Serve(lis); err != nil {
 		log.Fatalf("failed to serve: %v", err)
 	} /*
