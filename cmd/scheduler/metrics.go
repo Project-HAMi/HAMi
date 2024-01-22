@@ -221,7 +221,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
-func initmetrics() {
+func initmetrics(bindAddress string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	klog.Infof("Initializing metrics for scheduler")
@@ -239,5 +239,5 @@ func initmetrics() {
 	//)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(":9395", nil))
+	log.Fatal(http.ListenAndServe(bindAddress, nil))
 }

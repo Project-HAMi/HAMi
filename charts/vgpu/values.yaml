@@ -37,6 +37,7 @@ scheduler:
   nodeName: ""
   defaultMem: 0
   defaultCores: 0
+  metricsBindAddress: ":9395"
   kubeScheduler:
     imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
