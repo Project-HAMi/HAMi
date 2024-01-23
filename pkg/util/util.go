@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -292,6 +293,17 @@ func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 		klog.Infof("patch pod %v failed, %v", node.Name, err)
 	}
 	return err
+}
+
+func PatchHandshakeToNodeAnnotation(nodeName, handshake, handshakeValue string) error {
+	tmpAnno := make(map[string]string)
+	tmpAnno[handshake] = fmt.Sprintf("%s_%s", handshakeValue, time.Now().String())
+	n, err := GetNode(nodeName)
+	if err != nil {
+		klog.Errorln("get node failed", err.Error())
+		return err
+	}
+	return PatchNodeAnnotations(n, tmpAnno)
 }
 
 func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
