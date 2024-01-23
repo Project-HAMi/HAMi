@@ -37,3 +37,5 @@ jobs:
           go-version: '1.21'
       - run: make tidy
       - run: make lint
+      - name: vendor
+        run: hack/verify-vendor.sh
