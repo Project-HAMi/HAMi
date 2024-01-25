@@ -27,6 +27,7 @@ podSecurityPolicy:
   enabled: false
 
 global:
+  gpuHookPath: /usr/local
   labels: {}
   annotations: {}
 

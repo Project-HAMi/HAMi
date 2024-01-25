@@ -3,10 +3,11 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/ioutil"
-	"log"
 	"net"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -18,14 +19,22 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const containerpath = "/usr/local/vgpu/containers"
-
 type podusage struct {
 	idstr string
 	sr    *sharedRegionT
 }
 
-var lock sync.Mutex
+var (
+	containerPath string
+	lock          sync.Mutex
+)
+
+func init() {
+	hookPath, ok := os.LookupEnv("HOOK_PATH")
+	if ok {
+		containerPath = filepath.Join(hookPath, "containers")
+	}
+}
 
 func checkfiles(fpath string) (*sharedRegionT, error) {
 	klog.Infof("Checking path %s", fpath)
@@ -62,7 +71,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	return nil, nil
 }
 
-func checkpodvalid(name string, pods *v1.PodList) bool {
+func isVaildPod(name string, pods *v1.PodList) bool {
 	for _, val := range pods.Items {
 		if strings.Contains(name, string(val.UID)) {
 			return true
@@ -74,7 +83,7 @@ func checkpodvalid(name string, pods *v1.PodList) bool {
 func monitorpath(podmap map[string]podusage) error {
 	lock.Lock()
 	defer lock.Unlock()
-	files, err := ioutil.ReadDir(containerpath)
+	files, err := ioutil.ReadDir(containerPath)
 	if err != nil {
 		return err
 	}
@@ -83,10 +92,9 @@ func monitorpath(podmap map[string]podusage) error {
 		return nil
 	}
 	for _, val := range files {
-		//fmt.Println("val=", val.Name())
-		dirname := containerpath + "/" + val.Name()
+		dirname := containerPath + "/" + val.Name()
 		info, err1 := os.Stat(dirname)
-		if err1 != nil || !checkpodvalid(info.Name(), pods) {
+		if err1 != nil || !isVaildPod(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
 				klog.Infof("Removing dirname %s in in monitorpath", dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))
@@ -124,24 +132,19 @@ type server struct {
 	vGPUmonitor.UnimplementedNodeVGPUInfoServer
 }
 
-func serveinfo(ch chan error) {
+func serveInfo(ch chan error) {
 	s := grpc.NewServer()
 	lis, err := net.Listen("tcp", ":9395")
 	if err != nil {
-		log.Fatalf("failed to listen: %v", err)
+		ch <- fmt.Errorf("failed to listen: %v", err)
+		// return respect the error, so the goroutine can end
+		return
 	}
 	vGPUmonitor.RegisterNodeVGPUInfoServer(s, &server{})
 	klog.Infof("server listening at %v", lis.Addr())
-	if err := s.Serve(lis); err != nil {
-		log.Fatalf("failed to serve: %v", err)
-	} /*
-		for {
-			val, err := monitorpath()
-			if err != nil {
-				ch <- err
-				break
-			}
-
-			time.Sleep(time.Second * 10)
-		}*/
+	if err = s.Serve(lis); err != nil {
+		ch <- fmt.Errorf("failed to serve: %v", err)
+		// return respect the error, so the goroutine can end
+		return
+	}
 }
