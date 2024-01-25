@@ -1,11 +1,9 @@
-ARG GOLANG_IMAGE=golang:1.21-bullseye
-ARG NVIDIA_IMAGE=nvidia/cuda:11.2.2-base-ubuntu20.04
+ARG GOLANG_IMAGE
+ARG NVIDIA_IMAGE
 FROM $GOLANG_IMAGE AS build
 
 ADD . /k8s-vgpu
-#ENV GOPRIVATE="gitlab.4pd.io/*"
 ARG GOPROXY=https://goproxy.cn,direct
-ARG VERSION="unknown"
 RUN apt-get update && apt-get -y install libhwloc-dev libdrm-dev
 RUN cd /k8s-vgpu && make all
 
@@ -15,7 +13,7 @@ ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility
 
-ARG VERSION="unknown"
+ARG VERSION
 LABEL version="$VERSION"
 LABEL maintainer="opensource@4paradigm.com"
 
@@ -27,5 +25,5 @@ COPY ./lib/mlu/cntopo /usr/bin/
 COPY ./lib/mlu/libcndev.so /usr/lib/
 
 ENV PATH="/k8s-vgpu/bin:${PATH}"
-
-ENTRYPOINT ["entrypoint.sh"]
+ARG DEST_DIR
+ENTRYPOINT ["/bin/bash", "-c", "entrypoint.sh  $DEST_DIR"]

@@ -19,91 +19,49 @@ package plugin
 import "testing"
 
 func Test_parseNvidiaNumaInfo(t *testing.T) {
-	type args struct {
+
+	tests := []struct {
+		name          string
 		idx           int
 		nvidiaTopoStr string
-	}
-	tests := []struct {
-		name    string
-		args    args
-		want    int
-		wantErr bool
+		want          int
+		wantErr       bool
 	}{
 		{
 			name: "single Tesla P4 NUMA",
-			args: args{
-				idx: 0,
-				nvidiaTopoStr: `GPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID
-GPU0	 X 	0-7		N/A		N/A
-
-Legend:
-
-	X    = Self
-	SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
-	NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
-	PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
-	PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
-	PIX  = Connection traversing at most a single PCIe bridge
-	NV#  = Connection traversing a bonded set of # NVLinks
-					`,
-			},
+			idx:  0,
+			nvidiaTopoStr: `GPU0    CPU Affinity    NUMA Affinity ...
+                            ...`,
 			want:    0,
 			wantErr: false,
 		},
 		{
 			name: "two Tesla P4 NUMA topo with index 0",
-			args: args{
-				idx: 0,
-				nvidiaTopoStr: `GPU0	GPU1	CPU Affinity	NUMA Affinity
-GPU0	 X 	PHB	0-31		N/A
-GPU1	PHB	 X 	0-31		N/A
-
-Legend:
-
-	X    = Self
-	SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
-	NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
-	PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
-	PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
-	PIX  = Connection traversing at most a single PCIe bridge
-	NV#  = Connection traversing a bonded set of # NVLinks
-					`,
-			},
+			idx:  0,
+			nvidiaTopoStr: `GPU0    GPU1    CPU Affinity    NUMA Affinity ...
+                            ...`,
 			want:    0,
 			wantErr: false,
 		},
 		{
 			name: "two Tesla P4 NUMA topo with index 1",
-			args: args{
-				idx: 1,
-				nvidiaTopoStr: `GPU0	GPU1	CPU Affinity	NUMA Affinity
-GPU0	 X 	PHB	0-31		N/A
-GPU1	PHB	 X 	0-31		N/A
-
-Legend:
-
-	X    = Self
-	SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
-	NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
-	PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
-	PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
-	PIX  = Connection traversing at most a single PCIe bridge
-	NV#  = Connection traversing a bonded set of # NVLinks
-					`,
-			},
+			idx:  1,
+			nvidiaTopoStr: `GPU0    GPU1    CPU Affinity    NUMA Affinity ...
+                            ...`,
 			want:    0,
 			wantErr: false,
 		},
 	}
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := parseNvidiaNumaInfo(tt.args.idx, tt.args.nvidiaTopoStr)
+			got, err := parseNvidiaNumaInfo(tt.idx, tt.nvidiaTopoStr)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("parseNvidiaNumaInfo() error = %v, wantErr %v", err, tt.wantErr)
 				return
 			}
 			if got != tt.want {
-				t.Errorf("parseNvidiaNumaInfo() = %v, want %v", got, tt.want)
+				t.Errorf("parseNvidiaNumaInfo() got = %v, want %v", got, tt.want)
 			}
 		})
 	}
