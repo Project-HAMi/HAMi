@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"strings"
 
@@ -80,7 +79,7 @@ func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 }
 
 func readFromConfigFile() error {
-	jsonbyte, err := ioutil.ReadFile("/config/config.json")
+	jsonbyte, err := os.ReadFile("/config/config.json")
 	if err != nil {
 		return err
 	}

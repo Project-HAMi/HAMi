@@ -18,8 +18,8 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"log"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -132,7 +132,7 @@ func (d *Device) ValidateSriovNum(num int) error {
 }
 
 func getNumFromFile(path string) (int, error) {
-	output, err := ioutil.ReadFile(path)
+	output, err := os.ReadFile(path)
 	if err != nil {
 		return 0, err
 	}
