@@ -76,7 +76,8 @@ scheduler:
     nodeSelector: {}
     tolerations: []
     runAsUser: 2000
-
+  mutatingWebhookConfiguration:
+    failurePolicy: Ignore
   service:
     httpPort: 443
     schedulerPort: 31998
