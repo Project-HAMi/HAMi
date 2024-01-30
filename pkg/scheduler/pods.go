@@ -65,5 +65,6 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 }
 
 func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+	klog.Infof("Getting all scheduled pods with %d nums", len(m.pods))
 	return m.pods, nil
 }
