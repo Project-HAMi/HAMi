@@ -17,8 +17,9 @@
 package config
 
 var (
-	HttpBind      string
-	SchedulerName string
-	DefaultMem    int32
-	DefaultCores  int32
+	HttpBind           string
+	SchedulerName      string
+	DefaultMem         int32
+	DefaultCores       int32
+	MetricsBindAddress string
 )
