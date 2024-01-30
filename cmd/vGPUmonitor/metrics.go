@@ -164,10 +164,20 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				if nvret != nvml.SUCCESS {
 					klog.Error(nvml.ErrorString(nvret))
 				}
-				memory, nvret := hdev.GetMemoryInfo_v2()
-				if nvret != nvml.SUCCESS {
-					klog.Error(nvml.ErrorString(nvret))
+				memoryUsed := 0
+				memory, ret := hdev.GetMemoryInfo_v2()
+				if ret == nvml.SUCCESS {
+					memoryUsed = int(memory.Used)
+				} else {
+					klog.Error("nvml get memory_v2 error ret=", ret)
+					memory_v1, ret := hdev.GetMemoryInfo()
+					if ret != nvml.SUCCESS {
+						klog.Error("nvml get memory error ret=", ret)
+					} else {
+						memoryUsed = int(memory_v1.Used)
+					}
 				}
+
 				uuid, nvret := hdev.GetUUID()
 				if nvret != nvml.SUCCESS {
 					klog.Error(nvml.ErrorString(nvret))
@@ -175,7 +185,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					ch <- prometheus.MustNewConstMetric(
 						hostGPUdesc,
 						prometheus.GaugeValue,
-						float64(memory.Used),
+						float64(memoryUsed),
 						fmt.Sprint(ii), uuid,
 					)
 				}

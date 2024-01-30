@@ -106,10 +106,18 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 			klog.Errorln("nvml new device by index error idx=", idx, "err=", ret)
 			panic(0)
 		}
+		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo_v2()
-		if ret != nvml.SUCCESS {
-			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+		if ret == nvml.SUCCESS {
+			memoryTotal = int(memory.Total)
+		} else {
+			klog.Error("nvml get memory_v2 error ret=", ret)
+			memory_v1, ret := ndev.GetMemoryInfo()
+			if ret != nvml.SUCCESS {
+				klog.Error("nvml get memory_v2 error ret=", ret)
+				panic(0)
+			}
+			memoryTotal = int(memory_v1.Total)
 		}
 		UUID, ret := ndev.GetUUID()
 		if ret != nvml.SUCCESS {
@@ -122,7 +130,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 			panic(0)
 		}
 
-		registeredmem := int32(memory.Total / 1024 / 1024)
+		registeredmem := int32(memoryTotal / 1024 / 1024)
 		if *util.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
