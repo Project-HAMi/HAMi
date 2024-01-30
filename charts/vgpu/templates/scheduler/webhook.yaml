@@ -15,7 +15,7 @@ webhooks:
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
       {{- end }}
-    failurePolicy: Fail
+    failurePolicy: {{ .Values.scheduler.mutatingWebhookConfiguration.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.4pd.io
     namespaceSelector:
