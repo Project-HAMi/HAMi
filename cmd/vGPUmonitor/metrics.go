@@ -196,7 +196,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 
 		pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
 		if err != nil {
-			fmt.Println("err=", err.Error())
+			klog.Error("failed to list pods with err=", err.Error())
 		}
 		for _, val := range pods {
 			for sridx := range srPodList {

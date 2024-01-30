@@ -17,6 +17,7 @@
 package plugin
 
 import (
+	"fmt"
 	"testing"
 
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
@@ -167,5 +168,17 @@ func TestCDIAllocateResponse(t *testing.T) {
 			require.Nil(t, err)
 			require.EqualValues(t, &tc.expectedResponse, &response)
 		})
+	}
+}
+
+func Test_pathGeneration(t *testing.T) {
+	hostHookPath := "/usr/local/vgpu"
+	uid := "testuid"
+	cname := "testcname"
+	expected := "/usr/local/vgpu/containers/testuid_testcname"
+	result := fmt.Sprintf("%s/containers/%s_%s", hostHookPath, uid, cname)
+
+	if expected != result {
+		t.Errorf("Expected %s, got %s", expected, result)
 	}
 }
