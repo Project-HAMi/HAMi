@@ -49,7 +49,7 @@ type NodeUsage struct {
 
 type nodeManager struct {
 	nodes map[string]*NodeInfo
-	mutex sync.Mutex
+	mutex sync.RWMutex
 }
 
 func (m *nodeManager) init() {
@@ -101,8 +101,8 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 }
 
 func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 	if n, ok := m.nodes[nodeID]; ok {
 		return n, nil
 	}
@@ -110,5 +110,7 @@ func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {
 }
 
 func (m *nodeManager) ListNodes() (map[string]*NodeInfo, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 	return m.nodes, nil
 }

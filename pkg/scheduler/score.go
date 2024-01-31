@@ -88,7 +88,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	tmpDevs := []util.ContainerDevice{}
+	var tmpDevs []util.ContainerDevice
 	for i := len(node.Devices) - 1; i >= 0; i-- {
 		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices[i].Id)
 		found, numa := checkType(annos, *node.Devices[i], k)
