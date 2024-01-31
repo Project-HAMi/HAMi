@@ -1,4 +1,11 @@
+# Output of the go coverage tool, specifically when used with LiteIDE
+*.out
+_tmp/
+_output/
 bin/
-*.sh
-.idea
-vendor
+
+# Dependency directories (remove the comment below to include it)
+# vendor/
+
+.idea/
+.vscode/
