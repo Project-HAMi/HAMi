@@ -13,6 +13,8 @@ spec:
           resources:
             requests:
               nvidia.com/gpu: 1
+              nvidia.com/gpumem-percentage: 50
             limits:
               nvidia.com/gpu: 1
+              nvidia.com/gpumem-percentage: 50
       restartPolicy: Never
