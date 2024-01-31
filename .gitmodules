@@ -1,0 +1,6 @@
+[submodule "HAMi-core"]
+	path = HAMi-core
+	url = https://github.com/Project-HAMi/HAMi-core.git
+[submodule "libvgpu"]
+	path = libvgpu
+	url = git@github.com:Project-HAMi/HAMi-core.git

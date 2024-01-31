@@ -27,7 +27,7 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 )
 
 //var version string

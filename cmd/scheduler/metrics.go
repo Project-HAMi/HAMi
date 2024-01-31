@@ -8,7 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 )
 
 // ClusterManager is an example for a system that might have been built without
