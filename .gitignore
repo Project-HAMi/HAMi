@@ -5,3 +5,4 @@ device_plugin.sh
 libvgpu/build
 updateso.sh
 .idea
+vendor
