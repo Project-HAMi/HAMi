@@ -1,6 +1,6 @@
 English version|[中文版](README_cn.md)
 
-<img src="https://github.com/Project-HAMi/HAMi/blob/libopensource/HAMi.jpg" width="200px">
+<img src="./HAMi.jpg" width="200px">
 
 # Heterogeneous AI Computing Virtualization Middleware
 
