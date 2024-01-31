@@ -44,9 +44,6 @@ spec:
               exec:
                 command: ["/bin/sh","-c", {{ printf "cp -f /k8s-vgpu/lib/nvidia/* %s/vgpu/" .Values.global.gpuHookPath | quote }}]
           command:
-          #  - sleep
-          #  - infinity
-          command:
             - nvidia-device-plugin
             - --resource-name={{ .Values.resourceName }}
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}

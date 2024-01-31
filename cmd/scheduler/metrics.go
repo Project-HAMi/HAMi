@@ -8,7 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -163,7 +163,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
 		"vGPUCorePercentage",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
