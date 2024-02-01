@@ -23,7 +23,7 @@ import (
 	"os"
 	"time"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/hygon/dcu"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/hygon/dcu"
 	"github.com/golang/glog"
 	"github.com/kubevirt/device-plugin-manager/pkg/dpm"
 )

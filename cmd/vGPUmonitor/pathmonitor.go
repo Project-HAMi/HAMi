@@ -11,7 +11,7 @@ import (
 	"sync"
 	"time"
 
-	vGPUmonitor "4pd.io/k8s-vgpu/cmd/vGPUmonitor/noderpc"
+	vGPUmonitor "github.com/Project-HAMi/HAMi/cmd/vGPUmonitor/noderpc"
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

@@ -23,10 +23,10 @@ import (
 	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
-	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
-	"4pd.io/k8s-vgpu/pkg/device/cambricon"
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/api"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
+	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type DevListFunc func() []*pluginapi.Device

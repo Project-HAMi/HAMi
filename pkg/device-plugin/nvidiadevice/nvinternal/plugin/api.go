@@ -16,7 +16,7 @@
 
 package plugin
 
-import "4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+import "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 
 // Interface defines the API for the plugin package
 type Interface interface {

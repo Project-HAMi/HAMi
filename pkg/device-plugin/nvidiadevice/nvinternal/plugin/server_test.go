@@ -20,9 +20,9 @@ import (
 	"fmt"
 	"testing"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"4pd.io/k8s-vgpu/pkg/util"
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/stretchr/testify/require"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )

@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"4pd.io/k8s-vgpu/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )

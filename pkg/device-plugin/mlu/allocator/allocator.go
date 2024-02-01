@@ -17,7 +17,7 @@ package allocator
 import (
 	"strings"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
 )
 
 type Allocator interface {

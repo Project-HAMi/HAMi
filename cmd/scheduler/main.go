@@ -18,13 +18,13 @@ package main
 import (
 	"net/http"
 
-	"4pd.io/k8s-vgpu/pkg/device"
-	"4pd.io/k8s-vgpu/pkg/version"
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/version"
 
-	"4pd.io/k8s-vgpu/pkg/scheduler"
-	"4pd.io/k8s-vgpu/pkg/scheduler/config"
-	"4pd.io/k8s-vgpu/pkg/scheduler/routes"
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
 	klog "k8s.io/klog/v2"

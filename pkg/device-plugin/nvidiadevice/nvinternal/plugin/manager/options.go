@@ -17,9 +17,9 @@
 package manager
 
 import (
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // Option is a function that configures a manager
