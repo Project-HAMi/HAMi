@@ -27,8 +27,12 @@ jobs:
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
         uses: actions/checkout@v2
 
-      - name: Checkout submodules
-        uses: textbook/git-checkout-submodule-action@2.1.1
+      - name: Checkout submodule
+        uses: Mushus/checkout-submodule@v1.0.1
+        with:
+          basePath: # optional, default is .
+          submodulePath: libvgpu 
+                
 
       - name: Setup Go environment
         uses: actions/setup-go@v5.0.0
