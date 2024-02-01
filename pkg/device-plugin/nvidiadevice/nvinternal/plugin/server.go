@@ -367,7 +367,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			os.Chmod("/tmp/vgpulock", 0777)
 			response.Mounts = append(response.Mounts,
 				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
-					HostPath: hostHookPath + "/libvgpu.so",
+					HostPath: hostHookPath + "/vgpu/libvgpu.so",
 					ReadOnly: true},
 				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 					HostPath: cacheFileHostDirectory,
@@ -385,7 +385,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			}
 			if !found {
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
-					HostPath: hostHookPath + "/ld.so.preload",
+					HostPath: hostHookPath + "/vgpu/ld.so.preload",
 					ReadOnly: true},
 				)
 			}
@@ -398,7 +398,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				})
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
 					ContainerPath: "/usr/bin/vgpuvalidator",
-					HostPath:      fmt.Sprintf("%s/vgpuvalidator", hostHookPath),
+					HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
 					ReadOnly:      true,
 				})
 			}

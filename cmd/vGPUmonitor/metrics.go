@@ -165,17 +165,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					klog.Error(nvml.ErrorString(nvret))
 				}
 				memoryUsed := 0
-				memory, ret := hdev.GetMemoryInfo_v2()
+				memory, ret := hdev.GetMemoryInfo()
 				if ret == nvml.SUCCESS {
 					memoryUsed = int(memory.Used)
 				} else {
-					klog.Error("nvml get memory_v2 error ret=", ret)
-					memory_v1, ret := hdev.GetMemoryInfo()
-					if ret != nvml.SUCCESS {
-						klog.Error("nvml get memory error ret=", ret)
-					} else {
-						memoryUsed = int(memory_v1.Used)
-					}
+					klog.Error("nvml get memory error ret=", ret)
 				}
 
 				uuid, nvret := hdev.GetUUID()
