@@ -23,7 +23,7 @@ export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
 export LATEST_VERSION="latest"
 export GOLANG_IMAGE="golang:1.21-bullseye"
-export NVIDIA_IMAGE="nvidia/cuda:11.2.2-base-ubuntu20.04"
+export NVIDIA_IMAGE="nvidia/cuda:12.2.0-devel-ubuntu20.04"
 export DEST_DIR=""
 
 IMAGE=${IMAGE-"4pdosc/k8s-vdevice"}

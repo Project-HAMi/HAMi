@@ -27,7 +27,7 @@ podSecurityPolicy:
   enabled: false
 
 global:
-  gpuHookPath: /usr/local
+  gpuHookPath: /usr/local/vgpu
   labels: {}
   annotations: {}
 
