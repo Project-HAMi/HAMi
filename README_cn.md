@@ -150,10 +150,10 @@ $ kubectl label nodes {nodeid} gpu=on
 
 <details> <summary> 安装 </summary>
 
-首先使用helm添加我们的vgpu repo
+首先使用helm添加我们的 repo
 
 ```
-helm repo add vgpu-charts https://4paradigm.github.io/k8s-vgpu-scheduler
+helm repo add hami-charts https://4paradigm.github.io/hami
 ```
 
 随后，使用下列指令获取集群服务端版本
@@ -165,7 +165,7 @@ kubectl version
 在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
 
 ```
-$ helm install vgpu vgpu-charts/vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+$ helm install hami hami-charts/vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
 
 你可以修改这里的[配置](docs/config_cn.md)来定制安装
@@ -183,9 +183,9 @@ $ kubectl get pods -n kube-system
 只需要更新helm repo，并重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
 
 ```
-$ helm uninstall vgpu -n kube-system
+$ helm uninstall hami -n kube-system
 $ helm repo update
-$ helm install vgpu vgpu -n kube-system
+$ helm install hami vgpu -n kube-system
 ```
 
 > **注意:** *如果你没有清理完任务就进行热更新的话，正在运行的任务可能会出现段错误等报错.*

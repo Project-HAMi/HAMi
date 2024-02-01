@@ -178,13 +178,13 @@ kubectl version
 Then, add our repo in helm
 
 ```
-helm repo add vgpu-charts https://4paradigm.github.io/k8s-vgpu-scheduler
+helm repo add hami-charts https://4paradigm.github.io/HAMi
 ```
 
 During installation, set the Kubernetes scheduler image version to match your Kubernetes server version. For instance, if your cluster server version is 1.16.8, use the following command for deployment:
 
 ```
-helm install vgpu vgpu-charts/vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+helm install hami hami-charts/vgpu --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
 
 Customize your installation by adjusting the [configs](docs/config.md).
@@ -204,9 +204,9 @@ If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* stat
 Upgrading HAMi to the latest version is a simple process, update the repository and restart the chart:
 
 ```
-helm uninstall vgpu -n kube-system
+helm uninstall hami -n kube-system
 helm repo update
-helm install vgpu vgpu -n kube-system
+helm install hami vgpu -n kube-system
 ```
 
 > **WARNING:** *If you upgrade HAMi without clearing your submitted tasks, it may result in segmentation fault.*
@@ -216,7 +216,7 @@ helm install vgpu vgpu -n kube-system
 <details> <summary> Uninstall </summary>
 
 ```
-helm uninstall vgpu -n kube-system
+helm uninstall hami -n kube-system
 ```
 
 > **NOTICE:** *Uninstallation won't kill running tasks.*
