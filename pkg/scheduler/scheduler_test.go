@@ -17,7 +17,7 @@
 package scheduler
 
 import (
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"

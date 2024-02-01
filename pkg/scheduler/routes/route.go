@@ -23,7 +23,7 @@ import (
 	"io"
 	"net/http"
 
-	"4pd.io/k8s-vgpu/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/apimachinery/pkg/types"

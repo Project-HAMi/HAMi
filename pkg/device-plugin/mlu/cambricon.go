@@ -21,7 +21,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 

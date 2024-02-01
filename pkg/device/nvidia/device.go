@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"strings"
 
-	"4pd.io/k8s-vgpu/pkg/api"
-	"4pd.io/k8s-vgpu/pkg/scheduler/config"
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/api"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 )
 

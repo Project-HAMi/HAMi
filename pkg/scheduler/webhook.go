@@ -22,8 +22,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"4pd.io/k8s-vgpu/pkg/device"
-	"4pd.io/k8s-vgpu/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"

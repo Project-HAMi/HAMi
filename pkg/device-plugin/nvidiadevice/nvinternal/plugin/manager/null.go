@@ -17,7 +17,7 @@
 package manager
 
 import (
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 )
 
 type null struct{}

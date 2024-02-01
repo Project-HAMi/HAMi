@@ -21,9 +21,9 @@ import (
 	"os/signal"
 	"syscall"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/fsnotify/fsnotify"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )

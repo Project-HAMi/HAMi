@@ -26,7 +26,7 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/mig"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 )
 
 const (

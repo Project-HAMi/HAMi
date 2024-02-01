@@ -19,7 +19,7 @@ package rm
 import (
 	"fmt"
 
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const (

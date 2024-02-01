@@ -17,9 +17,9 @@ package allocator
 import (
 	"sort"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cntopo"
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cntopo"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/ginkgo/extensions/table"
 	. "github.com/onsi/gomega"

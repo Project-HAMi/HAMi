@@ -19,7 +19,7 @@ import (
 	"os"
 	"strings"
 
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	flags "github.com/jessevdk/go-flags"
 )
 
