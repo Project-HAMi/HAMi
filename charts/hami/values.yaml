@@ -27,7 +27,7 @@ podSecurityPolicy:
   enabled: false
 
 global:
-  gpuHookPath: /usr/local/vgpu
+  gpuHookPath: /usr/local
   labels: {}
   annotations: {}
 
@@ -51,8 +51,7 @@ scheduler:
       - --leader-elect=false
       - -v=4
   extender:
-    image: "4pdosc/k8s-vdevice"
-    #image: "m7-ieg-pico-test01:5000/k8s-vgpu-test:latest"
+    image: "projecthami/hami"
     imagePullPolicy: IfNotPresent
     extraArgs:
       - --debug
@@ -88,9 +87,9 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "4pdosc/k8s-vdevice"
+  image: "projecthami/hami"
   
-  monitorimage: "4pdosc/k8s-vdevice"
+  monitorimage: "projecthami/hami"
   monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
   deviceSplitCount: 10
