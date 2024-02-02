@@ -15,7 +15,7 @@
 # limitations under the License.
 #
 
-if [ $1 == "device-plugin" ]; then
-cp -f /k8s-vgpu/lib/* $DEST_DIR
-fi
+# if [ $1 == "device-plugin" ]; then
+# cp -f /k8s-vgpu/lib/* $DEST_DIR/vgpu
+# fi
 exec "$@"

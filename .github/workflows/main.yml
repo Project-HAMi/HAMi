@@ -63,7 +63,7 @@ jobs:
 
       - run: make tidy
         # run: make proto
-      - run: bash ./hack/build.sh
+      - run: SHORT_VERSION="${BRANCH_NAME}" bash ./hack/build.sh
 
       - name: Publish Helm charts
         uses: stefanprodan/helm-gh-pages@master

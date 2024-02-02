@@ -94,7 +94,7 @@ spec:
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
             - name: HOOK_PATH
-              value: {{ .Values.global.gpuHookPath }}              
+              value: {{ .Values.global.gpuHookPath }}/vgpu              
           volumeMounts:
             - name: ctrs
               mountPath: {{ .Values.devicePlugin.monitorctrPath }}
