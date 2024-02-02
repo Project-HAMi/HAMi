@@ -17,11 +17,12 @@
 package scheduler
 
 import (
+	"testing"
+
 	"4pd.io/k8s-vgpu/pkg/util"
-	"gotest.tools/v3/assert"
+	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"testing"
 )
 
 func Test_getNodesUsage(t *testing.T) {
@@ -86,11 +87,12 @@ func Test_getNodesUsage(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assert.Equal(t, len(*cachenodeMap), 1)
+	assert := assert.New(t)
+	assert.Equal(1, len(*cachenodeMap), "unexpected cachenodeMap length")
 	v, ok := (*cachenodeMap)["node1"]
-	assert.Equal(t, ok, true)
-	assert.Equal(t, len(v.Devices), 2)
-	assert.Equal(t, v.Devices[0].Used, int32(2))
-	assert.Equal(t, v.Devices[0].Usedmem, int32(200))
-	assert.Equal(t, v.Devices[0].Usedcores, int32(20))
+	assert.True(ok, "node1 should exist in cachenodeMap")
+	assert.Equal(2, len(v.Devices), "unexpected Devices length")
+	assert.Equal(int32(2), v.Devices[0].Used, "unexpected Used")
+	assert.Equal(int32(200), v.Devices[0].Usedmem, "unexpected Usedmem")
+	assert.Equal(int32(20), v.Devices[0].Usedcores, "unexpected Usedcores")
 }
