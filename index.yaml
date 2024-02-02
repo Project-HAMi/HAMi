@@ -4,16 +4,16 @@ entries:
   - apiVersion: v2
     appVersion: 0.0.2
     created: "2024-01-30T11:07:54.691770453Z"
-    description: 4paradigm vgpu for kubernetes
+    description: Heterogeneous AI Computing Virtualization Middleware
     digest: 94124e6fcf8c331a9f233999ca5dcf85fba0a2d891042e6c20204590e41ae694
     keywords:
     - vgpu
     - gpu
-    kubeVersion: '>= 1.14.0'
+    kubeVersion: '>= 1.16.0'
     maintainers:
-    - email: opensource@4paradigm.com
-      name: 4pd
-    name: vgpu
+    - email: limengxuan@4paradigm.com
+      name: limengxuan
+    name: hami
     type: application
     urls:
     - https://4paradigm.github.io/k8s-vgpu-scheduler/vgpu-2.0.0.tgz
