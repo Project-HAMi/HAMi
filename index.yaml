@@ -1,6 +1,6 @@
 apiVersion: v1
 entries:
-  vgpu:
+  hami:
   - apiVersion: v2
     appVersion: 0.0.2
     created: "2024-01-30T11:07:54.691770453Z"
@@ -18,4 +18,22 @@ entries:
     urls:
     - https://project-hami.github.io/HAMi/vgpu-2.0.0.tgz
     version: 2.0.0
-generated: "2024-01-30T11:07:54.689759316Z"
+  vgpu:
+  - apiVersion: v2
+    appVersion: 0.0.2
+    created: "2024-02-02T06:49:43.005155947Z"
+    description: 4paradigm vgpu for kubernetes
+    digest: addf30f6f39be6674b8192b4eabf656a5c71ecc063d91dccdc53cff940b28fa3
+    keywords:
+    - vgpu
+    - gpu
+    kubeVersion: '>= 1.14.0'
+    maintainers:
+    - email: opensource@4paradigm.com
+      name: 4pd
+    name: vgpu
+    type: application
+    urls:
+    - https://Project-HAMi.github.io/HAMi/vgpu-2.0.0.tgz
+    version: 2.0.0
+generated: "2024-02-02T06:49:43.004328069Z"
