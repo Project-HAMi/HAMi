@@ -16,6 +16,6 @@ entries:
     name: hami
     type: application
     urls:
-    - https://4paradigm.github.io/k8s-vgpu-scheduler/vgpu-2.0.0.tgz
+    - https://project-hami.github.io/HAMi/vgpu-2.0.0.tgz
     version: 2.0.0
 generated: "2024-01-30T11:07:54.689759316Z"
