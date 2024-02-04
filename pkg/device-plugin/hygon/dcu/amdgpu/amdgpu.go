@@ -13,7 +13,6 @@ import (
 	"bufio"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -100,7 +99,7 @@ func GetAMDGPUs() map[string]map[string]int {
 // AMDGPU check if a particular card is an AMD GPU by checking the device's vendor ID
 func AMDGPU(cardName string) bool {
 	sysfsVendorPath := "/sys/class/drm/" + cardName + "/device/vendor"
-	b, err := ioutil.ReadFile(sysfsVendorPath)
+	b, err := os.ReadFile(sysfsVendorPath)
 	if err == nil {
 		vid := strings.TrimSpace(string(b))
 

@@ -452,8 +452,14 @@ func (p *Plugin) createvdevFile(current *v1.Pod, ctr *v1.Container, req util.Con
 		s = s + fmt.Sprintln("enable: 1")
 	}
 	cacheFileHostDirectory := "/usr/local/vgpu/dcu/" + string(current.UID) + "_" + ctr.Name + "_" + fmt.Sprint(devidx) + "_" + fmt.Sprint(pipeid) + "_" + fmt.Sprint(vdevidx) + "_" + coremsk
-	os.MkdirAll(cacheFileHostDirectory, 0777)
-	os.Chmod(cacheFileHostDirectory, 0777)
+	err := os.MkdirAll(cacheFileHostDirectory, 0777)
+	if err != nil {
+		return "", err
+	}
+	err = os.Chmod(cacheFileHostDirectory, 0777)
+	if err != nil {
+		return "", err
+	}
 	os.WriteFile(cacheFileHostDirectory+"/vdev0.conf", []byte(s), os.ModePerm)
 	return cacheFileHostDirectory, nil
 }
