@@ -18,7 +18,7 @@
 
 ## 开启MLU复用
 
-* 通过helm部署本组件, 参照[主文档中的开启vgpu支持章节](https://github.com/4paradigm/k8s-vgpu-scheduler/blob/master/README_cn.md#kubernetes开启vgpu支持)
+* 通过helm部署本组件, 参照[主文档中的开启vgpu支持章节](https://github.com/Project-HAMi/HAMi/blob/master/README_cn.md#kubernetes开启vgpu支持)
 
 * 使用以下指令，为MLU节点打上label
 ```
