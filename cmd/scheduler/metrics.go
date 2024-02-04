@@ -101,49 +101,49 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	nu := sher.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
-		for _, devs := range val.Devices {
+		for _, devs := range val.Devices.DeviceLists {
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
-				float64(devs.Totalmem)*float64(1024)*float64(1024),
-				nodeID, devs.ID, fmt.Sprint(devs.Index),
+				float64(devs.Device.Totalmem)*float64(1024)*float64(1024),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUCoreLimitDesc,
 				prometheus.GaugeValue,
-				float64(devs.Totalcore),
-				nodeID, devs.ID, fmt.Sprint(devs.Index),
+				float64(devs.Device.Totalcore),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.ID, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores),
+				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
-				float64(devs.Used),
-				nodeID, devs.ID, fmt.Sprint(devs.Index),
+				float64(devs.Device.Used),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
 			)
 
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
-				float64(devs.Usedcores),
-				nodeID, devs.ID, fmt.Sprint(devs.Index),
+				float64(devs.Device.Usedcores),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.ID, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
+				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), fmt.Sprint(devs.Device.Used), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUMemoryPercentage,
 				prometheus.GaugeValue,
-				float64(devs.Usedmem)/float64(devs.Totalmem),
-				nodeID, devs.ID, fmt.Sprint(devs.Index),
+				float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
 			)
 		}
 	}
@@ -177,10 +177,10 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					var totaldev int32
 					found := false
 					for _, ni := range *nu {
-						for _, nodedev := range ni.Devices {
+						for _, nodedev := range ni.Devices.DeviceLists {
 							//fmt.Println("uuid=", nodedev.ID, ctrdevval.UUID)
-							if strings.Compare(nodedev.ID, ctrdevval.UUID) == 0 {
-								totaldev = nodedev.Totalmem
+							if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
+								totaldev = nodedev.Device.Totalmem
 								found = true
 								break
 							}
