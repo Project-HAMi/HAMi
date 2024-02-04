@@ -4,15 +4,15 @@ English version|[中文版](README_cn.md)
 
 # Heterogeneous AI Computing Virtualization Middleware
 
-[![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml/badge.svg)](https://github.com/4paradigm/k8s-vgpu-scheduler/actions/workflows/main.yml)
+[![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
-[![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/4paradigm/k8s-device-plugin/discussions)
-[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#contact)
+[![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
+[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
 
 ## Supperted devices
 
-[![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
 [![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
 [![hygon DCU](https://img.shields.io/badge/Hygon-DCU-blue)](docs/hygon-dcu-support.md)
 
@@ -307,8 +307,8 @@ Heterogeneous AI Computing device to support
 
 ## Issues and Contributing
 
-- Report bugs, ask questions, or suggest modifications by [filing a new issue](https://github.com/4paradigm/k8s-vgpu-scheduler/issues/new)
-- For more information or to share your ideas, you can participate in the [Discussions](https://github.com/4paradigm/k8s-device-plugin/discussions) and the [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
+- Report bugs, ask questions, or suggest modifications by [filing a new issue](https://github.com/Project-HAMi/HAMi/issues/new)
+- For more information or to share your ideas, you can participate in the [Discussions](https://github.com/Project-HAMi/HAMi/discussions) and the [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
 
 ## Contact
 
