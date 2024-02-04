@@ -27,18 +27,20 @@ import (
 	"k8s.io/klog/v2"
 )
 
-var kubeClient kubernetes.Interface
+var (
+	KubeClient kubernetes.Interface
+)
 
 func init() {
 	var err error
-	kubeClient, err = NewClient()
+	KubeClient, err = NewClient()
 	if err != nil {
 		panic(err)
 	}
 }
 
 func GetClient() kubernetes.Interface {
-	return kubeClient
+	return KubeClient
 }
 
 // NewClient connects to an API server.
