@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"net"
 	"os"
 	"path/filepath"
@@ -38,7 +37,7 @@ func init() {
 
 func checkfiles(fpath string) (*sharedRegionT, error) {
 	klog.Infof("Checking path %s", fpath)
-	files, err := ioutil.ReadDir(fpath)
+	files, err := os.ReadDir(fpath)
 	if err != nil {
 		return nil, err
 	}
@@ -83,7 +82,7 @@ func isVaildPod(name string, pods *v1.PodList) bool {
 func monitorpath(podmap map[string]podusage) error {
 	lock.Lock()
 	defer lock.Unlock()
-	files, err := ioutil.ReadDir(containerPath)
+	files, err := os.ReadDir(containerPath)
 	if err != nil {
 		return err
 	}

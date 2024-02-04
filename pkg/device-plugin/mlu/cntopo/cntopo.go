@@ -16,7 +16,7 @@ package cntopo
 
 import (
 	"encoding/json"
-	"io/ioutil"
+	"os"
 	"os/exec"
 	"sync"
 )
@@ -70,7 +70,7 @@ func (c *cntopo) GetRings(available []uint, size int) ([]Ring, error) {
 	}
 	c.Lock()
 	defer c.Unlock()
-	err = ioutil.WriteFile("/tmp/cntopo_input.json", b, 0666)
+	err = os.WriteFile("/tmp/cntopo_input.json", b, 0666)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +78,7 @@ func (c *cntopo) GetRings(available []uint, size int) ([]Ring, error) {
 	if err != nil {
 		return nil, err
 	}
-	j, err := ioutil.ReadFile("/tmp/cntopo_output.json")
+	j, err := os.ReadFile("/tmp/cntopo_output.json")
 	if err != nil {
 		return nil, err
 	}

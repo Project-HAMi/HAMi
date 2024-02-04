@@ -36,7 +36,7 @@ type podInfo struct {
 
 type podManager struct {
 	pods  map[k8stypes.UID]*podInfo
-	mutex sync.Mutex
+	mutex sync.RWMutex
 }
 
 func (m *podManager) init() {
@@ -65,6 +65,8 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 }
 
 func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 	klog.Infof("Getting all scheduled pods with %d nums", len(m.pods))
 	return m.pods, nil
 }
