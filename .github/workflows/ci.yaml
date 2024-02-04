@@ -42,4 +42,4 @@ jobs:
         uses: arduino/setup-protoc@v1.1.2
 
       - run: make tidy
-      - run: bash ./hack/build.sh
+      - run: SHORT_VERSION="dev" bash ./hack/build.sh
