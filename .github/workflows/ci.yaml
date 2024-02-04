@@ -2,6 +2,8 @@ name: CI
 on:
   pull_request:
     branches: ['master', 'release/**']
+  push:
+    branches: ['master']
 
 env:
   GO_VERSION: "1.21.6"
