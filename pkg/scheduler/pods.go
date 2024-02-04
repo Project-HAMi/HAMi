@@ -22,6 +22,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
@@ -33,6 +34,14 @@ type podInfo struct {
 	NodeID    string
 	Devices   util.PodDevices
 	CtrIDs    []string
+}
+
+// PodUseDeviceStat count pod use device info.
+type PodUseDeviceStat struct {
+	// count current node all running success pod num
+	TotalPod int
+	// only running success pod and use device pod can count.
+	UseDevicePod int
 }
 
 type podManager struct {
@@ -63,6 +72,20 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 		klog.Infof("Deleted pod %s with node ID %s", pi.Name, pi.NodeID)
 		delete(m.pods, pod.UID)
 	}
+}
+
+func (m *podManager) ListPods() ([]*corev1.Pod, error) {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	pods := make([]*corev1.Pod, 0)
+	for uid := range m.pods {
+		pods = append(pods, &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID: uid,
+			},
+		})
+	}
+	return pods, nil
 }
 
 func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {

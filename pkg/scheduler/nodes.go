@@ -21,15 +21,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"k8s.io/klog/v2"
 )
 
-type DeviceUsageList []*util.DeviceUsage
-
 type NodeUsage struct {
-	Devices DeviceUsageList
+	Devices policy.DeviceUsageList
 }
 
 type nodeManager struct {
