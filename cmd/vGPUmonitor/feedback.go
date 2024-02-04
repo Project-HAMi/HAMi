@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"io/ioutil"
 	"os"
 	"sort"
 	"strconv"
@@ -34,7 +33,7 @@ func init() {
 
 func setcGgroupDriver() int {
 	// 1 for cgroupfs 2 for systemd
-	kubeletconfig, err := ioutil.ReadFile("/hostvar/lib/kubelet/config.yaml")
+	kubeletconfig, err := os.ReadFile("/hostvar/lib/kubelet/config.yaml")
 	if err != nil {
 		return 0
 	}
