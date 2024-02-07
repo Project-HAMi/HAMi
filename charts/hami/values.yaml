@@ -112,10 +112,10 @@ devicePlugin:
 
   podAnnotations: {}
   nvidianodeSelector:
-    gpu: "on"
+    hami.io/nvidia-selector: "on"
   mlunodeSelector:
     mlu: "on"
   hygonnodeSelector:
     dcu: "on"
   tolerations: []
-
+  autoValidatorDriver: false

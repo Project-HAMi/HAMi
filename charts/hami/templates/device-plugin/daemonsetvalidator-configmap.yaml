@@ -1,0 +1,51 @@
+{{- if .Values.devicePlugin.autoValidatorDriver }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: driver-validator-configmap
+  labels:
+    app.kubernetes.io/component: 4pd-driver-validator
+data:
+  validator.sh: |
+    #!/bin/zsh
+    if [ -f "/host/usr/bin/nvidia-smi" ]; then
+        driverRoot="/host"
+        isHostDriver="true"
+    else
+        driverRoot="/run/nvidia/driver"
+        isHostDriver="false"
+    fi
+
+    # check this directory /run/nvidia/driver does exist?
+    if [ "$isHostDriver" = "false" ]; then
+      while [ ! -d "/run/nvidia/driver" ]; do
+        echo current node $NODE_NAME not GPU device;
+        sleep 10
+      done
+    fi
+
+    sleep_interval=5
+    if [ "$isHostDriver" = "false" ]; then
+        while true; do
+            stat /run/nvidia/validations/.driver-ctr-ready
+            if [ $? -ne 0 ]; then
+              kubectl label node $NODE_NAME hami.io/nvidia-selector="off" --overwrite
+              sleep $sleep_interval
+            else
+              break
+            fi
+        done
+    fi
+    while true; do
+        chroot "$driverRoot" nvidia-smi
+        if [ $? -eq 0 ]; then
+            sleep 30
+            kubectl label node $NODE_NAME hami.io/nvidia-selector="on" --overwrite
+            break
+        else
+            sleep $sleep_interval
+        fi
+    done
+    echo validations are successful; sleep infinity
+
+    {{- end }}
