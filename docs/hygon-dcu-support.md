@@ -24,7 +24,7 @@ If this command can't be found, then you should contact your device provider to 
 
 ## Enabling DCU-sharing Support
 
-* Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/4paradigm/k8s-vgpu-scheduler#enabling-vgpu-support-in-kubernetes), please be note that, you should set your dtk driver directory using --set devicePlugin.hygondriver={your dtk driver path on each nodes}, for example:
+* Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes), please be note that, you should set your dtk driver directory using --set devicePlugin.hygondriver={your dtk driver path on each nodes}, for example:
 
 ```
 helm install vgpu vgpu-charts/vgpu --set devicePlugin.hygondriver="/root/dcu-driver/dtk-22.10.1-vdcu" --set scheduler.kubeScheduler.imageTag={your k8s server version} -n kube-system
