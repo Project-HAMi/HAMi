@@ -1,4 +1,4 @@
-module 4pd.io/k8s-vgpu
+module github.com/Project-HAMi/HAMi
 
 go 1.21
 
@@ -97,8 +97,8 @@ require (
 )
 
 replace (
-	4pd.io/k8s-vgpu/pkg/api => ./pkg/api
-	4pd.io/k8s-vgpu/pkg/device-plugin => ./pkg/device-plugin
+	github.com/Project-HAMi/HAMi/pkg/api => ./pkg/api
+	github.com/Project-HAMi/HAMi/pkg/device-plugin => ./pkg/device-plugin
 	k8s.io/api => k8s.io/api v0.28.3
 	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.28.3
 	k8s.io/apimachinery => k8s.io/apimachinery v0.28.3

@@ -7,7 +7,7 @@ package mock
 import (
 	reflect "reflect"
 
-	cntopo 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cntopo"
+	cntopo 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cntopo"
 	gomock "github.com/golang/mock/gomock"
 )
 

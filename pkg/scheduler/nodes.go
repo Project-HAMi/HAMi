@@ -21,7 +21,7 @@ import (
 	"strings"
 	"sync"
 
-	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"k8s.io/klog/v2"
 )
 

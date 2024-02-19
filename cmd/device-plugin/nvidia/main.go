@@ -23,11 +23,11 @@ import (
 	"syscall"
 	"time"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/info"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/rm"
-	"4pd.io/k8s-vgpu/pkg/util"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
 
