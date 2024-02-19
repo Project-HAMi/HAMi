@@ -19,10 +19,10 @@ package rm
 import (
 	"fmt"
 
-	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type deviceMapBuilder struct {

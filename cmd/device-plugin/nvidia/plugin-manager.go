@@ -19,11 +19,11 @@ package main
 import (
 	"fmt"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/plugin/manager"
-	"4pd.io/k8s-vgpu/pkg/util"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin/manager"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // NewPluginManager creates an NVML-based plugin manager

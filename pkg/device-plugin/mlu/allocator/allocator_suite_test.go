@@ -17,7 +17,7 @@ package allocator
 import (
 	"testing"
 
-	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cntopo/mock"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cntopo/mock"
 	"github.com/golang/mock/gomock"
 	. "github.com/onsi/ginkgo"
 	. "github.com/onsi/gomega"
