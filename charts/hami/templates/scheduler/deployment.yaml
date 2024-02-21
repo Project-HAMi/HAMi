@@ -31,6 +31,7 @@ spec:
       serviceAccountName: {{ include "4pd-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
       containers:
+      {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: kube-scheduler
           image: {{ .Values.scheduler.kubeScheduler.image }}:{{ .Values.scheduler.kubeScheduler.imageTag }}
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
@@ -49,6 +50,7 @@ spec:
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
+        {{- end }}      
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
@@ -80,6 +82,7 @@ spec:
         - name: tls-config
           secret:
             secretName: {{ template "4pd-vgpu.scheduler.tls" . }}
+        {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
             {{- if ge (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 22 }}
@@ -87,6 +90,7 @@ spec:
             {{- else }}
             name: {{ template "4pd-vgpu.scheduler" . }}
             {{- end }}
+        {{- end }}
       {{- if .Values.scheduler.nodeSelector }}
       nodeSelector: {{ toYaml .Values.scheduler.nodeSelector | nindent 8 }}
       {{- end }}

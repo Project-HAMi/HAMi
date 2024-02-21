@@ -40,6 +40,8 @@ scheduler:
   defaultCores: 0
   metricsBindAddress: ":9395"
   kubeScheduler:
+    # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
+    enabled: true
     imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
     imagePullPolicy: IfNotPresent
