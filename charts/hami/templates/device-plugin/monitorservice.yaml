@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: {{ include "4pd-vgpu.device-plugin" . }}-monitor
   labels:
-    app.kubernetes.io/component: 4pd-scheduler
+    app.kubernetes.io/component: 4pd-device-plugin
     {{- include "4pd-vgpu.labels" . | nindent 4 }}
     {{- if .Values.scheduler.service.labels }}
     {{ toYaml .Values.scheduler.service.labels | indent 4 }}
