@@ -2,10 +2,10 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ include "4pd-vgpu.scheduler" . }}-newversion
+  name: {{ include "hami-vgpu.scheduler" . }}-newversion
   labels:
-    app.kubernetes.io/component: 4pd-scheduler
-    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   config.yaml: |
     {{- if gt (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 25}}

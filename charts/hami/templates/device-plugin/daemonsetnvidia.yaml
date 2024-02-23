@@ -1,10 +1,10 @@
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
-  name: {{ include "4pd-vgpu.device-plugin" . }}
+  name: {{ include "hami-vgpu.device-plugin" . }}
   labels:
-    app.kubernetes.io/component: 4pd-device-plugin
-    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hami-device-plugin
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
     {{- with .Values.global.labels }}
     {{- toYaml . | nindent 4 }}
     {{- end }}
@@ -14,14 +14,14 @@ metadata:
 spec:
   selector:
     matchLabels:
-      app.kubernetes.io/component: 4pd-device-plugin
-      {{- include "4pd-vgpu.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: hami-device-plugin
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       labels:
-        app.kubernetes.io/component: 4pd-device-plugin
-        4pd.io/webhook: ignore
-        {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: hami-device-plugin
+        hami.io/webhook: ignore
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
       {{- if .Values.devicePlugin.podAnnotations }}
       annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
       {{- end }}
@@ -29,9 +29,9 @@ spec:
       {{- if .Values.devicePlugin.runtimeClassName }}
       runtimeClassName: {{ .Values.devicePlugin.runtimeClassName }}
       {{- end }}
-      {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
+      {{- include "hami-vgpu.imagePullSecrets" . | nindent 6}}
       # serviceAccountName:
-      serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
+      serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: true
       hostNetwork: true
@@ -136,7 +136,7 @@ spec:
             path: /var
         - name: deviceconfig
           configMap:
-            name: {{ template "4pd-vgpu.device-plugin" . }}
+            name: {{ template "hami-vgpu.device-plugin" . }}
       {{- if .Values.devicePlugin.nvidianodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
       {{- end }}
