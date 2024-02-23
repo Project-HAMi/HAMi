@@ -1,4 +1,4 @@
-# Default values for 4pd-vgpu.
+# Default values for hami-vgpu.
 
 nameOverride: ""
 fullnameOverride: ""
@@ -21,7 +21,7 @@ dcuResourceName: "hygon.com/dcunum"
 dcuResourceMem: "hygon.com/dcumem"
 dcuResourceCores: "hygon.com/dcucores"
 
-schedulerName: "4pd-scheduler"
+schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
   enabled: false
@@ -62,7 +62,7 @@ scheduler:
   #nodeSelector: 
   #  gpu: "on"
   tolerations: []
-  #serviceAccountName: "4pd-vgpu-scheduler-sa"
+  #serviceAccountName: "hami-vgpu-scheduler-sa"
   customWebhook:
     enabled: false
     # must be an endpoint using https.

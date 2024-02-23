@@ -1,12 +1,12 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: {{ include "4pd-vgpu.fullname" . }}-admission-patch
+  name: {{ include "hami-vgpu.fullname" . }}-admission-patch
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
   labels:
-    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
     app.kubernetes.io/component: admission-webhook
 spec:
   {{- if .Capabilities.APIVersions.Has "batch/v1alpha1" }}
@@ -15,16 +15,16 @@ spec:
   {{- end }}
   template:
     metadata:
-      name: {{ include "4pd-vgpu.fullname" . }}-admission-patch
+      name: {{ include "hami-vgpu.fullname" . }}-admission-patch
       {{- if .Values.scheduler.patch.podAnnotations }}
       annotations: {{ toYaml .Values.scheduler.patch.podAnnotations | nindent 8 }}
       {{- end }}
       labels:
-        {{- include "4pd-vgpu.labels" . | nindent 8 }}
+        {{- include "hami-vgpu.labels" . | nindent 8 }}
         app.kubernetes.io/component: admission-webhook
-        4pd.io/webhook: ignore
+        hami.io/webhook: ignore
     spec:
-      {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
+      {{- include "hami-vgpu.imagePullSecrets" . | nindent 6}}
       {{- if .Values.scheduler.patch.priorityClassName }}
       priorityClassName: {{ .Values.scheduler.patch.priorityClassName }}
       {{- end }}
@@ -38,13 +38,13 @@ spec:
           imagePullPolicy: {{ .Values.scheduler.patch.imagePullPolicy }}
           args:
             - patch
-            - --webhook-name={{ include "4pd-vgpu.scheduler.webhook" . }}
+            - --webhook-name={{ include "hami-vgpu.scheduler.webhook" . }}
             - --namespace={{ .Release.Namespace }}
             - --patch-validating=false
-            - --secret-name={{ include "4pd-vgpu.scheduler.tls" . }}
+            - --secret-name={{ include "hami-vgpu.scheduler.tls" . }}
             - --patch-failure-policy=Fail
       restartPolicy: OnFailure
-      serviceAccountName: {{ include "4pd-vgpu.fullname" . }}-admission
+      serviceAccountName: {{ include "hami-vgpu.fullname" . }}-admission
       {{- if .Values.scheduler.patch.nodeSelector }}
       nodeSelector: {{ toYaml .Values.scheduler.patch.nodeSelector | nindent 8 }}
       {{- end }}
