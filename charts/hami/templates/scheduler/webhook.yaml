@@ -1,7 +1,7 @@
 apiVersion: admissionregistration.k8s.io/v1
 kind: MutatingWebhookConfiguration
 metadata:
-  name: {{ include "4pd-vgpu.scheduler.webhook" . }}
+  name: {{ include "hami-vgpu.scheduler.webhook" . }}
 webhooks:
   - admissionReviewVersions:
     - v1beta1
@@ -10,23 +10,23 @@ webhooks:
       url: https://{{ .Values.scheduler.customWebhook.host}}:{{.Values.scheduler.customWebhook.port}}{{.Values.scheduler.customWebhook.path}}
       {{- else }}
       service:
-        name: {{ include "4pd-vgpu.scheduler" . }}
+        name: {{ include "hami-vgpu.scheduler" . }}
         namespace: {{ .Release.Namespace }}
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
       {{- end }}
     failurePolicy: {{ .Values.scheduler.mutatingWebhookConfiguration.failurePolicy }}
     matchPolicy: Equivalent
-    name: vgpu.4pd.io
+    name: vgpu.hami.io
     namespaceSelector:
       matchExpressions:
-      - key: 4pd.io/webhook
+      - key: hami.io/webhook
         operator: NotIn
         values:
         - ignore
     objectSelector:
       matchExpressions:
-      - key: 4pd.io/webhook
+      - key: hami.io/webhook
         operator: NotIn
         values:
         - ignore
