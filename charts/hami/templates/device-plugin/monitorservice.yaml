@@ -1,10 +1,10 @@
 apiVersion: v1
 kind: Service
 metadata:
-  name: {{ include "4pd-vgpu.device-plugin" . }}-monitor
+  name: {{ include "hami-vgpu.device-plugin" . }}-monitor
   labels:
-    app.kubernetes.io/component: 4pd-device-plugin
-    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
     {{- if .Values.scheduler.service.labels }}
     {{ toYaml .Values.scheduler.service.labels | indent 4 }}
     {{- end }}
@@ -14,7 +14,7 @@ metadata:
 spec:
   externalTrafficPolicy: Local
   selector:
-    app.kubernetes.io/component: 4pd-device-plugin
+    app.kubernetes.io/component: hami-device-plugin
   type: NodePort
   ports:
     - name: monitorport

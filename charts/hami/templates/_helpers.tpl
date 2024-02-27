@@ -1,7 +1,7 @@
 {{/*
 Expand the name of the chart.
 */}}
-{{- define "4pd-vgpu.name" -}}
+{{- define "hami-vgpu.name" -}}
 {{- default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
@@ -10,7 +10,7 @@ Create a default fully qualified app name.
 We truncate at 63 chars because some Kubernetes name fields are limited to this (by the DNS naming spec).
 If release name contains chart name it will be used as a full name.
 */}}
-{{- define "4pd-vgpu.fullname" -}}
+{{- define "hami-vgpu.fullname" -}}
 {{- if .Values.fullnameOverride -}}
 {{- .Values.fullnameOverride | trunc 63 | trimSuffix "-" -}}
 {{- else }}
@@ -26,44 +26,44 @@ If release name contains chart name it will be used as a full name.
 {{/*
 The app name for Scheduler
 */}}
-{{- define "4pd-vgpu.scheduler" -}}
-{{- printf "%s-scheduler" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- define "hami-vgpu.scheduler" -}}
+{{- printf "%s-scheduler" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 The app name for DevicePlugin
 */}}
-{{- define "4pd-vgpu.device-plugin" -}}
-{{- printf "%s-device-plugin" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- define "hami-vgpu.device-plugin" -}}
+{{- printf "%s-device-plugin" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 The tls secret name for Scheduler
 */}}
-{{- define "4pd-vgpu.scheduler.tls" -}}
-{{- printf "%s-scheduler-tls" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- define "hami-vgpu.scheduler.tls" -}}
+{{- printf "%s-scheduler-tls" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 The webhook name
 */}}
-{{- define "4pd-vgpu.scheduler.webhook" -}}
-{{- printf "%s-webhook" ( include "4pd-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- define "hami-vgpu.scheduler.webhook" -}}
+{{- printf "%s-webhook" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
 {{- end -}}
 
 {{/*
 Create chart name and version as used by the chart label.
 */}}
-{{- define "4pd-vgpu.chart" -}}
+{{- define "hami-vgpu.chart" -}}
 {{- printf "%s-%s" .Chart.Name .Chart.Version | replace "+" "_" | trunc 63 | trimSuffix "-" }}
 {{- end }}
 
 {{/*
 Common labels
 */}}
-{{- define "4pd-vgpu.labels" -}}
-helm.sh/chart: {{ include "4pd-vgpu.chart" . }}
-{{ include "4pd-vgpu.selectorLabels" . }}
+{{- define "hami-vgpu.labels" -}}
+helm.sh/chart: {{ include "hami-vgpu.chart" . }}
+{{ include "hami-vgpu.selectorLabels" . }}
 {{- if .Chart.AppVersion }}
 app.kubernetes.io/version: {{ .Chart.AppVersion | quote }}
 {{- end }}
@@ -73,15 +73,15 @@ app.kubernetes.io/managed-by: {{ .Release.Service }}
 {{/*
 Selector labels
 */}}
-{{- define "4pd-vgpu.selectorLabels" -}}
-app.kubernetes.io/name: {{ include "4pd-vgpu.name" . }}
+{{- define "hami-vgpu.selectorLabels" -}}
+app.kubernetes.io/name: {{ include "hami-vgpu.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
 Image registry secret name
 */}}
-{{- define "4pd-vgpu.imagePullSecrets" -}}
+{{- define "hami-vgpu.imagePullSecrets" -}}
 imagePullSecrets: {{ toYaml .Values.imagePullSecrets | nindent 2 }}
 {{- end }}
 
