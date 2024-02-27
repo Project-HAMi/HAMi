@@ -27,25 +27,6 @@ type ClusterManager struct {
 	// Contains many more fields not listed in this example.
 }
 
-// ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
-// real cluster manager would have to do. Since it may actually be really
-// expensive, it must only be called once per collection. This implementation,
-// obviously, only returns some made-up data.
-func (c *ClusterManager) ReallyExpensiveAssessmentOfTheSystemState() (
-	oomCountByHost map[string]int, ramUsageByHost map[string]float64,
-) {
-	// Just example fake data.
-	oomCountByHost = map[string]int{
-		"foo.example.org": 42,
-		"bar.example.org": 2001,
-	}
-	ramUsageByHost = map[string]float64{
-		"foo.example.org": 6.023e23,
-		"bar.example.org": 3.14,
-	}
-	return
-}
-
 // ClusterManagerCollector implements the Collector interface.
 type ClusterManagerCollector struct {
 	ClusterManager *ClusterManager
@@ -167,41 +148,43 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
-		for ctridx, ctrval := range val.Devices {
-			for _, ctrdevval := range ctrval {
-				fmt.Println("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
-				ch <- prometheus.MustNewConstMetric(
-					ctrvGPUDeviceAllocatedDesc,
-					prometheus.GaugeValue,
-					float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
-					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
-				var totaldev int32
-				found := false
-				for _, ni := range *nu {
-					for _, nodedev := range ni.Devices {
-						//fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
-						if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
-							totaldev = nodedev.Totalmem
-							found = true
+		for ctridx, podSingleDevice := range val.Devices {
+			for _, ctrdevs := range podSingleDevice {
+				for _, ctrdevval := range ctrdevs {
+					fmt.Println("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+					ch <- prometheus.MustNewConstMetric(
+						ctrvGPUDeviceAllocatedDesc,
+						prometheus.GaugeValue,
+						float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
+						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
+					var totaldev int32
+					found := false
+					for _, ni := range *nu {
+						for _, nodedev := range ni.Devices {
+							//fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
+							if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
+								totaldev = nodedev.Totalmem
+								found = true
+								break
+							}
+						}
+						if found {
 							break
 						}
 					}
-					if found {
-						break
+					if totaldev > 0 {
+						ch <- prometheus.MustNewConstMetric(
+							ctrvGPUdeviceAllocatedMemoryPercentageDesc,
+							prometheus.GaugeValue,
+							float64(ctrdevval.Usedmem)/float64(totaldev),
+							val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 					}
-				}
-				if totaldev > 0 {
 					ch <- prometheus.MustNewConstMetric(
-						ctrvGPUdeviceAllocatedMemoryPercentageDesc,
+						ctrvGPUdeviceAllocateCorePercentageDesc,
 						prometheus.GaugeValue,
-						float64(ctrdevval.Usedmem)/float64(totaldev),
+						float64(ctrdevval.Usedcores),
 						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 				}
-				ch <- prometheus.MustNewConstMetric(
-					ctrvGPUdeviceAllocateCorePercentageDesc,
-					prometheus.GaugeValue,
-					float64(ctrdevval.Usedcores),
-					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 			}
 		}
 	}
@@ -230,13 +213,6 @@ func initmetrics(bindAddress string) {
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
 	NewClusterManager("vGPU", reg)
-	//NewClusterManager("ca", reg)
-
-	// Add the standard process and Go metrics to the custom registry.
-	//reg.MustRegister(
-	//	prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
-	//	prometheus.NewGoCollector(),
-	//)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
 	log.Fatal(http.ListenAndServe(bindAddress, nil))

@@ -33,6 +33,16 @@ import (
 	"k8s.io/klog/v2"
 )
 
+var (
+	InRequestDevices map[string]string
+	SupportDevices   map[string]string
+)
+
+func init() {
+	InRequestDevices = make(map[string]string)
+	SupportDevices = make(map[string]string)
+}
+
 func GetNode(nodename string) (*v1.Node, error) {
 	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	return n, err
@@ -117,13 +127,36 @@ func EncodeContainerDevices(cd ContainerDevices) string {
 	//return strings.Join(cd, ",")
 }
 
-func EncodePodDevices(pd PodDevices) string {
-	var ss []string
-	for _, cd := range pd {
-		ss = append(ss, EncodeContainerDevices(cd))
+func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
+	tmp := ""
+	for _, val := range cd {
+		if strings.Compare(val.Type, t) == 0 {
+			tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+		}
+		tmp += ":"
 	}
-	klog.Infof("Encoded pod Devices: %s", strings.Join(ss, ";"))
-	return strings.Join(ss, ";")
+	klog.Infof("Encoded container Certian Device type: %s->%s", t, tmp)
+	return tmp
+}
+
+func EncodePodSingleDevice(pd PodSingleDevice) string {
+	res := ""
+	for _, ctrdevs := range pd {
+		res = res + EncodeContainerDevices(ctrdevs)
+	}
+	res = res + ";"
+	klog.Infof("Encoded pod single devices %s", res)
+	return res
+}
+
+func EncodePodDevices(checklist map[string]string, pd PodDevices) map[string]string {
+	res := map[string]string{}
+	for devType, cd := range pd {
+		klog.Infoln("devtype=", devType)
+		res[checklist[devType]] = EncodePodSingleDevice(cd)
+	}
+	klog.Infof("Encoded pod Devices %s\n", res)
+	return res
 }
 
 func DecodeContainerDevices(str string) (ContainerDevices, error) {
@@ -157,38 +190,44 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	return contdev, nil
 }
 
-func DecodePodDevices(str string) (PodDevices, error) {
-	if len(str) == 0 {
+func DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error) {
+	if len(annos) == 0 {
 		return PodDevices{}, nil
 	}
-	var pd PodDevices
-	for _, s := range strings.Split(str, ";") {
-		cd, err := DecodeContainerDevices(s)
-		if err != nil {
-			return PodDevices{}, nil
+	pd := make(PodDevices)
+	for devID, devs := range checklist {
+		str, ok := annos[devs]
+		if !ok {
+			continue
 		}
-		pd = append(pd, cd)
+		pd[devID] = make(PodSingleDevice, 0)
+		for _, s := range strings.Split(str, ";") {
+			cd, err := DecodeContainerDevices(s)
+			if err != nil {
+				return PodDevices{}, nil
+			}
+			pd[devID] = append(pd[devID], cd)
+		}
 	}
+	klog.InfoS("Decoded pod annos", "poddevices", pd)
 	return pd, nil
 }
 
 func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevices, error) {
-	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	pdevices, err := DecodePodDevices(InRequestDevices, p.Annotations)
 	if err != nil {
 		return v1.Container{}, ContainerDevices{}, err
 	}
-	klog.Infoln("pdevices=", pdevices)
+	klog.InfoS("pdevices", pdevices)
 	res := ContainerDevices{}
-	for idx, val := range pdevices {
-		found := false
-		for _, dev := range val {
-			if strings.Compare(dtype, dev.Type) == 0 {
-				res = append(res, dev)
-				found = true
-			}
-		}
-		if found {
-			return p.Spec.Containers[idx], res, nil
+
+	pd, ok := pdevices[dtype]
+	if !ok {
+		return v1.Container{}, res, errors.New("device request not found")
+	}
+	for ctridx, ctrDevice := range pd {
+		if len(ctrDevice) > 0 {
+			return p.Spec.Containers[ctridx], ctrDevice, nil
 		}
 	}
 	return v1.Container{}, res, errors.New("device request not found")
@@ -203,36 +242,31 @@ func GetContainerDeviceStrArray(c ContainerDevices) []string {
 }
 
 func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
-	pdevices, err := DecodePodDevices(p.Annotations[AssignedIDsToAllocateAnnotations])
+	pdevices, err := DecodePodDevices(InRequestDevices, p.Annotations)
 	if err != nil {
 		return err
 	}
-	res := PodDevices{}
+	res := PodSingleDevice{}
+	pd, ok := pdevices[dtype]
+	if !ok {
+		return errors.New("erase device annotation not found")
+	}
 	found := false
-	for _, val := range pdevices {
+	for _, val := range pd {
 		if found {
 			res = append(res, val)
-			continue
 		} else {
-			tmp := ContainerDevices{}
-			for _, dev := range val {
-				klog.Infoln("Selecting erase res=", dtype, ":", dev.Type)
-				if strings.Compare(dtype, dev.Type) == 0 {
-					found = true
-				} else {
-					tmp = append(tmp, dev)
-				}
-			}
-			if !found {
-				res = append(res, val)
+			if len(val) > 0 {
+				found = true
+				res = append(res, ContainerDevices{})
 			} else {
-				res = append(res, tmp)
+				res = append(res, val)
 			}
 		}
 	}
 	klog.Infoln("After erase res=", res)
 	newannos := make(map[string]string)
-	newannos[AssignedIDsToAllocateAnnotations] = EncodePodDevices(res)
+	newannos[InRequestDevices[dtype]] = EncodePodSingleDevice(res)
 	return PatchPodAnnotations(&p, newannos)
 }
 
@@ -281,16 +315,6 @@ func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)
 	}
-	/*
-		Can't modify Env of pods here
-
-		patch1 := addGPUIndexPatch()
-		_, err = s.kubeClient.CoreV1().Pods(pod.Namespace).
-			Patch(context.Background(), pod.Name, k8stypes.JSONPatchType, []byte(patch1), metav1.PatchOptions{})
-		if err != nil {
-			klog.Infof("Patch1 pod %v failed, %v", pod.Name, err)
-		}*/
-
 	return err
 }
 

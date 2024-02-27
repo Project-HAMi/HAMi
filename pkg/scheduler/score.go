@@ -83,12 +83,13 @@ func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 	return false, false
 }
 
-func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *v1.Pod) (bool, []util.ContainerDevice) {
+func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *v1.Pod) (bool, map[string]util.ContainerDevices) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs []util.ContainerDevice
+	var tmpDevs map[string]util.ContainerDevices
+	tmpDevs = make(map[string]util.ContainerDevices)
 	for i := len(node.Devices) - 1; i >= 0; i-- {
 		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices[i].Id)
 		found, numa := checkType(annos, *node.Devices[i], k)
@@ -100,7 +101,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			klog.InfoS("Numa not fit, resotoreing", "pod", klog.KObj(pod), "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", node.Devices[i].Numa)
 			k.Nums = originReq
 			prevnuma = node.Devices[i].Numa
-			tmpDevs = []util.ContainerDevice{}
+			tmpDevs = make(map[string]util.ContainerDevices)
 		}
 
 		memreq := int32(0)
@@ -139,7 +140,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		if k.Nums > 0 {
 			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices[i].Id)
 			k.Nums--
-			tmpDevs = append(tmpDevs, util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 				Idx:       i,
 				UUID:      node.Devices[i].Id,
 				Type:      k.Type,
@@ -155,8 +156,9 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	return false, tmpDevs
 }
 
-func fitInDevices(node *NodeUsage, requests []util.ContainerDeviceRequest, annos map[string]string, pod *v1.Pod) (bool, float32, []util.ContainerDevice) {
-	devs := []util.ContainerDevice{}
+func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *v1.Pod, devinput *util.PodDevices) (bool, float32) {
+	//devmap := make(map[string]util.ContainerDevices)
+	devs := util.ContainerDevices{}
 	total := int32(0)
 	free := int32(0)
 	sums := 0
@@ -165,46 +167,50 @@ func fitInDevices(node *NodeUsage, requests []util.ContainerDeviceRequest, annos
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices) {
 			klog.InfoS("request devices nums cannot exceed the total number of devices on the node.", "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices))
-			return false, 0, devs
+			return false, 0
 		}
 		sort.Sort(node.Devices)
 		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod)
 		if fit {
-			for _, val := range tmpDevs {
+			for _, val := range tmpDevs[k.Type] {
 				total += node.Devices[val.Idx].Count
 				free += node.Devices[val.Idx].Count - node.Devices[val.Idx].Used
 				node.Devices[val.Idx].Used++
 				node.Devices[val.Idx].Usedcores += val.Usedcores
 				node.Devices[val.Idx].Usedmem += val.Usedmem
 			}
-			devs = append(devs, tmpDevs...)
+			devs = append(devs, tmpDevs[k.Type]...)
+			//(*devinput)[k.Type] = append((*devinput)[k.Type], tmpDevs[k.Type]...)
 		} else {
-			return false, 0, devs
+			return false, 0
 		}
+		(*devinput)[k.Type] = append((*devinput)[k.Type], devs)
 	}
-	return true, float32(total)/float32(free) + float32(len(node.Devices)-sums), devs
+	return true, float32(total)/float32(free) + float32(len(node.Devices)-sums)
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums [][]util.ContainerDeviceRequest, annos map[string]string, task *v1.Pod) (*NodeScoreList, error) {
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums util.PodDeviceRequests, annos map[string]string, task *v1.Pod) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
-		score := NodeScore{nodeID: nodeID, score: 0}
+		score := NodeScore{nodeID: nodeID, devices: make(util.PodDevices), score: 0}
 
 		//This loop is for different container request
-		for _, n := range nums {
+		for ctrid, n := range nums {
 			sums := 0
 			for _, k := range n {
 				sums += int(k.Nums)
 			}
+
 			if sums == 0 {
-				score.devices = append(score.devices, util.ContainerDevices{})
+				for idx := range score.devices {
+					score.devices[idx][ctrid] = append(score.devices[idx][ctrid], util.ContainerDevice{})
+				}
 				continue
 			}
 			klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-			fit, nodescore, devs := fitInDevices(node, n, annos, task)
+			fit, nodescore := fitInDevices(node, n, annos, task, &score.devices)
 			if fit {
-				score.devices = append(score.devices, devs)
 				klog.InfoS("calcScore:pod fit node score results", "pod", klog.KObj(task), "node", nodeID, "score", nodescore)
 				score.score += nodescore
 			} else {

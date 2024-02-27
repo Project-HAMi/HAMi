@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -79,15 +80,11 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 	if !ok {
 		return
 	}
-	ids, ok := pod.Annotations[util.AssignedIDsAnnotations]
-	if !ok {
-		return
-	}
 	if k8sutil.IsPodInTerminatedState(pod) {
 		s.delPod(pod)
 		return
 	}
-	podDev, _ := util.DecodePodDevices(ids)
+	podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
 	s.addPod(pod, nodeID, podDev)
 }
 
@@ -283,13 +280,15 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		if !ok {
 			continue
 		}
-		for _, ds := range p.Devices {
-			for _, udevice := range ds {
-				for _, d := range node.Devices {
-					if d.Id == udevice.UUID {
-						d.Used++
-						d.Usedmem += udevice.Usedmem
-						d.Usedcores += udevice.Usedcores
+		for _, podsingleds := range p.Devices {
+			for _, ctrdevs := range podsingleds {
+				for _, udevice := range ctrdevs {
+					for _, d := range node.Devices {
+						if d.Id == udevice.UUID {
+							d.Used++
+							d.Usedmem += udevice.Usedmem
+							d.Usedcores += udevice.Usedcores
+						}
 					}
 				}
 			}
@@ -393,8 +392,10 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.nodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
-	annotations[util.AssignedIDsAnnotations] = util.EncodePodDevices(m.devices)
-	annotations[util.AssignedIDsToAllocateAnnotations] = annotations[util.AssignedIDsAnnotations]
+	InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
+	supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
+	maps.Copy(annotations, InRequestDevices)
+	maps.Copy(annotations, supportDevices)
 	s.addPod(args.Pod, m.nodeID, m.devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {

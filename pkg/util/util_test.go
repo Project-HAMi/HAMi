@@ -23,6 +23,13 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+var inRequestDevices map[string]string
+
+func init() {
+	inRequestDevices = make(map[string]string)
+	inRequestDevices["NVIDIA"] = "hami.sh/vgpu-devices-to-allocate"
+}
+
 func TestEmptyContainerDevicesCoding(t *testing.T) {
 	cd1 := ContainerDevices{}
 	s := EncodeContainerDevices(cd1)
@@ -33,24 +40,25 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 
 func TestEmptyPodDeviceCoding(t *testing.T) {
 	pd1 := PodDevices{}
-	s := EncodePodDevices(pd1)
+	s := EncodePodDevices(inRequestDevices, pd1)
 	fmt.Println(s)
-	pd2, _ := DecodePodDevices(s)
+	pd2, _ := DecodePodDevices(inRequestDevices, s)
 	assert.DeepEqual(t, pd1, pd2)
 }
 
 func TestPodDevicesCoding(t *testing.T) {
 	pd1 := PodDevices{
-		ContainerDevices{
-			ContainerDevice{0, "UUID1", "Type1", 1000, 30},
-		},
-		ContainerDevices{},
-		ContainerDevices{
-			ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+		"NVIDIA": PodSingleDevice{
+			ContainerDevices{
+				ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+			},
+			ContainerDevices{
+				ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+			},
 		},
 	}
-	s := EncodePodDevices(pd1)
+	s := EncodePodDevices(inRequestDevices, pd1)
 	fmt.Println(s)
-	pd2, _ := DecodePodDevices(s)
+	pd2, _ := DecodePodDevices(inRequestDevices, s)
 	assert.DeepEqual(t, pd1, pd2)
 }
