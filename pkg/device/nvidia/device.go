@@ -35,6 +35,8 @@ type NvidiaGPUDevices struct {
 }
 
 func InitNvidiaDevice() *NvidiaGPUDevices {
+	util.InRequestDevices["NVIDIA"] = "hami.sh/vgpu-devices-to-allocate"
+	util.SupportDevices["NVIDIA"] = "hami.sh/vgpu-devices-allocated"
 	return &NvidiaGPUDevices{}
 }
 

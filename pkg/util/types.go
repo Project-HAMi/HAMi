@@ -99,8 +99,13 @@ type ContainerDeviceRequest struct {
 }
 
 type ContainerDevices []ContainerDevice
+type ContainerDeviceRequests map[string]ContainerDeviceRequest
 
-type PodDevices []ContainerDevices
+// type ContainerAllDevices map[string]ContainerDevices
+type PodSingleDevice []ContainerDevices
+
+type PodDeviceRequests []ContainerDeviceRequests
+type PodDevices map[string]PodSingleDevice
 
 type DeviceUsage struct {
 	Id        string

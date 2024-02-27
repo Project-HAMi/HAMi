@@ -23,19 +23,20 @@ import (
 	"k8s.io/klog/v2"
 )
 
-func Resourcereqs(pod *corev1.Pod) (counts [][]util.ContainerDeviceRequest) {
-	counts = make([][]util.ContainerDeviceRequest, len(pod.Spec.Containers))
+func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
+	counts = make(util.PodDeviceRequests, len(pod.Spec.Containers))
 	//Count Nvidia GPU
 	for i := 0; i < len(pod.Spec.Containers); i++ {
 		devices := device.GetDevices()
-		for _, val := range devices {
+		counts[i] = make(util.ContainerDeviceRequests)
+		for idx, val := range devices {
 			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if request.Nums > 0 {
-				counts[i] = append(counts[i], val.GenerateResourceRequests(&pod.Spec.Containers[i]))
+				counts[i][idx] = val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			}
 		}
 	}
-	klog.Infoln("counts=", counts)
+	klog.InfoS("collect requestreqs", counts)
 	return counts
 }
 

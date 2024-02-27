@@ -17,11 +17,12 @@
 package scheduler
 
 import (
+	"testing"
+
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"testing"
 )
 
 func Test_getNodesUsage(t *testing.T) {
@@ -51,12 +52,14 @@ func Test_getNodesUsage(t *testing.T) {
 		},
 	})
 	podDevces := util.PodDevices{
-		[]util.ContainerDevice{
-			{
-				Idx:       0,
-				UUID:      "GPU0",
-				Usedmem:   100,
-				Usedcores: 10,
+		"NVIDIA": util.PodSingleDevice{
+			[]util.ContainerDevice{
+				{
+					Idx:       0,
+					UUID:      "GPU0",
+					Usedmem:   100,
+					Usedcores: 10,
+				},
 			},
 		},
 	}
