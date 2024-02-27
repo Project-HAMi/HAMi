@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	NodeLockTime = "4pd.io/mutex.lock"
+	NodeLockTime = "hami.io/mutex.lock"
 	MaxLockRetry = 5
 )
 
