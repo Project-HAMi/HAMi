@@ -120,3 +120,19 @@ type DeviceUsage struct {
 	Type      string
 	Health    bool
 }
+
+type DeviceInfo struct {
+	ID      string
+	Index   uint
+	Count   int32
+	Devmem  int32
+	Devcore int32
+	Type    string
+	Numa    int
+	Health  bool
+}
+
+type NodeInfo struct {
+	ID      string
+	Devices []DeviceInfo
+}

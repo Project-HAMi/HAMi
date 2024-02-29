@@ -1,12 +1,14 @@
 package cambricon
 
 import (
+	"errors"
 	"flag"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -30,7 +32,35 @@ type CambriconDevices struct {
 }
 
 func InitMLUDevice() *CambriconDevices {
+	util.HandshakeAnnos[CambriconMLUDevice] = HandshakeAnnos
 	return &CambriconDevices{}
+}
+
+func (dev *CambriconDevices) NodeCleanUp(nn string) error {
+	return util.MarkAnnotationsToDelete(CambriconMLUDevice, nn)
+}
+
+func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	return util.CheckHealth(devType, n)
+}
+
+func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+	devEncoded, ok := n.Annotations[RegisterAnnos]
+	if !ok {
+		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+	}
+	nodedevices, err := util.DecodeNodeDevices(devEncoded)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, err
+	}
+	if len(nodedevices) == 0 {
+		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	devDecoded := util.EncodeNodeDevices(nodedevices)
+	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
+	return nodedevices, nil
 }
 
 func (dev *CambriconDevices) AssertNuma(annos map[string]string) bool {
@@ -133,4 +163,8 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+	return *annoinput
 }

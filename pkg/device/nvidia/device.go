@@ -1,6 +1,7 @@
 package nvidia
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"strconv"
@@ -10,6 +11,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -35,8 +38,9 @@ type NvidiaGPUDevices struct {
 }
 
 func InitNvidiaDevice() *NvidiaGPUDevices {
-	util.InRequestDevices["NVIDIA"] = "hami.sh/vgpu-devices-to-allocate"
-	util.SupportDevices["NVIDIA"] = "hami.sh/vgpu-devices-allocated"
+	util.InRequestDevices[NvidiaGPUDevice] = "hami.sh/vgpu-devices-to-allocate"
+	util.SupportDevices[NvidiaGPUDevice] = "hami.sh/vgpu-devices-allocated"
+	util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	return &NvidiaGPUDevices{}
 }
 
@@ -46,6 +50,32 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
+}
+
+func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
+	return util.MarkAnnotationsToDelete(NvidiaGPUDevice, nn)
+}
+
+func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	return util.CheckHealth(devType, n)
+}
+func (dev *NvidiaGPUDevices) GetNodeDevices(n v1.Node) ([]*api.DeviceInfo, error) {
+	devEncoded, ok := n.Annotations[RegisterAnnos]
+	if !ok {
+		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+	}
+	nodedevices, err := util.DecodeNodeDevices(devEncoded)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, err
+	}
+	if len(nodedevices) == 0 {
+		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	devDecoded := util.EncodeNodeDevices(nodedevices)
+	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
+	return nodedevices, nil
 }
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
@@ -111,6 +141,17 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 		return true, checkGPUtype(annos, d.Type, d.Numa), assertNuma(annos)
 	}
 	return false, false, false
+}
+
+func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+	devlist, ok := pd[NvidiaGPUDevice]
+	if ok && len(devlist) > 0 {
+		(*annoinput)[util.InRequestDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)[util.SupportDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
+		//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
+	}
+	return *annoinput
 }
 
 func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {

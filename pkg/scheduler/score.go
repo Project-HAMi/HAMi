@@ -180,7 +180,6 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 				node.Devices[val.Idx].Usedmem += val.Usedmem
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
-			//(*devinput)[k.Type] = append((*devinput)[k.Type], tmpDevs[k.Type]...)
 		} else {
 			return false, 0
 		}

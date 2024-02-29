@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -19,17 +20,24 @@ import (
 
 type Devices interface {
 	MutateAdmission(ctr *v1.Container) bool
+	CheckHealth(devType string, n *v1.Node) (bool, bool)
+	NodeCleanUp(nn string) error
+	GetNodeDevices(n v1.Node) ([]*api.DeviceInfo, error)
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
 	GenerateResourceRequests(ctr *v1.Container) util.ContainerDeviceRequest
+	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
 	ParseConfig(fs *flag.FlagSet)
 }
 
 var (
-	KnownDevice = map[string]string{
-		nvidia.HandshakeAnnos:    nvidia.RegisterAnnos,
-		cambricon.HandshakeAnnos: cambricon.RegisterAnnos,
-		hygon.HandshakeAnnos:     hygon.RegisterAnnos,
-	}
+	HandshakeAnnos = map[string]string{}
+	RegisterAnnos  = map[string]string{}
+	/*
+		KnownDevice    = map[string]string{
+			nvidia.HandshakeAnnos:    nvidia.RegisterAnnos,
+			cambricon.HandshakeAnnos: cambricon.RegisterAnnos,
+			hygon.HandshakeAnnos:     hygon.RegisterAnnos,
+		}*/
 	DevicesToHandle []string
 )
 
@@ -99,3 +107,96 @@ func GlobalFlagSet() *flag.FlagSet {
 	klog.InitFlags(fs)
 	return fs
 }
+
+/*
+func DefaultDeviceRegistration(n *v1.Node) *[]api.DeviceInfo {
+	nodeNames := []string{}
+	nodeNames = append(nodeNames, n.Name)
+	for devhandsk, devreg := range KnownDevice {
+		_, ok := n.Annotations[devreg]
+		if !ok {
+			continue
+		}
+		nodedevices, err := util.DecodeNodeDevices(n.Annotations[devreg])
+		if err != nil {
+			klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", n.Annotations[devreg])
+			continue
+		}
+		if len(nodedevices) == 0 {
+			klog.InfoS("no node gpu device found", "node", n.Name, "device annotation", n.Annotations[devreg])
+			continue
+		}
+		klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", util.EncodeNodeDevices(nodedevices))
+		handshake := n.Annotations[devhandsk]
+		if strings.Contains(handshake, "Requesting") {
+			formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+			if time.Now().After(formertime.Add(time.Second * 60)) {
+				_, ok := s.nodes[n.Name]
+				if ok {
+					_, ok = nodeInfoCopy[devhandsk]
+					if ok && nodeInfoCopy[devhandsk] != nil {
+						s.rmNodeDevice(n.Name, nodeInfoCopy[devhandsk])
+						klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
+
+						tmppat := make(map[string]string)
+						tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+						n, err := util.GetNode(n.Name)
+						if err != nil {
+							klog.Errorln("get node failed", err.Error())
+							continue
+						}
+						util.PatchNodeAnnotations(n, tmppat)
+						continue
+					}
+				}
+			}
+			continue
+		} else if strings.Contains(handshake, "Deleted") {
+			continue
+		} else {
+			tmppat := make(map[string]string)
+			tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+			n, err := util.GetNode(n.Name)
+			if err != nil {
+				klog.Errorln("get node failed", err.Error())
+				continue
+			}
+			util.PatchNodeAnnotations(n, tmppat)
+		}
+		nodeInfo := &util.NodeInfo{}
+		nodeInfo.ID = n.Name
+		nodeInfo.Devices = make([]util.DeviceInfo, 0)
+		for index, deviceinfo := range nodedevices {
+			found := false
+			_, ok := s.nodes[n.Name]
+			if ok {
+				for i1, val1 := range s.nodes[n.Name].Devices {
+					if strings.Compare(val1.ID, deviceinfo.Id) == 0 {
+						found = true
+						s.nodes[n.Name].Devices[i1].Devmem = deviceinfo.Devmem
+						s.nodes[n.Name].Devices[i1].Devcore = deviceinfo.Devcore
+						break
+					}
+				}
+			}
+			if !found {
+				nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
+					ID:      deviceinfo.Id,
+					Index:   uint(index),
+					Count:   deviceinfo.Count,
+					Devmem:  deviceinfo.Devmem,
+					Devcore: deviceinfo.Devcore,
+					Type:    deviceinfo.Type,
+					Numa:    deviceinfo.Numa,
+					Health:  deviceinfo.Health,
+				})
+			}
+		}
+		s.addNode(n.Name, nodeInfo)
+		nodeInfoCopy[devhandsk] = nodeInfo
+		if s.nodes[n.Name] != nil && nodeInfo != nil && len(nodeInfo.Devices) > 0 {
+			klog.Infof("node %v device %s come node info=%v total=%v", n.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[n.Name].Devices)
+		}
+	}
+}
+*/

@@ -1,12 +1,14 @@
 package hygon
 
 import (
+	"errors"
 	"flag"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 type DCUDevices struct {
@@ -76,6 +78,33 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
+func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+	devEncoded, ok := n.Annotations[RegisterAnnos]
+	if !ok {
+		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+	}
+	nodedevices, err := util.DecodeNodeDevices(devEncoded)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, err
+	}
+	if len(nodedevices) == 0 {
+		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
+		return []*api.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	devDecoded := util.EncodeNodeDevices(nodedevices)
+	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
+	return nodedevices, nil
+}
+
+func (dev *DCUDevices) NodeCleanUp(nn string) error {
+	return util.MarkAnnotationsToDelete(HygonDCUDevice, nn)
+}
+
+func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	return util.CheckHealth(devType, n)
+}
+
 func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
 		return true, checkDCUtype(annos, d.Type), false
@@ -133,4 +162,8 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+	return *annoinput
 }

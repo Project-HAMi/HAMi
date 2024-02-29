@@ -25,22 +25,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type DeviceInfo struct {
-	ID      string
-	Index   uint
-	Count   int32
-	Devmem  int32
-	Devcore int32
-	Type    string
-	Numa    int
-	Health  bool
-}
-
-type NodeInfo struct {
-	ID      string
-	Devices []DeviceInfo
-}
-
 type DeviceUsageList []*util.DeviceUsage
 
 type NodeUsage struct {
@@ -48,15 +32,15 @@ type NodeUsage struct {
 }
 
 type nodeManager struct {
-	nodes map[string]*NodeInfo
+	nodes map[string]*util.NodeInfo
 	mutex sync.RWMutex
 }
 
 func (m *nodeManager) init() {
-	m.nodes = make(map[string]*NodeInfo)
+	m.nodes = make(map[string]*util.NodeInfo)
 }
 
-func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
+func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	if nodeInfo == nil || len(nodeInfo.Devices) == 0 {
 		return
 	}
@@ -64,7 +48,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
+		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
 		tmp = append(tmp, m.nodes[nodeID].Devices...)
 		tmp = append(tmp, nodeInfo.Devices...)
 		m.nodes[nodeID].Devices = tmp
@@ -73,7 +57,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *NodeInfo) {
 	}
 }
 
-func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
+func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
@@ -82,7 +66,7 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 			return
 		}
 		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
-		tmp := make([]DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
+		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
 		for _, val := range m.nodes[nodeID].Devices {
 			found := false
 			for _, rmval := range nodeInfo.Devices {
@@ -100,16 +84,16 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *NodeInfo) {
 	}
 }
 
-func (m *nodeManager) GetNode(nodeID string) (*NodeInfo, error) {
+func (m *nodeManager) GetNode(nodeID string) (*util.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	if n, ok := m.nodes[nodeID]; ok {
 		return n, nil
 	}
-	return &NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	return &util.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 }
 
-func (m *nodeManager) ListNodes() (map[string]*NodeInfo, error) {
+func (m *nodeManager) ListNodes() (map[string]*util.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.nodes, nil

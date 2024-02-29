@@ -18,7 +18,6 @@ package scheduler
 
 import (
 	"context"
-	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -131,7 +130,7 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
-	nodeInfoCopy := make(map[string]*NodeInfo)
+	nodeInfoCopy := make(map[string]*util.NodeInfo)
 	for {
 		nodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
@@ -141,60 +140,44 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 		nodeNames := []string{}
 		for _, val := range nodes {
 			nodeNames = append(nodeNames, val.Name)
-			for devhandsk, devreg := range device.KnownDevice {
-				_, ok := val.Annotations[devreg]
-				if !ok {
-					continue
-				}
-				nodedevices, err := util.DecodeNodeDevices(val.Annotations[devreg])
-				if err != nil {
-					klog.ErrorS(err, "failed to decode node devices", "node", val.Name, "device annotation", val.Annotations[devreg])
-					continue
-				}
-				if len(nodedevices) == 0 {
-					klog.InfoS("no node gpu device found", "node", val.Name, "device annotation", val.Annotations[devreg])
-					continue
-				}
-				klog.V(5).InfoS("nodes device information", "node", val.Name, "nodedevices", util.EncodeNodeDevices(nodedevices))
-				handshake := val.Annotations[devhandsk]
-				if strings.Contains(handshake, "Requesting") {
-					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
-					if time.Now().After(formertime.Add(time.Second * 60)) {
-						_, ok := s.nodes[val.Name]
-						if ok {
-							_, ok = nodeInfoCopy[devhandsk]
-							if ok && nodeInfoCopy[devhandsk] != nil {
-								s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
-								klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
+			for devhandsk, devInstance := range device.GetDevices() {
+				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
+				if !health {
+					_, ok := s.nodes[val.Name]
+					if ok {
+						_, ok = nodeInfoCopy[devhandsk]
+						if ok && nodeInfoCopy[devhandsk] != nil {
+							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
+							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
 
-								tmppat := make(map[string]string)
-								tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
-								n, err := util.GetNode(val.Name)
-								if err != nil {
-									klog.Errorln("get node failed", err.Error())
-									continue
-								}
-								util.PatchNodeAnnotations(n, tmppat)
-								continue
+							err := devInstance.NodeCleanUp(val.Name)
+							if err != nil {
+								klog.ErrorS(err, "markAnnotationsToDeleteFailed")
 							}
+							continue
 						}
 					}
-					continue
-				} else if strings.Contains(handshake, "Deleted") {
-					continue
-				} else {
-					tmppat := make(map[string]string)
-					tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
-					n, err := util.GetNode(val.Name)
-					if err != nil {
-						klog.Errorln("get node failed", err.Error())
-						continue
-					}
-					util.PatchNodeAnnotations(n, tmppat)
 				}
-				nodeInfo := &NodeInfo{}
+				if !needUpdate {
+					continue
+				}
+
+				tmppat := make(map[string]string)
+				tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+				n, err := util.GetNode(val.Name)
+				if err != nil {
+					klog.Errorln("get node failed", err.Error())
+					continue
+				}
+				util.PatchNodeAnnotations(n, tmppat)
+
+				nodedevices, err := devInstance.GetNodeDevices(*val)
+				if err != nil {
+					continue
+				}
+				nodeInfo := &util.NodeInfo{}
 				nodeInfo.ID = val.Name
-				nodeInfo.Devices = make([]DeviceInfo, 0)
+				nodeInfo.Devices = make([]util.DeviceInfo, 0)
 				for index, deviceinfo := range nodedevices {
 					found := false
 					_, ok := s.nodes[val.Name]
@@ -209,7 +192,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 						}
 					}
 					if !found {
-						nodeInfo.Devices = append(nodeInfo.Devices, DeviceInfo{
+						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
 							ID:      deviceinfo.Id,
 							Index:   uint(index),
 							Count:   deviceinfo.Count,
@@ -223,7 +206,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				}
 				s.addNode(val.Name, nodeInfo)
 				nodeInfoCopy[devhandsk] = nodeInfo
-				if s.nodes[val.Name] != nil && nodeInfo != nil && len(nodeInfo.Devices) > 0 {
+				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
 					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
 				}
 			}
@@ -392,10 +375,15 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.nodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
-	InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
-	supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
-	maps.Copy(annotations, InRequestDevices)
-	maps.Copy(annotations, supportDevices)
+
+	for _, val := range device.GetDevices() {
+		val.PatchAnnotations(&annotations, m.devices)
+	}
+
+	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
+	//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
+	//maps.Copy(annotations, InRequestDevices)
+	//maps.Copy(annotations, supportDevices)
 	s.addPod(args.Pod, m.nodeID, m.devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
