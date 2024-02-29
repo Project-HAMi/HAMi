@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -36,11 +37,13 @@ import (
 var (
 	InRequestDevices map[string]string
 	SupportDevices   map[string]string
+	HandshakeAnnos   map[string]string
 )
 
 func init() {
 	InRequestDevices = make(map[string]string)
 	SupportDevices = make(map[string]string)
+	HandshakeAnnos = make(map[string]string)
 }
 
 func GetNode(nodename string) (*v1.Node, error) {
@@ -324,4 +327,27 @@ func InitKlogFlags() *flag.FlagSet {
 	klog.InitFlags(flagset)
 
 	return flagset
+}
+
+func CheckHealth(devType string, n *v1.Node) (bool, bool) {
+	handshake := n.Annotations[HandshakeAnnos[devType]]
+	if strings.Contains(handshake, "Requesting") {
+		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+		return time.Now().After(formertime.Add(time.Second * 60)), false
+	} else if strings.Contains(handshake, "Deleted") {
+		return true, false
+	} else {
+		return true, true
+	}
+}
+
+func MarkAnnotationsToDelete(devType string, nn string) error {
+	tmppat := make(map[string]string)
+	tmppat[devType] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+	n, err := GetNode(nn)
+	if err != nil {
+		klog.Errorln("get node failed", err.Error())
+		return err
+	}
+	return PatchNodeAnnotations(n, tmppat)
 }

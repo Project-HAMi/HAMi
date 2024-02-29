@@ -28,9 +28,9 @@ import (
 func Test_getNodesUsage(t *testing.T) {
 	nodeMage := nodeManager{}
 	nodeMage.init()
-	nodeMage.addNode("node1", &NodeInfo{
+	nodeMage.addNode("node1", &util.NodeInfo{
 		ID: "node1",
-		Devices: []DeviceInfo{
+		Devices: []util.DeviceInfo{
 			{
 				ID:      "GPU0",
 				Index:   0,
