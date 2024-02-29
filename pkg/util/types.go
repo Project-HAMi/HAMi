@@ -22,13 +22,13 @@ import (
 
 const (
 	//ResourceName = "nvidia.com/gpu"
-	//ResourceName = "4pd.io/vgpu"
-	AssignedTimeAnnotations          = "4pd.io/vgpu-time"
-	AssignedIDsAnnotations           = "4pd.io/vgpu-ids-new"
-	AssignedIDsToAllocateAnnotations = "4pd.io/devices-to-allocate"
-	AssignedNodeAnnotations          = "4pd.io/vgpu-node"
-	BindTimeAnnotations              = "4pd.io/bind-time"
-	DeviceBindPhase                  = "4pd.io/bind-phase"
+	//ResourceName = "hami.io/vgpu"
+	AssignedTimeAnnotations          = "hami.io/vgpu-time"
+	AssignedIDsAnnotations           = "hami.io/vgpu-ids-new"
+	AssignedIDsToAllocateAnnotations = "hami.io/devices-to-allocate"
+	AssignedNodeAnnotations          = "hami.io/vgpu-node"
+	BindTimeAnnotations              = "hami.io/bind-time"
+	DeviceBindPhase                  = "hami.io/bind-phase"
 
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
