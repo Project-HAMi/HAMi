@@ -15,8 +15,8 @@ type DCUDevices struct {
 }
 
 const (
-	HandshakeAnnos     = "4pd.io/node-handshake-dcu"
-	RegisterAnnos      = "4pd.io/node-dcu-register"
+	HandshakeAnnos     = "hami.io/node-handshake-dcu"
+	RegisterAnnos      = "hami.io/node-dcu-register"
 	HygonDCUDevice     = "DCU"
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"

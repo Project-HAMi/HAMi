@@ -16,8 +16,8 @@ import (
 )
 
 const (
-	HandshakeAnnos      = "4pd.io/node-handshake"
-	RegisterAnnos       = "4pd.io/node-nvidia-register"
+	HandshakeAnnos      = "hami.io/node-handshake"
+	RegisterAnnos       = "hami.io/node-nvidia-register"
 	NvidiaGPUDevice     = "NVIDIA"
 	NvidiaGPUCommonWord = "GPU"
 	GPUInUse            = "nvidia.com/use-gputype"

@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	HandshakeAnnos         = "4pd.io/node-handshake-mlu"
-	RegisterAnnos          = "4pd.io/node-mlu-register"
+	HandshakeAnnos         = "hami.io/node-handshake-mlu"
+	RegisterAnnos          = "hami.io/node-mlu-register"
 	CambriconMLUDevice     = "MLU"
 	CambriconMLUCommonWord = "MLU"
 	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
