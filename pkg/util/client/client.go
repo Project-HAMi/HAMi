@@ -15,7 +15,11 @@ var (
 )
 
 func init() {
-	kubeClient, _ = NewClient()
+    var err error
+    kubeClient, err = NewClient()
+    if err != nil {
+        panic(err)
+    }
 }
 
 func GetClient() kubernetes.Interface {
