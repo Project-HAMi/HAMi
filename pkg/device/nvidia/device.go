@@ -11,6 +11,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
 
@@ -31,6 +32,7 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
+	DefaultResourceNum    int
 )
 
 type NvidiaGPUDevices struct {
@@ -49,6 +51,7 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
+	fs.IntVar(&DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -87,8 +90,24 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 			Value: fmt.Sprint(priority.Value()),
 		})
 	}
-	_, ok = ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
-	return ok
+
+	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
+	if resourceNameOK {
+		return resourceNameOK
+	}
+
+	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(ResourceCores)]
+	_, resourceMemOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMem)]
+	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMemPercentage)]
+
+	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
+		if DefaultResourceNum > 0 {
+			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(DefaultResourceNum), resource.BinarySI)
+			resourceNameOK = true
+		}
+	}
+
+	return resourceNameOK
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
