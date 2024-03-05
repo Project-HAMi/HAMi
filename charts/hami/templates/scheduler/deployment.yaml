@@ -67,6 +67,7 @@ spec:
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --default-mem={{ .Values.scheduler.defaultMem }}
+            - --default-gpu={{ .Values.scheduler.defaultGPUNum }}
             - --default-cores={{ .Values.scheduler.defaultCores }}
             - --iluvatar-memory={{ .Values.iluvatarResourceMem }}
             - --iluvatar-cores={{ .Values.iluvatarResourceCore }}
