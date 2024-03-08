@@ -7,7 +7,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 var (
@@ -15,7 +15,11 @@ var (
 )
 
 func init() {
-	kubeClient, _ = NewClient()
+    var err error
+    kubeClient, err = NewClient()
+    if err != nil {
+        panic(err)
+    }
 }
 
 func GetClient() kubernetes.Interface {

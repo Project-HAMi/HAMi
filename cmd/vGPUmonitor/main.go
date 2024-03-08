@@ -1,7 +1,7 @@
 package main
 
 import (
-	"k8s.io/klog"
+	"k8s.io/klog/v2"
 )
 
 //var addr = flag.String("listen-address", ":9394", "The address to listen on for HTTP requests.")
