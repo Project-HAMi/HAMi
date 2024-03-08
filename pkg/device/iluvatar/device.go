@@ -16,11 +16,9 @@ type IluvatarDevices struct {
 }
 
 const (
-	IluvatarGPUDevice          = "Iluvatar"
-	IluvatarGPUCommonWord      = "Iluvatar"
-	IluvatarCoreResourceName   = "iluvatar.ai/vcuda-core"
-	IluvatarMemoryResourceName = "iluvatar.ai/vcuda-memory"
-	IluvatarDeviceSelection    = "iluvatar.ai/predicate-gpu-idx-"
+	IluvatarGPUDevice       = "Iluvatar"
+	IluvatarGPUCommonWord   = "Iluvatar"
+	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
 )
 
 var (
@@ -54,8 +52,8 @@ func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container) bool {
 func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
 	nodedevices := []*api.DeviceInfo{}
 	i := 0
-	cards, _ := n.Status.Capacity.Name(IluvatarCoreResourceName, resource.DecimalSI).AsInt64()
-	memoryTotal, _ := n.Status.Capacity.Name(IluvatarMemoryResourceName, resource.DecimalSI).AsInt64()
+	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
+	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
 		i++
 		nodedevices = append(nodedevices, &api.DeviceInfo{
