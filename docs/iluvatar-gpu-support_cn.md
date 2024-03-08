@@ -2,7 +2,7 @@
 
 本组件支持复用天数智芯GPU设备，并为此提供以下几种与vGPU类似的复用功能，包括：
 
-*** GPU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
+***GPU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
 
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）来分配MLU，本组件会确保任务使用的显存不会超过分配数值，注意只有M100型号的M150支持可配显存
 
@@ -27,7 +27,7 @@
 * 在安装HAMi时配置'iluvatarResourceMem'和'iluvatarResourceCore'参数
 
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem='iluvatar.ai/vcuda-memory' --set iluvatarResourceCore='iluvatar.ai/vcuda-core' -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem='iluvatar.ai/vcuda-memory' --set iluvatarResourceCores='iluvatar.ai/vcuda-core' -n kube-system
 ```
 
 ## 运行GPU任务
