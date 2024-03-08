@@ -36,7 +36,7 @@ func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 			}
 		}
 	}
-	klog.InfoS("collect requestreqs", counts)
+	klog.InfoS("collect requestreqs", "counts", counts)
 	return counts
 }
 

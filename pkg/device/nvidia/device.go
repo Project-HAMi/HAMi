@@ -11,7 +11,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -59,7 +58,8 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return util.CheckHealth(devType, n)
 }
-func (dev *NvidiaGPUDevices) GetNodeDevices(n v1.Node) ([]*api.DeviceInfo, error) {
+
+func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {
 		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
@@ -91,7 +91,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 	return ok
 }
 
-func checkGPUtype(annos map[string]string, cardtype string, numa int) bool {
+func checkGPUtype(annos map[string]string, cardtype string) bool {
 	inuse, ok := annos[GPUInUse]
 	if ok {
 		if !strings.Contains(inuse, ",") {
@@ -138,7 +138,7 @@ func assertNuma(annos map[string]string) bool {
 
 func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, checkGPUtype(annos, d.Type, d.Numa), assertNuma(annos)
+		return true, checkGPUtype(annos, d.Type), assertNuma(annos)
 	}
 	return false, false, false
 }

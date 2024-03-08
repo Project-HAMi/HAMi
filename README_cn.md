@@ -13,6 +13,7 @@
 [![英伟达 GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
 [![寒武纪 MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](docs/cambricon-mlu-support_cn.md)
 [![海光 DCU](https://img.shields.io/badge/海光-DCU-blue)](docs/hygon-dcu-support.md)
+[![天数智芯 GPU](https://img.shields.io/badge/天数智芯-GPU-blue)](docs/iluvatar-gpu-support_cn.md)
 
 ## 简介
 

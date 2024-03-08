@@ -21,6 +21,11 @@ dcuResourceName: "hygon.com/dcunum"
 dcuResourceMem: "hygon.com/dcumem"
 dcuResourceCores: "hygon.com/dcucores"
 
+#Iluvatar GPU Parameters
+iluvatarResourceName: "iluvatar.ai/vgpu"
+iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
+iluvatarResourceCore: "iluvatar.ai/vcuda-core"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
