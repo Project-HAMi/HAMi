@@ -49,4 +49,6 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.dcuResourceCores }}
         ignoredByScheduler: true
+      - name: {{ .Values.iluvatarResourceName }}
+        ignoredByScheduler: true
 {{- end }}

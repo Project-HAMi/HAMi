@@ -169,7 +169,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	cd := strings.Split(str, ":")
 	contdev := ContainerDevices{}
 	tmpdev := ContainerDevice{}
-	klog.Infof("Start to decode container device %s", str)
+	klog.V(5).Infof("Start to decode container device %s", str)
 	if len(str) == 0 {
 		return ContainerDevices{}, nil
 	}
@@ -189,7 +189,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			contdev = append(contdev, tmpdev)
 		}
 	}
-	klog.Infof("Finished decoding container devices. Total devices: %d", len(contdev))
+	klog.V(5).Infof("Finished decoding container devices. Total devices: %d", len(contdev))
 	return contdev, nil
 }
 
@@ -292,6 +292,7 @@ func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 	_, err = client.GetClient().CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
+		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch pod %v failed, %v", node.Name, err)
 	}
 	return err

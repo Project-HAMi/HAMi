@@ -63,7 +63,11 @@ data:
                     {
                         "name": "{{ .Values.dcuResourceCores }}",
                         "ignoredByScheduler": true
-                    }
+                    },
+                    {
+                        "name": "{{ .Values.iluvatarResourceName }}"
+                        "ignoredByScheduler": true
+                    },
                 ],
                 "ignoreable": false
             }

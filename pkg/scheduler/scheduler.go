@@ -161,15 +161,17 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				if !needUpdate {
 					continue
 				}
-
-				tmppat := make(map[string]string)
-				tmppat[devhandsk] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
-				n, err := util.GetNode(val.Name)
-				if err != nil {
-					klog.Errorln("get node failed", err.Error())
-					continue
+				_, ok := util.HandshakeAnnos[devhandsk]
+				if ok {
+					tmppat := make(map[string]string)
+					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					n, err := util.GetNode(val.Name)
+					if err != nil {
+						klog.Errorln("get node failed", err.Error())
+						continue
+					}
+					util.PatchNodeAnnotations(n, tmppat)
 				}
-				util.PatchNodeAnnotations(n, tmppat)
 
 				nodedevices, err := devInstance.GetNodeDevices(*val)
 				if err != nil {
@@ -362,9 +364,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
 	if err != nil {
+		klog.Infoln("err=", err.Error())
 		return nil, err
 	}
 	if len(*nodeScores) == 0 {
+		klog.Infoln("nodeScores_len=", len(*nodeScores))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil

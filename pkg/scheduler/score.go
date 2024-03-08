@@ -110,7 +110,8 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		}
 		if k.Coresreq > 100 {
 			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod))
-			return false, tmpDevs
+			k.Coresreq = 100
+			//return false, tmpDevs
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq
@@ -195,6 +196,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums uti
 		score := NodeScore{nodeID: nodeID, devices: make(util.PodDevices), score: 0}
 
 		//This loop is for different container request
+		ctrfit := false
 		for ctrid, n := range nums {
 			sums := 0
 			for _, k := range n {
@@ -209,6 +211,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums uti
 			}
 			klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 			fit, nodescore := fitInDevices(node, n, annos, task, &score.devices)
+			ctrfit = fit
 			if fit {
 				klog.InfoS("calcScore:pod fit node score results", "pod", klog.KObj(task), "node", nodeID, "score", nodescore)
 				score.score += nodescore
@@ -217,7 +220,7 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums uti
 				break
 			}
 		}
-		if len(score.devices) == len(nums) {
+		if ctrfit {
 			res = append(res, &score)
 		}
 	}
