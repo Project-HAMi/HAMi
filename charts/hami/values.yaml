@@ -43,6 +43,7 @@ scheduler:
   nodeName: ""
   defaultMem: 0
   defaultCores: 0
+  defaultGPUNum: 1
   metricsBindAddress: ":9395"
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.

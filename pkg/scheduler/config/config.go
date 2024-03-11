@@ -21,5 +21,6 @@ var (
 	SchedulerName      string
 	DefaultMem         int32
 	DefaultCores       int32
+	DefaultResourceNum int32
 	MetricsBindAddress string
 )
