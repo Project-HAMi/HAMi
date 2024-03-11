@@ -27,7 +27,7 @@ var inRequestDevices map[string]string
 
 func init() {
 	inRequestDevices = make(map[string]string)
-	inRequestDevices["NVIDIA"] = "hami.sh/vgpu-devices-to-allocate"
+	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 
 func TestEmptyContainerDevicesCoding(t *testing.T) {

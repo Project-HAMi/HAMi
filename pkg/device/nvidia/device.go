@@ -39,8 +39,8 @@ type NvidiaGPUDevices struct {
 }
 
 func InitNvidiaDevice() *NvidiaGPUDevices {
-	util.InRequestDevices[NvidiaGPUDevice] = "hami.sh/vgpu-devices-to-allocate"
-	util.SupportDevices[NvidiaGPUDevice] = "hami.sh/vgpu-devices-allocated"
+	util.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	util.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 	util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	return &NvidiaGPUDevices{}
 }
