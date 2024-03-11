@@ -47,18 +47,57 @@ func TestEmptyPodDeviceCoding(t *testing.T) {
 }
 
 func TestPodDevicesCoding(t *testing.T) {
-	pd1 := PodDevices{
-		"NVIDIA": PodSingleDevice{
-			ContainerDevices{
-				ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+	tests := []struct {
+		name string
+		args PodDevices
+	}{
+		{
+			name: "one pod one container use zero device",
+			args: PodDevices{
+				"NVIDIA": PodSingleDevice{},
 			},
-			ContainerDevices{
-				ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+		},
+		{
+			name: "one pod one container use one device",
+			args: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+					},
+				},
+			},
+		},
+		{
+			name: "one pod two container, every container use one device",
+			args: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+					},
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+					},
+				},
+			},
+		},
+		{
+			name: "one pod one container use two devices",
+			args: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30},
+					},
+				},
 			},
 		},
 	}
-	s := EncodePodDevices(inRequestDevices, pd1)
-	fmt.Println(s)
-	pd2, _ := DecodePodDevices(inRequestDevices, s)
-	assert.DeepEqual(t, pd1, pd2)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s := EncodePodDevices(inRequestDevices, test.args)
+			fmt.Println(s)
+			got, _ := DecodePodDevices(inRequestDevices, s)
+			assert.DeepEqual(t, test.args, got)
+		})
+	}
 }
