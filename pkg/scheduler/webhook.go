@@ -19,15 +19,16 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
+	"k8s.io/klog/v2"
 	"net/http"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
 type webhook struct {
@@ -48,28 +49,30 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
+		klog.Errorf("Failed to decode request: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if len(pod.Spec.Containers) == 0 {
+		klog.Warning("Denying admission as pod has no containers")
 		return admission.Denied("pod has no containers")
 	}
-	//klog.V(1).Infof("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
-	fmt.Printf("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
+	klog.Infof("Processing hook for pod %v/%v, UID: %v", req.Namespace, req.Name, req.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
+				klog.Infof("Denying admission as container %s is privileged", c.Name)
 				continue
 			}
 		}
-
 		for _, val := range device.GetDevices() {
 			hasResource = hasResource || val.MutateAdmission(c)
 		}
 	}
 
 	if !hasResource {
+		klog.Infof("Allowing admission for pod: %v/%v", req.Namespace, req.Name)
 		return admission.Allowed("no resource found")
 	}
 	if len(config.SchedulerName) > 0 {

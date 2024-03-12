@@ -1,8 +1,10 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"strconv"
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
@@ -11,15 +13,36 @@ import (
 )
 
 var (
-	kubeClient kubernetes.Interface
+	kubeClient  kubernetes.Interface
+	runE2ETests bool
 )
 
 func init() {
-    var err error
-    kubeClient, err = NewClient()
-    if err != nil {
-        panic(err)
-    }
+	runE2ETests = shouldRunE2ETests()
+
+	if !runE2ETests {
+		initKubeClient()
+	}
+}
+
+func shouldRunE2ETests() bool {
+	runE2ETestsStr := os.Getenv("RUN_E2E_TESTS")
+	runE2ETests, err := strconv.ParseBool(runE2ETestsStr)
+	if err != nil {
+		klog.Errorf("Failed to parse RUN_E2E_TESTS env var: %v", err)
+		return false
+	}
+
+	return runE2ETests
+}
+
+func initKubeClient() {
+	var err error
+	kubeClient, err = NewClient()
+	if err != nil {
+		klog.Errorf("Failed to init kubernetes client: %v", err)
+		panic(err)
+	}
 }
 
 func GetClient() kubernetes.Interface {
@@ -34,13 +57,11 @@ func NewClient() (kubernetes.Interface, error) {
 	}
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Infoln("InClusterConfig failed", err.Error())
+		klog.Infof("Trying config from file: %s", kubeConfig)
 		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
 		if err != nil {
-			klog.Errorln("BuildFromFlags failed", err.Error())
-			return nil, err
+			return nil, fmt.Errorf("BuildConfigFromFlags failed for file %s: %v", kubeConfig, err)
 		}
 	}
-	client, err := kubernetes.NewForConfig(config)
-	return client, err
+	return kubernetes.NewForConfig(config)
 }

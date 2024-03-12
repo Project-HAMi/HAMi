@@ -204,7 +204,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
-func initmetrics(bindAddress string) {
+func initMetrics(bindAddress string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	klog.Infof("Initializing metrics for scheduler")
