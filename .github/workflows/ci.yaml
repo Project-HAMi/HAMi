@@ -31,7 +31,7 @@ jobs:
         uses: nelonoel/branch-name@v1.0.1
 
       - name: Docker Login
-        uses: docker/login-action@v1.10.0
+        uses: docker/login-action@v3.0.0
         with:
           username: ${{ secrets.DOCKERHUB_TOKEN }}
           password: ${{ secrets.DOCKERHUB_PASSWD }}
