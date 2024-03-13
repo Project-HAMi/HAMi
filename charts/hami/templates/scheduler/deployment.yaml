@@ -43,6 +43,8 @@ spec:
             {{- end }}
             {{- else }}
             - --scheduler-name={{ .Values.schedulerName }}
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-namespace={{ .Release.Namespace }}
             {{- range .Values.scheduler.kubeScheduler.extraArgs }}
             - {{ . }}
             {{- end }}
@@ -71,6 +73,9 @@ spec:
             - --default-cores={{ .Values.scheduler.defaultCores }}
             - --iluvatar-memory={{ .Values.iluvatarResourceMem }}
             - --iluvatar-cores={{ .Values.iluvatarResourceCore }}
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-name={{ .Values.schedulerName }}
+            - --leader-elect-resource-namespace={{ .Release.Namespace }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}
