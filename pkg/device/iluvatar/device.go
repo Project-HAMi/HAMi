@@ -28,8 +28,8 @@ var (
 )
 
 func InitIluvatarDevice() *IluvatarDevices {
-	util.InRequestDevices[IluvatarGPUDevice] = "hami.sh/vgpu-devices-to-allocate"
-	util.SupportDevices[IluvatarGPUDevice] = "hami.sh/vgpu-devices-allocated"
+	util.InRequestDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	util.SupportDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-allocated"
 	return &IluvatarDevices{}
 }
 
