@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Close stale issues
-        uses: actions/stale@v6.0.1
+        uses: actions/stale@v9.0.0
         with:
           # ===== for issue
           stale-issue-label: ${{ env.STALE_ISSUE_LABEL }}
