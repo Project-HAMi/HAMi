@@ -23,10 +23,10 @@
 
 * Identify the resource name about core and memory usage(i.e 'iluvatar.ai/vcuda-core', 'iluvatar.ai/vcuda-memory')
 
-* set the 'iluvatarResourceMem' and 'iluvatarResourceCores' parameters when install hami
+* set the 'iluvatarResourceMem' and 'iluvatarResourceCore' parameters when install hami
 
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCores=iluvatar.ai/vcuda-core -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCore=iluvatar.ai/vcuda-core -n kube-system
 ```
 
 ## Running Iluvatar jobs

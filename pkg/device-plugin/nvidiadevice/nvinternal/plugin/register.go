@@ -129,6 +129,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 		if *util.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
+		klog.Infoln("MemoryScaling=", *util.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -156,7 +157,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 			Health:  health,
 		})
 		idx++
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, memory, Model, numa)
+		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
 	}
 	return &res
 }
