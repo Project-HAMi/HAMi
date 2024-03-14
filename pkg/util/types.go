@@ -83,6 +83,7 @@ var (
 //	   Containers []ContainerDevices `json:"containers,omitempty"`
 //	}
 type ContainerDevice struct {
+	// TODO current Idx cannot use, because EncodeContainerDevices method not encode this filed.
 	Idx       int
 	UUID      string
 	Type      string
