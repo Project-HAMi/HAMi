@@ -161,11 +161,6 @@ func start(c *cli.Context, flags []cli.Flag) error {
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
-	err = readFromConfigFile()
-	if err != nil {
-		klog.Errorf("failed to load config file %s", err.Error())
-	}
-
 	klog.Info("Starting OS watcher.")
 	sigs := newOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 

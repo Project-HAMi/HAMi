@@ -24,10 +24,10 @@
 
 * 部署'gpu-manager'之后，你需要确认显存和核组对应的资源名称(例如 'iluvatar.ai/vcuda-core', 'iluvatar.ai/vcuda-memory')
 
-* 在安装HAMi时配置'iluvatarResourceMem'和'iluvatarResourceCores'参数
+* 在安装HAMi时配置'iluvatarResourceMem'和'iluvatarResourceCore'参数
 
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCores=iluvatar.ai/vcuda-core -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCore=iluvatar.ai/vcuda-core -n kube-system
 ```
 
 ## 运行GPU任务
