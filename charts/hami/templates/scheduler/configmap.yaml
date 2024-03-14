@@ -65,9 +65,9 @@ data:
                         "ignoredByScheduler": true
                     },
                     {
-                        "name": "{{ .Values.iluvatarResourceName }}"
+                        "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
-                    },
+                    }
                 ],
                 "ignoreable": false
             }
