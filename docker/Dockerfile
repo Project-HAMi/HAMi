@@ -16,8 +16,11 @@ RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.tar.gz
 RUN tar -xf cmake-3.19.8-Linux-x86_64.tar.gz
 RUN cp /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake3
 ENV PATH="/libvgpu/cmake-3.19.8-Linux-x86_64/bin:${PATH}"
-RUN apt-get -y install openssl libssl-dev
+RUN apt-get -y install openssl libssl-dev curl
+ARG KUBERCTL_VERSION
+RUN curl https://storage.googleapis.com/kubernetes-release/release/${KUBERCTL_VERSION}/bin/linux/amd64/kubectl --output /bin/kubectl && chmod u+x /bin/kubectl
 RUN bash ./build.sh
+
 
 FROM nvidia/cuda:12.2.0-base-ubuntu22.04
 ENV NVIDIA_DISABLE_REQUIRE="true"
@@ -32,6 +35,7 @@ COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
 COPY --from=NVBUILD /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/
+COPY --from=NVBUILD /bin/kubectl /bin/kubectl
 COPY ./lib/mlu/cntopo /usr/bin/
 COPY ./lib/mlu/libcndev.so /usr/lib/
 

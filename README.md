@@ -158,11 +158,15 @@ sudo systemctl daemon-reload && systemctl restart containerd
 
 <details> <summary> Label your nodes </summary>
 
-Label your GPU nodes for scheduling with HAMi by adding the label "gpu=on". Without this label, the nodes cannot be managed by our scheduler.
+Finally, put a label on the node that needs to use GPU. Currently, there are two ways to label the node. You can manually or customize the label by controlling the autoValidatorDriver variable.
 
+- Manually put `label`, use the following command to put `label` on the node, and set `autoValidatorDriver` to `false`.
 ```
-kubectl label nodes {nodeid} gpu=on
+$ kubectl label nodes {nodeid} hami.io/nvidia-selector=on
 ```
+
+- Automatically put `label`. By setting `autoValidatorDriver` to `true`, a `daemonset` will be started to automatically detect whether the `NVIDIA` driver on the node is ready. If it is ready, set `hami.io/nvidia- selector=on` label, otherwise `hami.io/nvidia-selector=off` label.
+
 
 </details>
 

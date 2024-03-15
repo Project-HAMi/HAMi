@@ -139,11 +139,14 @@ systemctl daemon-reload && systemctl restart containerd
 
 <details> <summary> 为GPU节点打上标签 </summary>
 
-最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
+最后，在需要使用`GPU`的节点上打上`label`，目前提供了两种方式给节点打`label`，通过控制`autoValidatorDriver`变量来手动或者自定打`label`。
 
+- 手动打`label`，通过如下命令在节点上打`label`，并设置`autoValidatorDriver`为`false`。
 ```
-$ kubectl label nodes {nodeid} gpu=on
+$ kubectl label nodes {nodeid} hami.io/nvidia-selector=on
 ```
+
+- 自动打`label`，通过设置`autoValidatorDriver`为`true`，会启动一个`daemonset`，自动探测节点上的`NVIDIA`驱动是否准备好，准备好则给节点设置`hami.io/nvidia-selector=on` label，否则为`hami.io/nvidia-selector=off` label.
 
 </details>
 

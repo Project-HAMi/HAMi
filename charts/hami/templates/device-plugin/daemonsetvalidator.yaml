@@ -1,0 +1,70 @@
+{{- if .Values.devicePlugin.autoValidatorDriver }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: driver-validator
+  labels:
+    app.kubernetes.io/component: 4pd-driver-validator
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: 4pd-driver-validator
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: 4pd-driver-validator
+        4pd.io/webhook: ignore
+    spec:
+      serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
+      priorityClassName: system-node-critical
+      containers:
+        - name: driver-validator
+          image: '{{ .Values.devicePlugin.image }}:{{ .Values.version }}'
+          command:
+            - /bin/sh
+            - -c
+            - /scripts/validator.sh
+          env:
+          - name: NODE_NAME
+            valueFrom:
+              fieldRef:
+                fieldPath: spec.nodeName
+          volumeMounts:
+            - mountPath: /host
+              mountPropagation: HostToContainer
+              name: host-root
+              readOnly: true
+            - mountPath: /run/nvidia/driver
+              mountPropagation: HostToContainer
+              name: driver-install-path
+              readOnly: true
+            - mountPath: /run/nvidia/validations
+              mountPropagation: Bidirectional
+              name: run-nvidia-validations
+            - name: validator-configmap
+              mountPath: /scripts
+          resources:
+            limits:
+              cpu: 10m
+              memory: 50Mb
+      volumes:
+        - hostPath:
+            path: /run/nvidia/driver
+          name: driver-install-path
+        - hostPath:
+            path: /
+          name: host-root
+        - name: validator-configmap
+          configMap:
+            name: driver-validator-configmap
+        - hostPath:
+            path: /run/nvidia/validations
+            type: DirectoryOrCreate
+          name: run-nvidia-validations
+{{- end }}
