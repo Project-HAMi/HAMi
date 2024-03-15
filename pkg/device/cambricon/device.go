@@ -21,6 +21,10 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
+	// MLUUseUUID is user can use specify MLU device for set MLU UUID
+	MLUUseUUID = "cambricon.com/use-gpuuuid"
+	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID
+	MLUNoUseUUID = "cambricon.com/nouse-gpuuuid"
 )
 
 var (
@@ -131,6 +135,35 @@ func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsa
 		return true, checkMLUtype(annos, d.Type), false
 	}
 	return false, false, false
+}
+
+func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[MLUUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.Id == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[MLUNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.Id == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {

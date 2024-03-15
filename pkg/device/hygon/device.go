@@ -21,6 +21,10 @@ const (
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
+	// DCUUseUUID is user can use specify DCU device for set DCU UUID
+	DCUUseUUID = "hygon.com/use-gpuuuid"
+	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID
+	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 )
 
 var (
@@ -110,6 +114,35 @@ func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n 
 		return true, checkDCUtype(annos, d.Type), false
 	}
 	return false, false, false
+}
+
+func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[DCUUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.Id == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[DCUNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.Id == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
 }
 
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
