@@ -113,7 +113,7 @@ func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n 
 }
 
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Infof("Counting dcu devices")
+	klog.Info("Counting dcu devices")
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
 	dcuResourceMem := corev1.ResourceName(HygonResourceMemory)
 	dcuResourceCores := corev1.ResourceName(HygonResourceCores)

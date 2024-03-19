@@ -341,7 +341,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 // Allocate which return list of devices.
 func (m *CambriconDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 
-	klog.Infof("Into Allocate")
+	klog.Info("Into Allocate")
 	return m.allocateMLUShare(ctx, reqs)
 }
 

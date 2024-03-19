@@ -134,7 +134,7 @@ func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsa
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Infof("Counting mlu devices")
+	klog.Info("Counting mlu devices")
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
 	v, ok := ctr.Resources.Limits[mluResourceCount]

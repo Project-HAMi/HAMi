@@ -128,7 +128,7 @@ func WebHookRoute() httprouter.Handle {
 		klog.Fatalf("new web hook error, %v", err)
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infof("Into webhookfunc")
+		klog.Info("Into webhookfunc")
 		h.ServeHTTP(w, r)
 	}
 }
