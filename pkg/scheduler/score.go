@@ -62,7 +62,7 @@ func (l NodeScoreList) Less(i, j int) bool {
 }
 
 func viewStatus(usage NodeUsage) {
-	klog.InfoS("devices status")
+	klog.Info("devices status")
 	for _, val := range usage.Devices {
 		klog.InfoS("device status", "device id", val.Id, "device detail", val)
 	}
@@ -79,7 +79,7 @@ func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 			return pass, numaAssert
 		}
 	}
-	klog.Infof("Unrecognized device", n.Type)
+	klog.Infof("Unrecognized device %s", n.Type)
 	return false, false
 }
 

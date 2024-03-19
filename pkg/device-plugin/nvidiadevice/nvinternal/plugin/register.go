@@ -184,7 +184,7 @@ func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
 }
 
 func (r *NvidiaDevicePlugin) WatchAndRegister() {
-	klog.Infof("Starting WatchAndRegister")
+	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
 	successSleepInterval := time.Second * 30
 	for {

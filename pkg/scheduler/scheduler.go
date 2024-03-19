@@ -53,7 +53,7 @@ type Scheduler struct {
 }
 
 func NewScheduler() *Scheduler {
-	klog.Infof("New Scheduler")
+	klog.Info("New Scheduler")
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),

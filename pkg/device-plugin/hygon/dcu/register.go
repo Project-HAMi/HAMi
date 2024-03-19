@@ -74,7 +74,7 @@ func (r *Plugin) RegistrInAnnotation() error {
 }
 
 func (r *Plugin) WatchAndRegister() {
-	klog.Infof("into WatchAndRegister")
+	klog.Info("into WatchAndRegister")
 	for {
 		r.RefreshContainerDevices()
 		err := r.RegistrInAnnotation()
