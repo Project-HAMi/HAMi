@@ -45,7 +45,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
-	klog.Infof("Starting to collect metrics for scheduler")
+	klog.Info("Starting to collect metrics for scheduler")
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
@@ -207,7 +207,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 func initmetrics(bindAddress string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
-	klog.Infof("Initializing metrics for scheduler")
+	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 
 	// Construct cluster managers. In real code, we would assign them to
