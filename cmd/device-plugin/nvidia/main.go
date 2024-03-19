@@ -183,7 +183,7 @@ restart:
 	}
 
 	if restartPlugins {
-		klog.Infof("Failed to start one or more plugins. Retrying in 30s...")
+		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
 		restartTimeout = time.After(30 * time.Second)
 	}
 
@@ -208,7 +208,7 @@ restart:
 
 		// Watch for any other fs errors and log them.
 		case err := <-watcher.Errors:
-			klog.Infof("inotify: %s", err)
+			klog.Errorf("inotify: %s", err)
 
 		// Watch for any signals from the OS. On SIGHUP, restart this loop,
 		// restarting all of the plugins in the process. On all other
