@@ -205,6 +205,9 @@ func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums uti
 
 			if sums == 0 {
 				for idx := range score.devices {
+					if len(score.devices[idx]) <= ctrid {
+						score.devices[idx] = append(score.devices[idx], util.ContainerDevices{})
+					}
 					score.devices[idx][ctrid] = append(score.devices[idx][ctrid], util.ContainerDevice{})
 				}
 				continue
