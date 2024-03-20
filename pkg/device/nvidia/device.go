@@ -165,10 +165,11 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[util.InRequestDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
-		(*annoinput)[util.SupportDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
-		//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
-		//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
+		deviceStr := util.EncodePodSingleDevice(devlist)
+		(*annoinput)[util.InRequestDevices[NvidiaGPUDevice]] = deviceStr
+		(*annoinput)[util.SupportDevices[NvidiaGPUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.InRequestDevices[NvidiaGPUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[NvidiaGPUDevice], deviceStr)
 	}
 	return *annoinput
 }

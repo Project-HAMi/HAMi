@@ -101,3 +101,73 @@ func TestPodDevicesCoding(t *testing.T) {
 		})
 	}
 }
+
+func Test_DecodePodDevices(t *testing.T) {
+	//DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error)
+	InRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
+	SupportDevices["NVIDIA"] = "hami.io/vgpu-devices-allocated"
+	tests := []struct {
+		name string
+		args struct {
+			checklist map[string]string
+			annos     map[string]string
+		}
+		want    PodDevices
+		wantErr error
+	}{
+		{
+			name: "annos len is 0",
+			args: struct {
+				checklist map[string]string
+				annos     map[string]string
+			}{
+				checklist: map[string]string{},
+				annos:     make(map[string]string),
+			},
+			want:    PodDevices{},
+			wantErr: nil,
+		},
+		{
+			name: "annos having two device",
+			args: struct {
+				checklist map[string]string
+				annos     map[string]string
+			}{
+				checklist: InRequestDevices,
+				annos: map[string]string{
+					InRequestDevices["NVIDIA"]: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:;GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,NVIDIA,500,3:;",
+					SupportDevices["NVIDIA"]:   "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:;GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,NVIDIA,500,3:;",
+				},
+			},
+			want: PodDevices{
+				"NVIDIA": {
+					{
+						{
+							UUID:      "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+							Type:      "NVIDIA",
+							Usedmem:   500,
+							Usedcores: 3,
+						},
+					},
+					{
+						{
+							UUID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+							Type:      "NVIDIA",
+							Usedmem:   500,
+							Usedcores: 3,
+						},
+					},
+				},
+			},
+			wantErr: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, gotErr := DecodePodDevices(test.args.checklist, test.args.annos)
+			assert.DeepEqual(t, test.wantErr, gotErr)
+			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
