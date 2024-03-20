@@ -62,7 +62,8 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		if m.nodes[nodeID].Devices == nil || len(m.nodes[nodeID].Devices) == 0 {
+		if len(m.nodes[nodeID].Devices) == 0 {
+			delete(m.nodes, nodeID)
 			return
 		}
 		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
@@ -80,6 +81,9 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 			}
 		}
 		m.nodes[nodeID].Devices = tmp
+		if len(m.nodes[nodeID].Devices) == 0 {
+			delete(m.nodes, nodeID)
+		}
 		klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 	}
 }
