@@ -1,7 +1,10 @@
 name: CI
 on:
   pull_request_target:
-    branches: ['master', 'release/**']
+    types:
+      - opened
+      - synchronize
+      - reopened
   push:
     branches: ['master']
 
@@ -40,5 +43,9 @@ jobs:
         id: buildx
         uses: docker/setup-buildx-action@v1
 
+      - name: Generating image tag
+        id: runtime-tag
+        run: |
+          echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
       - run: make tidy
-      - run: SHORT_VERSION="dev" bash ./hack/build.sh
+      - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh
