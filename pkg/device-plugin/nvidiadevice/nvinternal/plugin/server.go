@@ -294,6 +294,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 		nodelock.ReleaseNodeLock(nodename)
 		return &pluginapi.AllocateResponse{}, err
 	}
+	klog.V(5).Infof("allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
@@ -406,7 +407,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	device.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, current)
 	return &responses, nil
 }
 
