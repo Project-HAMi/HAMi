@@ -31,3 +31,6 @@ clean:
 	-rm -rf $(OUTPUT_DIR)
 
 .PHONY: all build docker clean $(CMDS)
+
+test:
+	bash hack/unit-test.sh
