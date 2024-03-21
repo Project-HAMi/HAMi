@@ -16,6 +16,10 @@
 
 package config
 
+import (
+	componentbaseconfig "k8s.io/component-base/config"
+)
+
 var (
 	HttpBind           string
 	SchedulerName      string
@@ -23,4 +27,6 @@ var (
 	DefaultCores       int32
 	DefaultResourceNum int32
 	MetricsBindAddress string
+	// LeaderElection defines the configuration of leader election client.
+	LeaderElection componentbaseconfig.LeaderElectionConfiguration
 )

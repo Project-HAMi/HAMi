@@ -2489,6 +2489,7 @@ k8s.io/client-go v0.28.3/go.mod h1:LTykbBp9gsA7SwqirlCXBWtK0guzfhpoW4qSm7i9dxo=
 k8s.io/cloud-provider v0.28.3/go.mod h1:shAJxdrKu+SwwGUhkodxByPjaH8KBFZqXo6jU1F0ehI=
 k8s.io/cluster-bootstrap v0.28.3/go.mod h1:s1B3FTw713b9iw67yGFiVF3zCfw5obrZXWl3EMelvdg=
 k8s.io/code-generator v0.28.3/go.mod h1:A2EAHTRYvCvBrb/MM2zZBNipeCk3f8NtpdNIKawC43M=
+k8s.io/component-base v0.28.3 h1:rDy68eHKxq/80RiMb2Ld/tbH8uAE75JdCqJyi6lXMzI=
 k8s.io/component-base v0.28.3/go.mod h1:fDJ6vpVNSk6cRo5wmDa6eKIG7UlIQkaFmZN2fYgIUD8=
 k8s.io/component-helpers v0.28.3/go.mod h1:oJR7I9ist5UAQ3y/CTdbw6CXxdMZ1Lw2Ua/EZEwnVLs=
 k8s.io/controller-manager v0.28.3/go.mod h1:lYu5hxBVmfK5NrpmeVrioPH4ROnE4OxmUM3xx6JWlLs=

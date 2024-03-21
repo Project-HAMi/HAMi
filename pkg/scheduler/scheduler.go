@@ -124,7 +124,9 @@ func (s *Scheduler) Start() {
 
 }
 
-func (s *Scheduler) Stop() {
+func (s *Scheduler) Stop(ctx context.Context) {
+	<-ctx.Done()
+	klog.Info("Received context done single.")
 	close(s.stopCh)
 }
 
