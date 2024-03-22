@@ -12,7 +12,6 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
-const magic = 19920718
 const maxDevices = 16
 
 type deviceMemory struct {
@@ -47,9 +46,9 @@ type sharedRegionT struct {
 	num             uint64
 	uuids           [16]uuid
 
-	limit    [16]uint64
-	sm_limit [16]uint64
-	procs    [1024]shrregProcSlotT
+	limit   [16]uint64
+	smLimit [16]uint64
+	procs   [1024]shrregProcSlotT
 
 	procnum           int32
 	utilizationSwitch int32

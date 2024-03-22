@@ -19,7 +19,7 @@ const (
 	nvcapsDevicePath     = "/dev/nvidia-caps"
 )
 
-// GetMigCapabilityDevicePaths returns a mapping of MIG capability path to device node path
+// GetMigCapabilityDevicePaths returns a mapping of MIG capability path to device node path.
 func GetMigCapabilityDevicePaths() (map[string]string, error) {
 	// Open nvcapsMigMinorsPath for walking.
 	// If the nvcapsMigMinorsPath does not exist, then we are not on a MIG

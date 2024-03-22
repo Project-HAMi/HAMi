@@ -17,12 +17,14 @@
 package k8sutil
 
 import (
+	"testing"
+
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
-	"testing"
 )
 
 func Test_Resourcereqs(t *testing.T) {
@@ -50,7 +52,7 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{util.ContainerDeviceRequests{}},
+			want: []util.ContainerDeviceRequests{{}},
 		},
 		{
 			name: "one container use gpu",

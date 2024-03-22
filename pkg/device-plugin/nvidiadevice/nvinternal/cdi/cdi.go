@@ -32,7 +32,7 @@ const (
 	cdiRoot = "/var/run/cdi"
 )
 
-// cdiHandler creates CDI specs for devices assocatied with the device plugin
+// cdiHandler creates CDI specs for devices assocatied with the device plugin.
 type cdiHandler struct {
 	logger           *logrus.Logger
 	nvml             nvml.Interface
@@ -53,7 +53,7 @@ type cdiHandler struct {
 
 var _ Interface = &cdiHandler{}
 
-// newHandler constructs a new instance of the 'cdi' interface
+// newHandler constructs a new instance of the 'cdi' interface.
 func newHandler(opts ...Option) (Interface, error) {
 	c := &cdiHandler{}
 	for _, opt := range opts {

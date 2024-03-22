@@ -146,8 +146,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	if srPodList == nil {
 		srPodList = make(map[string]podusage)
 	}
-	err := monitorpath(srPodList)
-	if err != nil {
+	if err := monitorpath(srPodList); err != nil {
 		klog.Error("err=", err.Error())
 	}
 	if clientset != nil {
@@ -207,12 +206,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				if srPodList[sridx].sr == nil {
 					continue
 				}
-				pod_uid := strings.Split(srPodList[sridx].idstr, "_")[0]
-				ctr_name := strings.Split(srPodList[sridx].idstr, "_")[1]
-				if strings.Compare(string(val.UID), pod_uid) == 0 {
+				podUID := strings.Split(srPodList[sridx].idstr, "_")[0]
+				ctrName := strings.Split(srPodList[sridx].idstr, "_")[1]
+				if strings.Compare(string(val.UID), podUID) == 0 {
 					fmt.Println("Pod matched!", val.Name, val.Namespace, val.Labels)
 					for _, ctr := range val.Spec.Containers {
-						if strings.Compare(ctr.Name, ctr_name) == 0 {
+						if strings.Compare(ctr.Name, ctrName) == 0 {
 							fmt.Println("container matched", ctr.Name)
 							//err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[sridx])
 							//if err != nil {
@@ -234,19 +233,19 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 									ctrvGPUdesc,
 									prometheus.GaugeValue,
 									float64(value.total),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUlimitdesc,
 									prometheus.GaugeValue,
 									float64(srPodList[sridx].sr.limit[i]),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrDeviceMemorydesc,
 									prometheus.CounterValue,
 									float64(value.total),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
 								)
 							}
 						}

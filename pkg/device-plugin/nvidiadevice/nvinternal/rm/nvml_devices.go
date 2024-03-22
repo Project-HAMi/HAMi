@@ -23,10 +23,10 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
+
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
-
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 )
 
 const (
@@ -132,13 +132,13 @@ func (d nvmlMigDevice) GetPaths() ([]string, error) {
 
 // GetNumaNode returns the NUMA node associated with the GPU device
 func (d nvmlDevice) GetNumaNode() (bool, int, error) {
-	info, ret := d.GetPciInfo()
+	pciInfo, ret := d.GetPciInfo()
 	if ret != nvml.SUCCESS {
 		return false, 0, fmt.Errorf("error getting PCI Bus Info of device: %v", ret)
 	}
 
 	// Discard leading zeros.
-	busID := strings.ToLower(strings.TrimPrefix(int8Slice(info.BusId[:]).String(), "0000"))
+	busID := strings.ToLower(strings.TrimPrefix(int8Slice(pciInfo.BusId[:]).String(), "0000"))
 
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {

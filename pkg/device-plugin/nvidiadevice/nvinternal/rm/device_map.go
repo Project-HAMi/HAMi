@@ -19,10 +19,11 @@ package rm
 import (
 	"fmt"
 
+	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type deviceMapBuilder struct {
@@ -158,7 +159,7 @@ func (b *deviceMapBuilder) assertAllMigDevicesAreValid(uniform bool) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("At least one device with migEnabled=true was not configured correctly: %v", err)
+		return fmt.Errorf("at least one device with migEnabled=true was not configured correctly: %v", err)
 	}
 
 	if !uniform {
@@ -181,9 +182,9 @@ func (b *deviceMapBuilder) assertAllMigDevicesAreValid(uniform bool) error {
 	})
 }
 
-// setEntry sets the DeviceMap entry for the specified resource
-func (d DeviceMap) setEntry(name spec.ResourceName, index string, device deviceInfo) error {
-	dev, err := BuildDevice(index, device)
+// setEntry sets the DeviceMap entry for the specified resource.
+func (d DeviceMap) setEntry(name spec.ResourceName, index string, info deviceInfo) error {
+	dev, err := BuildDevice(index, info)
 	if err != nil {
 		return fmt.Errorf("error building Device: %v", err)
 	}

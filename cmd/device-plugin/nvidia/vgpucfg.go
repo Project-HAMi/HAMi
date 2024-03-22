@@ -6,8 +6,9 @@ import (
 	"os"
 	"strings"
 
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	cli "github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
 )
@@ -53,12 +54,12 @@ func addFlags() []cli.Flag {
 	return addition
 }
 
-// prt returns a reference to whatever type is passed into it
+// prt returns a reference to whatever type is passed into it.
 func ptr[T any](x T) *T {
 	return &x
 }
 
-// updateFromCLIFlag conditionally updates the config flag at 'pflag' to the value of the CLI flag with name 'flagName'
+// updateFromCLIFlag conditionally updates the config flag at 'pflag' to the value of the CLI flag with name 'flagName'.
 func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 	if c.IsSet(flagName) || *pflag == (*T)(nil) {
 		switch flag := any(pflag).(type) {
