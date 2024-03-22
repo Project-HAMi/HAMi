@@ -10,6 +10,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -111,8 +112,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[GPUInUse]
-	if ok {
+	if inuse, ok := annos[GPUInUse]; ok {
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
@@ -126,8 +126,7 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
-	nouse, ok := annos[GPUNoUse]
-	if ok {
+	if nouse, ok := annos[GPUNoUse]; ok {
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -140,16 +141,14 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 	v, ok := ctr.Resources.Limits[mluResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[mluResourceCount]
-	}
-	if ok {
+	} else {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found mlu devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[mluResourceMem]
-			}
-			if ok {
+			} else {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums)

@@ -7,6 +7,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -112,16 +113,14 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	v, ok := ctr.Resources.Limits[iluvatarResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[iluvatarResourceCount]
-	}
-	if ok {
+	} else {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found iluvatar devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[iluvatarResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[iluvatarResourceMem]
-			}
-			if ok {
+			} else {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums) * 256
@@ -131,8 +130,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
-			}
-			if ok {
+			} else {
 				corenums, ok := core.AsInt64()
 				if ok {
 					corenum = int32(corenums)

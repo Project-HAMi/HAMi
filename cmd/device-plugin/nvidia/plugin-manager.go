@@ -19,14 +19,15 @@ package main
 import (
 	"fmt"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin/manager"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
-// NewPluginManager creates an NVML-based plugin manager
+// NewPluginManager creates an NVML-based plugin manager.
 func NewPluginManager(config *util.DeviceConfig) (manager.Interface, error) {
 	var err error
 	switch *config.Flags.MigStrategy {
