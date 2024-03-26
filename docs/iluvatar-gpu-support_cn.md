@@ -27,7 +27,7 @@
 * 在安装HAMi时配置'iluvatarResourceMem'和'iluvatarResourceCore'参数
 
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem='iluvatar.ai/vcuda-memory' --set iluvatarResourceCores='iluvatar.ai/vcuda-core' -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCore=iluvatar.ai/vcuda-core -n kube-system
 ```
 
 ## 运行GPU任务

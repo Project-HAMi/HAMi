@@ -93,13 +93,13 @@ func readFromConfigFile() error {
 		if strings.Compare(os.Getenv("NodeName"), val.Name) == 0 {
 			klog.Infof("Reading config from file %s", val.Name)
 			if val.Devicememoryscaling > 0 {
-				util.DeviceMemoryScaling = &val.Devicememoryscaling
+				*util.DeviceMemoryScaling = val.Devicememoryscaling
 			}
 			if val.Devicecorescaling > 0 {
-				util.DeviceCoresScaling = &val.Devicecorescaling
+				*util.DeviceCoresScaling = val.Devicecorescaling
 			}
 			if val.Devicesplitcount > 0 {
-				util.DeviceSplitCount = &val.Devicesplitcount
+				*util.DeviceSplitCount = val.Devicesplitcount
 			}
 		}
 	}
@@ -110,19 +110,24 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 	devcfg := util.DeviceConfig{}
 	devcfg.Config = cfg
 
+	klog.Infoln("flags=", flags)
 	for _, flag := range flags {
 		for _, n := range flag.Names() {
 			// Common flags
-			switch n {
-			case "device-split-count":
+			if strings.Compare(n, "device-split-count") == 0 {
 				updateFromCLIFlag(&util.DeviceSplitCount, c, n)
-			case "device-memory-scaling":
+			}
+			if strings.Compare(n, "device-memory-scaling") == 0 {
 				updateFromCLIFlag(&util.DeviceMemoryScaling, c, n)
-			case "device-cores-scaling":
+				klog.Infoln("DeviceMemoryScaling", *util.DeviceMemoryScaling)
+			}
+			if strings.Compare(n, "device-cores-scaling") == 0 {
 				updateFromCLIFlag(&util.DeviceCoresScaling, c, n)
-			case "disable-core-limit":
+			}
+			if strings.Compare(n, "disable-core-limit") == 0 {
 				updateFromCLIFlag(&util.DisableCoreLimit, c, n)
-			case "resource-name":
+			}
+			if strings.Compare(n, "resource-name") == 0 {
 				updateFromCLIFlag(&devcfg.ResourceName, c, n)
 			}
 		}

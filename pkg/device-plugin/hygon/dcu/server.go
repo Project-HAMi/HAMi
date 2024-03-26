@@ -547,7 +547,7 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) 
 		responses.ContainerResponses = append(responses.ContainerResponses, &car)
 	}
 	klog.Infoln("response=", responses)
-	device.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, hygon.HygonDCUDevice, current)
 	return &responses, nil
 }
 

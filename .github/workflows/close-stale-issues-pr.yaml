@@ -1,0 +1,40 @@
+
+name: Clean Stale Issues And PR
+
+on:
+  schedule:
+    # each day
+    - cron: "0 20 * * *"
+
+permissions:
+  issues: write
+  pull-requests: write
+
+env:
+  STALE_ISSUE_LABEL: issue/stale
+  STALE_PR_LABEL: pr/stale
+
+jobs:
+  stale:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale issues
+        uses: actions/stale@v9.0.0
+        with:
+          # ===== for issue
+          stale-issue-label: ${{ env.STALE_ISSUE_LABEL }}
+          # exclude all issues/PRs with milestones
+          exempt-all-issue-assignees: true
+          # exclude issues/PRs with the specified labels
+          exempt-issue-labels: pinned,security,good-first-issue
+
+          # reach idle days and marked as stale
+          days-before-issue-stale: 30
+          stale-issue-message: |
+            This issue has been automatically marked as stale because it has not
+            had recent activity. It will be closed if no further activity occurs.
+          # after marked stale, how long will close it
+          days-before-issue-close: 14
+          close-issue-message: |
+            This issue has not seen any activity since it was marked stale.
+            Closing.
