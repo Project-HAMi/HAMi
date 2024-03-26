@@ -334,7 +334,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 		responses.ContainerResponses = append(responses.ContainerResponses, &resp)
 	}
 	klog.Infoln("response=", responses)
-	device.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, cambricon.CambriconMLUDevice, current)
 	return &responses, nil
 }
 
