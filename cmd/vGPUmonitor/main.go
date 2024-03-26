@@ -16,7 +16,7 @@ func main() {
 	cgroupDriver = 0
 	errchannel := make(chan error)
 	go serveInfo(errchannel)
-	go initmetrics()
+	go initMetrics()
 	go watchAndFeedback()
 	for {
 		err := <-errchannel
