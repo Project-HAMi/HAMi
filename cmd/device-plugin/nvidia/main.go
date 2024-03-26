@@ -161,11 +161,6 @@ func start(c *cli.Context, flags []cli.Flag) error {
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
-	err = readFromConfigFile()
-	if err != nil {
-		klog.Errorf("failed to load config file %s", err.Error())
-	}
-
 	klog.Info("Starting OS watcher.")
 	sigs := newOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
@@ -188,7 +183,7 @@ restart:
 	}
 
 	if restartPlugins {
-		klog.Infof("Failed to start one or more plugins. Retrying in 30s...")
+		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
 		restartTimeout = time.After(30 * time.Second)
 	}
 
@@ -213,7 +208,7 @@ restart:
 
 		// Watch for any other fs errors and log them.
 		case err := <-watcher.Errors:
-			klog.Infof("inotify: %s", err)
+			klog.Errorf("inotify: %s", err)
 
 		// Watch for any signals from the OS. On SIGHUP, restart this loop,
 		// restarting all of the plugins in the process. On all other

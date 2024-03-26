@@ -202,6 +202,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 }
 
 func DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error) {
+	klog.V(5).Infof("checklist is [%+v], annos is [%+v]", checklist, annos)
 	if len(annos) == 0 {
 		return PodDevices{}, nil
 	}
@@ -232,7 +233,7 @@ func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevice
 	if err != nil {
 		return v1.Container{}, ContainerDevices{}, err
 	}
-	klog.InfoS("pdevices", pdevices)
+	klog.Infof("pod annotation decode vaule is %+v", pdevices)
 	res := ContainerDevices{}
 
 	pd, ok := pdevices[dtype]
@@ -325,6 +326,7 @@ func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
 	if err != nil {
 		return err
 	}
+	klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
@@ -345,7 +347,7 @@ func CheckHealth(devType string, n *v1.Node) (bool, bool) {
 	handshake := n.Annotations[HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
-		return time.Now().After(formertime.Add(time.Second * 60)), false
+		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
 	} else {

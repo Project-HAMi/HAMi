@@ -45,10 +45,10 @@ func GetDevices() map[string]Devices {
 
 func init() {
 	devices = make(map[string]Devices)
-	devices["Cambricon"] = cambricon.InitMLUDevice()
-	devices["NVIDIA"] = nvidia.InitNvidiaDevice()
-	devices["Hygon"] = hygon.InitDCUDevice()
-	devices["Iluvatar"] = iluvatar.InitIluvatarDevice()
+	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice()
+	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
+	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
+	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
 	DevicesToHandle = []string{}
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
@@ -56,9 +56,13 @@ func init() {
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
 }
 
-func PodAllocationTrySuccess(nodeName string, pod *v1.Pod) {
-	refreshed, _ := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	annos := refreshed.Annotations[util.AssignedIDsToAllocateAnnotations]
+func PodAllocationTrySuccess(nodeName string, devName string, pod *v1.Pod) {
+	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("get pods %s/%s error: %+v", pod.Namespace, pod.Name, err)
+		return
+	}
+	annos := refreshed.Annotations[util.InRequestDevices[devName]]
 	klog.Infoln("TrySuccess:", annos)
 	for _, val := range DevicesToHandle {
 		if strings.Contains(annos, val) {

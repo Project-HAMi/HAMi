@@ -96,7 +96,7 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 }
 
 func (r *DeviceRegister) WatchAndRegister(opt Options) {
-	klog.Infof("into WatchAndRegister")
+	klog.Info("into WatchAndRegister")
 	for {
 		err := r.RegistrInAnnotation()
 		if err != nil {

@@ -25,6 +25,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/klog/v2"
+	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -36,6 +38,7 @@ type webhook struct {
 }
 
 func NewWebHook() (*admission.Webhook, error) {
+	logf.SetLogger(klog.NewKlogr())
 	schema := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(schema); err != nil {
 		return nil, err

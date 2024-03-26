@@ -53,7 +53,7 @@ type Scheduler struct {
 }
 
 func NewScheduler() *Scheduler {
-	klog.Infof("New Scheduler")
+	klog.Info("New Scheduler")
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
@@ -165,6 +165,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					klog.Infoln("New timestamp=", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]])
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())

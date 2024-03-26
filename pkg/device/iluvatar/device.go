@@ -28,8 +28,8 @@ var (
 )
 
 func InitIluvatarDevice() *IluvatarDevices {
-	util.InRequestDevices[IluvatarGPUDevice] = "hami.sh/vgpu-devices-to-allocate"
-	util.SupportDevices[IluvatarGPUDevice] = "hami.sh/vgpu-devices-allocated"
+	util.InRequestDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	util.SupportDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-allocated"
 	return &IluvatarDevices{}
 }
 
@@ -105,7 +105,7 @@ func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Infof("Counting iluvatar devices")
+	klog.Info("Counting iluvatar devices")
 	iluvatarResourceCount := corev1.ResourceName(IluvatarResourceCount)
 	iluvatarResourceMem := corev1.ResourceName(IluvatarResourceMemory)
 	iluvatarResourceCores := corev1.ResourceName(IluvatarResourceCores)
