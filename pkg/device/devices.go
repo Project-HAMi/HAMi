@@ -45,10 +45,10 @@ func GetDevices() map[string]Devices {
 
 func init() {
 	devices = make(map[string]Devices)
-	devices["Cambricon"] = cambricon.InitMLUDevice()
-	devices["NVIDIA"] = nvidia.InitNvidiaDevice()
-	devices["Hygon"] = hygon.InitDCUDevice()
-	devices["Iluvatar"] = iluvatar.InitIluvatarDevice()
+	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice()
+	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
+	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
+	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
 	DevicesToHandle = []string{}
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
