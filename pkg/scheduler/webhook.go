@@ -19,7 +19,6 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"k8s.io/klog/v2"
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
