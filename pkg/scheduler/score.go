@@ -84,6 +84,17 @@ func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 	return false, false
 }
 
+func checkUUID(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) bool {
+	devices, ok := device.GetDevices()[n.Type]
+	if !ok {
+		klog.Errorf("can not get device for %s type", n.Type)
+		return false
+	}
+	result := devices.CheckUUID(annos, d)
+	klog.V(2).Infof("checkUUID result is %v for %s type", result, n.Type)
+	return result
+}
+
 func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *v1.Pod) (bool, map[string]util.ContainerDevices) {
 	k := request
 	originReq := k.Nums
@@ -103,6 +114,10 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			k.Nums = originReq
 			prevnuma = node.Devices[i].Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
+		}
+		if !checkUUID(annos, *node.Devices[i], k) {
+			klog.InfoS("card uuid mismatch,", "pod", klog.KObj(pod), "current device info is:", node.Devices[i])
+			continue
 		}
 
 		memreq := int32(0)

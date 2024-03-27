@@ -20,6 +20,10 @@ const (
 	IluvatarGPUDevice       = "Iluvatar"
 	IluvatarGPUCommonWord   = "Iluvatar"
 	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
+	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID
+	IluvatarUseUUID = "iluvatar.ai/use-gpuuuid"
+	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID
+	IluvatarNoUseUUID = "iluvatar.ai/nouse-gpuuuid"
 )
 
 var (
@@ -99,6 +103,35 @@ func (dev *IluvatarDevices) CheckType(annos map[string]string, d util.DeviceUsag
 		return true, true, false
 	}
 	return false, false, false
+}
+
+func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[IluvatarUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.Id == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[IluvatarNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.Id == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
 }
 
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
