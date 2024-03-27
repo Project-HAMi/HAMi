@@ -24,9 +24,9 @@ const (
 	GPUInUse            = "nvidia.com/use-gputype"
 	GPUNoUse            = "nvidia.com/nouse-gputype"
 	NumaBind            = "nvidia.com/numa-bind"
-	// GPUUseUUID is user can use specify GPU device for set GPU UUID
+	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
-	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID
+	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 )
 
@@ -172,7 +172,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return true
 			}
 		}
@@ -185,7 +185,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return false
 			}
 		}
