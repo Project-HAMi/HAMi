@@ -29,6 +29,8 @@ English version|[中文版](README_cn.md)
 
 ***Device Type Specification***: You can specify the type of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype".
 
+***Device UUID Specification***: You can specify the UUID of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid".
+
 ***Easy to use***: You don't need to modify your task YAML to use our scheduler. All your jobs will be automatically supported after installation. Additionally, you can specify a resource name other than "nvidia.com/gpu" if you prefer.
 
 ## Major Features
