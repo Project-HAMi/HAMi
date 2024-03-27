@@ -22,9 +22,9 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
-	// MLUUseUUID is user can use specify MLU device for set MLU UUID
+	// MLUUseUUID is user can use specify MLU device for set MLU UUID.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
-	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID
+	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID.
 	MLUNoUseUUID = "cambricon.com/nouse-gpuuuid"
 )
 
@@ -145,7 +145,7 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return true
 			}
 		}
@@ -158,7 +158,7 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return false
 			}
 		}

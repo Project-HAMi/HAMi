@@ -22,9 +22,9 @@ const (
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
-	// DCUUseUUID is user can use specify DCU device for set DCU UUID
+	// DCUUseUUID is user can use specify DCU device for set DCU UUID.
 	DCUUseUUID = "hygon.com/use-gpuuuid"
-	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID
+	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID.
 	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 )
 
@@ -122,7 +122,7 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return true
 			}
 		}
@@ -135,7 +135,7 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return false
 			}
 		}
