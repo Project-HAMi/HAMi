@@ -168,11 +168,11 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[GPUUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.Id)
+		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return true
 			}
 		}
@@ -181,11 +181,11 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 
 	noUserUUID, ok := annos[GPUNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return false
 			}
 		}

@@ -129,7 +129,7 @@ func Test_CheckUUID(t *testing.T) {
 					GPUUseUUID: "abc,123",
 				},
 				d: util.DeviceUsage{
-					Id: "abc",
+					ID: "abc",
 				},
 			},
 			want: true,
@@ -144,7 +144,7 @@ func Test_CheckUUID(t *testing.T) {
 					GPUUseUUID: "abc,123",
 				},
 				d: util.DeviceUsage{
-					Id: "1abc",
+					ID: "1abc",
 				},
 			},
 			want: false,
@@ -159,7 +159,7 @@ func Test_CheckUUID(t *testing.T) {
 					GPUNoUseUUID: "abc,123",
 				},
 				d: util.DeviceUsage{
-					Id: "abc",
+					ID: "abc",
 				},
 			},
 			want: false,
@@ -174,7 +174,7 @@ func Test_CheckUUID(t *testing.T) {
 					GPUNoUseUUID: "abc,123",
 				},
 				d: util.DeviceUsage{
-					Id: "1abc",
+					ID: "1abc",
 				},
 			},
 			want: true,
