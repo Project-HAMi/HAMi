@@ -141,11 +141,11 @@ func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsa
 func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[MLUUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.Id)
+		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return true
 			}
 		}
@@ -154,11 +154,11 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 
 	noUserUUID, ok := annos[MLUNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return false
 			}
 		}

@@ -118,11 +118,11 @@ func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n 
 func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[DCUUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.Id)
+		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return true
 			}
 		}
@@ -131,11 +131,11 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 
 	noUserUUID, ok := annos[DCUNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.Id)
+		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if d.Id == uuid {
+			if strings.Compare(d.ID, uuid) == 0 {
 				return false
 			}
 		}
