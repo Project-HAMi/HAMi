@@ -20,9 +20,9 @@ const (
 	IluvatarGPUDevice       = "Iluvatar"
 	IluvatarGPUCommonWord   = "Iluvatar"
 	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID
+	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
 	IluvatarUseUUID = "iluvatar.ai/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID
+	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
 	IluvatarNoUseUUID = "iluvatar.ai/nouse-gpuuuid"
 )
 
@@ -112,7 +112,7 @@ func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return true
 			}
 		}
@@ -125,7 +125,7 @@ func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
-			if strings.Compare(d.ID, uuid) == 0 {
+			if d.ID == uuid {
 				return false
 			}
 		}
