@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/hygon/dcu"
+
 	"github.com/golang/glog"
 	"github.com/kubevirt/device-plugin-manager/pkg/dpm"
 )

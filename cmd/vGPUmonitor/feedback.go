@@ -176,7 +176,7 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusag
 	return false
 }
 
-// Check whether task with higher priority use GPU or there are other tasks with the same priority
+// Check whether task with higher priority use GPU or there are other tasks with the same priority.
 func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
 	for _, devuuid := range pu.sr.uuids {
 		_, ok := utSwitchOn[string(devuuid.uuid[:])]

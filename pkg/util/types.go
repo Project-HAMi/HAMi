@@ -22,7 +22,7 @@ import (
 
 const (
 	//ResourceName = "nvidia.com/gpu"
-	//ResourceName = "hami.io/vgpu"
+	//ResourceName = "hami.io/vgpu".
 	AssignedTimeAnnotations = "hami.io/vgpu-time"
 	AssignedNodeAnnotations = "hami.io/vgpu-node"
 	BindTimeAnnotations     = "hami.io/bind-time"
@@ -34,11 +34,11 @@ const (
 
 	//Set default mem to 5000m
 	//DefaultMem   = 5000
-	//DefaultCores = 0
+	//DefaultCores = 0.
 
 	DeviceLimit = 100
 	//TimeLayout = "ANSIC"
-	//DefaultTimeout = time.Second * 60
+	//DefaultTimeout = time.Second * 60.
 
 	BestEffort string = "best-effort"
 	Restricted string = "restricted"
@@ -100,14 +100,14 @@ type ContainerDeviceRequest struct {
 type ContainerDevices []ContainerDevice
 type ContainerDeviceRequests map[string]ContainerDeviceRequest
 
-// type ContainerAllDevices map[string]ContainerDevices
+// type ContainerAllDevices map[string]ContainerDevices.
 type PodSingleDevice []ContainerDevices
 
 type PodDeviceRequests []ContainerDeviceRequests
 type PodDevices map[string]PodSingleDevice
 
 type DeviceUsage struct {
-	Id        string
+	ID        string
 	Index     uint
 	Used      int32
 	Count     int32

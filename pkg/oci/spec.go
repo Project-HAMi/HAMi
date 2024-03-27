@@ -28,7 +28,7 @@ import (
 // error. The intention is that the function would modify the spec in-place.
 type SpecModifier func(*oci.Spec) error
 
-// Spec defines the operations to be performed on an OCI specification
+// Spec defines the operations to be performed on an OCI specification.
 type Spec interface {
 	Load() error
 	Flush() error
@@ -54,7 +54,7 @@ func NewSpecFromFile(filepath string) Spec {
 }
 
 // Load reads the contents of an OCI spec from file to be referenced internally.
-// The file is opened "read-only"
+// The file is opened "read-only".
 func (s *fileSpec) Load() error {
 	specFile, err := os.Open(s.path)
 	if err != nil {
@@ -82,7 +82,7 @@ func (s *fileSpec) Modify(f SpecModifier) error {
 	return f(s.Spec)
 }
 
-// Flush writes the stored OCI specification to the filepath specifed by the path member.
+// Flush writes the stored OCI specification to the filepath specified by the path member.
 // The file is truncated upon opening, overwriting any existing contents.
 func (s fileSpec) Flush() error {
 	specFile, err := os.Create(s.path)

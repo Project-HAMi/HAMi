@@ -7,6 +7,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -45,8 +46,7 @@ func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container) bool {
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[DCUInUse]
-	if ok {
+	if inuse, ok := annos[DCUInUse]; ok {
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
@@ -60,8 +60,7 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
-	nouse, ok := annos[DCUNoUse]
-	if ok {
+	if nouse, ok := annos[DCUNoUse]; ok {
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false
@@ -120,8 +119,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 	v, ok := ctr.Resources.Limits[dcuResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[dcuResourceCount]
-	}
-	if ok {
+	} else {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found dcu devices")
 			memnum := 0

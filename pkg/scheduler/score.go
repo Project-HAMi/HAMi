@@ -22,6 +22,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -64,7 +65,7 @@ func (l NodeScoreList) Less(i, j int) bool {
 func viewStatus(usage NodeUsage) {
 	klog.Info("devices status")
 	for _, val := range usage.Devices {
-		klog.InfoS("device status", "device id", val.Id, "device detail", val)
+		klog.InfoS("device status", "device id", val.ID, "device detail", val)
 	}
 }
 
@@ -91,10 +92,10 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
 	for i := len(node.Devices) - 1; i >= 0; i-- {
-		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices[i].Id)
+		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices[i].ID)
 		found, numa := checkType(annos, *node.Devices[i], k)
 		if !found {
-			klog.InfoS("card type mismatch,continueing...", "pod", klog.KObj(pod), node.Devices[i].Type, k.Type)
+			klog.InfoS("card type mismatch,continuing...", "pod", klog.KObj(pod), node.Devices[i].Type, k.Type)
 			continue
 		}
 		if numa && prevnuma != node.Devices[i].Numa {
@@ -121,29 +122,29 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			memreq = node.Devices[i].Totalmem * k.MemPercentagereq / 100
 		}
 		if node.Devices[i].Totalmem-node.Devices[i].Usedmem < memreq {
-			klog.V(5).InfoS("card Insufficient remaining memory", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].Id, "device total memory", node.Devices[i].Totalmem, "device used memory", node.Devices[i].Usedmem, "request memory", memreq)
+			klog.V(5).InfoS("card Insufficient remaining memory", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].ID, "device total memory", node.Devices[i].Totalmem, "device used memory", node.Devices[i].Usedmem, "request memory", memreq)
 			continue
 		}
 		if node.Devices[i].Totalcore-node.Devices[i].Usedcores < k.Coresreq {
-			klog.V(5).InfoS("card Insufficient remaining cores", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].Id, "device total core", node.Devices[i].Totalcore, "device used core", node.Devices[i].Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS("card Insufficient remaining cores", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].ID, "device total core", node.Devices[i].Totalcore, "device used core", node.Devices[i].Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		// Coresreq=100 indicates it want this card exclusively
 		if node.Devices[i].Totalcore == 100 && k.Coresreq == 100 && node.Devices[i].Used > 0 {
-			klog.V(5).InfoS("the container wants exclusive access to an entire card, but the card is already in use", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].Id, "used", node.Devices[i].Used)
+			klog.V(5).InfoS("the container wants exclusive access to an entire card, but the card is already in use", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].ID, "used", node.Devices[i].Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
 		if node.Devices[i].Totalcore != 0 && node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
-			klog.V(5).InfoS("can't allocate core=0 job to an already full GPU", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].Id)
+			klog.V(5).InfoS("can't allocate core=0 job to an already full GPU", "pod", klog.KObj(pod), "device index", i, "device", node.Devices[i].ID)
 			continue
 		}
 		if k.Nums > 0 {
-			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices[i].Id)
+			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices[i].ID)
 			k.Nums--
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 				Idx:       i,
-				UUID:      node.Devices[i].Id,
+				UUID:      node.Devices[i].ID,
 				Type:      k.Type,
 				Usedmem:   memreq,
 				Usedcores: k.Coresreq,
