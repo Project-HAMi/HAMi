@@ -34,3 +34,7 @@ clean:
 
 test:
 	bash hack/unit-test.sh
+
+lint:
+	bash hack/verify-staticcheck.sh
+

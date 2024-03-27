@@ -1,0 +1,137 @@
+run:
+  timeout: 10m
+
+  # The default concurrency value is the number of available CPU.
+  concurrency: 4
+
+  # which dirs to skip: issues from them won't be reported;
+  # can use regexp here: generated.*, regexp is applied on full path;
+  # default value is empty list, but default dirs are skipped independently
+  # from this option's value (see skip-dirs-use-default).
+  # "/" will be replaced by current OS file path separator to properly work
+  # on Windows.
+  skip-dirs:
+  - pkg/device-plugin # This code is directly lifted from the Kubernetes codebase, skip checking
+
+  # default is true. Enables skipping of directories:
+  #   vendor$, third_party$, testdata$, examples$, Godeps$, builtin$
+  skip-dirs-use-default: true
+
+  # One of 'readonly' and 'vendor'.
+  #  - readonly: the go command is disallowed from the implicit automatic updating of go.mod described above.
+  #              Instead, it fails when any changes to go.mod are needed. This setting is most useful to check
+  #              that go.mod does not need updates, such as in a continuous integration and testing system.
+  #  - vendor: the go command assumes that the vendor directory holds the correct copies of dependencies and ignores
+  #            the dependency descriptions in go.mod.
+  modules-download-mode: readonly
+
+linters-settings:
+  depguard:
+    list-type: blacklist
+    include-go-root: false
+  dupl:
+    threshold: 800
+  errcheck:
+    check-type-assertions: true
+    check-blank: true
+    # exclude: .errcheckignore
+  errorlint:
+    errorf: true
+    asserts: true
+    comparison: true
+  goconst:
+    min-len: 3
+    min-occurrences: 3
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+    disabled-checks:
+      - commentedOutCode
+      - whyNoLint
+    settings:
+      hugeParam:
+        sizeThreshold: 80
+      rangeExprCopy:
+        sizeThreshold: 512
+      rangeValCopy:
+        sizeThreshold: 128
+  godot:
+    scope: declarations
+    capital: false
+  gofmt:
+    simplify: true
+  gofumpt:
+    extra-rules: true
+  goimports:
+    local-prefixes: github.com/Project-HAMi/HAMi
+  gocyclo:
+    # minimal code complexity to report, 30 by default (but we recommend 10-20)
+    min-complexity: 20
+  nestif:
+    min-complexity: 20
+
+output:
+  format: colored-line-number
+  print-issued-lines: true
+  print-linter-name: true
+  uniq-by-line: true
+  sort-results: true
+
+linters:
+  disable-all: true
+  disabled:
+    - exhaustivestruct         # Checks if all struct's fields are initialized
+    - forbidigo                # Forbids identifiers
+    - forcetypeassert          # finds forced type assertions
+    - gci                      # Gci control golang package import order and make it always deterministic.
+    - gochecknoglobals         # check that no global variables exist
+    - gochecknoinits           # Checks that no init functions are present in Go code
+    - goconst                  # Finds repeated strings that could be replaced by a constant
+    - godox                    # Tool for detection of FIXME, TODO and other comment keywords
+    - goerr113                 # Golang linter to check the errors handling expressions
+    - golint                   # Golint differs from gofmt. Gofmt reformats Go source code, whereas golint prints out style mistakes
+    - gomnd                    # An analyzer to detect magic numbers.
+    - gomoddirectives          # Manage the use of 'replace', 'retract', and 'excludes' directives in go.mod.
+    - gomodguard               # Allow and block list linter for direct Go module dependencies.
+    - interfacer               # Linter that suggests narrower interface types
+    - lll                      # Reports long lines
+    - maligned                 # Tool to detect Go structs that would take less memory if their fields were sorted
+    - promlinter               # Check Prometheus metrics naming via promlint
+    - scopelint                # Scopelint checks for unpinned variables in go programs
+    - sqlclosecheck            # Checks that sql.Rows and sql.Stmt are closed.
+    - testpackage              # Linter that makes you use a separate _test package
+    - tparallel                # tparallel detects inappropriate usage of t.Parallel() method in your Go test codes
+    - wrapcheck                # Checks that errors returned from external packages are wrapped
+    - wsl                      # Whitespace Linter
+    - paralleltest             # paralleltest detects missing usage of t.Parallel() method in your Go test
+    - noctx                    # noctx finds sending http request without context.Context
+    - wastedassign             # wastedassign finds wasted assignment statements.
+    - exhaustive               # check exhaustiveness of enum switch statements
+    - cyclop                   # checks function and package cyclomatic complexity
+    - errcheck                 # Errcheck is a program for checking for unchecked errors in go programs. These unchecked errors can be critical bugs in some cases
+    - unparam                  # Reports unused function parameters
+    - gosec                    # Inspects source code for security problems
+    - funlen                   # Tool for detection of long functions
+    - gocognit                 # Computes and checks the cognitive complexity of functions
+    - gocyclo                  # Computes and checks the cyclomatic complexity of functions
+    - nlreturn                 # nlreturn checks for a new line before return and branch statements to increase code clarity
+    - gocritic                 # Provides many diagnostics that check for bugs, performance and style issues.
+    - errorlint                # errorlint is a linter for that can be used to find code that will cause problems with the error wrapping scheme introduced in Go 1.13.
+    - tagliatelle              # Checks the struct tags.
+    # need to enable
+    - nestif                   # Reports deeply nested if statements
+    - ineffassign              # Detects when assignments to existing variables are not used
+
+
+  enable:
+    - asciicheck
+    - forcetypeassert
+    - godot
+    - gofmt
+    - goimports
+    - misspell
+    - stylecheck

@@ -17,7 +17,7 @@
 package config
 
 var (
-	HttpBind           string
+	HTTPBind           string
 	SchedulerName      string
 	DefaultMem         int32
 	DefaultCores       int32

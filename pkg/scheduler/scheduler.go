@@ -27,6 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
@@ -223,13 +224,13 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	}
 }
 
-// InspectAllNodesUsage is used by metrics monitor
+// InspectAllNodesUsage is used by metrics monitor.
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.overviewstatus
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
-// unschedulerable and nodeName
+// unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
@@ -244,7 +245,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
 			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
-				Id:        d.ID,
+				ID:        d.ID,
 				Index:     d.Index,
 				Used:      0,
 				Count:     d.Count,
@@ -270,7 +271,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
 					for _, d := range node.Devices {
-						if d.Id == udevice.UUID {
+						if d.ID == udevice.UUID {
 							d.Used++
 							d.Usedmem += udevice.Usedmem
 							d.Usedcores += udevice.Usedcores

@@ -19,8 +19,9 @@ package rm
 import (
 	"fmt"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"k8s.io/klog/v2"
 )
 

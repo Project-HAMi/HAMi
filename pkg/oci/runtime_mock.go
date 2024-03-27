@@ -16,13 +16,13 @@
 
 package oci
 
-// MockExecRuntime wraps a SyscallExecRuntime, intercepting the exec call for testing
+// MockExecRuntime wraps a SyscallExecRuntime, intercepting the exec call for testing.
 type MockExecRuntime struct {
 	SyscallExecRuntime
 	execMock
 }
 
-// WithMockExec wraps a specified SyscallExecRuntime with a mocked exec function for testing
+// WithMockExec wraps a specified SyscallExecRuntime with a mocked exec function for testing.
 func WithMockExec(e SyscallExecRuntime, execResult error) *MockExecRuntime {
 	m := MockExecRuntime{
 		SyscallExecRuntime: e,

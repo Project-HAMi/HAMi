@@ -3,7 +3,6 @@
 
 package api
 
-
 // Reference imports to suppress errors if they are not otherwise used.
 
 // This is a compile-time assertion to ensure that this generated file
@@ -11,12 +10,12 @@ package api
 // A compilation error at this line likely means your copy of the
 // proto package needs to be updated.
 type DeviceInfo struct {
-	Index		int
-	Id                   string   
-	Count                int32    
-	Devmem               int32
-	Devcore              int32   
-	Type                 string
-	Numa		    int   
-	Health               bool 
+	Index   int
+	Id      string
+	Count   int32
+	Devmem  int32
+	Devcore int32
+	Type    string
+	Numa    int
+	Health  bool
 }

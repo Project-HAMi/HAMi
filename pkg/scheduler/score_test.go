@@ -5,6 +5,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	"gotest.tools/v3/assert"
 	v1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -37,7 +38,7 @@ func Test_calcScore(t *testing.T) {
 					"node1": {
 						Devices: DeviceUsageList{
 							&util.DeviceUsage{
-								Id:        "uuid1",
+								ID:        "uuid1",
 								Index:     0,
 								Used:      0,
 								Count:     10,

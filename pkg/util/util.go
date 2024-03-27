@@ -28,6 +28,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -35,10 +36,10 @@ import (
 )
 
 const (
-	// OneContainerMultiDeviceSplitSymbol this is when one container use multi device, use : symbol to join device info
+	// OneContainerMultiDeviceSplitSymbol this is when one container use multi device, use : symbol to join device info.
 	OneContainerMultiDeviceSplitSymbol = ":"
 
-	// OnePodMultiContainerSplitSymbol this is when one pod having multi container and more than one container use device, use ; symbol to join device info
+	// OnePodMultiContainerSplitSymbol this is when one pod having multi container and more than one container use device, use ; symbol to join device info.
 	OnePodMultiContainerSplitSymbol = ";"
 )
 
@@ -146,7 +147,7 @@ func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
 		}
 		tmp += OneContainerMultiDeviceSplitSymbol
 	}
-	klog.Infof("Encoded container Certian Device type: %s->%s", t, tmp)
+	klog.Infof("Encoded container Certain Device type: %s->%s", t, tmp)
 	return tmp
 }
 
