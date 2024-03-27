@@ -288,7 +288,7 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
 	klog.Infoln("Allocate", reqs.ContainerRequests)
 	responses := pluginapi.AllocateResponse{}
-	nodename := os.Getenv("NodeName")
+	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
 		nodelock.ReleaseNodeLock(nodename)
