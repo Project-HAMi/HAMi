@@ -37,7 +37,7 @@ spec:
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           command: ["/hygon","-logtostderr=true","-stderrthreshold=INFO","-v=5"]
           env:
-            - name: NodeName
+            - name: NODE_NAME
               valueFrom:
                 fieldRef:
                   fieldPath: spec.nodeName

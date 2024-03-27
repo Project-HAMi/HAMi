@@ -32,7 +32,7 @@ import (
 func main() {
 	options := mlu.ParseFlags()
 
-	util.NodeName = os.Getenv("NODE_NAME")
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	log.Println("Loading CNDEV")
 	if err := cndev.Init(); err != nil {
 		log.Printf("Failed to initialize CNDEV, err: %v", err)
