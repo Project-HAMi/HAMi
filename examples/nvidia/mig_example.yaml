@@ -9,4 +9,4 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/mig-3g.20gb: 1 # requesting 2 vGPUs
+          nvidia.com/mig-3g.20gb: 1 # requesting 1 vGPUs
