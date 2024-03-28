@@ -17,7 +17,7 @@ func addFlags() []cli.Flag {
 	addition := []cli.Flag{
 		&cli.StringFlag{
 			Name:    "node-name",
-			Value:   os.Getenv("NodeName"),
+			Value:   os.Getenv(util.NodeNameEnvName),
 			Usage:   "node name",
 			EnvVars: []string{"NodeName"},
 		},
@@ -91,7 +91,7 @@ func readFromConfigFile() error {
 	}
 	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
 	for _, val := range deviceConfigs.Nodeconfig {
-		if strings.Compare(os.Getenv("NodeName"), val.Name) == 0 {
+		if strings.Compare(os.Getenv(util.NodeNameEnvName), val.Name) == 0 {
 			klog.Infof("Reading config from file %s", val.Name)
 			if val.Devicememoryscaling > 0 {
 				*util.DeviceMemoryScaling = val.Devicememoryscaling
@@ -134,6 +134,6 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 		}
 	}
 	readFromConfigFile()
-	util.NodeName = os.Getenv("NodeName")
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	return devcfg, nil
 }

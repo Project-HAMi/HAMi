@@ -275,7 +275,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 	defer m.Unlock()
 
 	responses := pluginapi.AllocateResponse{}
-	nodename := os.Getenv("NODE_NAME")
+	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
 		nodelock.ReleaseNodeLock(nodename)
