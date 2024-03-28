@@ -49,6 +49,7 @@ type Scheduler struct {
 	nodeLister listerscorev1.NodeLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
+	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 }
@@ -58,6 +59,7 @@ func NewScheduler() *Scheduler {
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
+		nodeNotify:   make(chan struct{}, 1),
 	}
 	s.nodeManager.init()
 	s.podManager.init()
@@ -68,6 +70,18 @@ func check(err error) {
 	if err != nil {
 		klog.Fatal(err)
 	}
+}
+
+func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
+	s.nodeNotify <- struct{}{}
+}
+
+func (s *Scheduler) onDelNode(obj interface{}) {
+	s.nodeNotify <- struct{}{}
+}
+
+func (s *Scheduler) onAddNode(obj interface{}) {
+	s.nodeNotify <- struct{}{}
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
@@ -119,7 +133,11 @@ func (s *Scheduler) Start() {
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
-
+	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddNode,
+		UpdateFunc: s.onUpdateNode,
+		DeleteFunc: s.onDelNode,
+	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 
@@ -129,14 +147,21 @@ func (s *Scheduler) Stop() {
 	close(s.stopCh)
 }
 
-func (s *Scheduler) RegisterFromNodeAnnotatons() error {
+func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*util.NodeInfo)
+	ticker := time.NewTicker(time.Second * 15)
 	for {
+		select {
+		case <-s.nodeNotify:
+		case <-ticker.C:
+		case <-s.stopCh:
+			return
+		}
 		nodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
-			return err
+			continue
 		}
 		nodeNames := []string{}
 		for _, val := range nodes {
@@ -218,9 +243,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 		_, _, err = s.getNodesUsage(&nodeNames, nil)
 		if err != nil {
 			klog.Errorln("get node usage failed", err.Error())
-			return err
 		}
-		time.Sleep(time.Second * 15)
 	}
 }
 
@@ -286,7 +309,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
 		if err != nil {
-			klog.Errorf("get node %v device error, %v", nodeID, err)
+			klog.Warningf("get node %v device error, %v", nodeID, err)
 			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
@@ -370,11 +393,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len(*nodeScores) == 0 {
-		klog.Infoln("nodeScores_len=", len(*nodeScores))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
 	}
+	klog.V(4).Infoln("nodeScores_len=", len(*nodeScores))
 	sort.Sort(nodeScores)
 	m := (*nodeScores)[len(*nodeScores)-1]
 	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.nodeID, m.devices)
