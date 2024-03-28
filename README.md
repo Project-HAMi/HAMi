@@ -19,7 +19,7 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-!<img src="./imgs/example.png" width = "600" /> 
+<img src="./imgs/example.png" width = "600" /> 
 
 **Heterogeneous AI Computing Virtualization Middleware (HAMi), formerly known as k8s-vGPU-scheduler, is an "all-in-one" chart designed to manage Heterogeneous AI Computing Devices in a k8s cluster.** It includes everything you would expect, such as:
 
@@ -58,7 +58,7 @@ will see 3G device memory inside container
 
 ## Architect
 
-!<img src="./imgs/arch.png" width = "600" /> 
+<img src="./imgs/arch.png" width = "600" /> 
 
 HAMi consists of several components, including a unified mutatingwebhook, a unified scheduler extender, different device-plugins and different in-container virtualization technics for each heterogeneous AI devices.
 
