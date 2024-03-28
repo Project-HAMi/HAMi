@@ -9,5 +9,5 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 1 # requesting 2 vGPUs
+          nvidia.com/gpu: 1 # requesting 1 vGPUs
           nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
