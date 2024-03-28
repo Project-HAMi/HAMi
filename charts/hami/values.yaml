@@ -64,6 +64,8 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
+  serviceMonitor:
+    enable: false
   podAnnotations: {}
   #nodeSelector: 
   #  gpu: "on"
@@ -126,4 +128,6 @@ devicePlugin:
   hygonnodeSelector:
     dcu: "on"
   tolerations: []
+  serviceMonitor:
+    enable: false
 
