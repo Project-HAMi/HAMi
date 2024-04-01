@@ -54,7 +54,7 @@ func (r *Plugin) RegistrInAnnotation() error {
 	devices := r.apiDevices()
 	annos := make(map[string]string)
 	if len(util.NodeName) == 0 {
-		util.NodeName = os.Getenv("NodeName")
+		util.NodeName = os.Getenv(util.NodeNameEnvName)
 	}
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
