@@ -9,7 +9,7 @@ require (
 	github.com/NVIDIA/k8s-device-plugin v0.14.1
 	github.com/NVIDIA/nvidia-container-toolkit v1.14.4-0.20231115203935-5d7ee25b37e2
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
-	github.com/fsnotify/fsnotify v1.6.0
+	github.com/fsnotify/fsnotify v1.7.0
 	github.com/golang/glog v1.1.0
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
