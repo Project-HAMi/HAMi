@@ -10,7 +10,7 @@ require (
 	github.com/NVIDIA/nvidia-container-toolkit v1.14.4-0.20231115203935-5d7ee25b37e2
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
 	github.com/fsnotify/fsnotify v1.7.0
-	github.com/golang/glog v1.1.0
+	github.com/golang/glog v1.2.0
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.6.0
 	github.com/jessevdk/go-flags v1.5.0
@@ -53,7 +53,7 @@ require (
 	github.com/gogo/protobuf v1.3.2 // indirect
 	github.com/golang/protobuf v1.5.3 // indirect
 	github.com/google/gnostic-models v0.6.8 // indirect
-	github.com/google/go-cmp v0.5.9 // indirect
+	github.com/google/go-cmp v0.6.0 // indirect
 	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/imdario/mergo v0.3.6 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
