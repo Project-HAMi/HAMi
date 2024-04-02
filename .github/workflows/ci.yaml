@@ -20,7 +20,7 @@ jobs:
           basePath: # optional, default is .
           submodulePath: libvgpu
       - name: Install Go
-        uses: actions/setup-go@v4
+        uses: actions/setup-go@v5
         with:
           go-version: '1.21'
       - run: make tidy
@@ -32,7 +32,7 @@ jobs:
       - name: checkout code
         uses: actions/checkout@v4
       - name: install Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: '1.21'
       - run: make tidy
