@@ -26,7 +26,7 @@ jobs:
           submodulePath: libvgpu
 
       - name: Setup Go environment
-        uses: actions/setup-go@v5.0.0
+        uses: actions/setup-go@v5
         with:
           go-version: 1.21
 
