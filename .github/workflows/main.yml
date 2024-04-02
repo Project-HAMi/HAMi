@@ -54,7 +54,7 @@ jobs:
       
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
       
       - name: Setup protoc
         # You may pin to the exact commit or the version.
