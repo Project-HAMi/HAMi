@@ -1,9 +1,9 @@
 package nvidia
 
 import (
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
