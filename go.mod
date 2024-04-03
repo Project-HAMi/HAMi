@@ -17,7 +17,7 @@ require (
 	github.com/julienschmidt/httprouter v1.3.0
 	github.com/kubevirt/device-plugin-manager v1.19.5
 	github.com/onsi/ginkgo v1.16.5
-	github.com/onsi/gomega v1.27.10
+	github.com/onsi/gomega v1.32.0
 	github.com/opencontainers/runtime-spec v1.1.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/sirupsen/logrus v1.9.3
@@ -27,7 +27,7 @@ require (
 	golang.org/x/exp v0.0.0-20220827204233-334a2380cb91
 	golang.org/x/net v0.22.0
 	google.golang.org/grpc v1.56.0
-	google.golang.org/protobuf v1.30.0
+	google.golang.org/protobuf v1.33.0
 	gotest.tools/v3 v3.5.1
 	k8s.io/api v0.28.3
 	k8s.io/apimachinery v0.28.3
