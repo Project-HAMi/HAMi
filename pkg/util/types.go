@@ -43,6 +43,9 @@ const (
 	BestEffort string = "best-effort"
 	Restricted string = "restricted"
 	Guaranteed string = "guaranteed"
+
+	// NodeNameEnvName define env var name for use get node name.
+	NodeNameEnvName = "NODE_NAME"
 )
 
 type DevicePluginConfigs struct {
