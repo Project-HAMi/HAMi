@@ -37,7 +37,6 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
-	DefaultResourceNum    int
 )
 
 type NvidiaGPUDevices struct {
@@ -56,7 +55,6 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
-	fs.IntVar(&DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -106,8 +104,8 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMemPercentage)]
 
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
-		if DefaultResourceNum > 0 {
-			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(DefaultResourceNum), resource.BinarySI)
+		if config.DefaultResourceNum > 0 {
+			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(config.DefaultResourceNum), resource.BinarySI)
 			resourceNameOK = true
 		}
 	}

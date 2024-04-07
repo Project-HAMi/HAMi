@@ -3,6 +3,7 @@ package nvidia
 import (
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -22,7 +23,7 @@ func Test_MutateAdmission(t *testing.T) {
 	ResourceMem = "nvidia.com/gpumem"
 	ResourceMemPercentage = "nvidia.com/gpumem-percentage"
 	ResourceCores = "nvidia.com/gpucores"
-	DefaultResourceNum = 1
+	config.DefaultResourceNum = 1
 	tests := []struct {
 		name string
 		args *corev1.Container
