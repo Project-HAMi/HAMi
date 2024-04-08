@@ -10,7 +10,7 @@ For some cluster that don't have external web access, you can install HAMi by th
 
 Image list:
 ```
-projecthami/hami:v2.3.9:{HAMi version} 
+projecthami/hami:{HAMi version} 
 docker.io/jettech/kube-webhook-certgen:v1.5.2
 liangjw/kube-webhook-certgen:v1.1.1
 registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler:{your kubernetes version}
@@ -42,7 +42,7 @@ scheduler.devicePlugin.monitorimage
 6. Execute the following command in your /root/HAMi/chart folder
 
 ```
-helm install vgpu vgpu --set scheduler.kubeScheduler.imageTag={你的k8s server版本} -n kube-system
+helm install hami hami --set scheduler.kubeScheduler.imageTag={your k8s server version} -n kube-system
 ```
 
 7. Verify your installation
