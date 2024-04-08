@@ -8,6 +8,13 @@
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
 
+---
+<p>
+<img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
+</p>
+
+**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) Landscape project.**
+
 ## 支持设备：
 
 [![英伟达 GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
@@ -26,6 +33,8 @@
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）或者显存比例（例如50%）来分配GPU，vGPU调度器会确保任务使用的显存不会超过分配数值
 
 ***指定设备型号***：当前任务可以通过设置annotation的方式，来选择使用或者不使用某些具体型号的设备
+
+***设备指定UUID***：当前任务可以通过设置`annotation`的方式，来选择使用或者不使用指定的设备，比如："nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid"
 
 ***无侵入***:  vGPU调度器兼容nvidia官方插件的显卡分配方式，所以安装完毕后，你不需要修改原有的任务文件就可以使用vGPU的功能。当然，你也可以自定义的资源名称
 

@@ -32,13 +32,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-func (r *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
+func (plugin *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
 	cmd := exec.Command("nvidia-smi", "topo", "-m")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		log.Fatalf("cmd.Run() failed with %s\n", err)
 	}
-	klog.V(5).InfoS("nvidia-smi topo -m ouput", "result", string(out))
+	klog.V(5).InfoS("nvidia-smi topo -m output", "result", string(out))
 	return parseNvidiaNumaInfo(idx, string(out))
 }
 
@@ -93,8 +93,8 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 	return result, nil
 }
 
-func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
-	devs := r.Devices()
+func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
+	devs := plugin.Devices()
 	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
 	idx := 0
@@ -143,7 +143,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 				break
 			}
 		}
-		numa, err := r.getNumaInformation(idx)
+		numa, err := plugin.getNumaInformation(idx)
 		if err != nil {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
@@ -162,8 +162,8 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 	return &res
 }
 
-func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
-	devices := r.getApiDevices()
+func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
+	devices := plugin.getAPIDevices()
 	klog.InfoS("start working on the devices", "devices", devices)
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
@@ -183,12 +183,12 @@ func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	return err
 }
 
-func (r *NvidiaDevicePlugin) WatchAndRegister() {
+func (plugin *NvidiaDevicePlugin) WatchAndRegister() {
 	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
 	successSleepInterval := time.Second * 30
 	for {
-		err := r.RegistrInAnnotation()
+		err := plugin.RegistrInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)
 			klog.Infof("Retrying in %v seconds...", errorSleepInterval/time.Second)

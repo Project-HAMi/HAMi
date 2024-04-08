@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -28,7 +29,7 @@ import (
 type podInfo struct {
 	Namespace string
 	Name      string
-	Uid       k8stypes.UID
+	UID       k8stypes.UID
 	NodeID    string
 	Devices   util.PodDevices
 	CtrIDs    []string
@@ -48,9 +49,9 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 	defer m.mutex.Unlock()
 	_, ok := m.pods[pod.UID]
 	if !ok {
-		pi := &podInfo{Name: pod.Name, Uid: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
+		pi := &podInfo{Name: pod.Name, UID: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
 		m.pods[pod.UID] = pi
-		klog.Infof("Pod added: Name: %s, Uid: %s, Namespace: %s, NodeID: %s", pod.Name, pod.UID, pod.Namespace, nodeID)
+		klog.Infof("Pod added: Name: %s, UID: %s, Namespace: %s, NodeID: %s", pod.Name, pod.UID, pod.Namespace, nodeID)
 	}
 }
 

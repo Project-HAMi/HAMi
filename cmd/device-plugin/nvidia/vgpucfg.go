@@ -6,8 +6,9 @@ import (
 	"os"
 	"strings"
 
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	cli "github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
 )
@@ -16,7 +17,7 @@ func addFlags() []cli.Flag {
 	addition := []cli.Flag{
 		&cli.StringFlag{
 			Name:    "node-name",
-			Value:   os.Getenv("NodeName"),
+			Value:   os.Getenv(util.NodeNameEnvName),
 			Usage:   "node name",
 			EnvVars: []string{"NodeName"},
 		},
@@ -53,12 +54,12 @@ func addFlags() []cli.Flag {
 	return addition
 }
 
-// prt returns a reference to whatever type is passed into it
+// prt returns a reference to whatever type is passed into it.
 func ptr[T any](x T) *T {
 	return &x
 }
 
-// updateFromCLIFlag conditionally updates the config flag at 'pflag' to the value of the CLI flag with name 'flagName'
+// updateFromCLIFlag conditionally updates the config flag at 'pflag' to the value of the CLI flag with name 'flagName'.
 func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 	if c.IsSet(flagName) || *pflag == (*T)(nil) {
 		switch flag := any(pflag).(type) {
@@ -90,7 +91,7 @@ func readFromConfigFile() error {
 	}
 	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
 	for _, val := range deviceConfigs.Nodeconfig {
-		if strings.Compare(os.Getenv("NodeName"), val.Name) == 0 {
+		if strings.Compare(os.Getenv(util.NodeNameEnvName), val.Name) == 0 {
 			klog.Infof("Reading config from file %s", val.Name)
 			if val.Devicememoryscaling > 0 {
 				*util.DeviceMemoryScaling = val.Devicememoryscaling
@@ -133,6 +134,6 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 		}
 	}
 	readFromConfigFile()
-	util.NodeName = os.Getenv("NodeName")
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	return devcfg, nil
 }

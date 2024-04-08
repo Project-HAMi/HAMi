@@ -8,6 +8,7 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
 	klog "k8s.io/klog/v2"
 )
 
@@ -89,44 +90,44 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Totalmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Index),
+				nodeID, devs.ID, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUCoreLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Totalcore),
-				nodeID, devs.Id, fmt.Sprint(devs.Index),
+				nodeID, devs.ID, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores),
+				nodeID, devs.ID, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
 				float64(devs.Used),
-				nodeID, devs.Id, fmt.Sprint(devs.Index),
+				nodeID, devs.ID, fmt.Sprint(devs.Index),
 			)
 
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Usedcores),
-				nodeID, devs.Id, fmt.Sprint(devs.Index),
+				nodeID, devs.ID, fmt.Sprint(devs.Index),
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Id, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
+				nodeID, devs.ID, fmt.Sprint(devs.Index), fmt.Sprint(devs.Usedcores), fmt.Sprint(devs.Used), fmt.Sprint(devs.Totalmem), devs.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUMemoryPercentage,
 				prometheus.GaugeValue,
 				float64(devs.Usedmem)/float64(devs.Totalmem),
-				nodeID, devs.Id, fmt.Sprint(devs.Index),
+				nodeID, devs.ID, fmt.Sprint(devs.Index),
 			)
 		}
 	}
@@ -161,8 +162,8 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					found := false
 					for _, ni := range *nu {
 						for _, nodedev := range ni.Devices {
-							//fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
-							if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
+							//fmt.Println("uuid=", nodedev.ID, ctrdevval.UUID)
+							if strings.Compare(nodedev.ID, ctrdevval.UUID) == 0 {
 								totaldev = nodedev.Totalmem
 								found = true
 								break

@@ -260,22 +260,22 @@ func (r *nvmlResourceManager) getMigDeviceParts(d *Device) (string, int, int, er
 func parseMigDeviceUUID(mig string) (string, int, int, error) {
 	tokens := strings.SplitN(mig, "-", 2)
 	if len(tokens) != 2 || tokens[0] != "MIG" {
-		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
 	tokens = strings.SplitN(tokens[1], "/", 3)
 	if len(tokens) != 3 || !strings.HasPrefix(tokens[0], "GPU-") {
-		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
 	gi, err := strconv.Atoi(tokens[1])
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
 	ci, err := strconv.Atoi(tokens[2])
 	if err != nil {
-		return "", 0, 0, fmt.Errorf("Unable to parse UUID as MIG device")
+		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
 	return tokens[0], gi, ci, nil

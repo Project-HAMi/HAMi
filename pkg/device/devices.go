@@ -14,6 +14,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
@@ -25,6 +26,8 @@ type Devices interface {
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n v1.Node) ([]*api.DeviceInfo, error)
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
+	// CheckUUID is check current device id whether in GPUUseUUID or GPUNoUseUUID set, return true is check success.
+	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
 	GenerateResourceRequests(ctr *v1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
 	ParseConfig(fs *flag.FlagSet)

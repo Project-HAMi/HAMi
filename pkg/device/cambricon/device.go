@@ -7,6 +7,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
@@ -21,6 +22,10 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
+	// MLUUseUUID is user can use specify MLU device for set MLU UUID.
+	MLUUseUUID = "cambricon.com/use-gpuuuid"
+	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID.
+	MLUNoUseUUID = "cambricon.com/nouse-gpuuuid"
 )
 
 var (
@@ -133,6 +138,35 @@ func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsa
 	return false, false, false
 }
 
+func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[MLUUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.ID == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[MLUNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.ID == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
 	klog.Info("Counting mlu devices")
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
@@ -140,16 +174,14 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 	v, ok := ctr.Resources.Limits[mluResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[mluResourceCount]
-	}
-	if ok {
+	} else {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found mlu devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[mluResourceMem]
-			}
-			if ok {
+			} else {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums)
