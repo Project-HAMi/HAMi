@@ -12,6 +12,7 @@ import (
 	"time"
 
 	vGPUmonitor "github.com/Project-HAMi/HAMi/cmd/vGPUmonitor/noderpc"
+
 	"google.golang.org/grpc"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -92,8 +93,7 @@ func monitorpath(podmap map[string]podusage) error {
 	}
 	for _, val := range files {
 		dirname := containerPath + "/" + val.Name()
-		info, err1 := os.Stat(dirname)
-		if err1 != nil || !isVaildPod(info.Name(), pods) {
+		if info, err1 := os.Stat(dirname); err1 != nil || !isVaildPod(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
 				klog.Infof("Removing dirname %s in in monitorpath", dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))

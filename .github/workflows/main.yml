@@ -25,7 +25,7 @@ jobs:
     steps:
       - name: Checkout
       # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
 
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
@@ -35,7 +35,7 @@ jobs:
                 
 
       - name: Setup Go environment
-        uses: actions/setup-go@v5.0.0
+        uses: actions/setup-go@v5
         with:
             go-version: 1.21
 
@@ -43,7 +43,7 @@ jobs:
         uses: nelonoel/branch-name@v1.0.1
      
       - name: Docker Login
-        uses: docker/login-action@v1.10.0
+        uses: docker/login-action@v3.1.0
         with:
             # Server address of Docker registry. If not set then will default to Docker Hub
             # registry: 4pdosc
@@ -54,12 +54,12 @@ jobs:
       
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@v1
+        uses: docker/setup-buildx-action@v3
       
       - name: Setup protoc
         # You may pin to the exact commit or the version.
         # uses: arduino/setup-protoc@64c0c85d18e984422218383b81c52f8b077404d3
-        uses: arduino/setup-protoc@v1.1.2
+        uses: arduino/setup-protoc@v3.0.0
 
       - run: make tidy
         # run: make proto

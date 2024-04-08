@@ -10,6 +10,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -23,6 +24,10 @@ const (
 	GPUInUse            = "nvidia.com/use-gputype"
 	GPUNoUse            = "nvidia.com/nouse-gputype"
 	NumaBind            = "nvidia.com/numa-bind"
+	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
+	GPUUseUUID = "nvidia.com/use-gpuuuid"
+	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
+	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 )
 
 var (
@@ -32,7 +37,6 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
-	DefaultResourceNum    int
 )
 
 type NvidiaGPUDevices struct {
@@ -51,7 +55,6 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
-	fs.IntVar(&DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -101,8 +104,8 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMemPercentage)]
 
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
-		if DefaultResourceNum > 0 {
-			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(DefaultResourceNum), resource.BinarySI)
+		if config.DefaultResourceNum > 0 {
+			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(config.DefaultResourceNum), resource.BinarySI)
 			resourceNameOK = true
 		}
 	}
@@ -111,8 +114,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[GPUInUse]
-	if ok {
+	if inuse, ok := annos[GPUInUse]; ok {
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
@@ -126,8 +128,7 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
-	nouse, ok := annos[GPUNoUse]
-	if ok {
+	if nouse, ok := annos[GPUNoUse]; ok {
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false
@@ -160,6 +161,36 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 		return true, checkGPUtype(annos, d.Type), assertNuma(annos)
 	}
 	return false, false, false
+}
+
+func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[GPUUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.ID == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[GPUNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.ID == uuid {
+				return false
+			}
+		}
+		return true
+	}
+
+	return true
 }
 
 func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {

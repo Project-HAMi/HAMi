@@ -168,7 +168,7 @@ func splitByBoards(available []uint, devs map[string]*cndev.Device) [][]uint {
 		}
 		boards[dev.SN] = append(boards[dev.SN], dev.Slot)
 	}
-	log.Printf("available devices seperated by board %v", boards)
+	log.Printf("available devices separated by board %v", boards)
 	res := [][]uint{}
 	for _, board := range boards {
 		res = append(res, board)

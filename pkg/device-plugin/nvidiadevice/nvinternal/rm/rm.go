@@ -148,8 +148,8 @@ func AddDefaultResourcesToConfig(config *util.DeviceConfig) error {
 			device.WithNvml(nvmllib),
 		)
 		return devicelib.VisitMigProfiles(func(p device.MigProfile) error {
-			info := p.GetInfo()
-			if info.C != info.G {
+			profileInfo := p.GetInfo()
+			if profileInfo.C != profileInfo.G {
 				return nil
 			}
 			resourceName := strings.ReplaceAll("mig-"+p.String(), "+", ".")

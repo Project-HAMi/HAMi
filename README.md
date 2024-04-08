@@ -10,6 +10,13 @@ English version|[中文版](README_cn.md)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
 
+---
+<p>
+<img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
+</p>
+
+**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) Landscape project.**
+
 ## Supperted devices
 
 [![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
@@ -19,7 +26,7 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-!<img src="./imgs/example.png" width = "600" /> 
+<img src="./imgs/example.png" width = "600" /> 
 
 **Heterogeneous AI Computing Virtualization Middleware (HAMi), formerly known as k8s-vGPU-scheduler, is an "all-in-one" chart designed to manage Heterogeneous AI Computing Devices in a k8s cluster.** It includes everything you would expect, such as:
 
@@ -28,6 +35,8 @@ English version|[中文版](README_cn.md)
 ***Device Memory Control***: Devices can be allocated a specific device memory size (e.g., 3000M) or a percentage of the whole GPU's memory (e.g., 50%), ensuring it does not exceed the specified boundaries.
 
 ***Device Type Specification***: You can specify the type of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype".
+
+***Device UUID Specification***: You can specify the UUID of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid".
 
 ***Easy to use***: You don't need to modify your task YAML to use our scheduler. All your jobs will be automatically supported after installation. Additionally, you can specify a resource name other than "nvidia.com/gpu" if you prefer.
 
@@ -56,7 +65,7 @@ will see 3G device memory inside container
 
 ## Architect
 
-!<img src="./imgs/arch.png" width = "600" /> 
+<img src="./imgs/arch.png" width = "600" /> 
 
 HAMi consists of several components, including a unified mutatingwebhook, a unified scheduler extender, different device-plugins and different in-container virtualization technics for each heterogeneous AI devices.
 

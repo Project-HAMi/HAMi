@@ -32,6 +32,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
+const template = "Processing admission hook for pod %v/%v, UID: %v"
+
 type webhook struct {
 	decoder *admission.Decoder
 }
@@ -55,16 +57,16 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if len(pod.Spec.Containers) == 0 {
-		klog.Warning("Denying admission as pod has no containers")
+		klog.Warningf(template+" - Denying admission as pod has no containers", req.Namespace, req.Name, req.UID)
 		return admission.Denied("pod has no containers")
 	}
-	klog.Infof("Processing hook for pod %v/%v, UID: %v", req.Namespace, req.Name, req.UID)
+	klog.Infof(template, req.Namespace, req.Name, req.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
-				klog.Infof("Denying admission as container %s is privileged", c.Name)
+				klog.Warningf(template+" - Denying admission as container %s is privileged", req.Namespace, req.Name, req.UID, c.Name)
 				continue
 			}
 		}
@@ -74,7 +76,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 
 	if !hasResource {
-		klog.Infof("Allowing admission for pod: %v/%v", req.Namespace, req.Name)
+		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("no resource found")
 	}
 	if len(config.SchedulerName) > 0 {
@@ -82,6 +84,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
+		klog.Errorf(template+" - Failed to marshal pod, error: %v", req.Namespace, req.Name, req.UID, err)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)

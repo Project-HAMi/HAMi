@@ -7,6 +7,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -19,6 +20,10 @@ const (
 	IluvatarGPUDevice       = "Iluvatar"
 	IluvatarGPUCommonWord   = "Iluvatar"
 	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
+	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	IluvatarUseUUID = "iluvatar.ai/use-gpuuuid"
+	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	IluvatarNoUseUUID = "iluvatar.ai/nouse-gpuuuid"
 )
 
 var (
@@ -100,6 +105,35 @@ func (dev *IluvatarDevices) CheckType(annos map[string]string, d util.DeviceUsag
 	return false, false, false
 }
 
+func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[IluvatarUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.ID == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[IluvatarNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.ID == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return util.CheckHealth(devType, n)
 }
@@ -112,16 +146,14 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	v, ok := ctr.Resources.Limits[iluvatarResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[iluvatarResourceCount]
-	}
-	if ok {
+	} else {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found iluvatar devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[iluvatarResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[iluvatarResourceMem]
-			}
-			if ok {
+			} else {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums) * 256
@@ -131,8 +163,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
-			}
-			if ok {
+			} else {
 				corenums, ok := core.AsInt64()
 				if ok {
 					corenum = int32(corenums)

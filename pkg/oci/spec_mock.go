@@ -31,7 +31,7 @@ type MockSpec struct {
 
 var _ Spec = (*MockSpec)(nil)
 
-// NewMockSpec constructs a MockSpec to be used in testing as a Spec
+// NewMockSpec constructs a MockSpec to be used in testing as a Spec.
 func NewMockSpec(spec *oci.Spec, flushResult error, modifyResult error) *MockSpec {
 	s := MockSpec{
 		Spec:       spec,
@@ -42,12 +42,12 @@ func NewMockSpec(spec *oci.Spec, flushResult error, modifyResult error) *MockSpe
 	return &s
 }
 
-// Load invokes the mocked Load function to return the predefined error / result
+// Load invokes the mocked Load function to return the predefined error / result.
 func (s *MockSpec) Load() error {
 	return s.MockLoad.call()
 }
 
-// Flush invokes the mocked Load function to return the predefined error / result
+// Flush invokes the mocked Load function to return the predefined error / result.
 func (s *MockSpec) Flush() error {
 	return s.MockFlush.call()
 }
