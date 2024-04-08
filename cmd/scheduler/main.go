@@ -68,7 +68,7 @@ func start() {
 	defer sher.Stop()
 
 	// start monitor metrics
-	go sher.RegisterFromNodeAnnotatons()
+	go sher.RegisterFromNodeAnnotations()
 	go initMetrics(config.MetricsBindAddress)
 
 	// start http server
