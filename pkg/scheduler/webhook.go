@@ -19,11 +19,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
-
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -31,7 +27,12 @@ import (
 	"k8s.io/klog/v2"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
+
+const template = "Processing admission hook for pod %v/%v, UID: %v"
 
 type webhook struct {
 	decoder *admission.Decoder
@@ -52,28 +53,30 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
+		klog.Errorf("Failed to decode request: %v", err)
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if len(pod.Spec.Containers) == 0 {
+		klog.Warningf(template+" - Denying admission as pod has no containers", req.Namespace, req.Name, req.UID)
 		return admission.Denied("pod has no containers")
 	}
-	//klog.V(1).Infof("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
-	fmt.Printf("hook %v pod %v/%v", req.UID, req.Namespace, req.Name)
+	klog.Infof(template, req.Namespace, req.Name, req.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
+				klog.Warningf(template+" - Denying admission as container %s is privileged", req.Namespace, req.Name, req.UID, c.Name)
 				continue
 			}
 		}
-
 		for _, val := range device.GetDevices() {
 			hasResource = hasResource || val.MutateAdmission(c)
 		}
 	}
 
 	if !hasResource {
+		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("no resource found")
 	}
 	if len(config.SchedulerName) > 0 {
@@ -81,6 +84,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
+		klog.Errorf(template+" - Failed to marshal pod, error: %v", req.Namespace, req.Name, req.UID, err)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)

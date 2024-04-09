@@ -1,6 +1,7 @@
 package client
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 
@@ -32,13 +33,11 @@ func NewClient() (kubernetes.Interface, error) {
 	}
 	config, err := rest.InClusterConfig()
 	if err != nil {
-		klog.Infoln("InClusterConfig failed", err.Error())
+		klog.Infof("Trying config from file: %s", kubeConfig)
 		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
 		if err != nil {
-			klog.Errorln("BuildFromFlags failed", err.Error())
-			return nil, err
+			return nil, fmt.Errorf("BuildConfigFromFlags failed for file %s: %v", kubeConfig, err)
 		}
 	}
-	client, err := kubernetes.NewForConfig(config)
-	return client, err
+	return kubernetes.NewForConfig(config)
 }
