@@ -333,3 +333,7 @@ If you have any questions, please feel free to reach out to us through the follo
 - Email: refer to the [MAINTAINERS.md](MAINTAINERS.md) to find the email addresses of all maintainers. Feel free to contact them via email to report any issues or ask questions.
 - [mailing list](https://groups.google.com/forum/#!forum/hami-project)
 - [slack](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
+
+## License
+
+HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
