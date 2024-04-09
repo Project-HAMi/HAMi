@@ -23,12 +23,12 @@ import (
 	"io"
 	"net/http"
 
-	"github.com/Project-HAMi/HAMi/pkg/scheduler"
-
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
 
 func checkBody(w http.ResponseWriter, r *http.Request) {
@@ -125,10 +125,10 @@ func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, typ
 func WebHookRoute() httprouter.Handle {
 	h, err := scheduler.NewWebHook()
 	if err != nil {
-		klog.Fatalf("new web hook error, %v", err)
+		klog.Errorf("failed to create new web hook, %v", err)
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Info("Into webhookfunc")
+		klog.Infof("Start to handle webhook request on %s", r.URL.Path)
 		h.ServeHTTP(w, r)
 	}
 }
