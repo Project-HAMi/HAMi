@@ -283,12 +283,10 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 | Ascend      | 华为     | 开发中     | 开发中   | ❌                |
 | GPU         | 天数智芯   | 开发中     | 开发中   | ❌                |
 | DPU         | 太初       | 开发中     | 开发中   | ❌                | 
-- 支持视频编解码处理
-- 支持Multi-Instance GPUs (MIG) 
+- 支持视频编解码处理。
+- 支持Multi-Instance GPUs (MIG)。
 
 
-## 反馈和参与
+## 参与贡献
 
-* bug、疑惑、修改欢迎提在 [Github Issues](https://github.com/Project-HAMi/HAMi/issues/new)
-* 想了解更多或者有想法可以参与到[Discussions](https://github.com/Project-HAMi/HAMi/discussions)和[slack](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)交流
-
+如果你想成为 HAMi 的贡献者，请参[考贡献者指南](CONTRIBUTING.md),里面有详细的贡献流程。
