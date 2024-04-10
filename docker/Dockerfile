@@ -19,7 +19,7 @@ ENV PATH="/libvgpu/cmake-3.19.8-Linux-x86_64/bin:${PATH}"
 RUN apt-get -y install openssl libssl-dev
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.2.0-base-ubuntu22.04
+FROM nvidia/cuda:12.4.1-base-ubuntu22.04
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility
