@@ -21,7 +21,7 @@ Please note that, the DP used here is a customized version, you need to install 
 
 - InContainer Control
 
-The implementation of in-container hard limit is different for diffent devices. For example, HAMi-Core is responsible for NVIDIA devices. libnvidia-control.so is responsible for iluvatar devices, etc. HAMi needs to pass the correct environment variables in order for it to operate.
+The implementation of in-container hard limit is different for diffent devices. For example, HAMi-Core is responsible for NVIDIA devices. libvgpu-control.so is responsible for iluvatar devices, etc. HAMi needs to pass the correct environment variables in order for it to operate.
 
 <img src="./imgs/flowchart.jpeg" width = "600" /> 
 
