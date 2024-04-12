@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: gpu-pod
   annotations:
-    nvidia.com/use-gputype: "A100,V100" # Specify the card type for this job, use comma to seperate, will not launch job on non-specified card
+    nvidia.com/use-gputype: "A100,V100" # Specify the card type for this job, use comma to seperate, will launch job on specified card
     #In this example, we want to run this job on A100 or V100
 spec:
   containers:
