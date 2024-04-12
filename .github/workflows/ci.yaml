@@ -2,7 +2,7 @@ name: CI
 on:
   pull_request:
   push:
-    branches: ['master']
+    branches: ["master"]
 
 env:
   GO_VERSION: "1.21.6"
@@ -22,7 +22,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
+          go-version: "1.21"
       - run: make tidy
       - run: make test
   golangci:
@@ -34,6 +34,10 @@ jobs:
       - name: install Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.21'
-      - run: make tidy
-      - run: make lint
+          go-version: "1.21"
+      - name: verify license
+        run: hack/verify-license.sh
+      - name: go tidy
+        run: make tidy
+      - name: lint
+        run: make lint
