@@ -69,7 +69,7 @@ func start() {
 
 	// start monitor metrics
 	go sher.RegisterFromNodeAnnotations()
-	go initmetrics(config.MetricsBindAddress)
+	go initMetrics(config.MetricsBindAddress)
 
 	// start http server
 	router := httprouter.New()
