@@ -46,3 +46,7 @@ test:
 lint:
 	bash hack/verify-staticcheck.sh
 
+.PHONY: verify
+verify:
+	hack/verify-all.sh
+
