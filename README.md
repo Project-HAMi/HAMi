@@ -269,7 +269,7 @@ You can now execute the `nvidia-smi` command in the container to observe the dif
 
 #### More examples
 
-Click [here](docs/examples/nvidia/)
+Click [here](examples/nvidia)
 
 </details>
 

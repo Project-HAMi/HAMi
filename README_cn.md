@@ -245,6 +245,11 @@ spec:
 
 </details>
 
+
+#### 更多范例
+
+点击 [范例](examples/nvidia)
+
 ### 监控：
 
 <details> <summary> 访问集群算力视图 </summary>
