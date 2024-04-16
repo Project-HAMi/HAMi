@@ -28,7 +28,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -85,7 +85,7 @@ func (s *Scheduler) onAddNode(obj interface{}) {
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
-	pod, ok := obj.(*v1.Pod)
+	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -107,7 +107,7 @@ func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
 }
 
 func (s *Scheduler) onDelPod(obj interface{}) {
-	pod, ok := obj.(*v1.Pod)
+	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -254,7 +254,7 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
-func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
+func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
@@ -323,9 +323,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	klog.InfoS("Bind", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
 	var err error
 	var res *extenderv1.ExtenderBindingResult
-	binding := &v1.Binding{
+	binding := &corev1.Binding{
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
-		Target:     v1.ObjectReference{Kind: "Node", Name: args.Node},
+		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
 	if err != nil {

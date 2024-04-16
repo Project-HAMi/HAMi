@@ -16,10 +16,10 @@ limitations under the License.
 
 package mlu
 
-import pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+import kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 const (
-	serverSock               = pluginapi.DevicePluginPath + "cambricon.sock"
+	serverSock               = kubeletdevicepluginv1beta1.DevicePluginPath + "cambricon.sock"
 	mluLinkPolicyUnsatisfied = "mluLinkPolicyUnsatisfied"
 	retries                  = 5
 

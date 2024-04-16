@@ -40,16 +40,16 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 // CambriconDevicePlugin implements the Kubernetes device plugin API
 type CambriconDevicePlugin struct {
-	devs         []*pluginapi.Device
+	devs         []*kubeletdevicepluginv1beta1.Device
 	devsInfo     map[string]*cndev.Device
 	socket       string
 	stop         chan interface{}
-	health       chan *pluginapi.Device
+	health       chan *kubeletdevicepluginv1beta1.Device
 	server       *grpc.Server
 	deviceList   *deviceList
 	allocator    allocator.Allocator
@@ -68,15 +68,15 @@ func NewCambriconDevicePlugin(o Options) *CambriconDevicePlugin {
 		devsInfo:     devsInfo,
 		socket:       serverSock,
 		stop:         make(chan interface{}),
-		health:       make(chan *pluginapi.Device),
+		health:       make(chan *kubeletdevicepluginv1beta1.Device),
 		deviceList:   newDeviceList(),
 		nodeHostname: o.NodeName,
 		options:      o,
 	}
 }
 
-func (m *CambriconDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-	return &pluginapi.DevicePluginOptions{
+func (m *CambriconDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
+	return &kubeletdevicepluginv1beta1.DevicePluginOptions{
 		GetPreferredAllocationAvailable: m.options.Mode == topologyAware,
 	}, nil
 }
@@ -110,7 +110,7 @@ func (m *CambriconDevicePlugin) Start() error {
 	}
 
 	m.server = grpc.NewServer([]grpc.ServerOption{}...)
-	pluginapi.RegisterDevicePluginServer(m.server, m)
+	kubeletdevicepluginv1beta1.RegisterDevicePluginServer(m.server, m)
 
 	go m.server.Serve(sock)
 
@@ -149,12 +149,12 @@ func (m *CambriconDevicePlugin) Register(kubeletEndpoint, resourceName string) e
 	}
 	defer conn.Close()
 
-	client := pluginapi.NewRegistrationClient(conn)
-	reqt := &pluginapi.RegisterRequest{
-		Version:      pluginapi.Version,
+	client := kubeletdevicepluginv1beta1.NewRegistrationClient(conn)
+	reqt := &kubeletdevicepluginv1beta1.RegisterRequest{
+		Version:      kubeletdevicepluginv1beta1.Version,
 		Endpoint:     path.Base(m.socket),
 		ResourceName: resourceName,
-		Options: &pluginapi.DevicePluginOptions{
+		Options: &kubeletdevicepluginv1beta1.DevicePluginOptions{
 			GetPreferredAllocationAvailable: m.options.Mode == topologyAware,
 		},
 	}
@@ -167,8 +167,8 @@ func (m *CambriconDevicePlugin) Register(kubeletEndpoint, resourceName string) e
 }
 
 // ListAndWatch lists devices and update that list according to the health status
-func (m *CambriconDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
-	s.Send(&pluginapi.ListAndWatchResponse{Devices: m.devs})
+func (m *CambriconDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
+	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: m.devs})
 
 	for {
 		select {
@@ -181,16 +181,16 @@ func (m *CambriconDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.Dev
 					break
 				}
 			}
-			s.Send(&pluginapi.ListAndWatchResponse{Devices: m.devs})
+			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: m.devs})
 		}
 	}
 }
 
-func (m *CambriconDevicePlugin) PrepareResponse(uuids []string) pluginapi.ContainerAllocateResponse {
+func (m *CambriconDevicePlugin) PrepareResponse(uuids []string) kubeletdevicepluginv1beta1.ContainerAllocateResponse {
 
-	resp := pluginapi.ContainerAllocateResponse{}
+	resp := kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
 
-	resp.Mounts = []*pluginapi.Mount{
+	resp.Mounts = []*kubeletdevicepluginv1beta1.Mount{
 		{
 			ContainerPath: mluRPMsgDir,
 			HostPath:      mluRPMsgDir,
@@ -198,7 +198,7 @@ func (m *CambriconDevicePlugin) PrepareResponse(uuids []string) pluginapi.Contai
 	}
 
 	if m.options.CnmonPath != "" {
-		resp.Mounts = append(resp.Mounts, &pluginapi.Mount{
+		resp.Mounts = append(resp.Mounts, &kubeletdevicepluginv1beta1.Mount{
 			ContainerPath: m.options.CnmonPath,
 			HostPath:      m.options.CnmonPath,
 			ReadOnly:      true,
@@ -272,33 +272,33 @@ func (m *CambriconDevicePlugin) GetDeviceIndexByUUID(uuid string) (int, bool) {
 	return 0, false
 }
 
-func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	m.Lock()
 	defer m.Unlock()
 
-	responses := pluginapi.AllocateResponse{}
+	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
 		nodelock.ReleaseNodeLock(nodename)
-		return &pluginapi.AllocateResponse{}, err
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
 		_, devreq, err := util.GetNextDeviceRequest(cambricon.CambriconMLUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
 			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, err
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
 			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 		}
 
 		err = util.EraseNextDeviceTypeFromAnnotation(cambricon.CambriconMLUDevice, *current)
 		if err != nil {
 			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, err
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 
 		deviceToMount := []string{}
@@ -327,7 +327,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 			mluMemSplitLimit:  fmt.Sprintf("%d", reqMem),
 		}
 		if reqMem > 0 {
-			resp.Mounts = append(resp.Mounts, &pluginapi.Mount{
+			resp.Mounts = append(resp.Mounts, &kubeletdevicepluginv1beta1.Mount{
 				ContainerPath: "/usr/bin/smlu-containerd",
 				HostPath:      os.Getenv("HOOK_PATH") + "/smlu-containerd",
 				ReadOnly:      true,
@@ -341,7 +341,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 }
 
 // Allocate which return list of devices.
-func (m *CambriconDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+func (m *CambriconDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 
 	klog.Info("Into Allocate")
 	return m.allocateMLUShare(ctx, reqs)
@@ -356,8 +356,8 @@ func (m *CambriconDevicePlugin) uuidToPath(uuids []string) []string {
 	return paths
 }
 
-func (m *CambriconDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
-	return &pluginapi.PreStartContainerResponse{}, nil
+func (m *CambriconDevicePlugin) PreStartContainer(context.Context, *kubeletdevicepluginv1beta1.PreStartContainerRequest) (*kubeletdevicepluginv1beta1.PreStartContainerResponse, error) {
+	return &kubeletdevicepluginv1beta1.PreStartContainerResponse{}, nil
 }
 
 func (m *CambriconDevicePlugin) cleanup() error {
@@ -369,7 +369,7 @@ func (m *CambriconDevicePlugin) cleanup() error {
 
 func (m *CambriconDevicePlugin) healthcheck() {
 	ctx, cancel := context.WithCancel(context.Background())
-	health := make(chan *pluginapi.Device)
+	health := make(chan *kubeletdevicepluginv1beta1.Device)
 
 	go watchUnhealthy(ctx, m.devsInfo, health)
 
@@ -434,7 +434,7 @@ func (m *CambriconDevicePlugin) Serve() error {
 	if m.options.Mode == mluShare {
 		resourceName = mluMemResourceName
 	}
-	if err := m.Register(pluginapi.KubeletSocket, resourceName); err != nil {
+	if err := m.Register(kubeletdevicepluginv1beta1.KubeletSocket, resourceName); err != nil {
 		m.Stop()
 		return fmt.Errorf("register resource %s err: %v", resourceName, err)
 	}
@@ -442,9 +442,9 @@ func (m *CambriconDevicePlugin) Serve() error {
 	return nil
 }
 
-func (m *CambriconDevicePlugin) GetPreferredAllocation(ctx context.Context, r *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
+func (m *CambriconDevicePlugin) GetPreferredAllocation(ctx context.Context, r *kubeletdevicepluginv1beta1.PreferredAllocationRequest) (*kubeletdevicepluginv1beta1.PreferredAllocationResponse, error) {
 	klog.Infoln("into GetPreferredAllocation")
-	response := &pluginapi.PreferredAllocationResponse{}
+	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
 	for _, req := range r.ContainerRequests {
 		available := m.getSlots(req.AvailableDeviceIDs)
 		required := m.getSlots(req.MustIncludeDeviceIDs)
@@ -453,7 +453,7 @@ func (m *CambriconDevicePlugin) GetPreferredAllocation(ctx context.Context, r *p
 			log.Printf("failed to get preferred allocated devices, available: %v, size: %d, err: %v \n", available, req.AllocationSize, err)
 			return response, err
 		}
-		resp := &pluginapi.ContainerPreferredAllocationResponse{
+		resp := &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
 			DeviceIDs: allocated,
 		}
 		response.ContainerResponses = append(response.ContainerResponses, resp)
@@ -534,8 +534,8 @@ func (m *CambriconDevicePlugin) getSlots(ids []string) []uint {
 	return slots
 }
 
-func addDevice(car *pluginapi.ContainerAllocateResponse, hostPath string, containerPath string) {
-	dev := new(pluginapi.DeviceSpec)
+func addDevice(car *kubeletdevicepluginv1beta1.ContainerAllocateResponse, hostPath string, containerPath string) {
+	dev := new(kubeletdevicepluginv1beta1.DeviceSpec)
 	dev.HostPath = hostPath
 	dev.ContainerPath = containerPath
 	dev.Permissions = "rw"

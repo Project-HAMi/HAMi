@@ -33,7 +33,7 @@ import (
 	cli "github.com/urfave/cli/v2"
 
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func main() {
@@ -154,7 +154,7 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 
 func start(c *cli.Context, flags []cli.Flag) error {
 	klog.Info("Starting FS watcher.")
-	watcher, err := newFSWatcher(pluginapi.DevicePluginPath)
+	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
 	if err != nil {
 		return fmt.Errorf("failed to create FS watcher: %v", err)
 	}
@@ -199,11 +199,11 @@ restart:
 			goto restart
 
 		// Detect a kubelet restart by watching for a newly created
-		// 'pluginapi.KubeletSocket' file. When this occurs, restart this loop,
+		// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
 		// restarting all of the plugins in the process.
 		case event := <-watcher.Events:
-			if event.Name == pluginapi.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				klog.Infof("inotify: %s created, restarting.", pluginapi.KubeletSocket)
+			if event.Name == kubeletdevicepluginv1beta1.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+				klog.Infof("inotify: %s created, restarting.", kubeletdevicepluginv1beta1.KubeletSocket)
 				goto restart
 			}
 

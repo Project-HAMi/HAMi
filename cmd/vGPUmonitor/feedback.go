@@ -27,7 +27,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -96,7 +96,7 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	return result, nvml.SUCCESS
 }
 
-func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
+func setHostPid(pod corev1.Pod, ctr corev1.ContainerStatus, sr *podusage) error {
 	var pids []string
 	mutex.Lock()
 	defer mutex.Unlock()

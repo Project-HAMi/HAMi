@@ -21,13 +21,13 @@ import (
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/stretchr/testify/require"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func TestDeviceMapInsert(t *testing.T) {
-	device0 := Device{Device: pluginapi.Device{ID: "0"}}
-	device0withIndex := Device{Device: pluginapi.Device{ID: "0"}, Index: "index"}
-	device1 := Device{Device: pluginapi.Device{ID: "1"}}
+	device0 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0"}}
+	device0withIndex := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0"}, Index: "index"}
+	device1 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1"}}
 
 	testCases := []struct {
 		description       string

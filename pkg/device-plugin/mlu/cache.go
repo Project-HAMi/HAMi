@@ -22,31 +22,31 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 type MLUDevice struct {
-	dev    pluginapi.Device
+	dev    kubeletdevicepluginv1beta1.Device
 	handle *cndev.Device
 }
 
 type DeviceCache struct {
 	cache     []*MLUDevice
 	stopCh    chan interface{}
-	unhealthy chan *pluginapi.Device
-	notifyCh  map[string]chan *pluginapi.Device
+	unhealthy chan *kubeletdevicepluginv1beta1.Device
+	notifyCh  map[string]chan *kubeletdevicepluginv1beta1.Device
 	mutex     sync.Mutex
 }
 
 func NewDeviceCache() *DeviceCache {
 	return &DeviceCache{
 		stopCh:    make(chan interface{}),
-		unhealthy: make(chan *pluginapi.Device),
-		notifyCh:  make(map[string]chan *pluginapi.Device),
+		unhealthy: make(chan *kubeletdevicepluginv1beta1.Device),
+		notifyCh:  make(map[string]chan *kubeletdevicepluginv1beta1.Device),
 	}
 }
 
-func (d *DeviceCache) AddNotifyChannel(name string, ch chan *pluginapi.Device) {
+func (d *DeviceCache) AddNotifyChannel(name string, ch chan *kubeletdevicepluginv1beta1.Device) {
 	d.mutex.Lock()
 	defer d.mutex.Unlock()
 	d.notifyCh[name] = ch
@@ -78,7 +78,7 @@ func (d *DeviceCache) notify() {
 		case <-d.stopCh:
 			return
 		case dev := <-d.unhealthy:
-			dev.Health = pluginapi.Unhealthy
+			dev.Health = kubeletdevicepluginv1beta1.Unhealthy
 			d.mutex.Lock()
 			for _, ch := range d.notifyCh {
 				ch <- dev
@@ -102,7 +102,7 @@ func (d *DeviceCache) Devices() []*MLUDevice {
 		check(err)
 
 		devs = append(devs, &MLUDevice{
-			dev:    pluginapi.Device{ID: d.UUID},
+			dev:    kubeletdevicepluginv1beta1.Device{ID: d.UUID},
 			handle: d,
 		})
 	}
@@ -111,7 +111,7 @@ func (d *DeviceCache) Devices() []*MLUDevice {
 }
 
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
-func (d *DeviceCache) CheckHealth(stop <-chan interface{}, devices []*MLUDevice, unhealthy chan<- *pluginapi.Device) {
+func (d *DeviceCache) CheckHealth(stop <-chan interface{}, devices []*MLUDevice, unhealthy chan<- *kubeletdevicepluginv1beta1.Device) {
 	// mlu.checkHealth...
 	WatchUnhealthy(context.Background(), devices, unhealthy)
 }

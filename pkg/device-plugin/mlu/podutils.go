@@ -25,14 +25,14 @@ import (
 	"strconv"
 	"time"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/types"
 )
 
-func (m *CambriconDevicePlugin) getCandidatePods(ctx context.Context) ([]*v1.Pod, error) {
-	candidatePods := []*v1.Pod{}
+func (m *CambriconDevicePlugin) getCandidatePods(ctx context.Context) ([]*corev1.Pod, error) {
+	candidatePods := []*corev1.Pod{}
 	allPods, err := m.getPendingPodsInNode(ctx)
 	if err != nil {
 		return candidatePods, err
@@ -49,18 +49,18 @@ func (m *CambriconDevicePlugin) getCandidatePods(ctx context.Context) ([]*v1.Pod
 	return candidatePods, nil
 }
 
-func (m *CambriconDevicePlugin) getPendingPodsInNode(ctx context.Context) ([]v1.Pod, error) {
-	pods := []v1.Pod{}
+func (m *CambriconDevicePlugin) getPendingPodsInNode(ctx context.Context) ([]corev1.Pod, error) {
+	pods := []corev1.Pod{}
 	podMap := make(map[types.UID]bool)
 
 	selector := fields.SelectorFromSet(fields.Set{"spec.nodeName": m.nodeHostname, "status.phase": "Pending"})
-	podList, err := m.clientset.CoreV1().Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{
+	podList, err := m.clientset.CoreV1().Pods(corev1.NamespaceAll).List(ctx, metav1.ListOptions{
 		FieldSelector: selector.String(),
 	})
 	for i := 0; i < retries && err != nil; i++ {
 		log.Printf("list pods error %v, retried %d times", err, i)
 		time.Sleep(100 * time.Second)
-		podList, err = m.clientset.CoreV1().Pods(v1.NamespaceAll).List(ctx, metav1.ListOptions{
+		podList, err = m.clientset.CoreV1().Pods(corev1.NamespaceAll).List(ctx, metav1.ListOptions{
 			FieldSelector: selector.String(),
 		})
 	}
@@ -77,7 +77,7 @@ func (m *CambriconDevicePlugin) getPendingPodsInNode(ctx context.Context) ([]v1.
 	return pods, nil
 }
 
-func isMLUMemoryAssumedPod(pod *v1.Pod) bool {
+func isMLUMemoryAssumedPod(pod *corev1.Pod) bool {
 	if !requestsMLUMemory(pod) {
 		return false
 	}
@@ -93,10 +93,10 @@ func isMLUMemoryAssumedPod(pod *v1.Pod) bool {
 	return false
 }
 
-func requestsMLUMemory(pod *v1.Pod) bool {
+func requestsMLUMemory(pod *corev1.Pod) bool {
 	r := false
 	for _, c := range pod.Spec.Containers {
-		if _, ok := c.Resources.Limits[v1.ResourceName(mluMemResourceName)]; ok {
+		if _, ok := c.Resources.Limits[corev1.ResourceName(mluMemResourceName)]; ok {
 			r = true
 			break
 		}
@@ -104,7 +104,7 @@ func requestsMLUMemory(pod *v1.Pod) bool {
 	return r
 }
 
-func getAssumeTimeFromPodAnnotation(pod *v1.Pod) (assumeTime uint64) {
+func getAssumeTimeFromPodAnnotation(pod *corev1.Pod) (assumeTime uint64) {
 	if assumeTimeStr, ok := pod.ObjectMeta.Annotations[mluMemResourceAssumeTime]; ok {
 		u64, err := strconv.ParseUint(assumeTimeStr, 10, 64)
 		if err != nil {
@@ -116,7 +116,7 @@ func getAssumeTimeFromPodAnnotation(pod *v1.Pod) (assumeTime uint64) {
 	return assumeTime
 }
 
-func getIndexFromAnnotation(pod *v1.Pod) (uint, error) {
+func getIndexFromAnnotation(pod *corev1.Pod) (uint, error) {
 	value, found := pod.ObjectMeta.Annotations[mluMemSplitIndex]
 	if !found {
 		return 0, fmt.Errorf("pod annotation %s not found", mluMemSplitIndex)
@@ -131,16 +131,16 @@ func getIndexFromAnnotation(pod *v1.Pod) (uint, error) {
 	return uint(index), nil
 }
 
-func podContainerCountWithMlu(pod *v1.Pod) uint {
+func podContainerCountWithMlu(pod *corev1.Pod) uint {
 	count := 0
 	for _, c := range pod.Spec.InitContainers {
-		if _, ok := c.Resources.Limits[v1.ResourceName(mluMemResourceName)]; ok {
+		if _, ok := c.Resources.Limits[corev1.ResourceName(mluMemResourceName)]; ok {
 			count++
 			log.Printf("namespace %s pod %s init container %s uses mlu-mem, just allocate the mlu and ignore memory limit", pod.Namespace, pod.Name, c.Name)
 		}
 	}
 	for _, c := range pod.Spec.Containers {
-		if _, ok := c.Resources.Limits[v1.ResourceName(mluMemResourceName)]; ok {
+		if _, ok := c.Resources.Limits[corev1.ResourceName(mluMemResourceName)]; ok {
 			count++
 		}
 	}

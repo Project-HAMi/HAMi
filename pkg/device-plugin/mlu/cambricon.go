@@ -24,7 +24,7 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 type deviceList struct {
@@ -66,8 +66,8 @@ func check(err error) {
 	}
 }
 
-func generateFakeDevs(origin *cndev.Device, num int, sriovEnabled bool) ([]*pluginapi.Device, map[string]*cndev.Device) {
-	devs := []*pluginapi.Device{}
+func generateFakeDevs(origin *cndev.Device, num int, sriovEnabled bool) ([]*kubeletdevicepluginv1beta1.Device, map[string]*cndev.Device) {
+	devs := []*kubeletdevicepluginv1beta1.Device{}
 	devsInfo := make(map[string]*cndev.Device)
 	var uuid string
 	path := origin.Path
@@ -83,16 +83,16 @@ func generateFakeDevs(origin *cndev.Device, num int, sriovEnabled bool) ([]*plug
 			UUID: uuid,
 			Path: path,
 		}
-		devs = append(devs, &pluginapi.Device{
+		devs = append(devs, &kubeletdevicepluginv1beta1.Device{
 			ID:     uuid,
-			Health: pluginapi.Healthy,
+			Health: kubeletdevicepluginv1beta1.Healthy,
 		})
 	}
 	return devs, devsInfo
 }
 
-func getDevices(mode string, fakeNum int) ([]*pluginapi.Device, map[string]*cndev.Device) {
-	devs := []*pluginapi.Device{}
+func getDevices(mode string, fakeNum int) ([]*kubeletdevicepluginv1beta1.Device, map[string]*cndev.Device) {
+	devs := []*kubeletdevicepluginv1beta1.Device{}
 	devsInfo := make(map[string]*cndev.Device)
 
 	num, err := cndev.GetDeviceCount()
@@ -131,16 +131,16 @@ func getDevices(mode string, fakeNum int) ([]*pluginapi.Device, map[string]*cnde
 			}
 		default:
 			devsInfo[d.UUID] = d
-			devs = append(devs, &pluginapi.Device{
+			devs = append(devs, &kubeletdevicepluginv1beta1.Device{
 				ID:     d.UUID,
-				Health: pluginapi.Healthy,
+				Health: kubeletdevicepluginv1beta1.Healthy,
 			})
 		}
 	}
 	return devs, devsInfo
 }
 
-func deviceExists(devs []*pluginapi.Device, id string) bool {
+func deviceExists(devs []*kubeletdevicepluginv1beta1.Device, id string) bool {
 	for _, d := range devs {
 		if d.ID == id {
 			return true
@@ -149,7 +149,7 @@ func deviceExists(devs []*pluginapi.Device, id string) bool {
 	return false
 }
 
-func WatchUnhealthy(ctx context.Context, devsInfo []*MLUDevice, health chan<- *pluginapi.Device) {
+func WatchUnhealthy(ctx context.Context, devsInfo []*MLUDevice, health chan<- *kubeletdevicepluginv1beta1.Device) {
 	unhealthy := make(map[string]bool)
 
 	for {
@@ -167,16 +167,16 @@ func WatchUnhealthy(ctx context.Context, devsInfo []*MLUDevice, health chan<- *p
 			}
 			if ret == 0 && !unhealthy[dm.handle.UUID] {
 				unhealthy[dm.handle.UUID] = true
-				dev := pluginapi.Device{
+				dev := kubeletdevicepluginv1beta1.Device{
 					ID:     dm.handle.UUID,
-					Health: pluginapi.Unhealthy,
+					Health: kubeletdevicepluginv1beta1.Unhealthy,
 				}
 				health <- &dev
 			} else if unhealthy[dm.handle.UUID] {
 				delete(unhealthy, dm.handle.UUID)
-				dev := pluginapi.Device{
+				dev := kubeletdevicepluginv1beta1.Device{
 					ID:     dm.handle.UUID,
-					Health: pluginapi.Healthy,
+					Health: kubeletdevicepluginv1beta1.Healthy,
 				}
 				health <- &dev
 			}
@@ -187,7 +187,7 @@ func WatchUnhealthy(ctx context.Context, devsInfo []*MLUDevice, health chan<- *p
 	}
 }
 
-func watchUnhealthy(ctx context.Context, devsInfo map[string]*cndev.Device, health chan<- *pluginapi.Device) {
+func watchUnhealthy(ctx context.Context, devsInfo map[string]*cndev.Device, health chan<- *kubeletdevicepluginv1beta1.Device) {
 	unhealthy := make(map[string]bool)
 
 	for {
@@ -205,16 +205,16 @@ func watchUnhealthy(ctx context.Context, devsInfo map[string]*cndev.Device, heal
 			}
 			if ret == 0 && !unhealthy[dm.UUID] {
 				unhealthy[dm.UUID] = true
-				dev := pluginapi.Device{
+				dev := kubeletdevicepluginv1beta1.Device{
 					ID:     dm.UUID,
-					Health: pluginapi.Unhealthy,
+					Health: kubeletdevicepluginv1beta1.Unhealthy,
 				}
 				health <- &dev
 			} else if unhealthy[dm.UUID] {
 				delete(unhealthy, dm.UUID)
-				dev := pluginapi.Device{
+				dev := kubeletdevicepluginv1beta1.Device{
 					ID:     dm.UUID,
-					Health: pluginapi.Healthy,
+					Health: kubeletdevicepluginv1beta1.Healthy,
 				}
 				health <- &dev
 			}

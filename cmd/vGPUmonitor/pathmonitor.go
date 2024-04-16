@@ -30,7 +30,7 @@ import (
 	vGPUmonitor "github.com/Project-HAMi/HAMi/cmd/vGPUmonitor/noderpc"
 
 	"google.golang.org/grpc"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -87,7 +87,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	return nil, nil
 }
 
-func isVaildPod(name string, pods *v1.PodList) bool {
+func isVaildPod(name string, pods *corev1.PodList) bool {
 	for _, val := range pods.Items {
 		if strings.Contains(name, string(val.UID)) {
 			return true
