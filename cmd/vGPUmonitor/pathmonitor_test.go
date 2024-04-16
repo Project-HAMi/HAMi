@@ -19,13 +19,13 @@ package main
 import (
 	"testing"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestIsVaildPod(t *testing.T) {
-	pods := &v1.PodList{
-		Items: []v1.Pod{
+	pods := &corev1.PodList{
+		Items: []corev1.Pod{
 			{
 				ObjectMeta: metav1.ObjectMeta{
 					UID: "123",

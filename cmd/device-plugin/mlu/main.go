@@ -27,7 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"github.com/fsnotify/fsnotify"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func main() {
@@ -53,7 +53,7 @@ func main() {
 	}
 
 	log.Println("Starting FS watcher.")
-	watcher, err := startFSWatcher(pluginapi.DevicePluginPath)
+	watcher, err := startFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
 	if err != nil {
 		log.Printf("Failed to created FS watcher. err: %v", err)
 		os.Exit(1)
@@ -90,8 +90,8 @@ events:
 		case <-startErr:
 			goto restart
 		case event := <-watcher.Events:
-			if event.Name == pluginapi.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				log.Printf("inotify: %s created, restarting.", pluginapi.KubeletSocket)
+			if event.Name == kubeletdevicepluginv1beta1.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+				log.Printf("inotify: %s created, restarting.", kubeletdevicepluginv1beta1.KubeletSocket)
 				goto restart
 			}
 		case err := <-watcher.Errors:

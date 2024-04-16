@@ -41,7 +41,7 @@ import (
 	"google.golang.org/grpc"
 
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
@@ -86,7 +86,7 @@ func NewNvidiaDevicePlugin(config *util.DeviceConfig, resourceManager rm.Resourc
 		config:               config,
 		deviceListEnvvar:     "NVIDIA_VISIBLE_DEVICES",
 		deviceListStrategies: deviceListStrategies,
-		socket:               pluginapi.DevicePluginPath + "nvidia-" + name + ".sock",
+		socket:               kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
 		cdiHandler:           cdiHandler,
 		cdiEnabled:           cdiEnabled,
 		cdiAnnotationPrefix:  *config.Flags.Plugin.CDIAnnotationPrefix,
@@ -174,7 +174,7 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 		return err
 	}
 
-	pluginapi.RegisterDevicePluginServer(plugin.server, plugin)
+	kubeletdevicepluginv1beta1.RegisterDevicePluginServer(plugin.server, plugin)
 
 	go func() {
 		lastCrashTime := time.Now()
@@ -218,18 +218,18 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 
 // Register registers the device plugin for the given resourceName with Kubelet.
 func (plugin *NvidiaDevicePlugin) Register() error {
-	conn, err := plugin.dial(pluginapi.KubeletSocket, 5*time.Second)
+	conn, err := plugin.dial(kubeletdevicepluginv1beta1.KubeletSocket, 5*time.Second)
 	if err != nil {
 		return err
 	}
 	defer conn.Close()
 
-	client := pluginapi.NewRegistrationClient(conn)
-	reqt := &pluginapi.RegisterRequest{
-		Version:      pluginapi.Version,
+	client := kubeletdevicepluginv1beta1.NewRegistrationClient(conn)
+	reqt := &kubeletdevicepluginv1beta1.RegisterRequest{
+		Version:      kubeletdevicepluginv1beta1.Version,
 		Endpoint:     path.Base(plugin.socket),
 		ResourceName: string(plugin.rm.Resource()),
-		Options: &pluginapi.DevicePluginOptions{
+		Options: &kubeletdevicepluginv1beta1.DevicePluginOptions{
 			GetPreferredAllocationAvailable: true,
 		},
 	}
@@ -242,16 +242,16 @@ func (plugin *NvidiaDevicePlugin) Register() error {
 }
 
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
-func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-	options := &pluginapi.DevicePluginOptions{
+func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
+	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
 		GetPreferredAllocationAvailable: true,
 	}
 	return options, nil
 }
 
 // ListAndWatch lists devices and update that list according to the health status
-func (plugin *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
-	s.Send(&pluginapi.ListAndWatchResponse{Devices: plugin.apiDevices()})
+func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
+	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
 
 	for {
 		select {
@@ -259,23 +259,23 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.D
 			return nil
 		case d := <-plugin.health:
 			// FIXME: there is no way to recover from the Unhealthy state.
-			d.Health = pluginapi.Unhealthy
+			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			s.Send(&pluginapi.ListAndWatchResponse{Devices: plugin.apiDevices()})
+			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
 		}
 	}
 }
 
 // GetPreferredAllocation returns the preferred allocation from the set of devices specified in the request
-func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
-	response := &pluginapi.PreferredAllocationResponse{}
+func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *kubeletdevicepluginv1beta1.PreferredAllocationRequest) (*kubeletdevicepluginv1beta1.PreferredAllocationResponse, error) {
+	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
 	/*for _, req := range r.ContainerRequests {
 		devices, err := plugin.rm.GetPreferredAllocation(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, int(req.AllocationSize))
 		if err != nil {
 			return nil, fmt.Errorf("error getting list of preferred allocation devices: %v", err)
 		}
 
-		resp := &pluginapi.ContainerPreferredAllocationResponse{
+		resp := &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
 			DeviceIDs: devices,
 		}
 
@@ -285,14 +285,14 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 }
 
 // Allocate which return list of devices.
-func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	klog.Infoln("Allocate", reqs.ContainerRequests)
-	responses := pluginapi.AllocateResponse{}
+	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
 		nodelock.ReleaseNodeLock(nodename)
-		return &pluginapi.AllocateResponse{}, err
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	klog.V(5).Infof("allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
@@ -324,11 +324,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
 				device.PodAllocationFailed(nodename, current)
-				return &pluginapi.AllocateResponse{}, err
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
 				device.PodAllocationFailed(nodename, current)
-				return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
 			response, err := plugin.getAllocateResponse(util.GetContainerDeviceStrArray(devreq))
 			if err != nil {
@@ -338,7 +338,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			err = util.EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
 				device.PodAllocationFailed(nodename, current)
-				return &pluginapi.AllocateResponse{}, err
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
 			for i, dev := range devreq {
@@ -367,13 +367,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			os.MkdirAll("/tmp/vgpulock", 0777)
 			os.Chmod("/tmp/vgpulock", 0777)
 			response.Mounts = append(response.Mounts,
-				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
+				&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 					HostPath: hostHookPath + "/vgpu/libvgpu.so",
 					ReadOnly: true},
-				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
+				&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 					HostPath: cacheFileHostDirectory,
 					ReadOnly: false},
-				&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",
+				&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
 					HostPath: "/tmp/vgpulock",
 					ReadOnly: false},
 			)
@@ -385,19 +385,19 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				}
 			}
 			if !found {
-				response.Mounts = append(response.Mounts, &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
+				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
 					HostPath: hostHookPath + "/vgpu/ld.so.preload",
 					ReadOnly: true},
 				)
 			}
 			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 			if err == nil {
-				response.Mounts = append(response.Mounts, &pluginapi.Mount{
+				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
 					ContainerPath: "/vgpu/",
 					HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
 					ReadOnly:      true,
 				})
-				response.Mounts = append(response.Mounts, &pluginapi.Mount{
+				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
 					ContainerPath: "/usr/bin/vgpuvalidator",
 					HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
 					ReadOnly:      true,
@@ -411,7 +411,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 	return &responses, nil
 }
 
-func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*pluginapi.ContainerAllocateResponse, error) {
+func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*kubeletdevicepluginv1beta1.ContainerAllocateResponse, error) {
 	deviceIDs := plugin.deviceIDsFromAnnotatedDeviceIDs(requestIds)
 
 	responseID := uuid.New().String()
@@ -444,8 +444,8 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*plu
 
 // getAllocateResponseForCDI returns the allocate response for the specified device IDs.
 // This response contains the annotations required to trigger CDI injection in the container engine or nvidia-container-runtime.
-func (plugin *NvidiaDevicePlugin) getAllocateResponseForCDI(responseID string, deviceIDs []string) (pluginapi.ContainerAllocateResponse, error) {
-	response := pluginapi.ContainerAllocateResponse{}
+func (plugin *NvidiaDevicePlugin) getAllocateResponseForCDI(responseID string, deviceIDs []string) (kubeletdevicepluginv1beta1.ContainerAllocateResponse, error) {
+	response := kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
 
 	if !plugin.cdiEnabled {
 		return response, nil
@@ -499,8 +499,8 @@ func (plugin *NvidiaDevicePlugin) getCDIDeviceAnnotations(id string, devices []s
 }
 
 // PreStartContainer is unimplemented for this plugin
-func (plugin *NvidiaDevicePlugin) PreStartContainer(context.Context, *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
-	return &pluginapi.PreStartContainerResponse{}, nil
+func (plugin *NvidiaDevicePlugin) PreStartContainer(context.Context, *kubeletdevicepluginv1beta1.PreStartContainerRequest) (*kubeletdevicepluginv1beta1.PreStartContainerResponse, error) {
+	return &kubeletdevicepluginv1beta1.PreStartContainerResponse{}, nil
 }
 
 // dial establishes the gRPC communication with the registered device plugin.
@@ -530,7 +530,7 @@ func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) 
 	return deviceIDs
 }
 
-func (plugin *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
+func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	return plugin.rm.Devices().GetPluginDevices()
 }
 
@@ -541,11 +541,11 @@ func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map
 }
 
 /*
-func (plugin *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mount {
-	var mounts []*pluginapi.Mount
+func (plugin *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*kubeletdevicepluginv1beta1.Mount {
+	var mounts []*kubeletdevicepluginv1beta1.Mount
 
 	for _, id := range deviceIDs {
-		mount := &pluginapi.Mount{
+		mount := &kubeletdevicepluginv1beta1.Mount{
 			HostPath:      deviceListAsVolumeMountsHostPath,
 			ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
 		}
@@ -555,7 +555,7 @@ func (plugin *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*pluginapi.Mou
 	return mounts
 }*/
 
-func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string) []*pluginapi.DeviceSpec {
+func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string) []*kubeletdevicepluginv1beta1.DeviceSpec {
 	optional := map[string]bool{
 		"/dev/nvidiactl":        true,
 		"/dev/nvidia-uvm":       true,
@@ -565,14 +565,14 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string
 
 	paths := plugin.rm.GetDevicePaths(ids)
 
-	var specs []*pluginapi.DeviceSpec
+	var specs []*kubeletdevicepluginv1beta1.DeviceSpec
 	for _, p := range paths {
 		if optional[p] {
 			if _, err := os.Stat(p); err != nil {
 				continue
 			}
 		}
-		spec := &pluginapi.DeviceSpec{
+		spec := &kubeletdevicepluginv1beta1.DeviceSpec{
 			ContainerPath: p,
 			HostPath:      filepath.Join(driverRoot, p),
 			Permissions:   "rw",

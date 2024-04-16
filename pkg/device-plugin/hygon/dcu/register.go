@@ -22,14 +22,14 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-type DevListFunc func() []*pluginapi.Device
+type DevListFunc func() []*kubeletdevicepluginv1beta1.Device
 
 func (r *Plugin) apiDevices() *[]*api.DeviceInfo {
 	res := []*api.DeviceInfo{}

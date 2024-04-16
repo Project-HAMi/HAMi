@@ -22,7 +22,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -94,7 +94,7 @@ func checkUUID(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 	return result
 }
 
-func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *v1.Pod) (bool, map[string]util.ContainerDevices) {
+func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod) (bool, map[string]util.ContainerDevices) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -172,7 +172,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	return false, tmpDevs
 }
 
-func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *v1.Pod, devinput *util.PodDevices) (bool, float32) {
+func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, float32) {
 	//devmap := make(map[string]util.ContainerDevices)
 	devs := util.ContainerDevices{}
 	total := int32(0)
@@ -204,7 +204,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 	return true, float32(total)/float32(free) + float32(len(node.Devices)-sums)
 }
 
-func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums util.PodDeviceRequests, annos map[string]string, task *v1.Pod) (*NodeScoreList, error) {
+func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod) (*NodeScoreList, error) {
 	res := make(NodeScoreList, 0, len(*nodes))
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
