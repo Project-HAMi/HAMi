@@ -29,7 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -55,12 +55,12 @@ func init() {
 	HandshakeAnnos = make(map[string]string)
 }
 
-func GetNode(nodename string) (*v1.Node, error) {
+func GetNode(nodename string) (*corev1.Node, error) {
 	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	return n, err
 }
 
-func GetPendingPod(node string) (*v1.Pod, error) {
+func GetPendingPod(node string) (*corev1.Pod, error) {
 	podlist, err := client.GetClient().CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
 	if err != nil {
 		return nil, err
@@ -229,24 +229,24 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 	return pd, nil
 }
 
-func GetNextDeviceRequest(dtype string, p v1.Pod) (v1.Container, ContainerDevices, error) {
+func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, ContainerDevices, error) {
 	pdevices, err := DecodePodDevices(InRequestDevices, p.Annotations)
 	if err != nil {
-		return v1.Container{}, ContainerDevices{}, err
+		return corev1.Container{}, ContainerDevices{}, err
 	}
 	klog.Infof("pod annotation decode vaule is %+v", pdevices)
 	res := ContainerDevices{}
 
 	pd, ok := pdevices[dtype]
 	if !ok {
-		return v1.Container{}, res, errors.New("device request not found")
+		return corev1.Container{}, res, errors.New("device request not found")
 	}
 	for ctridx, ctrDevice := range pd {
 		if len(ctrDevice) > 0 {
 			return p.Spec.Containers[ctridx], ctrDevice, nil
 		}
 	}
-	return v1.Container{}, res, errors.New("device request not found")
+	return corev1.Container{}, res, errors.New("device request not found")
 }
 
 func GetContainerDeviceStrArray(c ContainerDevices) []string {
@@ -257,7 +257,7 @@ func GetContainerDeviceStrArray(c ContainerDevices) []string {
 	return tmp
 }
 
-func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
+func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
 	pdevices, err := DecodePodDevices(InRequestDevices, p.Annotations)
 	if err != nil {
 		return err
@@ -286,7 +286,7 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
 	return PatchPodAnnotations(&p, newannos)
 }
 
-func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
+func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}
@@ -311,7 +311,7 @@ func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 	return err
 }
 
-func PatchPodAnnotations(pod *v1.Pod, annotations map[string]string) error {
+func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}
@@ -344,7 +344,7 @@ func InitKlogFlags() *flag.FlagSet {
 	return flagset
 }
 
-func CheckHealth(devType string, n *v1.Node) (bool, bool) {
+func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	handshake := n.Annotations[HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])

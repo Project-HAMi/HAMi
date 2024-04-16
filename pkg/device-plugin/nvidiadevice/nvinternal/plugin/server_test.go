@@ -24,7 +24,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/stretchr/testify/require"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func TestCDIAllocateResponse(t *testing.T) {
@@ -36,7 +36,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 		CDIEnabled           bool
 		GDSEnabled           bool
 		MOFEDEnabled         bool
-		expectedResponse     pluginapi.ContainerAllocateResponse
+		expectedResponse     kubeletdevicepluginv1beta1.ContainerAllocateResponse
 	}{
 		{
 			description:          "empty device list has empty response",
@@ -57,7 +57,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
 			CDIEnabled:           true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0",
 				},
@@ -69,7 +69,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "custom.cdi.k8s.io/",
 			CDIEnabled:           true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"custom.cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0",
 				},
@@ -81,7 +81,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
 			CDIEnabled:           true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gpu=gpu1",
 				},
@@ -93,7 +93,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "custom.cdi.k8s.io/",
 			CDIEnabled:           true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"custom.cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gpu=gpu1",
 				},
@@ -105,7 +105,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			CDIPrefix:            "cdi.k8s.io/",
 			CDIEnabled:           true,
 			MOFEDEnabled:         true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/mofed=all",
 				},
@@ -117,7 +117,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			CDIPrefix:            "cdi.k8s.io/",
 			CDIEnabled:           true,
 			GDSEnabled:           true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gds=all",
 				},
@@ -131,7 +131,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			CDIEnabled:           true,
 			GDSEnabled:           true,
 			MOFEDEnabled:         true,
-			expectedResponse: pluginapi.ContainerAllocateResponse{
+			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gds=all,nvidia.com/mofed=all",
 				},

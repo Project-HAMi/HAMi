@@ -21,7 +21,7 @@ import (
 	"time"
 
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
@@ -29,18 +29,18 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-type DevListFunc func() []*pluginapi.Device
+type DevListFunc func() []*kubeletdevicepluginv1beta1.Device
 
 type DeviceRegister struct {
 	deviceCache *DeviceCache
-	unhealthy   chan *pluginapi.Device
+	unhealthy   chan *kubeletdevicepluginv1beta1.Device
 	stopCh      chan struct{}
 }
 
 func NewDeviceRegister(deviceCache *DeviceCache) *DeviceRegister {
 	return &DeviceRegister{
 		deviceCache: deviceCache,
-		unhealthy:   make(chan *pluginapi.Device),
+		unhealthy:   make(chan *kubeletdevicepluginv1beta1.Device),
 		stopCh:      make(chan struct{}),
 	}
 }

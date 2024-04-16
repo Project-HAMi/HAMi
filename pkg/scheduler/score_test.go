@@ -23,7 +23,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -35,7 +35,7 @@ func Test_calcScore(t *testing.T) {
 			nodes *map[string]*NodeUsage
 			nums  util.PodDeviceRequests
 			annos map[string]string
-			task  *v1.Pod
+			task  *corev1.Pod
 		}
 		wants struct {
 			want *NodeScoreList
@@ -48,7 +48,7 @@ func Test_calcScore(t *testing.T) {
 				nodes *map[string]*NodeUsage
 				nums  util.PodDeviceRequests
 				annos map[string]string
-				task  *v1.Pod
+				task  *corev1.Pod
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
@@ -82,18 +82,18 @@ func Test_calcScore(t *testing.T) {
 					{},
 				},
 				annos: make(map[string]string),
-				task: &v1.Pod{
+				task: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "test1",
 					},
-					Spec: v1.PodSpec{
-						Containers: []v1.Container{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
 							{
 								Name:  "gpu-burn1",
 								Image: "chrstnhntschl/gpu_burn",
 								Args:  []string{"6000"},
-								Resources: v1.ResourceRequirements{
-									Limits: v1.ResourceList{
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
 										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
 										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
 										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
@@ -104,7 +104,7 @@ func Test_calcScore(t *testing.T) {
 								Name:      "gpu-burn2",
 								Image:     "chrstnhntschl/gpu_burn",
 								Args:      []string{"6000"},
-								Resources: v1.ResourceRequirements{},
+								Resources: corev1.ResourceRequirements{},
 							},
 						},
 					},
