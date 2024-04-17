@@ -334,6 +334,10 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	err = nodelock.LockNode(args.Node)
 	if err != nil {
 		klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+		res = &extenderv1.ExtenderBindingResult{
+			Error: err.Error(),
+		}
+		return res, nil
 	}
 	//defer util.ReleaseNodeLock(args.Node)
 
