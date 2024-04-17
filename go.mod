@@ -4,10 +4,10 @@ go 1.21
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.3.1
-	github.com/NVIDIA/go-nvlib v0.0.0-20240109130712-11603560817a
-	github.com/NVIDIA/go-nvml v0.12.0-2
+	github.com/NVIDIA/go-nvlib v0.2.0
+	github.com/NVIDIA/go-nvml v0.12.0-3
 	github.com/NVIDIA/k8s-device-plugin v0.14.5
-	github.com/NVIDIA/nvidia-container-toolkit v1.14.7-0.20240229083338-37b1e37c8f2f
+	github.com/NVIDIA/nvidia-container-toolkit v1.15.0
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
 	github.com/fsnotify/fsnotify v1.7.0
 	github.com/golang/glog v1.2.0
@@ -38,7 +38,7 @@ require (
 	k8s.io/kube-scheduler v0.28.3
 	k8s.io/kubelet v0.28.3
 	sigs.k8s.io/controller-runtime v0.16.3
-	tags.cncf.io/container-device-interface v0.6.2
+	tags.cncf.io/container-device-interface v0.7.1
 )
 
 require (
@@ -76,9 +76,9 @@ require (
 	github.com/spf13/pflag v1.0.5 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
-	golang.org/x/mod v0.15.0 // indirect
+	golang.org/x/mod v0.17.0 // indirect
 	golang.org/x/oauth2 v0.11.0 // indirect
-	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/sys v0.19.0 // indirect
 	golang.org/x/text v0.14.0 // indirect
 	golang.org/x/time v0.3.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
@@ -93,7 +93,7 @@ require (
 	sigs.k8s.io/json v0.0.0-20221116044647-bc3834ca7abd // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.2.3 // indirect
 	sigs.k8s.io/yaml v1.3.0 // indirect
-	tags.cncf.io/container-device-interface/specs-go v0.6.0 // indirect
+	tags.cncf.io/container-device-interface/specs-go v0.7.0 // indirect
 )
 
 replace (
