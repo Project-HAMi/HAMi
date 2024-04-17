@@ -92,8 +92,7 @@ To submit a proposed change, please develop the code/fix and add new test cases.
 After that, run these local verifications before submitting pull request to predict the pass or
 fail of continuous integration.
 
-* Run and pass `make lint`
-* Run and pass `make test`
+* Run and pass `make verify`
 
 ## Code Review
 
