@@ -1,13 +1,18 @@
-FROM tensorflow/tensorflow:2.4.1-gpu
+# This Dockerfile is used to build a Docker image for running the AI Benchmark.
+# It is based on the tensorflow/tensorflow:latest-gpu image.
 
-RUN apt-get update && apt-get install -y --no-install-recommends apt-utils
+FROM tensorflow/tensorflow:latest-gpu
 
-RUN pip install --upgrade pip
-
-RUN apt-get -y install git
-RUN git clone -b feat/transformer https://github.com/shiyoubun/ai-benchmark.git
-
+# Set the working directory to /ai-benchmark
 WORKDIR ai-benchmark
-RUN pip install -e .
 
-ENTRYPOINT [ "python", "bin/ai-benchmark.py" ]
+# Update the package list and install git and apt-utils
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends apt-utils git && \
+    rm -rf /var/lib/apt/lists/* && \
+    pip install --no-cache-dir --upgrade pip && \
+    git clone https://github.com/haitwang-cloud/ai-benchmark . && \
+    pip install --no-cache-dir -r requirements.txt
+
+# Set the default command to run when the container starts
+CMD ["python", "./main.py"]
