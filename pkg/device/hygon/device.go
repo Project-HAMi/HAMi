@@ -97,6 +97,14 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
+func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	return nil
+}
+
+func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	return nil
+}
+
 func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {

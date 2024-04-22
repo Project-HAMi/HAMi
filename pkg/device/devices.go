@@ -44,6 +44,8 @@ type Devices interface {
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
 	// CheckUUID is check current device id whether in GPUUseUUID or GPUNoUseUUID set, return true is check success.
 	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
+	LockNode(n *corev1.Node, p *corev1.Pod) error
+	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
 	ParseConfig(fs *flag.FlagSet)
@@ -75,7 +77,7 @@ func init() {
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
 }
 
-func PodAllocationTrySuccess(nodeName string, devName string, pod *corev1.Pod) {
+func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
 	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("get pods %s/%s error: %+v", pod.Namespace, pod.Name, err)
@@ -89,30 +91,30 @@ func PodAllocationTrySuccess(nodeName string, devName string, pod *corev1.Pod) {
 		}
 	}
 	klog.Infoln("AllDevicesAllocateSuccess releasing lock")
-	PodAllocationSuccess(nodeName, pod)
+	PodAllocationSuccess(nodeName, pod, lockName)
 }
 
-func PodAllocationSuccess(nodeName string, pod *corev1.Pod) {
+func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockname string) {
 	newannos := make(map[string]string)
 	newannos[util.DeviceBindPhase] = util.DeviceBindSuccess
 	err := util.PatchPodAnnotations(pod, newannos)
 	if err != nil {
 		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
 	}
-	err = nodelock.ReleaseNodeLock(nodeName)
+	err = nodelock.ReleaseNodeLock(nodeName, lockname)
 	if err != nil {
 		klog.Errorf("release lock failed:%v", err.Error())
 	}
 }
 
-func PodAllocationFailed(nodeName string, pod *corev1.Pod) {
+func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockname string) {
 	newannos := make(map[string]string)
 	newannos[util.DeviceBindPhase] = util.DeviceBindFailed
 	err := util.PatchPodAnnotations(pod, newannos)
 	if err != nil {
 		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
 	}
-	err = nodelock.ReleaseNodeLock(nodeName)
+	err = nodelock.ReleaseNodeLock(nodeName, lockname)
 	if err != nil {
 		klog.Errorf("release lock failed:%v", err.Error())
 	}

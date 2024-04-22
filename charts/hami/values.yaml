@@ -13,8 +13,9 @@ resourceCores: "nvidia.com/gpucores"
 resourcePriority: "nvidia.com/priority"
 
 #MLU Parameters
-mluResourceName: "cambricon.com/mlunum"
-mluResourceMem: "cambricon.com/mlumem"
+mluResourceName: "cambricon.com/vmlu"
+mluResourceMem: "cambricon.com/mlu.smlu.vmemory"
+mluResourceCores: "cambricon.com/mlu.smlu.vcore"
 
 #Hygon DCU Parameters
 dcuResourceName: "hygon.com/dcunum"

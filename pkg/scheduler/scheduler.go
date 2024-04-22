@@ -26,7 +26,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -207,7 +206,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				nodeInfo := &util.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
-				for index, deviceinfo := range nodedevices {
+				for _, deviceinfo := range nodedevices {
 					found := false
 					_, ok := s.nodes[val.Name]
 					if ok {
@@ -223,7 +222,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
 							ID:      deviceinfo.Id,
-							Index:   uint(index),
+							Index:   uint(deviceinfo.Index),
 							Count:   deviceinfo.Count,
 							Devmem:  deviceinfo.Devmem,
 							Devcore: deviceinfo.Devcore,
@@ -331,17 +330,34 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Get pod failed")
 	}
-	err = nodelock.LockNode(args.Node)
+
+	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
 	if err != nil {
-		klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+		klog.ErrorS(err, "Failed to get node", "node", args.Node)
 		res = &extenderv1.ExtenderBindingResult{
 			Error: err.Error(),
 		}
 		return res, nil
 	}
-	//defer util.ReleaseNodeLock(args.Node)
 
 	tmppatch := make(map[string]string)
+	for _, val := range device.GetDevices() {
+		err = val.LockNode(node, current)
+		if err != nil {
+			goto RelaseNodeLocks
+		}
+	}
+	/*
+		err = nodelock.LockNode(args.Node)
+		if err != nil {
+			klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+			res = &extenderv1.ExtenderBindingResult{
+				Error: err.Error(),
+			}
+			return res, nil
+		}*/
+	//defer util.ReleaseNodeLock(args.Node)
+
 	tmppatch[util.DeviceBindPhase] = "allocating"
 	tmppatch[util.BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
@@ -356,13 +372,17 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		res = &extenderv1.ExtenderBindingResult{
 			Error: "",
 		}
-	} else {
-		res = &extenderv1.ExtenderBindingResult{
-			Error: err.Error(),
-		}
+		klog.Infoln("After Binding Process")
+		return res, nil
 	}
-	klog.Infoln("After Binding Process")
-	return res, nil
+RelaseNodeLocks:
+	klog.InfoS("bind failed", "err", err.Error())
+	for _, val := range device.GetDevices() {
+		val.ReleaseNodeLock(node, current)
+	}
+	return &extenderv1.ExtenderBindingResult{
+		Error: err.Error(),
+	}, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {

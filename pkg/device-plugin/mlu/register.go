@@ -25,7 +25,6 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/mlu/cndev"
-	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -84,8 +83,8 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 		return err
 	}
 	encodeddevices := util.EncodeNodeDevices(*devices)
-	annos[cambricon.HandshakeAnnos] = "Reported " + time.Now().String()
-	annos[cambricon.RegisterAnnos] = encodeddevices
+	//annos[cambricon.HandshakeAnnos] = "Reported " + time.Now().String()
+	//annos[cambricon.RegisterAnnos] = encodeddevices
 	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
 	err = util.PatchNodeAnnotations(node, annos)
 

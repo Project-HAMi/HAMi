@@ -26,6 +26,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -40,6 +41,7 @@ const (
 	GPUInUse            = "nvidia.com/use-gputype"
 	GPUNoUse            = "nvidia.com/nouse-gputype"
 	NumaBind            = "nvidia.com/numa-bind"
+	NodeLockNvidia      = "hami.io/mutex.lock"
 	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
 	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
@@ -79,6 +81,34 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return util.CheckHealth(devType, n)
+}
+
+func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.LockNode(n.Name, NodeLockNvidia)
+}
+
+func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia)
 }
 
 func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {

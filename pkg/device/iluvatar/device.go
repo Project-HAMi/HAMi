@@ -83,7 +83,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 			Count:   100,
 			Devmem:  int32(memoryTotal * 256 * 100 / cards),
 			Devcore: 100,
-			Type:    "Iluvatar",
+			Type:    IluvatarGPUDevice,
 			Numa:    0,
 			Health:  true,
 		})
@@ -108,6 +108,14 @@ func (dev *IluvatarDevices) PatchAnnotations(annoinput *map[string]string, pd ut
 		}
 	}
 	return *annoinput
+}
+
+func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	return nil
+}
+
+func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	return nil
 }
 
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
@@ -151,7 +159,7 @@ func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 }
 
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return util.CheckHealth(devType, n)
+	return true, true
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
@@ -162,14 +170,16 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	v, ok := ctr.Resources.Limits[iluvatarResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[iluvatarResourceCount]
-	} else {
+	}
+	if ok {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found iluvatar devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[iluvatarResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[iluvatarResourceMem]
-			} else {
+			}
+			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums) * 256
@@ -179,7 +189,8 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[iluvatarResourceCores]
-			} else {
+			}
+			if ok {
 				corenums, ok := core.AsInt64()
 				if ok {
 					corenum = int32(corenums)
