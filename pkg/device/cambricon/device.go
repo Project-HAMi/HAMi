@@ -260,7 +260,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 					memnum = int(memnums) * 256
 				}
 			}
-			corenum := int32(0)
+			corenum := int32(100)
 			core, ok := ctr.Resources.Limits[mluResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[mluResourceCores]

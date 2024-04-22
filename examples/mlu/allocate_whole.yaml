@@ -21,6 +21,4 @@ spec:
           args: ["100000"]
           resources:
             limits:
-              cambricon.com/vmlu: "1"
-              cambricon.com/mlu370.smlu.vmemory: "20"
-              cambricon.com/mlu370.smlu.vcore: "10"
+              cambricon.com/vmlu: "1" #allocates a whole MLU
