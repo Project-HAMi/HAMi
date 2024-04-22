@@ -157,7 +157,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices[i].ID)
 			k.Nums--
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
-				Idx:       i,
+				Idx:       int(node.Devices[i].Index),
 				UUID:      node.Devices[i].ID,
 				Type:      k.Type,
 				Usedmem:   memreq,

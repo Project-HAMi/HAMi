@@ -11,7 +11,7 @@ RUN cd /k8s-vgpu && make all
 FROM $NVIDIA_IMAGE AS NVBUILD
 COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
-RUN apt-get -y update; apt-get -y install wget
+RUN apt-get -y update && apt-get -y install wget
 RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.tar.gz
 RUN tar -xf cmake-3.19.8-Linux-x86_64.tar.gz
 RUN cp /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake3

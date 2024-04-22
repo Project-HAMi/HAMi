@@ -71,6 +71,9 @@ spec:
             - --default-cores={{ .Values.scheduler.defaultCores }}
             - --iluvatar-memory={{ .Values.iluvatarResourceMem }}
             - --iluvatar-cores={{ .Values.iluvatarResourceCore }}
+            - --cambricon-mlu-name={{ .Values.mluResourceName }}
+            - --cambricon-mlu-memory={{ .Values.mluResourceMem }}
+            - --cambricon-mlu-cores={{ .Values.mluResourceCores }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}

@@ -44,6 +44,10 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
+const (
+	NodeLockDCU = "hami.io/dcumutex.lock"
+)
+
 // Plugin is identical to DevicePluginServer interface of device plugin API.
 type Plugin struct {
 	AMDGPUs    map[string]map[string]int
@@ -487,24 +491,24 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.
 	nodename := util.NodeName
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
-		nodelock.ReleaseNodeLock(nodename)
+		nodelock.ReleaseNodeLock(nodename, NodeLockDCU)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
 		currentCtr, devreq, err := util.GetNextDeviceRequest(hygon.HygonDCUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 		}
 
 		err = util.EraseNextDeviceTypeFromAnnotation(hygon.HygonDCUDevice, *current)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 
@@ -545,7 +549,7 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.
 		//Create vdev file
 		filename, err := p.createvdevFile(current, &currentCtr, devreq)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
 			return &responses, err
 		}
 		if len(filename) > 0 {
@@ -563,7 +567,7 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.
 		responses.ContainerResponses = append(responses.ContainerResponses, &car)
 	}
 	klog.Infoln("response=", responses)
-	device.PodAllocationTrySuccess(nodename, hygon.HygonDCUDevice, current)
+	device.PodAllocationTrySuccess(nodename, hygon.HygonDCUDevice, NodeLockDCU, current)
 	return &responses, nil
 }
 

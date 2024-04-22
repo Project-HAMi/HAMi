@@ -32,7 +32,7 @@ const (
 	MaxLockRetry = 5
 )
 
-func SetNodeLock(nodeName string) error {
+func SetNodeLock(nodeName string, lockname string) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -63,7 +63,7 @@ func SetNodeLock(nodeName string) error {
 	return nil
 }
 
-func ReleaseNodeLock(nodeName string) error {
+func ReleaseNodeLock(nodeName string, lockname string) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -95,14 +95,14 @@ func ReleaseNodeLock(nodeName string) error {
 	return nil
 }
 
-func LockNode(nodeName string) error {
+func LockNode(nodeName string, lockname string) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	if _, ok := node.ObjectMeta.Annotations[NodeLockTime]; !ok {
-		return SetNodeLock(nodeName)
+		return SetNodeLock(nodeName, lockname)
 	}
 	lockTime, err := time.Parse(time.RFC3339, node.ObjectMeta.Annotations[NodeLockTime])
 	if err != nil {
@@ -110,12 +110,12 @@ func LockNode(nodeName string) error {
 	}
 	if time.Since(lockTime) > time.Minute*5 {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
-		err = ReleaseNodeLock(nodeName)
+		err = ReleaseNodeLock(nodeName, lockname)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
 		}
-		return SetNodeLock(nodeName)
+		return SetNodeLock(nodeName, lockname)
 	}
 	return fmt.Errorf("node %s has been locked within 5 minutes", nodeName)
 }

@@ -43,6 +43,8 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
+const NodeLockMLU = "hami.io/mlumutex.lock"
+
 // CambriconDevicePlugin implements the Kubernetes device plugin API
 type CambriconDevicePlugin struct {
 	devs         []*kubeletdevicepluginv1beta1.Device
@@ -280,24 +282,24 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *kube
 	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
-		nodelock.ReleaseNodeLock(nodename)
+		nodelock.ReleaseNodeLock(nodename, NodeLockMLU)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
 		_, devreq, err := util.GetNextDeviceRequest(cambricon.CambriconMLUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockMLU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockMLU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 		}
 
 		err = util.EraseNextDeviceTypeFromAnnotation(cambricon.CambriconMLUDevice, *current)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockMLU)
 			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 
@@ -312,7 +314,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *kube
 		for i, v := range devreq {
 			devidx, found := m.GetDeviceIndexByUUID(v.UUID)
 			if !found {
-				device.PodAllocationFailed(nodename, current)
+				device.PodAllocationFailed(nodename, current, NodeLockMLU)
 				return nil, errors.New("device uuid" + v.UUID + "not found")
 			}
 			if i == 0 {
@@ -336,7 +338,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *kube
 		responses.ContainerResponses = append(responses.ContainerResponses, &resp)
 	}
 	klog.Infoln("response=", responses)
-	device.PodAllocationTrySuccess(nodename, cambricon.CambriconMLUDevice, current)
+	device.PodAllocationTrySuccess(nodename, cambricon.CambriconMLUDevice, NodeLockMLU, current)
 	return &responses, nil
 }
 
