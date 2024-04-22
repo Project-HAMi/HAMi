@@ -107,6 +107,11 @@ var (
 		"Container device meory description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
+	ctrDeviceUtilizationdesc = prometheus.NewDesc(
+		"Device_utilization_desc_of_container",
+		"Container device utilization description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
 	clientset *kubernetes.Clientset
 )
 
@@ -146,6 +151,20 @@ func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
 		added.total += val.used[vidx].total
 	}
 	return added, nil
+}
+
+func getTotalUtilization(usage podusage, vidx int) deviceUtilization {
+	added := deviceUtilization{
+		decUtil: 0,
+		encUtil: 0,
+		smUtil:  0,
+	}
+	for _, val := range usage.sr.procs {
+		added.decUtil += val.deviceUtil[vidx].decUtil
+		added.encUtil += val.deviceUtil[vidx].encUtil
+		added.smUtil += val.deviceUtil[vidx].smUtil
+	}
+	return added
 }
 
 func getsrlist() map[string]podusage {
@@ -242,6 +261,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							}
 							for i := 0; i < int(srPodList[sridx].sr.num); i++ {
 								value, _ := gettotalusage(srPodList[sridx], i)
+								utilization := getTotalUtilization(srPodList[sridx], i)
 								uuid := string(srPodList[sridx].sr.uuids[i].uuid[:])[0:40]
 
 								//fmt.Println("uuid=", uuid, "length=", len(uuid))
@@ -262,6 +282,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 									prometheus.CounterValue,
 									float64(value.total),
 									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
+								)
+								ch <- prometheus.MustNewConstMetric(
+									ctrDeviceUtilizationdesc,
+									prometheus.GaugeValue,
+									float64(utilization.smUtil),
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid,
 								)
 							}
 						}
