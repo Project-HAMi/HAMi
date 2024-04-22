@@ -38,11 +38,18 @@ type deviceMemory struct {
 	total       uint64
 }
 
+type deviceUtilization struct {
+	decUtil uint64
+	encUtil uint64
+	smUtil  uint64
+}
+
 type shrregProcSlotT struct {
 	pid         int32
 	hostpid     int32
 	used        [16]deviceMemory
 	monitorused [16]uint64
+	deviceUtil  [16]deviceUtilization
 	status      int32
 }
 
