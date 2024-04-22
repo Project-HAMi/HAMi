@@ -21,15 +21,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"k8s.io/klog/v2"
 )
 
-type DeviceUsageList []*util.DeviceUsage
-
 type NodeUsage struct {
-	Devices DeviceUsageList
+	Devices policy.DeviceUsageList
 }
 
 type nodeManager struct {
@@ -84,6 +83,7 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 		m.nodes[nodeID].Devices = tmp
 		if len(m.nodes[nodeID].Devices) == 0 {
 			delete(m.nodes, nodeID)
+			return
 		}
 		klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 	}
