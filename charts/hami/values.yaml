@@ -2,7 +2,7 @@
 
 nameOverride: ""
 fullnameOverride: ""
-imagePullSecrets: []
+imagePullSecrets: [ ]
 version: "v2.3.9"
 
 #Nvidia GPU Parameters
@@ -46,6 +46,7 @@ scheduler:
   defaultCores: 0
   defaultGPUNum: 1
   metricsBindAddress: ":9395"
+  leaderElect: true
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
@@ -57,7 +58,6 @@ scheduler:
       - -v=4
     extraArgs:
       - --policy-config-file=/config/config.json
-      - --leader-elect=false
       - -v=4
   extender:
     image: "projecthami/hami"

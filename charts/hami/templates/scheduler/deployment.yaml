@@ -47,6 +47,9 @@ spec:
             - {{ . }}
             {{- end }}
             {{- end }}
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-name={{ .Values.schedulerName }}
+            - --leader-elect-resource-namespace={{ .Release.Namespace }}
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
