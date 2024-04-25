@@ -154,6 +154,7 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 
 func start(c *cli.Context, flags []cli.Flag) error {
 	klog.Info("Starting FS watcher.")
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
 	if err != nil {
 		return fmt.Errorf("failed to create FS watcher: %v", err)

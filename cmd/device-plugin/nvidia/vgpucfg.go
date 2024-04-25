@@ -150,6 +150,5 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 		}
 	}
 	readFromConfigFile()
-	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	return devcfg, nil
 }
