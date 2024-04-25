@@ -168,7 +168,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		for ctridx, podSingleDevice := range val.Devices {
 			for _, ctrdevs := range podSingleDevice {
 				for _, ctrdevval := range ctrdevs {
-					fmt.Println("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+					klog.Infoln("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+					if len(ctrdevval.UUID) == 0 {
+						klog.Infof("UUID empty, omitted")
+						continue
+					}
 					ch <- prometheus.MustNewConstMetric(
 						ctrvGPUDeviceAllocatedDesc,
 						prometheus.GaugeValue,
