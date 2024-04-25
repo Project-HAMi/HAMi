@@ -25,6 +25,8 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -265,25 +267,37 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
+		userGPUPolicy := config.GPUSchedulerPolicy
+		if task != nil && task.Annotations != nil {
+			if value, ok := task.Annotations[policy.GPUSchedulerPolicyAnnotationKey]; ok {
+				userGPUPolicy = value
+			}
+		}
+		nodeInfo.Devices = policy.DeviceUsageList{
+			Policy:      userGPUPolicy,
+			DeviceLists: make([]*policy.DeviceListsScore, 0),
+		}
 		for _, d := range node.Devices {
-			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
-				ID:        d.ID,
-				Index:     d.Index,
-				Used:      0,
-				Count:     d.Count,
-				Usedmem:   0,
-				Totalmem:  d.Devmem,
-				Totalcore: d.Devcore,
-				Usedcores: 0,
-				Type:      d.Type,
-				Numa:      d.Numa,
-				Health:    d.Health,
+			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
+				Score: 0,
+				Device: &util.DeviceUsage{
+					ID:        d.ID,
+					Index:     d.Index,
+					Used:      0,
+					Count:     d.Count,
+					Usedmem:   0,
+					Totalmem:  d.Devmem,
+					Totalcore: d.Devcore,
+					Usedcores: 0,
+					Type:      d.Type,
+					Numa:      d.Numa,
+					Health:    d.Health,
+				},
 			})
 		}
 		overallnodeMap[node.ID] = nodeInfo
-
 	}
-	//}
+
 	for _, p := range s.pods {
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
@@ -292,11 +306,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
-					for _, d := range node.Devices {
-						if d.ID == udevice.UUID {
-							d.Used++
-							d.Usedmem += udevice.Usedmem
-							d.Usedcores += udevice.Usedcores
+					for _, d := range node.Devices.DeviceLists {
+						if d.Device.ID == udevice.UUID {
+							d.Device.Used++
+							d.Device.Usedmem += udevice.Usedmem
+							d.Device.Usedcores += udevice.Usedcores
 						}
 					}
 				}
@@ -316,6 +330,37 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	}
 	s.cachedstatus = cachenodeMap
 	return &cachenodeMap, failedNodes, nil
+}
+
+func (s *Scheduler) getPodUsage() (map[string]PodUseDeviceStat, error) {
+	podUsageStat := make(map[string]PodUseDeviceStat)
+	pods, err := s.podLister.List(labels.NewSelector())
+	if err != nil {
+		return nil, err
+	}
+	for _, pod := range pods {
+		if pod.Status.Phase != corev1.PodSucceeded {
+			continue
+		}
+		podUseDeviceNum := 0
+		if v, ok := pod.Annotations[util.DeviceBindPhase]; ok && v == util.DeviceBindSuccess {
+			podUseDeviceNum = 1
+		}
+		nodeName := pod.Spec.NodeName
+		if _, ok := podUsageStat[nodeName]; !ok {
+			podUsageStat[nodeName] = PodUseDeviceStat{
+				TotalPod:     1,
+				UseDevicePod: podUseDeviceNum,
+			}
+		} else {
+			exist := podUsageStat[nodeName]
+			podUsageStat[nodeName] = PodUseDeviceStat{
+				TotalPod:     exist.TotalPod + 1,
+				UseDevicePod: exist.UseDevicePod + podUseDeviceNum,
+			}
+		}
+	}
+	return podUsageStat, nil
 }
 
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
@@ -411,38 +456,38 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if len(failedNodes) != 0 {
 		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
 	}
-	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
+	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod)
 	if err != nil {
 		klog.Infoln("err=", err.Error())
 		return nil, err
 	}
-	if len(*nodeScores) == 0 {
+	if len((*nodeScores).NodeList) == 0 {
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
 	}
-	klog.V(4).Infoln("nodeScores_len=", len(*nodeScores))
+	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
 	sort.Sort(nodeScores)
-	m := (*nodeScores)[len(*nodeScores)-1]
-	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.nodeID, m.devices)
+	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
+	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.NodeID, m.Devices)
 	annotations := make(map[string]string)
-	annotations[util.AssignedNodeAnnotations] = m.nodeID
+	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(&annotations, m.devices)
+		val.PatchAnnotations(&annotations, m.Devices)
 	}
 
 	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
 	//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
 	//maps.Copy(annotations, InRequestDevices)
 	//maps.Copy(annotations, supportDevices)
-	s.addPod(args.Pod, m.nodeID, m.devices)
+	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.delPod(args.Pod)
 		return nil, err
 	}
-	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.nodeID}}
+	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
 }
