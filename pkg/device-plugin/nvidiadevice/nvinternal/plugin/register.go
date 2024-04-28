@@ -18,7 +18,6 @@ package plugin
 
 import (
 	"fmt"
-	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -36,7 +35,7 @@ func (plugin *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
 	cmd := exec.Command("nvidia-smi", "topo", "-m")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
+		return 0, err
 	}
 	klog.V(5).InfoS("nvidia-smi topo -m output", "result", string(out))
 	return parseNvidiaNumaInfo(idx, string(out))
