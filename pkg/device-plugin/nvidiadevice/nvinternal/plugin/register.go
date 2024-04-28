@@ -191,10 +191,10 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister() {
 		err := plugin.RegistrInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)
-			klog.Infof("Retrying in %v seconds...", errorSleepInterval/time.Second)
+			klog.Infof("Retrying in %v seconds...", errorSleepInterval)
 			time.Sleep(errorSleepInterval)
 		} else {
-			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval/time.Second)
+			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval)
 			time.Sleep(successSleepInterval)
 		}
 	}
