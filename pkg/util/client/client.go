@@ -17,7 +17,6 @@ limitations under the License.
 package client
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -49,13 +48,17 @@ func NewClient() (kubernetes.Interface, error) {
 	if kubeConfig == "" {
 		kubeConfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
-	config, err := rest.InClusterConfig()
+	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
 	if err != nil {
-		klog.Infof("Trying config from file: %s", kubeConfig)
-		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+		klog.Infof("BuildConfigFromFlags failed for file %s: %v using inClusterConfig", kubeConfig, err)
+		config, err = rest.InClusterConfig()
 		if err != nil {
-			return nil, fmt.Errorf("BuildConfigFromFlags failed for file %s: %v", kubeConfig, err)
+			klog.Errorf("InClusterConfig Failed for err:%s", err.Error())
 		}
 	}
-	return kubernetes.NewForConfig(config)
+	KubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Errorf("new config error %s", err.Error())
+	}
+	return KubeClient, err
 }
