@@ -275,6 +275,9 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 - 目前仅支持计算任务，不支持视频编解码处理。
 - 暂时仅支持MIG的"none"和"mixed"模式，暂时不支持single模式
 - 当任务有字段“nodeName“时会出现无法调度的情况，有类似需求的请使用"nodeSelector"代替
+- 我们修改了 `device-plugin` 组件的环境变量，从 `NodeName` 改为 `NODE_NAME`, 如果使用的是镜像版本是 `v2.3.9`, 则可能会出现 `device-plugin` 无法启动的情况，目前有两种修复建议：
+  - 手动执行`kubectl edit daemonset` 修改 `device-plugin` 的环境变量从`NodeName` 改为 `NODE_NAME`。
+  - 使用helm升级到最新版本，最新版`device-plugin`的镜像版本是`v2.3.10`，执行 `helm upgrade hami hami/hami -n kube-system`, 会自动修复。
 
 ## 开发计划
 
