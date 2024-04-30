@@ -32,6 +32,7 @@ import (
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
 
+	errorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -304,10 +305,12 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 
 func stopPlugins(plugins []plugin.Interface) error {
 	klog.Info("Stopping plugins.")
+	errs := []error{}
 	for _, p := range plugins {
-		p.Stop()
+		err := p.Stop()
+		errs = append(errs, err)
 	}
-	return nil
+	return errorsutil.NewAggregate(errs)
 }
 
 // disableResourceRenamingInConfig temporarily disable the resource renaming feature of the plugin.
