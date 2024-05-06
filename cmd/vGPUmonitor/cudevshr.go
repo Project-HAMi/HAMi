@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -12,7 +28,6 @@ import (
 	"golang.org/x/exp/mmap"
 )
 
-const magic = 19920718
 const maxDevices = 16
 
 type deviceMemory struct {
@@ -23,11 +38,18 @@ type deviceMemory struct {
 	total       uint64
 }
 
+type deviceUtilization struct {
+	decUtil uint64
+	encUtil uint64
+	smUtil  uint64
+}
+
 type shrregProcSlotT struct {
 	pid         int32
 	hostpid     int32
 	used        [16]deviceMemory
 	monitorused [16]uint64
+	deviceUtil  [16]deviceUtilization
 	status      int32
 }
 
@@ -47,9 +69,9 @@ type sharedRegionT struct {
 	num             uint64
 	uuids           [16]uuid
 
-	limit    [16]uint64
-	sm_limit [16]uint64
-	procs    [1024]shrregProcSlotT
+	limit   [16]uint64
+	smLimit [16]uint64
+	procs   [1024]shrregProcSlotT
 
 	procnum           int32
 	utilizationSwitch int32

@@ -6,9 +6,16 @@ English version|[中文版](README_cn.md)
 
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
-[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
+[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
+
+---
+<p>
+<img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
+</p>
+
+**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) Landscape project.**
 
 ## Supperted devices
 
@@ -19,7 +26,7 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-!<img src="./imgs/example.png" width = "600" /> 
+<img src="./imgs/example.png" width = "600" /> 
 
 **Heterogeneous AI Computing Virtualization Middleware (HAMi), formerly known as k8s-vGPU-scheduler, is an "all-in-one" chart designed to manage Heterogeneous AI Computing Devices in a k8s cluster.** It includes everything you would expect, such as:
 
@@ -28,6 +35,8 @@ English version|[中文版](README_cn.md)
 ***Device Memory Control***: Devices can be allocated a specific device memory size (e.g., 3000M) or a percentage of the whole GPU's memory (e.g., 50%), ensuring it does not exceed the specified boundaries.
 
 ***Device Type Specification***: You can specify the type of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gputype" or "nvidia.com/nouse-gputype".
+
+***Device UUID Specification***: You can specify the UUID of device to use or avoid for a particular task by setting annotations, such as "nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid".
 
 ***Easy to use***: You don't need to modify your task YAML to use our scheduler. All your jobs will be automatically supported after installation. Additionally, you can specify a resource name other than "nvidia.com/gpu" if you prefer.
 
@@ -56,7 +65,7 @@ will see 3G device memory inside container
 
 ## Architect
 
-!<img src="./imgs/arch.png" width = "600" /> 
+<img src="./imgs/arch.png" width = "600" /> 
 
 HAMi consists of several components, including a unified mutatingwebhook, a unified scheduler extender, different device-plugins and different in-container virtualization technics for each heterogeneous AI devices.
 
@@ -260,7 +269,7 @@ You can now execute the `nvidia-smi` command in the container to observe the dif
 
 #### More examples
 
-Click [here](docs/examples/nvidia/)
+Click [here](examples/nvidia/)
 
 </details>
 
@@ -306,19 +315,25 @@ Heterogeneous AI Computing device to support
 - Support video codec processing
 - Support Multi-Instance GPUs (MIG)
 
-## Issues and Contributing
+## Contributing
 
-- Report bugs, ask questions, or suggest modifications by [filing a new issue](https://github.com/Project-HAMi/HAMi/issues/new)
-- For more information or to share your ideas, you can participate in the [Discussions](https://github.com/Project-HAMi/HAMi/discussions) and the [slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw) exchanges
+If you're interested in being a contributor and want to get involved in
+developing the HAMi code, please see [CONTRIBUTING](CONTRIBUTING.md) for
+details on submitting patches and the contribution workflow.
 
-## Contact
+## Meeting & Contact
 
-Owner & Maintainer: Limengxuan
+The HAMi community is committed to fostering an open and welcoming environment, with several ways to engage with other users and developers.
 
-Feel free to reach me by
+If you have any questions, please feel free to reach out to us through the following channels:
 
-```
-email: <limengxuan@4paradigm.com>
-phone: +86 18810644493
-WeChat: xuanzong4493
-```
+- Regular Community Meeting: Friday at 16:00 UTC+8 (Chinese)(weekly). [Convert to your timezone](https://www.thetimezoneconverter.com/?t=14%3A30&tz=GMT%2B8&).
+  - [Meeting Notes and Agenda](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
+  - [Meeting Link](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
+- Email: refer to the [MAINTAINERS.md](MAINTAINERS.md) to find the email addresses of all maintainers. Feel free to contact them via email to report any issues or ask questions.
+- [mailing list](https://groups.google.com/forum/#!forum/hami-project)
+- [slack](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
+
+## License
+
+HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.

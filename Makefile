@@ -11,6 +11,14 @@ docker:
 	--build-arg DEST_DIR=${DEST_DIR} \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
 
+dockerwithlib:
+	docker build \
+	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
+	--build-arg TARGET_ARCH=${TARGET_ARCH} \
+	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
+	--build-arg DEST_DIR=${DEST_DIR} \
+	. -f=docker/Dockerfile.withlib -t ${IMG_TAG}
+
 tidy:
 	$(GO) mod tidy
 
@@ -31,3 +39,14 @@ clean:
 	-rm -rf $(OUTPUT_DIR)
 
 .PHONY: all build docker clean $(CMDS)
+
+test:
+	bash hack/unit-test.sh
+
+lint:
+	bash hack/verify-staticcheck.sh
+
+.PHONY: verify
+verify:
+	hack/verify-all.sh
+

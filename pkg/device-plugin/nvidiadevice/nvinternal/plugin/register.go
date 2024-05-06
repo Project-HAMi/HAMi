@@ -1,24 +1,23 @@
 /*
- * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package plugin
 
 import (
 	"fmt"
-	"log"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -32,13 +31,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-func (r *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
+func (plugin *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
 	cmd := exec.Command("nvidia-smi", "topo", "-m")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		log.Fatalf("cmd.Run() failed with %s\n", err)
+		return 0, err
 	}
-	klog.V(5).InfoS("nvidia-smi topo -m ouput", "result", string(out))
+	klog.V(5).InfoS("nvidia-smi topo -m output", "result", string(out))
 	return parseNvidiaNumaInfo(idx, string(out))
 }
 
@@ -93,8 +92,8 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 	return result, nil
 }
 
-func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
-	devs := r.Devices()
+func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
+	devs := plugin.Devices()
 	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
 	idx := 0
@@ -129,6 +128,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 		if *util.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 		}
+		klog.Infoln("MemoryScaling=", *util.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -142,7 +142,7 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 				break
 			}
 		}
-		numa, err := r.getNumaInformation(idx)
+		numa, err := plugin.getNumaInformation(idx)
 		if err != nil {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
@@ -156,13 +156,13 @@ func (r *NvidiaDevicePlugin) getApiDevices() *[]*api.DeviceInfo {
 			Health:  health,
 		})
 		idx++
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, memory, Model, numa)
+		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
 	}
 	return &res
 }
 
-func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
-	devices := r.getApiDevices()
+func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
+	devices := plugin.getAPIDevices()
 	klog.InfoS("start working on the devices", "devices", devices)
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
@@ -182,18 +182,18 @@ func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	return err
 }
 
-func (r *NvidiaDevicePlugin) WatchAndRegister() {
-	klog.Infof("Starting WatchAndRegister")
+func (plugin *NvidiaDevicePlugin) WatchAndRegister() {
+	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
 	successSleepInterval := time.Second * 30
 	for {
-		err := r.RegistrInAnnotation()
+		err := plugin.RegistrInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)
-			klog.Infof("Retrying in %v seconds...", errorSleepInterval/time.Second)
+			klog.Infof("Retrying in %v seconds...", errorSleepInterval)
 			time.Sleep(errorSleepInterval)
 		} else {
-			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval/time.Second)
+			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval)
 			time.Sleep(successSleepInterval)
 		}
 	}

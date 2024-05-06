@@ -1,0 +1,51 @@
+name: CI
+on:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
+  push:
+    branches: ['master']
+
+env:
+  GO_VERSION: "1.21.6"
+
+jobs:
+  build:
+    name: build-dev-image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Checkout submodule
+        uses: Mushus/checkout-submodule@v1.0.1
+        with:
+          basePath: # optional, default is .
+          submodulePath: libvgpu
+
+      - name: Setup Go environment
+        uses: actions/setup-go@v5
+        with:
+          go-version: 1.21
+
+      - name: Get branch name
+        uses: nelonoel/branch-name@v1.0.1
+
+      - name: Docker Login
+        uses: docker/login-action@v3.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWD }}
+
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generating image tag
+        id: runtime-tag
+        run: |
+          echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - run: make tidy
+      - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh

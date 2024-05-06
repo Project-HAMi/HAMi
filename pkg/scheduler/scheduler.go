@@ -1,18 +1,18 @@
 /*
- * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package scheduler
 
@@ -25,9 +25,11 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
-	v1 "k8s.io/api/core/v1"
+
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
@@ -48,15 +50,17 @@ type Scheduler struct {
 	nodeLister listerscorev1.NodeLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
+	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 }
 
 func NewScheduler() *Scheduler {
-	klog.Infof("New Scheduler")
+	klog.Info("New Scheduler")
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
+		nodeNotify:   make(chan struct{}, 1),
 	}
 	s.nodeManager.init()
 	s.podManager.init()
@@ -69,8 +73,20 @@ func check(err error) {
 	}
 }
 
+func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
+	s.nodeNotify <- struct{}{}
+}
+
+func (s *Scheduler) onDelNode(obj interface{}) {
+	s.nodeNotify <- struct{}{}
+}
+
+func (s *Scheduler) onAddNode(obj interface{}) {
+	s.nodeNotify <- struct{}{}
+}
+
 func (s *Scheduler) onAddPod(obj interface{}) {
-	pod, ok := obj.(*v1.Pod)
+	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -92,7 +108,7 @@ func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
 }
 
 func (s *Scheduler) onDelPod(obj interface{}) {
-	pod, ok := obj.(*v1.Pod)
+	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
 		return
@@ -118,7 +134,11 @@ func (s *Scheduler) Start() {
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
-
+	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddNode,
+		UpdateFunc: s.onUpdateNode,
+		DeleteFunc: s.onDelNode,
+	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 
@@ -128,14 +148,21 @@ func (s *Scheduler) Stop() {
 	close(s.stopCh)
 }
 
-func (s *Scheduler) RegisterFromNodeAnnotatons() error {
+func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	nodeInfoCopy := make(map[string]*util.NodeInfo)
+	ticker := time.NewTicker(time.Second * 15)
 	for {
+		select {
+		case <-s.nodeNotify:
+		case <-ticker.C:
+		case <-s.stopCh:
+			return
+		}
 		nodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
-			return err
+			continue
 		}
 		nodeNames := []string{}
 		for _, val := range nodes {
@@ -165,6 +192,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					klog.Infoln("New timestamp=", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]])
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
@@ -180,7 +208,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 				nodeInfo := &util.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
-				for index, deviceinfo := range nodedevices {
+				for _, deviceinfo := range nodedevices {
 					found := false
 					_, ok := s.nodes[val.Name]
 					if ok {
@@ -196,7 +224,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
 							ID:      deviceinfo.Id,
-							Index:   uint(index),
+							Index:   uint(deviceinfo.Index),
 							Count:   deviceinfo.Count,
 							Devmem:  deviceinfo.Devmem,
 							Devcore: deviceinfo.Devcore,
@@ -216,20 +244,18 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 		_, _, err = s.getNodesUsage(&nodeNames, nil)
 		if err != nil {
 			klog.Errorln("get node usage failed", err.Error())
-			return err
 		}
-		time.Sleep(time.Second * 15)
 	}
 }
 
-// InspectAllNodesUsage is used by metrics monitor
+// InspectAllNodesUsage is used by metrics monitor.
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.overviewstatus
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
-// unschedulerable and nodeName
-func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
+// unschedulerable and nodeName.
+func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
@@ -241,25 +267,37 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 
 	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
+		userGPUPolicy := config.GPUSchedulerPolicy
+		if task != nil && task.Annotations != nil {
+			if value, ok := task.Annotations[policy.GPUSchedulerPolicyAnnotationKey]; ok {
+				userGPUPolicy = value
+			}
+		}
+		nodeInfo.Devices = policy.DeviceUsageList{
+			Policy:      userGPUPolicy,
+			DeviceLists: make([]*policy.DeviceListsScore, 0),
+		}
 		for _, d := range node.Devices {
-			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
-				Id:        d.ID,
-				Index:     d.Index,
-				Used:      0,
-				Count:     d.Count,
-				Usedmem:   0,
-				Totalmem:  d.Devmem,
-				Totalcore: d.Devcore,
-				Usedcores: 0,
-				Type:      d.Type,
-				Numa:      d.Numa,
-				Health:    d.Health,
+			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
+				Score: 0,
+				Device: &util.DeviceUsage{
+					ID:        d.ID,
+					Index:     d.Index,
+					Used:      0,
+					Count:     d.Count,
+					Usedmem:   0,
+					Totalmem:  d.Devmem,
+					Totalcore: d.Devcore,
+					Usedcores: 0,
+					Type:      d.Type,
+					Numa:      d.Numa,
+					Health:    d.Health,
+				},
 			})
 		}
 		overallnodeMap[node.ID] = nodeInfo
-
 	}
-	//}
+
 	for _, p := range s.pods {
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
@@ -268,11 +306,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
-					for _, d := range node.Devices {
-						if d.Id == udevice.UUID {
-							d.Used++
-							d.Usedmem += udevice.Usedmem
-							d.Usedcores += udevice.Usedcores
+					for _, d := range node.Devices.DeviceLists {
+						if d.Device.ID == udevice.UUID {
+							d.Device.Used++
+							d.Device.Usedmem += udevice.Usedmem
+							d.Device.Usedcores += udevice.Usedcores
 						}
 					}
 				}
@@ -284,7 +322,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
 		if err != nil {
-			klog.Errorf("get node %v device error, %v", nodeID, err)
+			klog.Warningf("get node %v device error, %v", nodeID, err)
 			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
@@ -294,25 +332,77 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 	return &cachenodeMap, failedNodes, nil
 }
 
+func (s *Scheduler) getPodUsage() (map[string]PodUseDeviceStat, error) {
+	podUsageStat := make(map[string]PodUseDeviceStat)
+	pods, err := s.podLister.List(labels.NewSelector())
+	if err != nil {
+		return nil, err
+	}
+	for _, pod := range pods {
+		if pod.Status.Phase != corev1.PodSucceeded {
+			continue
+		}
+		podUseDeviceNum := 0
+		if v, ok := pod.Annotations[util.DeviceBindPhase]; ok && v == util.DeviceBindSuccess {
+			podUseDeviceNum = 1
+		}
+		nodeName := pod.Spec.NodeName
+		if _, ok := podUsageStat[nodeName]; !ok {
+			podUsageStat[nodeName] = PodUseDeviceStat{
+				TotalPod:     1,
+				UseDevicePod: podUseDeviceNum,
+			}
+		} else {
+			exist := podUsageStat[nodeName]
+			podUsageStat[nodeName] = PodUseDeviceStat{
+				TotalPod:     exist.TotalPod + 1,
+				UseDevicePod: exist.UseDevicePod + podUseDeviceNum,
+			}
+		}
+	}
+	return podUsageStat, nil
+}
+
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Bind", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
 	var err error
 	var res *extenderv1.ExtenderBindingResult
-	binding := &v1.Binding{
+	binding := &corev1.Binding{
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
-		Target:     v1.ObjectReference{Kind: "Node", Name: args.Node},
+		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
 	if err != nil {
 		klog.ErrorS(err, "Get pod failed")
 	}
-	err = nodelock.LockNode(args.Node)
+
+	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
 	if err != nil {
-		klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+		klog.ErrorS(err, "Failed to get node", "node", args.Node)
+		res = &extenderv1.ExtenderBindingResult{
+			Error: err.Error(),
+		}
+		return res, nil
 	}
-	//defer util.ReleaseNodeLock(args.Node)
 
 	tmppatch := make(map[string]string)
+	for _, val := range device.GetDevices() {
+		err = val.LockNode(node, current)
+		if err != nil {
+			goto RelaseNodeLocks
+		}
+	}
+	/*
+		err = nodelock.LockNode(args.Node)
+		if err != nil {
+			klog.ErrorS(err, "Failed to lock node", "node", args.Node)
+			res = &extenderv1.ExtenderBindingResult{
+				Error: err.Error(),
+			}
+			return res, nil
+		}*/
+	//defer util.ReleaseNodeLock(args.Node)
+
 	tmppatch[util.DeviceBindPhase] = "allocating"
 	tmppatch[util.BindTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
@@ -327,13 +417,17 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		res = &extenderv1.ExtenderBindingResult{
 			Error: "",
 		}
-	} else {
-		res = &extenderv1.ExtenderBindingResult{
-			Error: err.Error(),
-		}
+		klog.Infoln("After Binding Process")
+		return res, nil
 	}
-	klog.Infoln("After Binding Process")
-	return res, nil
+RelaseNodeLocks:
+	klog.InfoS("bind failed", "err", err.Error())
+	for _, val := range device.GetDevices() {
+		val.ReleaseNodeLock(node, current)
+	}
+	return &extenderv1.ExtenderBindingResult{
+		Error: err.Error(),
+	}, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
@@ -362,38 +456,38 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if len(failedNodes) != 0 {
 		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
 	}
-	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
+	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod)
 	if err != nil {
 		klog.Infoln("err=", err.Error())
 		return nil, err
 	}
-	if len(*nodeScores) == 0 {
-		klog.Infoln("nodeScores_len=", len(*nodeScores))
+	if len((*nodeScores).NodeList) == 0 {
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
 	}
+	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
 	sort.Sort(nodeScores)
-	m := (*nodeScores)[len(*nodeScores)-1]
-	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.nodeID, m.devices)
+	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
+	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.NodeID, m.Devices)
 	annotations := make(map[string]string)
-	annotations[util.AssignedNodeAnnotations] = m.nodeID
+	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(&annotations, m.devices)
+		val.PatchAnnotations(&annotations, m.Devices)
 	}
 
 	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
 	//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
 	//maps.Copy(annotations, InRequestDevices)
 	//maps.Copy(annotations, supportDevices)
-	s.addPod(args.Pod, m.nodeID, m.devices)
+	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.delPod(args.Pod)
 		return nil, err
 	}
-	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.nodeID}}
+	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
 }

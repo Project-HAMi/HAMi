@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package dcu
 
 import (
@@ -22,10 +38,14 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 	"github.com/golang/glog"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+)
+
+const (
+	NodeLockDCU = "hami.io/dcumutex.lock"
 )
 
 // Plugin is identical to DevicePluginServer interface of device plugin API.
@@ -235,15 +255,15 @@ func simpleHealthCheck() bool {
 
 // GetDevicePluginOptions returns options to be communicated with Device
 // Manager
-func (p *Plugin) GetDevicePluginOptions(ctx context.Context, e *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
-	return &pluginapi.DevicePluginOptions{}, nil
+func (p *Plugin) GetDevicePluginOptions(ctx context.Context, e *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
+	return &kubeletdevicepluginv1beta1.DevicePluginOptions{}, nil
 }
 
 // PreStartContainer is expected to be called before each container start if indicated by plugin during registration phase.
 // PreStartContainer allows kubelet to pass reinitialized devices to containers.
 // PreStartContainer allows Device Plugin to run device specific operations on the Devices requested
-func (p *Plugin) PreStartContainer(ctx context.Context, r *pluginapi.PreStartContainerRequest) (*pluginapi.PreStartContainerResponse, error) {
-	return &pluginapi.PreStartContainerResponse{}, nil
+func (p *Plugin) PreStartContainer(ctx context.Context, r *kubeletdevicepluginv1beta1.PreStartContainerRequest) (*kubeletdevicepluginv1beta1.PreStartContainerResponse, error) {
+	return &kubeletdevicepluginv1beta1.PreStartContainerResponse{}, nil
 }
 
 // GetPreferredAllocation returns a preferred set of devices to allocate
@@ -251,19 +271,19 @@ func (p *Plugin) PreStartContainer(ctx context.Context, r *pluginapi.PreStartCon
 // guaranteed to be the allocation ultimately performed by the
 // devicemanager. It is only designed to help the devicemanager make a more
 // informed allocation decision when possible.
-func (p *Plugin) GetPreferredAllocation(context.Context, *pluginapi.PreferredAllocationRequest) (*pluginapi.PreferredAllocationResponse, error) {
-	return &pluginapi.PreferredAllocationResponse{}, nil
+func (p *Plugin) GetPreferredAllocation(context.Context, *kubeletdevicepluginv1beta1.PreferredAllocationRequest) (*kubeletdevicepluginv1beta1.PreferredAllocationResponse, error) {
+	return &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}, nil
 }
 
-func (p *Plugin) generateFakeDevs(devices *[]*api.DeviceInfo) []*pluginapi.Device {
-	fakedevs := []*pluginapi.Device{}
+func (p *Plugin) generateFakeDevs(devices *[]*api.DeviceInfo) []*kubeletdevicepluginv1beta1.Device {
+	fakedevs := []*kubeletdevicepluginv1beta1.Device{}
 
 	for _, val := range *devices {
 		idx := 0
 		for idx < int(val.Count) {
-			fakedevs = append(fakedevs, &pluginapi.Device{
+			fakedevs = append(fakedevs, &kubeletdevicepluginv1beta1.Device{
 				ID:     val.Id + "-fake-" + fmt.Sprint(idx),
-				Health: pluginapi.Healthy,
+				Health: kubeletdevicepluginv1beta1.Healthy,
 			})
 			idx++
 		}
@@ -338,10 +358,10 @@ func (p *Plugin) AllocatePipeID(devidx int) (int, error) {
 // ListAndWatch returns a stream of List of Devices
 // Whenever a Device state change or a Device disappears, ListAndWatch
 // returns the new list
-func (p *Plugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
+func (p *Plugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
 	p.AMDGPUs = amdgpu.GetAMDGPUs()
 
-	devs := make([]*pluginapi.Device, len(p.AMDGPUs))
+	devs := make([]*kubeletdevicepluginv1beta1.Device, len(p.AMDGPUs))
 
 	// limit scope for hwloc
 	func() {
@@ -351,9 +371,9 @@ func (p *Plugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListA
 
 		i := 0
 		for id := range p.AMDGPUs {
-			dev := &pluginapi.Device{
+			dev := &kubeletdevicepluginv1beta1.Device{
 				ID:     id,
-				Health: pluginapi.Healthy,
+				Health: kubeletdevicepluginv1beta1.Healthy,
 			}
 			devs[i] = dev
 			i++
@@ -370,37 +390,37 @@ func (p *Plugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListA
 				continue
 			}
 
-			numaNodes := make([]*pluginapi.NUMANode, len(numas))
+			numaNodes := make([]*kubeletdevicepluginv1beta1.NUMANode, len(numas))
 			for j, v := range numas {
-				numaNodes[j] = &pluginapi.NUMANode{
+				numaNodes[j] = &kubeletdevicepluginv1beta1.NUMANode{
 					ID: int64(v),
 				}
 			}
 
-			dev.Topology = &pluginapi.TopologyInfo{
+			dev.Topology = &kubeletdevicepluginv1beta1.TopologyInfo{
 				Nodes: numaNodes,
 			}
 		}
 	}()
 
 	fakedevs := p.apiDevices()
-	s.Send(&pluginapi.ListAndWatchResponse{Devices: p.generateFakeDevs(fakedevs)})
+	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: p.generateFakeDevs(fakedevs)})
 
 	for {
 		select {
 		case <-p.Heartbeat:
-			var health = pluginapi.Unhealthy
+			var health = kubeletdevicepluginv1beta1.Unhealthy
 
 			// TODO there are no per device health check currently
 			// TODO all devices on a node is used together by kfd
 			if simpleHealthCheck() {
-				health = pluginapi.Healthy
+				health = kubeletdevicepluginv1beta1.Healthy
 			}
 
 			for i := 0; i < len(p.AMDGPUs); i++ {
 				devs[i].Health = health
 			}
-			s.Send(&pluginapi.ListAndWatchResponse{Devices: p.generateFakeDevs(fakedevs)})
+			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: p.generateFakeDevs(fakedevs)})
 		}
 	}
 	// returning a value with this function will unregister the plugin from k8s
@@ -412,7 +432,7 @@ func getIndexFromUUID(uid string) int {
 }
 
 // Create virtual vdev directory and file
-func (p *Plugin) createvdevFile(current *v1.Pod, ctr *v1.Container, req util.ContainerDevices) (string, error) {
+func (p *Plugin) createvdevFile(current *corev1.Pod, ctr *corev1.Container, req util.ContainerDevices) (string, error) {
 	s := ""
 	var devidx, pipeid, vdevidx int
 	coremsk := ""
@@ -464,44 +484,44 @@ func (p *Plugin) createvdevFile(current *v1.Pod, ctr *v1.Container, req util.Con
 	return cacheFileHostDirectory, nil
 }
 
-func (p *Plugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	var car pluginapi.ContainerAllocateResponse
-	var dev *pluginapi.DeviceSpec
-	responses := pluginapi.AllocateResponse{}
+func (p *Plugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
+	var car kubeletdevicepluginv1beta1.ContainerAllocateResponse
+	var dev *kubeletdevicepluginv1beta1.DeviceSpec
+	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := util.NodeName
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
-		nodelock.ReleaseNodeLock(nodename)
-		return &pluginapi.AllocateResponse{}, err
+		nodelock.ReleaseNodeLock(nodename, NodeLockDCU)
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
 		currentCtr, devreq, err := util.GetNextDeviceRequest(hygon.HygonDCUDevice, *current)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, err
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 		}
 
 		err = util.EraseNextDeviceTypeFromAnnotation(hygon.HygonDCUDevice, *current)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
-			return &pluginapi.AllocateResponse{}, err
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 		}
 
-		car = pluginapi.ContainerAllocateResponse{}
+		car = kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
 		// Currently, there are only 1 /dev/kfd per nodes regardless of the # of GPU available
 		// for compute/rocm/HSA use cases
-		dev = new(pluginapi.DeviceSpec)
+		dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 		dev.HostPath = "/dev/kfd"
 		dev.ContainerPath = "/dev/kfd"
 		dev.Permissions = "rwm"
 		car.Devices = append(car.Devices, dev)
 
-		dev = new(pluginapi.DeviceSpec)
+		dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 		dev.HostPath = "/dev/mkfd"
 		dev.ContainerPath = "/dev/mkfd"
 		dev.Permissions = "rwm"
@@ -513,14 +533,14 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) 
 			fmt.Sscanf(val.UUID, "DCU-%d", &id)
 
 			devpath := fmt.Sprintf("/dev/dri/card%d", id)
-			dev = new(pluginapi.DeviceSpec)
+			dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 			dev.HostPath = devpath
 			dev.ContainerPath = devpath
 			dev.Permissions = "rw"
 			car.Devices = append(car.Devices, dev)
 
 			devpath = fmt.Sprintf("/dev/dri/renderD%d", (id + 128))
-			dev = new(pluginapi.DeviceSpec)
+			dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 			dev.HostPath = devpath
 			dev.ContainerPath = devpath
 			dev.Permissions = "rw"
@@ -529,15 +549,15 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) 
 		//Create vdev file
 		filename, err := p.createvdevFile(current, &currentCtr, devreq)
 		if err != nil {
-			device.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current, NodeLockDCU)
 			return &responses, err
 		}
 		if len(filename) > 0 {
-			car.Mounts = append(car.Mounts, &pluginapi.Mount{
+			car.Mounts = append(car.Mounts, &kubeletdevicepluginv1beta1.Mount{
 				ContainerPath: "/etc/vdev/docker/",
 				HostPath:      filename,
 				ReadOnly:      false,
-			}, &pluginapi.Mount{
+			}, &kubeletdevicepluginv1beta1.Mount{
 				ContainerPath: "/opt/hygondriver",
 				HostPath:      os.Getenv("HYGONPATH"),
 				ReadOnly:      false,
@@ -547,24 +567,24 @@ func (p *Plugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) 
 		responses.ContainerResponses = append(responses.ContainerResponses, &car)
 	}
 	klog.Infoln("response=", responses)
-	device.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, hygon.HygonDCUDevice, NodeLockDCU, current)
 	return &responses, nil
 }
 
 // Allocate is called during container creation so that the Device
 // Plugin can run device specific operations and instruct Kubelet
 // of the steps to make the Device available in the container
-func (p *Plugin) AllocateOrigin(ctx context.Context, r *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	var response pluginapi.AllocateResponse
-	var car pluginapi.ContainerAllocateResponse
-	var dev *pluginapi.DeviceSpec
+func (p *Plugin) AllocateOrigin(ctx context.Context, r *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
+	var response kubeletdevicepluginv1beta1.AllocateResponse
+	var car kubeletdevicepluginv1beta1.ContainerAllocateResponse
+	var dev *kubeletdevicepluginv1beta1.DeviceSpec
 
 	for _, req := range r.ContainerRequests {
-		car = pluginapi.ContainerAllocateResponse{}
+		car = kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
 
 		// Currently, there are only 1 /dev/kfd per nodes regardless of the # of GPU available
 		// for compute/rocm/HSA use cases
-		dev = new(pluginapi.DeviceSpec)
+		dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 		dev.HostPath = "/dev/kfd"
 		dev.ContainerPath = "/dev/kfd"
 		dev.Permissions = "rw"
@@ -575,7 +595,7 @@ func (p *Plugin) AllocateOrigin(ctx context.Context, r *pluginapi.AllocateReques
 
 			for k, v := range p.AMDGPUs[id] {
 				devpath := fmt.Sprintf("/dev/dri/%s%d", k, v)
-				dev = new(pluginapi.DeviceSpec)
+				dev = new(kubeletdevicepluginv1beta1.DeviceSpec)
 				dev.HostPath = devpath
 				dev.ContainerPath = devpath
 				dev.Permissions = "rw"

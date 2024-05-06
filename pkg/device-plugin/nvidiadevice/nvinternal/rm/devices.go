@@ -22,12 +22,13 @@ import (
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
-// Device wraps pluginapi.Device with extra metadata and functions.
+// Device wraps kubeletdevicepluginv1beta1.Device with extra metadata and functions.
 type Device struct {
-	pluginapi.Device
+	kubeletdevicepluginv1beta1.Device
 	Paths []string
 	Index string
 }
@@ -69,10 +70,10 @@ func BuildDevice(index string, d deviceInfo) (*Device, error) {
 	dev.ID = uuid
 	dev.Index = index
 	dev.Paths = paths
-	dev.Health = pluginapi.Healthy
+	dev.Health = kubeletdevicepluginv1beta1.Healthy
 	if hasNuma {
-		dev.Topology = &pluginapi.TopologyInfo{
-			Nodes: []*pluginapi.NUMANode{
+		dev.Topology = &kubeletdevicepluginv1beta1.TopologyInfo{
+			Nodes: []*kubeletdevicepluginv1beta1.NUMANode{
 				{
 					ID: int64(numa),
 				},
@@ -141,14 +142,14 @@ func (ds Devices) GetIDs() []string {
 }
 
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
-func (ds Devices) GetPluginDevices() []*pluginapi.Device {
-	var res []*pluginapi.Device
+func (ds Devices) GetPluginDevices() []*kubeletdevicepluginv1beta1.Device {
+	var res []*kubeletdevicepluginv1beta1.Device
 
 	if !strings.Contains(ds.GetIDs()[0], "MIG") {
 		for _, dev := range ds {
 			for i := uint(0); i < *util.DeviceSplitCount; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
-				res = append(res, &pluginapi.Device{
+				res = append(res, &kubeletdevicepluginv1beta1.Device{
 					ID:       id,
 					Health:   dev.Health,
 					Topology: nil,

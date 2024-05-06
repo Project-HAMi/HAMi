@@ -1,18 +1,18 @@
 /*
- * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package main
 
@@ -23,16 +23,17 @@ import (
 	"syscall"
 	"time"
 
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
 
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func main() {
@@ -153,7 +154,8 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 
 func start(c *cli.Context, flags []cli.Flag) error {
 	klog.Info("Starting FS watcher.")
-	watcher, err := newFSWatcher(pluginapi.DevicePluginPath)
+	util.NodeName = os.Getenv(util.NodeNameEnvName)
+	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
 	if err != nil {
 		return fmt.Errorf("failed to create FS watcher: %v", err)
 	}
@@ -161,11 +163,6 @@ func start(c *cli.Context, flags []cli.Flag) error {
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
-	err = readFromConfigFile()
-	if err != nil {
-		klog.Errorf("failed to load config file %s", err.Error())
-	}
-
 	klog.Info("Starting OS watcher.")
 	sigs := newOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
@@ -188,7 +185,7 @@ restart:
 	}
 
 	if restartPlugins {
-		klog.Infof("Failed to start one or more plugins. Retrying in 30s...")
+		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
 		restartTimeout = time.After(30 * time.Second)
 	}
 
@@ -203,17 +200,17 @@ restart:
 			goto restart
 
 		// Detect a kubelet restart by watching for a newly created
-		// 'pluginapi.KubeletSocket' file. When this occurs, restart this loop,
+		// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
 		// restarting all of the plugins in the process.
 		case event := <-watcher.Events:
-			if event.Name == pluginapi.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				klog.Infof("inotify: %s created, restarting.", pluginapi.KubeletSocket)
+			if event.Name == kubeletdevicepluginv1beta1.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+				klog.Infof("inotify: %s created, restarting.", kubeletdevicepluginv1beta1.KubeletSocket)
 				goto restart
 			}
 
 		// Watch for any other fs errors and log them.
 		case err := <-watcher.Errors:
-			klog.Infof("inotify: %s", err)
+			klog.Errorf("inotify: %s", err)
 
 		// Watch for any signals from the OS. On SIGHUP, restart this loop,
 		// restarting all of the plugins in the process. On all other

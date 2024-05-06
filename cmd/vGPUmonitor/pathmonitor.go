@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -12,8 +28,9 @@ import (
 	"time"
 
 	vGPUmonitor "github.com/Project-HAMi/HAMi/cmd/vGPUmonitor/noderpc"
+
 	"google.golang.org/grpc"
-	v1 "k8s.io/api/core/v1"
+	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
@@ -70,7 +87,7 @@ func checkfiles(fpath string) (*sharedRegionT, error) {
 	return nil, nil
 }
 
-func isVaildPod(name string, pods *v1.PodList) bool {
+func isVaildPod(name string, pods *corev1.PodList) bool {
 	for _, val := range pods.Items {
 		if strings.Contains(name, string(val.UID)) {
 			return true
@@ -92,8 +109,7 @@ func monitorpath(podmap map[string]podusage) error {
 	}
 	for _, val := range files {
 		dirname := containerPath + "/" + val.Name()
-		info, err1 := os.Stat(dirname)
-		if err1 != nil || !isVaildPod(info.Name(), pods) {
+		if info, err1 := os.Stat(dirname); err1 != nil || !isVaildPod(info.Name(), pods) {
 			if info.ModTime().Add(time.Second * 300).Before(time.Now()) {
 				klog.Infof("Removing dirname %s in in monitorpath", dirname)
 				//syscall.Munmap(unsafe.Pointer(podmap[dirname].sr))

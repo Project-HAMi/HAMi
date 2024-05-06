@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package main
 
 import (
@@ -91,6 +107,11 @@ var (
 		"Container device meory description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
+	ctrDeviceUtilizationdesc = prometheus.NewDesc(
+		"Device_utilization_desc_of_container",
+		"Container device utilization description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
 	clientset *kubernetes.Clientset
 )
 
@@ -132,6 +153,20 @@ func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
 	return added, nil
 }
 
+func getTotalUtilization(usage podusage, vidx int) deviceUtilization {
+	added := deviceUtilization{
+		decUtil: 0,
+		encUtil: 0,
+		smUtil:  0,
+	}
+	for _, val := range usage.sr.procs {
+		added.decUtil += val.deviceUtil[vidx].decUtil
+		added.encUtil += val.deviceUtil[vidx].encUtil
+		added.smUtil += val.deviceUtil[vidx].smUtil
+	}
+	return added
+}
+
 func getsrlist() map[string]podusage {
 	return srPodList
 }
@@ -142,12 +177,11 @@ func getsrlist() map[string]podusage {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
-	klog.Infof("Starting to collect metrics for vGPUMonitor")
+	klog.Info("Starting to collect metrics for vGPUMonitor")
 	if srPodList == nil {
 		srPodList = make(map[string]podusage)
 	}
-	err := monitorpath(srPodList)
-	if err != nil {
+	if err := monitorpath(srPodList); err != nil {
 		klog.Error("err=", err.Error())
 	}
 	if clientset != nil {
@@ -207,12 +241,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				if srPodList[sridx].sr == nil {
 					continue
 				}
-				pod_uid := strings.Split(srPodList[sridx].idstr, "_")[0]
-				ctr_name := strings.Split(srPodList[sridx].idstr, "_")[1]
-				if strings.Compare(string(val.UID), pod_uid) == 0 {
+				podUID := strings.Split(srPodList[sridx].idstr, "_")[0]
+				ctrName := strings.Split(srPodList[sridx].idstr, "_")[1]
+				if strings.Compare(string(val.UID), podUID) == 0 {
 					fmt.Println("Pod matched!", val.Name, val.Namespace, val.Labels)
 					for _, ctr := range val.Spec.Containers {
-						if strings.Compare(ctr.Name, ctr_name) == 0 {
+						if strings.Compare(ctr.Name, ctrName) == 0 {
 							fmt.Println("container matched", ctr.Name)
 							//err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[sridx])
 							//if err != nil {
@@ -227,6 +261,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							}
 							for i := 0; i < int(srPodList[sridx].sr.num); i++ {
 								value, _ := gettotalusage(srPodList[sridx], i)
+								utilization := getTotalUtilization(srPodList[sridx], i)
 								uuid := string(srPodList[sridx].sr.uuids[i].uuid[:])[0:40]
 
 								//fmt.Println("uuid=", uuid, "length=", len(uuid))
@@ -234,19 +269,25 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 									ctrvGPUdesc,
 									prometheus.GaugeValue,
 									float64(value.total),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrvGPUlimitdesc,
 									prometheus.GaugeValue,
 									float64(srPodList[sridx].sr.limit[i]),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 								)
 								ch <- prometheus.MustNewConstMetric(
 									ctrDeviceMemorydesc,
 									prometheus.CounterValue,
 									float64(value.total),
-									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
+								)
+								ch <- prometheus.MustNewConstMetric(
+									ctrDeviceUtilizationdesc,
+									prometheus.GaugeValue,
+									float64(utilization.smUtil),
+									val.Namespace, val.Name, ctrName, fmt.Sprint(i), uuid,
 								)
 							}
 						}
@@ -277,10 +318,10 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
-func initmetrics() {
+func initMetrics() {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
-	klog.Infof("Initializing metrics for vGPUmonitor")
+	klog.Info("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
 	config, err := rest.InClusterConfig()

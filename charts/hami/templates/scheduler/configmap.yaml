@@ -49,10 +49,6 @@ data:
                         "ignoredByScheduler": true
                     },
                     {
-                        "name": "{{ .Values.mluResourceMem }}",
-                        "ignoredByScheduler": true   
-                    },
-                    {
                         "name": "{{ .Values.dcuResourceName }}",
                         "ignoredByScheduler": true
                     },
@@ -65,9 +61,9 @@ data:
                         "ignoredByScheduler": true
                     },
                     {
-                        "name": "{{ .Values.iluvatarResourceName }}"
+                        "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
-                    },
+                    }
                 ],
                 "ignoreable": false
             }

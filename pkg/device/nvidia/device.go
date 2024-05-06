@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package nvidia
 
 import (
@@ -10,6 +26,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -23,6 +41,11 @@ const (
 	GPUInUse            = "nvidia.com/use-gputype"
 	GPUNoUse            = "nvidia.com/nouse-gputype"
 	NumaBind            = "nvidia.com/numa-bind"
+	NodeLockNvidia      = "hami.io/mutex.lock"
+	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
+	GPUUseUUID = "nvidia.com/use-gpuuuid"
+	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
+	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 )
 
 var (
@@ -32,7 +55,6 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
-	DefaultResourceNum    int
 )
 
 type NvidiaGPUDevices struct {
@@ -51,7 +73,6 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
-	fs.IntVar(&DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -60,6 +81,34 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return util.CheckHealth(devType, n)
+}
+
+func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.LockNode(n.Name, NodeLockNvidia)
+}
+
+func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia)
 }
 
 func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
@@ -101,8 +150,8 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMemPercentage)]
 
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
-		if DefaultResourceNum > 0 {
-			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(DefaultResourceNum), resource.BinarySI)
+		if config.DefaultResourceNum > 0 {
+			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(config.DefaultResourceNum), resource.BinarySI)
 			resourceNameOK = true
 		}
 	}
@@ -111,8 +160,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	inuse, ok := annos[GPUInUse]
-	if ok {
+	if inuse, ok := annos[GPUInUse]; ok {
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
@@ -126,8 +174,7 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
-	nouse, ok := annos[GPUNoUse]
-	if ok {
+	if nouse, ok := annos[GPUNoUse]; ok {
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false
@@ -162,13 +209,44 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 	return false, false, false
 }
 
+func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[GPUUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.ID == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[GPUNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.ID == uuid {
+				return false
+			}
+		}
+		return true
+	}
+
+	return true
+}
+
 func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[util.InRequestDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
-		(*annoinput)[util.SupportDevices[NvidiaGPUDevice]] = util.EncodePodSingleDevice(devlist)
-		//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
-		//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
+		deviceStr := util.EncodePodSingleDevice(devlist)
+		(*annoinput)[util.InRequestDevices[NvidiaGPUDevice]] = deviceStr
+		(*annoinput)[util.SupportDevices[NvidiaGPUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.InRequestDevices[NvidiaGPUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[NvidiaGPUDevice], deviceStr)
 	}
 	return *annoinput
 }

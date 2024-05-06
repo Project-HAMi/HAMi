@@ -1,18 +1,18 @@
 /*
- * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package util
 
@@ -22,13 +22,11 @@ import (
 
 const (
 	//ResourceName = "nvidia.com/gpu"
-	//ResourceName = "hami.io/vgpu"
-	AssignedTimeAnnotations          = "hami.io/vgpu-time"
-	AssignedIDsAnnotations           = "hami.io/vgpu-ids-new"
-	AssignedIDsToAllocateAnnotations = "hami.io/devices-to-allocate"
-	AssignedNodeAnnotations          = "hami.io/vgpu-node"
-	BindTimeAnnotations              = "hami.io/bind-time"
-	DeviceBindPhase                  = "hami.io/bind-phase"
+	//ResourceName = "hami.io/vgpu".
+	AssignedTimeAnnotations = "hami.io/vgpu-time"
+	AssignedNodeAnnotations = "hami.io/vgpu-node"
+	BindTimeAnnotations     = "hami.io/bind-time"
+	DeviceBindPhase         = "hami.io/bind-phase"
 
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
@@ -36,15 +34,18 @@ const (
 
 	//Set default mem to 5000m
 	//DefaultMem   = 5000
-	//DefaultCores = 0
+	//DefaultCores = 0.
 
 	DeviceLimit = 100
 	//TimeLayout = "ANSIC"
-	//DefaultTimeout = time.Second * 60
+	//DefaultTimeout = time.Second * 60.
 
 	BestEffort string = "best-effort"
 	Restricted string = "restricted"
 	Guaranteed string = "guaranteed"
+
+	// NodeNameEnvName define env var name for use get node name.
+	NodeNameEnvName = "NODE_NAME"
 )
 
 type DevicePluginConfigs struct {
@@ -102,14 +103,14 @@ type ContainerDeviceRequest struct {
 type ContainerDevices []ContainerDevice
 type ContainerDeviceRequests map[string]ContainerDeviceRequest
 
-// type ContainerAllDevices map[string]ContainerDevices
+// type ContainerAllDevices map[string]ContainerDevices.
 type PodSingleDevice []ContainerDevices
 
 type PodDeviceRequests []ContainerDeviceRequests
 type PodDevices map[string]PodSingleDevice
 
 type DeviceUsage struct {
-	Id        string
+	ID        string
 	Index     uint
 	Used      int32
 	Count     int32

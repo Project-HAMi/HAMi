@@ -1,13 +1,26 @@
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: gpu-pod
+  name: binpack-1
+  labels:
+    app: binpack-1
 spec:
-  containers:
-    - name: ubuntu-container
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          cambricon.com/mlunum: 1 # requesting 1 MLU
-          cambricon.com/mlumem: 10240 # requesting 10G MLU device memory
+  replicas: 1
+  selector:
+    matchLabels:
+      app: binpack-1
+  template:
+    metadata:
+      labels:
+        app: binpack-1
+    spec:
+      containers:
+        - name: c-1
+          image: ubuntu:18.04
+          command: ["sleep"]
+          args: ["100000"]
+          resources:
+            limits:
+              cambricon.com/vmlu: "1"
+              cambricon.com/mlu370.smlu.vmemory: "20"
+              cambricon.com/mlu370.smlu.vcore: "10"

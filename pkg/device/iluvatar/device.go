@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package iluvatar
 
 import (
@@ -7,6 +23,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -19,6 +36,10 @@ const (
 	IluvatarGPUDevice       = "Iluvatar"
 	IluvatarGPUCommonWord   = "Iluvatar"
 	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
+	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	IluvatarUseUUID = "iluvatar.ai/use-gpuuuid"
+	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	IluvatarNoUseUUID = "iluvatar.ai/nouse-gpuuuid"
 )
 
 var (
@@ -28,8 +49,8 @@ var (
 )
 
 func InitIluvatarDevice() *IluvatarDevices {
-	util.InRequestDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-	util.SupportDevices[IluvatarGPUDevice] = "hami.io/vgpu-devices-allocated"
+	util.InRequestDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-to-allocate"
+	util.SupportDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-allocated"
 	return &IluvatarDevices{}
 }
 
@@ -62,7 +83,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 			Count:   100,
 			Devmem:  int32(memoryTotal * 256 * 100 / cards),
 			Devcore: 100,
-			Type:    "Iluvatar",
+			Type:    IluvatarGPUDevice,
 			Numa:    0,
 			Health:  true,
 		})
@@ -89,6 +110,14 @@ func (dev *IluvatarDevices) PatchAnnotations(annoinput *map[string]string, pd ut
 	return *annoinput
 }
 
+func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	return nil
+}
+
+func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	return nil
+}
+
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
 	return nil
 }
@@ -100,12 +129,41 @@ func (dev *IluvatarDevices) CheckType(annos map[string]string, d util.DeviceUsag
 	return false, false, false
 }
 
+func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[IluvatarUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		for _, uuid := range userUUIDs {
+			if d.ID == uuid {
+				return true
+			}
+		}
+		return false
+	}
+
+	noUserUUID, ok := annos[IluvatarNoUseUUID]
+	if ok {
+		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		for _, uuid := range noUserUUIDs {
+			if d.ID == uuid {
+				return false
+			}
+		}
+		return true
+	}
+	return true
+}
+
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return util.CheckHealth(devType, n)
+	return true, true
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Infof("Counting iluvatar devices")
+	klog.Info("Counting iluvatar devices")
 	iluvatarResourceCount := corev1.ResourceName(IluvatarResourceCount)
 	iluvatarResourceMem := corev1.ResourceName(IluvatarResourceMemory)
 	iluvatarResourceCores := corev1.ResourceName(IluvatarResourceCores)

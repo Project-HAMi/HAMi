@@ -1,3 +1,19 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+	http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package client
 
 import (
@@ -11,36 +27,38 @@ import (
 )
 
 var (
-	kubeClient kubernetes.Interface
+	KubeClient kubernetes.Interface
 )
 
 func init() {
-    var err error
-    kubeClient, err = NewClient()
-    if err != nil {
-        panic(err)
-    }
+	var err error
+	KubeClient, err = NewClient()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func GetClient() kubernetes.Interface {
-	return kubeClient
+	return KubeClient
 }
 
-// NewClient connects to an API server
+// NewClient connects to an API server.
 func NewClient() (kubernetes.Interface, error) {
 	kubeConfig := os.Getenv("KUBECONFIG")
 	if kubeConfig == "" {
 		kubeConfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
-	config, err := rest.InClusterConfig()
+	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
 	if err != nil {
-		klog.Infoln("InClusterConfig failed", err.Error())
-		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+		klog.Infof("BuildConfigFromFlags failed for file %s: %v using inClusterConfig", kubeConfig, err)
+		config, err = rest.InClusterConfig()
 		if err != nil {
-			klog.Errorln("BuildFromFlags failed", err.Error())
-			return nil, err
+			klog.Errorf("InClusterConfig Failed for err:%s", err.Error())
 		}
 	}
-	client, err := kubernetes.NewForConfig(config)
-	return client, err
+	KubeClient, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Errorf("new config error %s", err.Error())
+	}
+	return KubeClient, err
 }

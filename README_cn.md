@@ -4,9 +4,16 @@
 
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/build.yml)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
-[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)
+[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
+
+---
+<p>
+<img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
+</p>
+
+**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) Landscape project.**
 
 ## 支持设备：
 
@@ -26,6 +33,8 @@
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）或者显存比例（例如50%）来分配GPU，vGPU调度器会确保任务使用的显存不会超过分配数值
 
 ***指定设备型号***：当前任务可以通过设置annotation的方式，来选择使用或者不使用某些具体型号的设备
+
+***设备指定UUID***：当前任务可以通过设置`annotation`的方式，来选择使用或者不使用指定的设备，比如："nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid"
 
 ***无侵入***:  vGPU调度器兼容nvidia官方插件的显卡分配方式，所以安装完毕后，你不需要修改原有的任务文件就可以使用vGPU的功能。当然，你也可以自定义的资源名称
 
@@ -236,6 +245,11 @@ spec:
 
 </details>
 
+#### 更多范例
+
+点击 [范例](examples/nvidia)
+
+
 ### 监控：
 
 <details> <summary> 访问集群算力视图 </summary>
@@ -274,12 +288,10 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 | Ascend      | 华为     | 开发中     | 开发中   | ❌                |
 | GPU         | 天数智芯   | 开发中     | 开发中   | ❌                |
 | DPU         | 太初       | 开发中     | 开发中   | ❌                | 
-- 支持视频编解码处理
-- 支持Multi-Instance GPUs (MIG) 
+- 支持视频编解码处理。
+- 支持Multi-Instance GPUs (MIG)。
 
 
-## 反馈和参与
+## 参与贡献
 
-* bug、疑惑、修改欢迎提在 [Github Issues](https://github.com/Project-HAMi/HAMi/issues/new)
-* 想了解更多或者有想法可以参与到[Discussions](https://github.com/Project-HAMi/HAMi/discussions)和[slack](https://join.slack.com/t/k8s-device-plugin/shared_invite/zt-oi9zkr5c-LsMzNmNs7UYg6usc0OiWKw)交流
-
+如果你想成为 HAMi 的贡献者，请参[考贡献者指南](CONTRIBUTING.md),里面有详细的贡献流程。

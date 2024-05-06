@@ -24,7 +24,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-// SyscallExecRuntime wraps the path that a binary and defines the semanitcs for how to exec into it.
+// SyscallExecRuntime wraps the path that a binary and defines the semantics for how to exec into it.
 // This can be used to wrap an OCI-compliant low-level runtime binary, allowing it to be used through the
 // Runtime internface.
 type SyscallExecRuntime struct {
@@ -36,12 +36,12 @@ type SyscallExecRuntime struct {
 
 var _ Runtime = (*SyscallExecRuntime)(nil)
 
-// NewSyscallExecRuntime creates a SyscallExecRuntime for the specified path with the standard logger
+// NewSyscallExecRuntime creates a SyscallExecRuntime for the specified path with the standard logger.
 func NewSyscallExecRuntime(path string) (Runtime, error) {
 	return NewSyscallExecRuntimeWithLogger(log.StandardLogger(), path)
 }
 
-// NewSyscallExecRuntimeWithLogger creates a SyscallExecRuntime for the specified logger and path
+// NewSyscallExecRuntimeWithLogger creates a SyscallExecRuntime for the specified logger and path.
 func NewSyscallExecRuntimeWithLogger(logger *log.Logger, path string) (Runtime, error) {
 	info, err := os.Stat(path)
 	if err != nil {

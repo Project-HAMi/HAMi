@@ -47,6 +47,9 @@ spec:
             - {{ . }}
             {{- end }}
             {{- end }}
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-name={{ .Values.schedulerName }}
+            - --leader-elect-resource-namespace={{ .Release.Namespace }}
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
@@ -71,6 +74,9 @@ spec:
             - --default-cores={{ .Values.scheduler.defaultCores }}
             - --iluvatar-memory={{ .Values.iluvatarResourceMem }}
             - --iluvatar-cores={{ .Values.iluvatarResourceCore }}
+            - --cambricon-mlu-name={{ .Values.mluResourceName }}
+            - --cambricon-mlu-memory={{ .Values.mluResourceMem }}
+            - --cambricon-mlu-cores={{ .Values.mluResourceCores }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}

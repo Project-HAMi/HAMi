@@ -1,18 +1,18 @@
 /*
- * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 
 package scheduler
 
@@ -21,14 +21,14 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	"k8s.io/klog/v2"
 )
 
-type DeviceUsageList []*util.DeviceUsage
-
 type NodeUsage struct {
-	Devices DeviceUsageList
+	Devices policy.DeviceUsageList
 }
 
 type nodeManager struct {
@@ -62,7 +62,8 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		if m.nodes[nodeID].Devices == nil || len(m.nodes[nodeID].Devices) == 0 {
+		if len(m.nodes[nodeID].Devices) == 0 {
+			delete(m.nodes, nodeID)
 			return
 		}
 		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
@@ -80,6 +81,10 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 			}
 		}
 		m.nodes[nodeID].Devices = tmp
+		if len(m.nodes[nodeID].Devices) == 0 {
+			delete(m.nodes, nodeID)
+			return
+		}
 		klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 	}
 }
