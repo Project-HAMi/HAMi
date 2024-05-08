@@ -5,7 +5,7 @@
 ### how to build the benchmark image
 
 ```bash
-cd k8s-vgpu-scheduler/benchmarks/ai-benchmark
+cd HAMi/benchmarks/ai-benchmark
 
 sh build.sh
 ```
@@ -17,9 +17,9 @@ Please refer to  [Quick Start](https://github.com/NVIDIA/k8s-device-plugin?tab=r
 ## Run the benchmark
 
 ```bash
-cd k8s-vgpu-scheduler/deployments
+cd HAMi/deployments
 
-k apply -f job-on-hami.yml
+kubectl apply -f job-on-hami.yml
 
-k apply -f job-on-nvidia-device-plugin.yml
+kubectl apply -f job-on-nvidia-device-plugin.yml
 ```
