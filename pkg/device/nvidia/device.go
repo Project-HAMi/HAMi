@@ -130,7 +130,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, e
 	return nodedevices, nil
 }
 
-func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
+func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
 	/*gpu related */
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(ResourcePriority)]
 	if ok {
@@ -142,7 +142,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 
 	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
 	if resourceNameOK {
-		return resourceNameOK
+		return resourceNameOK, nil
 	}
 
 	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(ResourceCores)]
@@ -156,7 +156,13 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
 		}
 	}
 
-	return resourceNameOK
+	if !resourceNameOK {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "none",
+		})
+	}
+	return resourceNameOK, nil
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {

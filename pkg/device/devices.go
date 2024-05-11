@@ -23,6 +23,7 @@ import (
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
+	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
@@ -37,7 +38,7 @@ import (
 )
 
 type Devices interface {
-	MutateAdmission(ctr *corev1.Container) bool
+	MutateAdmission(ctr *corev1.Container) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error)
@@ -70,11 +71,13 @@ func init() {
 	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
+	devices[ascend.AscendDevice] = ascend.InitDevice()
 	DevicesToHandle = []string{}
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
+	DevicesToHandle = append(DevicesToHandle, ascend.AscendDevice)
 }
 
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {

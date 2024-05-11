@@ -71,7 +71,12 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 		}
 		for _, val := range device.GetDevices() {
-			hasResource = hasResource || val.MutateAdmission(c)
+			found, err := val.MutateAdmission(c)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
 		}
 	}
 

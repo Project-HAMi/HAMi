@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: [ ]
-version: "v2.3.9"
+version: "v2.3.10"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -26,6 +26,10 @@ dcuResourceCores: "hygon.com/dcucores"
 iluvatarResourceName: "iluvatar.ai/vgpu"
 iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
 iluvatarResourceCore: "iluvatar.ai/vcuda-core"
+
+#Ascend 910B Parameters
+ascendResourceName: "huawei.com/Ascend910"
+ascendResourceMem: "huawei.com/Ascend910-memory"
 
 schedulerName: "hami-scheduler"
 

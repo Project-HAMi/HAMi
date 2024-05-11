@@ -108,7 +108,7 @@ func Test_MutateAdmission(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := gpuDevices.MutateAdmission(test.args)
+			got, _ := gpuDevices.MutateAdmission(test.args)
 			if test.want != got {
 				t.Fatalf("exec MutateAdmission method expect return is %+v, but got is %+v", test.want, got)
 			}
