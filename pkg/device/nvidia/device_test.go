@@ -206,3 +206,72 @@ func Test_CheckUUID(t *testing.T) {
 		})
 	}
 }
+
+func Test_CheckType(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{}
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+		}
+		want bool
+	}{
+		{
+			name: "use set GPUInUse don't set GPUNoUse annotation,device match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUInUse: "A10",
+				},
+				d: util.DeviceUsage{
+					Type: "NVIDIA A100",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "use set GPUInUse set GPUNoUse annotation,device don't match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUInUse: "A10",
+					GPUNoUse: "A100",
+				},
+				d: util.DeviceUsage{
+					Type: "NVIDIA A100",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "use set GPUInUse set GPUNoUse annotation,device match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUInUse: "A10",
+					GPUNoUse: "A100",
+				},
+				d: util.DeviceUsage{
+					Type: "NVIDIA A10",
+				},
+			},
+			want: true,
+		},
+	}
+	req := util.ContainerDeviceRequest{
+		Type: NvidiaGPUDevice,
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}

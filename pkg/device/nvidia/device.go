@@ -166,35 +166,33 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) (bool, error
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
+	cardtype = strings.ToUpper(cardtype)
 	if inuse, ok := annos[GPUInUse]; ok {
-		if !strings.Contains(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
-				return true
-			}
-		} else {
-			for _, val := range strings.Split(inuse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return true
-				}
-			}
+		useTypes := strings.Split(inuse, ",")
+		if !ContainsSliceFunc(useTypes, func(useType string) bool {
+			return strings.Contains(cardtype, strings.ToUpper(useType))
+		}) {
+			return false
 		}
-		return false
 	}
-	if nouse, ok := annos[GPUNoUse]; ok {
-		if !strings.Contains(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
-				return false
-			}
-		} else {
-			for _, val := range strings.Split(nouse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return false
-				}
-			}
+	if unuse, ok := annos[GPUNoUse]; ok {
+		unuseTypes := strings.Split(unuse, ",")
+		if ContainsSliceFunc(unuseTypes, func(unuseType string) bool {
+			return strings.Contains(cardtype, strings.ToUpper(unuseType))
+		}) {
+			return false
 		}
-		return true
 	}
 	return true
+}
+
+func ContainsSliceFunc[S ~[]E, E any](s S, match func(E) bool) bool {
+	for _, e := range s {
+		if match(e) {
+			return true
+		}
+	}
+	return false
 }
 
 func assertNuma(annos map[string]string) bool {
