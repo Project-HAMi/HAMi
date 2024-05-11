@@ -63,6 +63,14 @@ data:
                     {
                         "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.ascendResourceMem }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.ascendResourceName }}",
+                        "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false

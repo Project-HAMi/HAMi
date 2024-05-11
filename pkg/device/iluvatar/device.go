@@ -60,14 +60,14 @@ func (dev *IluvatarDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&IluvatarResourceCores, "iluvatar-cores", "iluvatar.ai/vcuda-core", "iluvatar core resource")
 }
 
-func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container) bool {
+func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(IluvatarResourceCount)]
 	if ok {
 		if count.Value() > 1 {
 			ctr.Resources.Limits[corev1.ResourceName(IluvatarResourceCores)] = *resource.NewQuantity(count.Value()*int64(100), resource.DecimalSI)
 		}
 	}
-	return ok
+	return ok, nil
 }
 
 func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {

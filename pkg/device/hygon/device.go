@@ -60,9 +60,9 @@ func (dev *DCUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&HygonResourceCores, "dcu-cores", "hygon.com/dcucores", "dcu core resource")
 }
 
-func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container) bool {
+func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
-	return ok
+	return ok, nil
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {

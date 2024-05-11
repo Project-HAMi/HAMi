@@ -66,7 +66,7 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 			delete(m.nodes, nodeID)
 			return
 		}
-		klog.Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
+		klog.V(5).Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
 		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
 		for _, val := range m.nodes[nodeID].Devices {
 			found := false
@@ -85,7 +85,7 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 			delete(m.nodes, nodeID)
 			return
 		}
-		klog.Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
+		klog.V(5).Infoln("Rm Devices res:", m.nodes[nodeID].Devices)
 	}
 }
 

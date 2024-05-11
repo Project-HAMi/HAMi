@@ -77,6 +77,8 @@ spec:
             - --cambricon-mlu-name={{ .Values.mluResourceName }}
             - --cambricon-mlu-memory={{ .Values.mluResourceMem }}
             - --cambricon-mlu-cores={{ .Values.mluResourceCores }}
+            - --ascend-name={{ .Values.ascendResourceName }}
+            - --ascend-mem={{ .Values.ascendResourceMem }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}

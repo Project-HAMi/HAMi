@@ -196,9 +196,9 @@ func (dev *CambriconDevices) AssertNuma(annos map[string]string) bool {
 	return false
 }
 
-func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container) bool {
+func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(MLUResourceCount)]
-	return ok
+	return ok, nil
 }
 
 func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {

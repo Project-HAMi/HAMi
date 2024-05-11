@@ -362,6 +362,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				response.Envs[api.CoreLimitSwitch] = "disable"
 			}
 			cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
+			os.RemoveAll(cacheFileHostDirectory)
 
 			os.MkdirAll(cacheFileHostDirectory, 0777)
 			os.Chmod(cacheFileHostDirectory, 0777)
