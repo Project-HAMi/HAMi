@@ -3,9 +3,9 @@ entries:
   hami:
   - apiVersion: v2
     appVersion: 0.0.2
-    created: "2024-04-28T10:40:54.33270878Z"
+    created: "2024-05-11T09:22:11.150970215Z"
     description: Heterogeneous AI Computing Virtualization Middleware
-    digest: f78adea8ae46052a02f5fa7ad791dad4562019f4213431a35ddead6df7250102
+    digest: fa526539b9e1e98571ab600e7efe6a347726d88639a5451c967e766e4da862ce
     keywords:
     - vgpu
     - gpu
@@ -36,4 +36,4 @@ entries:
     urls:
     - https://Project-HAMi.github.io/HAMi/vgpu-2.0.0.tgz
     version: 2.0.0
-generated: "2024-04-28T10:40:54.331680133Z"
+generated: "2024-05-11T09:22:11.150116913Z"
