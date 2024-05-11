@@ -82,9 +82,8 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 
 	if !hasResource {
 		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
-		return admission.Allowed("no resource found")
-	}
-	if len(config.SchedulerName) > 0 {
+		//return admission.Allowed("no resource found")
+	} else if len(config.SchedulerName) > 0 {
 		pod.Spec.SchedulerName = config.SchedulerName
 	}
 	marshaledPod, err := json.Marshal(pod)
