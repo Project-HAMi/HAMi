@@ -21,7 +21,7 @@
 
 * Tag Ascend-910B node with the following command
 ```
-ubectl label node {ascend-node} accelerator=huawei-Ascend910
+kubectl label node {ascend-node} accelerator=huawei-Ascend910
 ```
 
 * Install [Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
