@@ -19,6 +19,11 @@
 
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
+* Tag Ascend-910B node with the following command
+```
+ubectl label node {ascend-node} accelerator=huawei-Ascend910
+```
+
 * Install [Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
 
 * Install Ascend-device-plugin from HAMi Project [here](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml)

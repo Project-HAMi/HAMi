@@ -18,6 +18,11 @@
 
 * 通过helm部署本组件, 参照[主文档中的开启vgpu支持章节](https://github.com/Project-HAMi/HAMi/blob/master/README_cn.md#kubernetes开启vgpu支持)
 
+* 使用以下指令，为Ascend 910B所在节点打上label
+```
+kubectl label node {ascend-node} accelerator=huawei-Ascend910
+```
+
 * 部署[Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
 
 * 从HAMi项目中获取并安装[ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml)
