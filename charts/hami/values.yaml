@@ -49,6 +49,9 @@ scheduler:
   defaultMem: 0
   defaultCores: 0
   defaultGPUNum: 1
+  defaultSchedulerPolicy:
+    nodeSchedulerPolicy: binpack
+    gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
   leaderElect: true
   kubeScheduler:
