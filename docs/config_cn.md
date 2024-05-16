@@ -20,6 +20,8 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
   整数类型(0-100)，默认为0，表示默认为每个任务预留的百分比算力。若设置为0，则代表任务可能会被分配到任一满足显存需求的GPU中，若设置为100，代表该任务独享整张显卡
 * `scheduler.defaultGPUNum:`
   整数类型，默认为1，如果配置为0，则配置不会生效。当用户在 pod 资源中没有设置 nvidia.com/gpu 这个 key 时，webhook 会检查 nvidia.com/gpumem、resource-mem-percentage、nvidia.com/gpucores 这三个 key 中的任何一个 key 有值，webhook 都会添加 nvidia.com/gpu 键和此默认值到 resources limit中。
+* `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy:` 字符串类型，预设值为"binpack", 表示GPU节点调度策略，"binpack"表示尽量将任务分配到同一个GPU节点上，"spread"表示尽量将任务分配到不同GPU节点上。
+* `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy:` 字符串类型，预设值为"spread", 表示GPU调度策略，"binpack"表示尽量将任务分配到同一个GPU上，"spread"表示尽量将任务分配到不同GPU上。
 * `resourceName:`
   字符串类型, 申请vgpu个数的资源名, 默认: "nvidia.com/gpu"
 * `resourceMem:`
