@@ -7,3 +7,5 @@ updateso.sh
 libvgpu.so
 .idea
 vendor
+license
+vgpuvalidator
