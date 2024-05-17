@@ -41,6 +41,8 @@ English version|[中文版](README_cn.md)
 
 ***Easy to use***: You don't need to modify your task YAML to use our scheduler. All your jobs will be automatically supported after installation. Additionally, you can specify a resource name other than "nvidia.com/gpu" if you prefer.
 
+***Scheduling Policy***: The vGPU scheduler supports various scheduling policies, including node-level and GPU-level policies. These can be set by default through scheduler parameters, and can also be selected based on application scenarios by setting the Pod's annotation, such as "hami.io/node-scheduler-policy" or "hami.io/gpu-scheduler-policy". Both dimensions support two policies: `binpack` and `spread`.
+
 ## Major Features
 
 - Hard Limit on Device Memory.

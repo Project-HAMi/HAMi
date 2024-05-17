@@ -39,6 +39,8 @@
 
 ***无侵入***:  vGPU调度器兼容nvidia官方插件的显卡分配方式，所以安装完毕后，你不需要修改原有的任务文件就可以使用vGPU的功能。当然，你也可以自定义的资源名称
 
+***调度策略***:  vGPU调度器支持多种调度策略，包括节点、GPU卡纬度的调度策略，可以通过调度器的参数来进行默认设置，同时也可以根据应用场景，通过设置 Pod 的`annotation`来选择，比如："hami.io/node-scheduler-policy" or "hami.io/gpu-scheduler-policy"，两个纬度都支持`binpack`和`spread`两种策略。
+
 ## 使用场景
 
 1. 云原生场景下需要复用算力设备的场合
