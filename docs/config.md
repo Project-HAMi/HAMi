@@ -39,13 +39,20 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 
 * `GPU_CORE_UTILIZATION_POLICY:`
   String type, "default", "force", "disable"
+  default: "default"
   "default" means the dafault utilization policy
   "force" means the container will always limit the core utilization below "nvidia.com/gpucores"
   "disable" means the container will ignore the utilization limitation set by "nvidia.com/gpucores" during task execution
 
 * `ACTIVE_OOM_KILLER:`
-  String type, "true","false"
-  "true" means the task may be killed if exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
-  "false" means the task will not be killed even it exceeds the limitation.
+  Bool type, "true","false"
+  default: false
+  "true" means there will be a daemon process which monitors all running tasks inside this container, and instantly kill any process which exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
+
+* `CUDA_DISABLE_CONTROL`
+  Bool type, "true","false"
+  default: false
+  "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitaion in that container, only for debug. 
+
 
   

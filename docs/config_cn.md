@@ -37,7 +37,13 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 
 * `GPU_CORE_UTILIZATION_POLICY:`
   字符串类型，"default", "force", "disable"
+  默认为"default"
   代表容器算力限制策略， "default"为默认，"force"为强制限制算力，一般用于测试算力限制的功能，"disable"为忽略算力限制
 * `ACTIVE_OOM_KILLER:`
-  字符串类型，"true", "false"
-  代表容器是否会因为超用显存而被终止执行，"true"为会，"false"为不会
+  布尔类型，"true", "false"
+  默认为false
+  若设置为true，则代表监控系统将会持续监控进程的显存使用量，并主动kill掉任何用超配额的进行。
+* `CUDA_DISABLE_CONTROL`
+  布尔类型，"true", "false"
+  默认为false
+  若设置为true，则代表屏蔽掉容器层的资源隔离机制，需要注意的是，这个参数只有在容器创建时指定才会生效，一般用于调试
