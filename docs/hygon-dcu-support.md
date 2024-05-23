@@ -12,28 +12,13 @@
 
 ## Prerequisites
 
-* dtk driver with virtualization enabled(i.e dtk-22.10.1-vdcu), try the following command to see if your driver has virtualization ability
-
-```
-hdmcli -show-device-info
-```
-
-If this command can't be found, then you should contact your device provider to aquire a vdcu version of dtk driver.
-
-* The absolute path of dtk driver on each dcu node must be the same(i.e placed in /root/dtk-driver)
+* dtk driver >= 24.04
+* hy-smi v1.6.0
 
 ## Enabling DCU-sharing Support
 
-* Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes), please be note that, you should set your dtk driver directory using --set devicePlugin.hygondriver={your dtk driver path on each nodes}, for example:
+* Deploy the dcu-vgpu-device-plugin [here](https://github.com/Project-HAMi/dcu-vgpu-device-plugin)
 
-```
-helm install vgpu vgpu-charts/vgpu --set devicePlugin.hygondriver="/root/dcu-driver/dtk-22.10.1-vdcu" --set scheduler.kubeScheduler.imageTag={your k8s server version} -n kube-system
-```
-
-* Tag DCU node with the following command
-```
-kubectl label node {dcu-node} dcu=on
-```
 
 ## Running DCU jobs
 
@@ -71,7 +56,7 @@ source /opt/hygondriver/env.sh
 check if you have successfully enabled vDCU by using following command
 
 ```
-hdmcli -show-device-info
+hy-virtual -show-device-info
 ```
 
 If you have an output like this, then you have successfully enabled vDCU inside container.

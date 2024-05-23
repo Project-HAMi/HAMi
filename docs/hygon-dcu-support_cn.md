@@ -12,24 +12,12 @@
 
 ## 节点需求
 
-* 带有虚拟化功能的dtk驱动（例如dtk-22.10.1-vdcu）,相关组件可以在海光开发者社区获取，或联系您的设备提供商
-
-* 在宿主机上执行hdmcli -show-device-info获取设备信息，若能成功获取，则代表配置成功。若找不到指令，说明您安装的驱动不带有虚拟化功能，请联系厂商获取代虚拟化功能的dtk驱动
-
-* 需要将各个DCU节点上的dtk驱动路径放置在统一的绝对路径上，例如均放置在/root/dtk-driver
+* dtk driver >= 24.04
+* hy-smi v1.6.0
 
 ## 开启DCU复用
 
-* 通过helm部署本组件, 参照[主文档中的开启vgpu支持章节](https://github.com/Project-HAMi/HAMi/blob/master/README_cn.md#kubernetes开启vgpu支持)，需要注意的是，必须使用--set devicePlugin.hygondriver="/root/dcu-driver/dtk-22.10.1-vdcu" 手动指定dtk驱动的绝对路径
-
-```
-helm install vgpu vgpu-charts/vgpu --set devicePlugin.hygondriver="/root/dcu-driver/dtk-22.10.1-vdcu" --set scheduler.kubeScheduler.imageTag={your k8s server version} -n kube-system
-```
-
-* 使用以下指令，为DCU节点打上label
-```
-kubectl label node {dcu-node} dcu=on
-```
+* 部署[dcu-vgpu-device-plugin](https://github.com/Project-HAMi/dcu-vgpu-device-plugin)
 
 ## 运行DCU任务
 
@@ -63,7 +51,7 @@ source /opt/hygondriver/env.sh
 
 随后，使用hdmcli指令查看虚拟设备是否已经激活
 ```
-hdmcli -show-device-info
+hy-virtual -show-device-info
 ```
 
 若输出如下，则代表虚拟设备已经成功激活
