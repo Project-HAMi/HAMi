@@ -193,7 +193,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 					memnum = int(memnums)
 				}
 			}
-			corenum := int32(0)
+			corenum := int32(100)
 			core, ok := ctr.Resources.Limits[dcuResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[dcuResourceCores]
