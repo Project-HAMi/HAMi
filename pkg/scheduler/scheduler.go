@@ -322,7 +322,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
 		if err != nil {
-			klog.Warningf("get node %v device error, %v", nodeID, err)
+			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
+			klog.V(5).InfoS("node unregisterd", "node", nodeID, "error", err)
 			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
