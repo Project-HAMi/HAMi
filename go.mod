@@ -10,10 +10,8 @@ require (
 	github.com/NVIDIA/nvidia-container-toolkit v1.14.7-0.20240229083338-37b1e37c8f2f
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
 	github.com/fsnotify/fsnotify v1.7.0
-	github.com/golang/glog v1.2.0
 	github.com/google/uuid v1.6.0
 	github.com/julienschmidt/httprouter v1.3.0
-	github.com/kubevirt/device-plugin-manager v1.19.5
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/sirupsen/logrus v1.9.3
@@ -62,7 +60,6 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/onsi/ginkgo v1.16.5 // indirect
 	github.com/onsi/ginkgo/v2 v2.15.0 // indirect
 	github.com/onsi/gomega v1.32.0 // indirect
 	github.com/opencontainers/runc v1.1.7 // indirect
