@@ -42,7 +42,6 @@ spec:
             - --namespace={{ .Release.Namespace }}
             - --patch-validating=false
             - --secret-name={{ include "hami-vgpu.scheduler.tls" . }}
-            - --patch-failure-policy=Fail
       restartPolicy: OnFailure
       serviceAccountName: {{ include "hami-vgpu.fullname" . }}-admission
       {{- if .Values.scheduler.patch.nodeSelector }}
