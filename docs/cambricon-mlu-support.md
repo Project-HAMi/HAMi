@@ -20,9 +20,12 @@
 
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
-* Tag MLU node with the following command
+* Activate the smlu mode for each MLUs on that node
+
 ```
-kubectl label node {mlu-node} mlu=on
+cnmon set -c 0 -smlu on
+cnmon set -c 1 -smlu on
+...
 ```
 
 * Get cambricon-device-plugin from your device provider and specify the following parameters during deployment:
