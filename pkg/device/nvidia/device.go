@@ -55,6 +55,7 @@ var (
 	ResourceMemPercentage string
 	ResourcePriority      string
 	DebugMode             bool
+	OverwriteEnv          bool
 )
 
 type NvidiaGPUDevices struct {
@@ -73,6 +74,7 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
+	fs.BoolVar(&OverwriteEnv, "overwrite-env", false, "If set NVIDIA_VISIBLE_DEVICES=none to pods with no-gpu allocation")
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -156,7 +158,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) (bool, error
 		}
 	}
 
-	if !resourceNameOK {
+	if !resourceNameOK && OverwriteEnv {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "none",

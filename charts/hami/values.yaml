@@ -49,6 +49,7 @@ scheduler:
   defaultMem: 0
   defaultCores: 0
   defaultGPUNum: 1
+  overwriteEnv: "false"
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
@@ -104,7 +105,6 @@ scheduler:
 
 devicePlugin:
   image: "projecthami/hami"
-  
   monitorimage: "projecthami/hami"
   monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
@@ -117,9 +117,6 @@ devicePlugin:
   extraArgs:
     - -v=false
   
-  hygonimage: "4pdosc/vdcu-device-plugin:v1.0"
-  hygondriver: "/root/dcu-driver/dtk-22.10.1-vdcu"
-  
   service:
     httpPort: 31992
     
@@ -129,9 +126,5 @@ devicePlugin:
   podAnnotations: {}
   nvidianodeSelector:
     gpu: "on"
-  mlunodeSelector:
-    mlu: "on"
-  hygonnodeSelector:
-    dcu: "on"
   tolerations: []
 

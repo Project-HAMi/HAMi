@@ -79,6 +79,7 @@ spec:
             - --cambricon-mlu-cores={{ .Values.mluResourceCores }}
             - --ascend-name={{ .Values.ascendResourceName }}
             - --ascend-memory={{ .Values.ascendResourceMem }}
+            - --overwrite-env={{ .Values.scheduler.overwriteEnv }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
             {{- range .Values.scheduler.extender.extraArgs }}
