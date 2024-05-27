@@ -177,8 +177,8 @@ func (dev *AscendDevices) CheckUUID(annos map[string]string, d util.DeviceUsage)
 	return true
 }
 
-func (dev *AscendDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+func (dev *AscendDevices) CheckHealth(devType string, n *corev1.Node) bool {
+	return true
 }
 
 func trimMemory(i int64) int64 {

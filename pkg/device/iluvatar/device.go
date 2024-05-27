@@ -158,8 +158,8 @@ func (dev *IluvatarDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 	return true
 }
 
-func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) bool {
+	return true
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {

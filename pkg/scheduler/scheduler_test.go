@@ -221,7 +221,7 @@ func Test_Filter(t *testing.T) {
 		nodes, _ := s.ListNodes()
 		for index := range nodes {
 			node := nodes[index]
-			s.rmNodeDevice(node.ID, node)
+			s.rmNodeDevice(node.ID, node, nvidia.NvidiaGPUDevice)
 		}
 		pods, _ := s.ListPods()
 		for index := range pods {
@@ -232,24 +232,26 @@ func Test_Filter(t *testing.T) {
 			ID: "node1",
 			Devices: []util.DeviceInfo{
 				{
-					ID:      "device1",
-					Index:   0,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+					ID:           "device1",
+					Index:        0,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
 				{
-					ID:      "device2",
-					Index:   1,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+					ID:           "device2",
+					Index:        1,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
 			},
 		})
@@ -257,24 +259,26 @@ func Test_Filter(t *testing.T) {
 			ID: "node2",
 			Devices: []util.DeviceInfo{
 				{
-					ID:      "device3",
-					Index:   0,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+					ID:           "device3",
+					Index:        0,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
 				{
-					ID:      "device4",
-					Index:   1,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+					ID:           "device4",
+					Index:        1,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
 			},
 		})

@@ -150,7 +150,6 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
-	nodeInfoCopy := make(map[string]*util.NodeInfo)
 	ticker := time.NewTicker(time.Second * 15)
 	for {
 		select {
@@ -168,26 +167,20 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		for _, val := range nodes {
 			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devInstance := range device.GetDevices() {
-				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
+				health := devInstance.CheckHealth(devhandsk, val)
 				if !health {
-					_, ok := s.nodes[val.Name]
+					info, ok := s.nodes[val.Name]
 					if ok {
-						_, ok = nodeInfoCopy[devhandsk]
-						if ok && nodeInfoCopy[devhandsk] != nil {
-							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
-							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
-
-							err := devInstance.NodeCleanUp(val.Name)
-							if err != nil {
-								klog.ErrorS(err, "markAnnotationsToDeleteFailed")
-							}
-							continue
+						err := devInstance.NodeCleanUp(val.Name)
+						if err != nil {
+							klog.ErrorS(err, "markAnnotationsToDeleteFailed")
 						}
+						s.rmNodeDevice(val.Name, info, devhandsk)
+						klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, info, err, s.nodes[val.Name].Devices)
+						continue
 					}
 				}
-				if !needUpdate {
-					continue
-				}
+
 				_, ok := util.HandshakeAnnos[devhandsk]
 				if ok {
 					tmppat := make(map[string]string)
@@ -223,21 +216,21 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					}
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
-							ID:      deviceinfo.Id,
-							Index:   uint(deviceinfo.Index),
-							Count:   deviceinfo.Count,
-							Devmem:  deviceinfo.Devmem,
-							Devcore: deviceinfo.Devcore,
-							Type:    deviceinfo.Type,
-							Numa:    deviceinfo.Numa,
-							Health:  deviceinfo.Health,
+							ID:           deviceinfo.Id,
+							Index:        uint(deviceinfo.Index),
+							Count:        deviceinfo.Count,
+							Devmem:       deviceinfo.Devmem,
+							Devcore:      deviceinfo.Devcore,
+							Type:         deviceinfo.Type,
+							Numa:         deviceinfo.Numa,
+							Health:       deviceinfo.Health,
+							DeviceVendor: devhandsk,
 						})
 					}
 				}
 				s.addNode(val.Name, nodeInfo)
-				nodeInfoCopy[devhandsk] = nodeInfo
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
+					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfo, s.nodes[val.Name].Devices)
 				}
 			}
 		}

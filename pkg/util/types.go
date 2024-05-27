@@ -124,14 +124,15 @@ type DeviceUsage struct {
 }
 
 type DeviceInfo struct {
-	ID      string
-	Index   uint
-	Count   int32
-	Devmem  int32
-	Devcore int32
-	Type    string
-	Numa    int
-	Health  bool
+	ID           string
+	Index        uint
+	Count        int32
+	Devmem       int32
+	Devcore      int32
+	Type         string
+	Numa         int
+	Health       bool
+	DeviceVendor string
 }
 
 type NodeInfo struct {
