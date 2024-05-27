@@ -26,11 +26,10 @@ kubectl label node {ascend-node} accelerator=huawei-Ascend910
 
 * Install [Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
 
-* Install Ascend-device-plugin from HAMi Project [here](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml)
-
-* Deploy the ascend-device-plugin you just specified
+* Download yaml for Ascend-vgpu-device-plugin from HAMi Project [here](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml), and deploy
 
 ```
+wget https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/master/build/ascendplugin-910-hami.yaml
 kubectl apply -f ascendplugin-910-hami.yaml
 ```
 
