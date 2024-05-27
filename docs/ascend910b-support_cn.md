@@ -25,11 +25,10 @@ kubectl label node {ascend-node} accelerator=huawei-Ascend910
 
 * 部署[Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
 
-* 从HAMi项目中获取并安装[ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml)
-
-* 部署`ascend-device-plugin`
+* 从HAMi项目中获取并安装[ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml)，并进行部署
 
 ```
+wget https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/master/build/ascendplugin-910-hami.yaml
 kubectl apply -f ascendplugin-910-hami.yaml
 ```
 
