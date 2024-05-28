@@ -23,7 +23,6 @@ English version|[中文版](README_cn.md)
 [![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
 [![hygon DCU](https://img.shields.io/badge/Hygon-DCU-blue)](docs/hygon-dcu-support.md)
 [![iluvatar GPU](https://img.shields.io/badge/Iluvatar-GPU-blue)](docs/iluvatar-gpu-support.md)
-[![Ascend NPU](https://img.shields.io/badge/Ascend-NPU-blue)](docs/ascend910b-support.md)
 
 ## Introduction
 
