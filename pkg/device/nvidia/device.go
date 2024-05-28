@@ -78,7 +78,7 @@ func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
-	return util.MarkAnnotationsToDelete(NvidiaGPUDevice, nn)
+	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {

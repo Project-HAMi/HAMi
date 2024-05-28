@@ -128,7 +128,7 @@ func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) 
 }
 
 func (dev *DCUDevices) NodeCleanUp(nn string) error {
-	return util.MarkAnnotationsToDelete(HygonDCUDevice, nn)
+	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
 func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
