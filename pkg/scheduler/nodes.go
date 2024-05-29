@@ -57,7 +57,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	}
 }
 
-func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
+func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo, deviceVendor string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
@@ -69,6 +69,9 @@ func (m *nodeManager) rmNodeDevice(nodeID string, nodeInfo *util.NodeInfo) {
 		klog.V(5).Infoln("before rm:", m.nodes[nodeID].Devices, "needs remove", nodeInfo.Devices)
 		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)-len(nodeInfo.Devices))
 		for _, val := range m.nodes[nodeID].Devices {
+			if deviceVendor != val.DeviceVendor {
+				continue
+			}
 			found := false
 			for _, rmval := range nodeInfo.Devices {
 				if strings.Compare(val.ID, rmval.ID) == 0 {
