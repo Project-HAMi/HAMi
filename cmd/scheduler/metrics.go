@@ -165,8 +165,8 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
-		for ctridx, podSingleDevice := range val.Devices {
-			for _, ctrdevs := range podSingleDevice {
+		for _, podSingleDevice := range val.Devices {
+			for ctridx, ctrdevs := range podSingleDevice {
 				for _, ctrdevval := range ctrdevs {
 					klog.Infoln("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
 					if len(ctrdevval.UUID) == 0 {
