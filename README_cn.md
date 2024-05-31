@@ -80,7 +80,7 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 * NVIDIA drivers >= 440
 * nvidia-docker version > 2.0 
-* docker已配置nvidia作为默认runtime
+* docker/containerd/cri-o已配置nvidia作为默认runtime
 * Kubernetes version >= 1.16
 * glibc >= 2.17 & glibc < 2.3.0
 * kernel version >= 3.10
