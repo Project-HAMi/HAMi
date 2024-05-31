@@ -318,8 +318,18 @@ Heterogeneous AI Computing device to support
 | GPU         | iluvatar   | All         | ✅              | ✅            | ❌                |
 | DPU         | Teco       | Checking    | In progress     | In progress   | ❌                |
 
-- Support video codec processing
-- Support Multi-Instance GPUs (MIG)
+- [ ] Support video codec processing
+- [ ] Support Multi-Instance GPUs (MIG)
+- [ ] Support Flexible scheduling  policies
+  - [ ] binpack
+  - [ ] spread
+  - [ ] numa affinity
+- [ ] integrated gpu-operator
+- [ ] Rich observability support
+- [ ] DRA Support
+- [ ] Support Intel GPU device
+- [ ] Support AMD GPU device
+ 
 
 ## Contributing
 
