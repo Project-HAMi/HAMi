@@ -61,7 +61,13 @@ func GetNode(nodename string) (*corev1.Node, error) {
 }
 
 func GetPendingPod(node string) (*corev1.Pod, error) {
-	podlist, err := client.GetClient().CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+
+	// filter pods for this node.
+	selector := fmt.Sprintf("spec.nodeName=%s", node)
+	podListOptions := metav1.ListOptions{
+		FieldSelector: selector,
+	}
+	podlist, err := client.GetClient().CoreV1().Pods("").List(context.Background(), podListOptions)
 	if err != nil {
 		return nil, err
 	}
