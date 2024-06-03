@@ -350,16 +350,17 @@ func InitKlogFlags() *flag.FlagSet {
 	return flagset
 }
 
-func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+func CheckHealth(devType string, n *corev1.Node) bool {
 	handshake := n.Annotations[HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
-		return time.Now().Before(formertime.Add(time.Second * 60)), false
+		return time.Now().Before(formertime.Add(time.Second * 60))
 	} else if strings.Contains(handshake, "Deleted") {
-		return true, false
-	} else {
-		return true, true
+		return true
+	} else if strings.Contains(handshake, "Reported") {
+		return true
 	}
+	return false
 }
 
 func MarkAnnotationsToDelete(devType string, nn string) error {

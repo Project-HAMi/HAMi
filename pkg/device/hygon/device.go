@@ -131,7 +131,7 @@ func (dev *DCUDevices) NodeCleanUp(nn string) error {
 	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
-func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) bool {
 	return util.CheckHealth(devType, n)
 }
 

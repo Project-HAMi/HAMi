@@ -167,8 +167,8 @@ func (dev *CambriconDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) bool {
+	return true
 }
 
 func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {

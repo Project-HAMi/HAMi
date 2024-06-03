@@ -39,7 +39,7 @@ import (
 
 type Devices interface {
 	MutateAdmission(ctr *corev1.Container) (bool, error)
-	CheckHealth(devType string, n *corev1.Node) (bool, bool)
+	CheckHealth(devType string, n *corev1.Node) bool
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error)
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)

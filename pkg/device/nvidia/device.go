@@ -81,7 +81,7 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
-func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) bool {
 	return util.CheckHealth(devType, n)
 }
 
