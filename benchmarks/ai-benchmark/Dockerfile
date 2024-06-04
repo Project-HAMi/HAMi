@@ -11,7 +11,7 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends apt-utils git && \
     rm -rf /var/lib/apt/lists/* && \
     pip install --no-cache-dir --upgrade pip && \
-    git clone https://github.com/haitwang-cloud/ai-benchmark . && \
+    git clone https://github.com/Project-HAMi/ai-benchmark . && \
     pip install --no-cache-dir -r requirements.txt
 
 # Set the default command to run when the container starts
