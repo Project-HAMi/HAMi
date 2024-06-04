@@ -1,13 +1,59 @@
 apiVersion: v1
-kind: Pod
+kind: Namespace
 metadata:
-  name: gpu-pod
+  labels:
+    kubernetes.io/metadata.name: gpu-test-workloads
+    pod-security.kubernetes.io/enforce: privileged
+  name: gpu-test-workloads
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cuda-sample-vector-add
+  namespace: gpu-test-workloads
+  labels:
+    app: cuda-sample-vector-add
 spec:
-  containers:
-    - name: ubuntu-container
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          nvidia.com/gpu: 1 # requesting 1 vGPUs
-          nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cuda-sample-vector-add
+  template:
+    metadata:
+      labels:
+        app: cuda-sample-vector-add
+    spec:
+      containers:
+        - name: cuda-sample-vector-add
+          image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda11.7.1-ubuntu20.04
+          command:
+            - /bin/bash
+            - '-c'
+            - '--'
+          args:
+            - while true; do /cuda-samples/vectorAdd; done
+          resources:
+            limits:
+              nvidia.com/gpu: 1 # requesting 1 vGPUs
+              nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          imagePullPolicy: IfNotPresent
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      hostPID: true
+      securityContext: {}
+      schedulerName: default-scheduler
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+      priorityClassName: system-cluster-critical
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 25%
+      maxSurge: 25%
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
