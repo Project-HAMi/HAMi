@@ -92,6 +92,13 @@ spec:
           volumeMounts:
             - name: tls-config
               mountPath: /tls
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 443
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
       volumes:
         - name: tls-config
           secret:
