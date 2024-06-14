@@ -17,8 +17,6 @@ limitations under the License.
 package main
 
 import (
-	"net/http"
-
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -26,6 +24,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/version"
+	"net/http"
+	"net/http/pprof"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
@@ -61,6 +61,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", policy.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&config.GPUSchedulerPolicy, "gpu-scheduler-policy", policy.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
+	rootCmd.Flags().BoolVar(&config.Debug, "debug", false, "enable pprof endpoint")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
@@ -80,6 +81,11 @@ func start() {
 	router.POST("/filter", routes.PredicateRoute(sher))
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
+	if config.Debug {
+		router.HandlerFunc("GET", "/pprof/profile", pprof.Profile)
+		router.HandlerFunc("GET", "/pprof/heap", pprof.Handler("heap").ServeHTTP)
+		router.HandlerFunc("GET", "/pprof/goroutine", pprof.Handler("goroutine").ServeHTTP)
+	}
 	klog.Info("listen on ", config.HTTPBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
