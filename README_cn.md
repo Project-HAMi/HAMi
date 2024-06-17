@@ -80,7 +80,7 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 * NVIDIA drivers >= 440
 * nvidia-docker version > 2.0 
-* docker已配置nvidia作为默认runtime
+* docker/containerd/cri-o已配置nvidia作为默认runtime
 * Kubernetes version >= 1.16
 * glibc >= 2.17 & glibc < 2.3.0
 * kernel version >= 3.10
@@ -294,8 +294,18 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 | Ascend      | 华为     | 开发中     | 开发中   | ❌                |
 | GPU         | 天数智芯   | 开发中     | 开发中   | ❌                |
 | DPU         | 太初       | 开发中     | 开发中   | ❌                | 
-- 支持视频编解码处理。
-- 支持Multi-Instance GPUs (MIG)。
+
+- [ ] 支持视频编解码处理。
+- [ ] 支持Multi-Instance GPUs (MIG)。
+- [ ] 支持更加灵活的调度策略。
+  - [ ] binpack
+  - [ ] spread
+  - [ ] numa affinity
+- [ ] 与 nvidia gpu-operator 集成。
+- [ ] 更丰富的可观测性能力支持。
+- [ ] 支持 DRA。
+- [ ] 支持 Intel GPU device。
+- [ ] 支持 AMD GPU device。
 
 
 ## 参与贡献
