@@ -11,4 +11,4 @@ spec:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
           nvidia.com/gpumem-percentage: 100 # Each vGPU contains 100% of the entire GPU device memory （Optional,Integer）
-          nvidia.com/gpucores: 100 # Each vGPU uses 30% of the entire GPU cores（Optional,Integer)
+          nvidia.com/gpucores: 100 # Each vGPU uses 100% of the entire GPU cores（Optional,Integer)
