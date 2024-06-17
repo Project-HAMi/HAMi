@@ -86,8 +86,8 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 The list of prerequisites for running the NVIDIA device plugin is described below:
 
 - NVIDIA drivers >= 440
-- CUDA Version > 10.2
 - nvidia-docker version > 2.0
+- config default runtime is nvidia for containerd/docker/cri-o container runtime.
 - Kubernetes version >= 1.16
 - glibc >= 2.17 & glibc < 2.3.0
 - kernel version >= 3.10
@@ -318,8 +318,17 @@ Heterogeneous AI Computing device to support
 | GPU         | iluvatar   | All         | ✅              | ✅            | ❌                |
 | DPU         | Teco       | Checking    | In progress     | In progress   | ❌                |
 
-- Support video codec processing
-- Support Multi-Instance GPUs (MIG)
+- [ ] Support video codec processing
+- [ ] Support Multi-Instance GPUs (MIG)
+- [ ] Support Flexible scheduling  policies
+  - [ ] binpack
+  - [ ] spread
+  - [ ] numa affinity
+- [ ] integrated gpu-operator
+- [ ] Rich observability support
+- [ ] DRA Support
+- [ ] Support Intel GPU device
+- [ ] Support AMD GPU device
 
 ## Contributing
 

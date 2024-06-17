@@ -150,7 +150,6 @@ func (s *Scheduler) Stop() {
 
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
-	nodeInfoCopy := make(map[string]*util.NodeInfo)
 	ticker := time.NewTicker(time.Second * 15)
 	for {
 		select {
@@ -169,20 +168,19 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devInstance := range device.GetDevices() {
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
+				klog.V(5).InfoS("node", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 				if !health {
-					_, ok := s.nodes[val.Name]
+					err := devInstance.NodeCleanUp(val.Name)
+					// If the device is not healthy, the device is removed from the node.
+					// At the same time, this node needs to be removed from the cache.
+					if err != nil {
+						klog.Errorln("node cleanup failed", err.Error())
+					}
+					info, ok := s.nodes[val.Name]
 					if ok {
-						_, ok = nodeInfoCopy[devhandsk]
-						if ok && nodeInfoCopy[devhandsk] != nil {
-							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
-							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
-
-							err := devInstance.NodeCleanUp(val.Name)
-							if err != nil {
-								klog.ErrorS(err, "markAnnotationsToDeleteFailed")
-							}
-							continue
-						}
+						klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, info, err, s.nodes[val.Name].Devices)
+						s.rmNodeDevice(val.Name, info, devhandsk)
+						continue
 					}
 				}
 				if !needUpdate {
@@ -192,7 +190,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
-					klog.Infoln("New timestamp=", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]])
+					klog.V(4).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
@@ -223,21 +221,21 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					}
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
-							ID:      deviceinfo.Id,
-							Index:   uint(deviceinfo.Index),
-							Count:   deviceinfo.Count,
-							Devmem:  deviceinfo.Devmem,
-							Devcore: deviceinfo.Devcore,
-							Type:    deviceinfo.Type,
-							Numa:    deviceinfo.Numa,
-							Health:  deviceinfo.Health,
+							ID:           deviceinfo.Id,
+							Index:        uint(deviceinfo.Index),
+							Count:        deviceinfo.Count,
+							Devmem:       deviceinfo.Devmem,
+							Devcore:      deviceinfo.Devcore,
+							Type:         deviceinfo.Type,
+							Numa:         deviceinfo.Numa,
+							Health:       deviceinfo.Health,
+							DeviceVendor: devhandsk,
 						})
 					}
 				}
 				s.addNode(val.Name, nodeInfo)
-				nodeInfoCopy[devhandsk] = nodeInfo
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], s.nodes[val.Name].Devices)
+					klog.Infof("node %v device %s come node info=%v total=%v", val.Name, devhandsk, nodeInfo, s.nodes[val.Name].Devices)
 				}
 			}
 		}
@@ -322,7 +320,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
 		if err != nil {
-			klog.Warningf("get node %v device error, %v", nodeID, err)
+			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
+			klog.V(5).InfoS("node unregisterd", "node", nodeID, "error", err)
 			failedNodes[nodeID] = "node unregisterd"
 			continue
 		}
@@ -389,7 +388,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	for _, val := range device.GetDevices() {
 		err = val.LockNode(node, current)
 		if err != nil {
-			goto RelaseNodeLocks
+			goto ReleaseNodeLocks
 		}
 	}
 	/*
@@ -420,7 +419,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.Infoln("After Binding Process")
 		return res, nil
 	}
-RelaseNodeLocks:
+ReleaseNodeLocks:
 	klog.InfoS("bind failed", "err", err.Error())
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
