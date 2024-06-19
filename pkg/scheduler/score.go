@@ -197,6 +197,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 	for nodeID, node := range *nodes {
 		viewStatus(*node)
 		score := policy.NodeScore{NodeID: nodeID, Devices: make(util.PodDevices), Score: 0}
+		score.ComputeScore(node.Devices)
 
 		//This loop is for different container request
 		ctrfit := false
@@ -225,7 +226,6 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 		}
 
 		if ctrfit {
-			score.ComputeScore(node.Devices)
 			res.NodeList = append(res.NodeList, &score)
 		}
 	}

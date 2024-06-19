@@ -388,7 +388,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	for _, val := range device.GetDevices() {
 		err = val.LockNode(node, current)
 		if err != nil {
-			goto RelaseNodeLocks
+			goto ReleaseNodeLocks
 		}
 	}
 	/*
@@ -419,7 +419,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.Infoln("After Binding Process")
 		return res, nil
 	}
-RelaseNodeLocks:
+ReleaseNodeLocks:
 	klog.InfoS("bind failed", "err", err.Error())
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
