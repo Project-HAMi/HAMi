@@ -51,14 +51,14 @@ func (l NodeScoreList) Less(i, j int) bool {
 }
 
 func (ns *NodeScore) ComputeScore(devices DeviceUsageList) {
-	request, core, mem := int32(0), int32(0), int32(0)
 	// current user having request resource
-	user, userCore, userMem := int32(0), int32(0), int32(0)
+	used, usedCore, usedMem := int32(0), int32(0), int32(0)
 	for _, device := range devices.DeviceLists {
-		user += device.Device.Used
-		userCore += device.Device.Usedcores
-		userMem += device.Device.Usedmem
+		used += device.Device.Used
+		usedCore += device.Device.Usedcores
+		usedMem += device.Device.Usedmem
 	}
+	klog.V(2).Infof("node %s used %d, usedCore %d, usedMem %d,", ns.NodeID, used, usedCore, usedMem)
 
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
 	for _, deviceLists := range devices.DeviceLists {
@@ -66,9 +66,9 @@ func (ns *NodeScore) ComputeScore(devices DeviceUsageList) {
 		totalCore += deviceLists.Device.Totalcore
 		totalMem += deviceLists.Device.Totalmem
 	}
-	useScore := float32(request+user) / float32(total)
-	coreScore := float32(core+userCore) / float32(totalCore)
-	memScore := float32(mem+userMem) / float32(totalMem)
+	useScore := float32(used) / float32(total)
+	coreScore := float32(usedCore) / float32(totalCore)
+	memScore := float32(usedMem) / float32(totalMem)
 	ns.Score = float32(Weight) * (useScore + coreScore + memScore)
 	klog.V(2).Infof("node %s computer score is %f", ns.NodeID, ns.Score)
 }
