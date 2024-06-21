@@ -37,3 +37,9 @@ function util::verify_go_version {
     exit 1
   fi
 }
+
+# util::install_helm will install the helm command
+function util::install_helm {
+    curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+}
+
