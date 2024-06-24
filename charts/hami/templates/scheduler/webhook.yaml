@@ -20,10 +20,10 @@ webhooks:
     name: vgpu.hami.io
     namespaceSelector:
       matchExpressions:
-      - key: hami.io/webhook
+      - key: kubernetes.io/metadata.name
         operator: NotIn
         values:
-        - ignore
+        {{- toYaml .Values.scheduler.customWebhook.whitelistNamespaces | nindent 10 }}
     objectSelector:
       matchExpressions:
       - key: hami.io/webhook
