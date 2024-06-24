@@ -67,9 +67,11 @@ func (ds *DeviceListsScore) ComputeScore(requests util.ContainerDeviceRequests) 
 		}
 		mem += container.Memreq
 	}
-	useScore := float32(request+ds.Device.Used) / float32(ds.Device.Count)
+	klog.V(2).Infof("device %s user %d, userCore %d, userMem %d,", ds.Device.ID, ds.Device.Used, ds.Device.Usedcores, ds.Device.Usedmem)
+
+	usedScore := float32(request+ds.Device.Used) / float32(ds.Device.Count)
 	coreScore := float32(core+ds.Device.Usedcores) / float32(ds.Device.Totalcore)
 	memScore := float32(mem+ds.Device.Usedmem) / float32(ds.Device.Totalmem)
-	ds.Score = float32(Weight) * (useScore + coreScore + memScore)
+	ds.Score = float32(Weight) * (usedScore + coreScore + memScore)
 	klog.V(2).Infof("device %s computer score is %f", ds.Device.ID, ds.Score)
 }
