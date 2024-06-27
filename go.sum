@@ -2,8 +2,8 @@ github.com/NVIDIA/go-gpuallocator v0.3.1 h1:Uha6CgoZwkYI8Ds1EhxeQ9X5tij9o+dUMs2W
 github.com/NVIDIA/go-gpuallocator v0.3.1/go.mod h1:KPTQBtJ8wlptOyz5KCONg1Lo/2aIiw34xcqsRixG0nw=
 github.com/NVIDIA/go-nvlib v0.0.0-20240109130712-11603560817a h1:EH7wiaq9+NYDgCBJEcGa3HTO2Sz6dRlmO2y9yMxA5jE=
 github.com/NVIDIA/go-nvlib v0.0.0-20240109130712-11603560817a/go.mod h1:U82N6/xKp6OnoqpALBH0C5SO59Buu4sX1Z3rQtBsBKQ=
-github.com/NVIDIA/go-nvml v0.12.0-2 h1:Sg239yy7jmopu/cuvYauoMj9fOpcGMngxVxxS1EBXeY=
-github.com/NVIDIA/go-nvml v0.12.0-2/go.mod h1:7ruy85eOM73muOc/I37euONSwEyFqZsv5ED9AogD4G0=
+github.com/NVIDIA/go-nvml v0.12.0-3 h1:QwfjYxEqIQVRhl8327g2Y3ZvKResPydpGSKtCIIK9jE=
+github.com/NVIDIA/go-nvml v0.12.0-3/go.mod h1:SOufGc5Wql+cxrIZ8RyJwVKDYxfbs4WPkHXqadcbfvA=
 github.com/NVIDIA/k8s-device-plugin v0.14.5 h1:RqstjEz6DOp2IeTHqSYITjVnsDG3YQWhztQlpcLAUcM=
 github.com/NVIDIA/k8s-device-plugin v0.14.5/go.mod h1:ghABKHDzX3tiuUZZkPA223ydaPDjkRYcbE30LwDdYZ8=
 github.com/NVIDIA/nvidia-container-toolkit v1.14.7-0.20240229083338-37b1e37c8f2f h1:EcktnWsBCMfFpABisiBHqtEis6I7wrxgfc9Rn+zGmho=
@@ -145,7 +145,6 @@ github.com/stretchr/testify v1.7.0/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/
 github.com/stretchr/testify v1.7.1/go.mod h1:6Fq8oRcR53rry900zMqJjRRixrwX3KX962/h/Wwjteg=
 github.com/stretchr/testify v1.8.0/go.mod h1:yNjHg4UonilssWZ8iaSj1OCr/vHnekPRkoO+kdMU+MU=
 github.com/stretchr/testify v1.8.1/go.mod h1:w2LPCIKwWwSfY2zedu0+kehJoqGctiVI29o6fzry7u4=
-github.com/stretchr/testify v1.8.4/go.mod h1:sz/lmYIOXD/1dqDmKjjqLyZ2RngseejIcXlSw2iwfAo=
 github.com/stretchr/testify v1.9.0 h1:HtqpIVDClZ4nwg75+f6Lvsy/wHu+3BoSGCbBAcpTsTg=
 github.com/stretchr/testify v1.9.0/go.mod h1:r2ic/lqez/lEtzL7wO/rwa5dbSLXVDPFyf8C91i36aY=
 github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 h1:kdXcSzyDtseVEc4yCz2qF8ZrQvIDBJLl4S1c3GCXmoI=
