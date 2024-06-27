@@ -51,11 +51,14 @@ jobs:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             # Password or personal access token used to log against the Docker registry
             password: ${{ secrets.DOCKERHUB_PASSWD }}
-      
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
-      
+
       - name: Setup protoc
         # You may pin to the exact commit or the version.
         # uses: arduino/setup-protoc@64c0c85d18e984422218383b81c52f8b077404d3
