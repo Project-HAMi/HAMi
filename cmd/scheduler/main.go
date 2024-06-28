@@ -80,6 +80,7 @@ func start() {
 	router.POST("/filter", routes.PredicateRoute(sher))
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
+	router.GET("/healthz", routes.HealthzRoute())
 	klog.Info("listen on ", config.HTTPBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
