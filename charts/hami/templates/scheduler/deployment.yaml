@@ -53,7 +53,17 @@ spec:
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
-        {{- end }}      
+        {{- end }}
+          livenessProbe:
+            failureThreshold: 8
+            httpGet:
+              path: /healthz
+              port: 10259
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            successThreshold: 1
+            timeoutSeconds: 15
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
@@ -92,6 +102,13 @@ spec:
           volumeMounts:
             - name: tls-config
               mountPath: /tls
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 443
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
       volumes:
         - name: tls-config
           secret:
