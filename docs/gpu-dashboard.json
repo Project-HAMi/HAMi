@@ -932,7 +932,7 @@
       "yaxes": [
         {
           "$$hashKey": "object:1087",
-          "format": "mbytes",
+          "format": "bytes",
           "label": null,
           "logBase": 1,
           "show": true

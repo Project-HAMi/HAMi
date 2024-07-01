@@ -5,7 +5,7 @@ go 1.21
 require (
 	github.com/NVIDIA/go-gpuallocator v0.3.1
 	github.com/NVIDIA/go-nvlib v0.0.0-20240109130712-11603560817a
-	github.com/NVIDIA/go-nvml v0.12.0-2
+	github.com/NVIDIA/go-nvml v0.12.0-3
 	github.com/NVIDIA/k8s-device-plugin v0.14.5
 	github.com/NVIDIA/nvidia-container-toolkit v1.14.7-0.20240229083338-37b1e37c8f2f
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
@@ -15,7 +15,7 @@ require (
 	github.com/opencontainers/runtime-spec v1.2.0
 	github.com/prometheus/client_golang v1.16.0
 	github.com/sirupsen/logrus v1.9.3
-	github.com/spf13/cobra v1.7.0
+	github.com/spf13/cobra v1.8.1
 	github.com/stretchr/testify v1.9.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/exp v0.0.0-20220827204233-334a2380cb91
@@ -38,7 +38,7 @@ require (
 require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.2.0 // indirect
-	github.com/cpuguy83/go-md2man/v2 v2.0.2 // indirect
+	github.com/cpuguy83/go-md2man/v2 v2.0.4 // indirect
 	github.com/davecgh/go-spew v1.1.1 // indirect
 	github.com/emicklei/go-restful/v3 v3.11.0 // indirect
 	github.com/evanphx/json-patch v5.6.0+incompatible // indirect
