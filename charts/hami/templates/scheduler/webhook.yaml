@@ -24,6 +24,12 @@ webhooks:
         operator: NotIn
         values:
         - ignore
+      {{- if .Values.scheduler.customWebhook.whitelistNamespaces }}
+      - key: kubernetes.io/metadata.name
+        operator: NotIn
+        values:
+        {{- toYaml .Values.scheduler.customWebhook.whitelistNamespaces | nindent 10 }}
+      {{- end }}
     objectSelector:
       matchExpressions:
       - key: hami.io/webhook

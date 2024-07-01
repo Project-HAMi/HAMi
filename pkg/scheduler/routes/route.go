@@ -132,3 +132,9 @@ func WebHookRoute() httprouter.Handle {
 		h.ServeHTTP(w, r)
 	}
 }
+
+func HealthzRoute() httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		w.WriteHeader(http.StatusOK)
+	}
+}
