@@ -67,6 +67,13 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
+          env:
+          {{- if .Values.global.vmBmMixMode }}
+          {{- range $key, $value := .Values.global.vmBmMixModeSelector }}
+            - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" }}
+              value: "{{ $value }}"
+          {{- end }}
+          {{- end }}
           command:
             - scheduler
             - --resource-name={{ .Values.resourceName }}
