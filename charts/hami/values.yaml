@@ -31,6 +31,11 @@ iluvatarResourceCore: "iluvatar.ai/vcuda-core"
 ascendResourceName: "huawei.com/Ascend910"
 ascendResourceMem: "huawei.com/Ascend910-memory"
 
+#Ascend 310P Parameters
+ascend310PResourceName: "huawei.com/Ascend310P"
+ascend310PResourceMem: "huawei.com/Ascend310P-memory"
+
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
