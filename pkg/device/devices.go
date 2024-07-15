@@ -72,12 +72,14 @@ func init() {
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
 	devices[ascend.AscendDevice] = ascend.InitDevice()
+	devices[ascend.Ascend310PName] = ascend.InitAscend310P()
 	DevicesToHandle = []string{}
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, ascend.AscendDevice)
+	DevicesToHandle = append(DevicesToHandle, ascend.Ascend310PName)
 }
 
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {

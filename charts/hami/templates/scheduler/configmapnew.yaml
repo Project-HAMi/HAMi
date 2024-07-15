@@ -53,4 +53,8 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.ascendResourceName }}
         ignoredByScheduler: true
+      - name: {{ .Values.ascend310PResourceMem }}
+        ignoredByScheduler: true
+      - name: {{ .Values.ascend310PResourceName }}
+        ignoredByScheduler: true
 {{- end }}
