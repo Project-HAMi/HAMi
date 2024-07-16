@@ -16,7 +16,7 @@ jobs:
     name: build-dev-image
     runs-on: ubuntu-latest
     env:
-      IMAGE=${{ secrets.IMAGE || 'projecthami/hami' }}
+      IMAGE: ${{ secrets.IMAGE || 'projecthami/hami' }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
