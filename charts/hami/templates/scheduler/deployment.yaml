@@ -113,9 +113,11 @@ spec:
             httpGet:
               path: /healthz
               port: 443
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
+            timeoutSeconds: 5
       volumes:
         - name: tls-config
           secret:
