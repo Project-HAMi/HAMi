@@ -7,7 +7,7 @@ ADD . /k8s-vgpu
 ARG GOPROXY=https://goproxy.cn,direct
 RUN cd /k8s-vgpu && make all
 
-FROM ubuntu:24.04
+FROM ubuntu:20.04
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility
