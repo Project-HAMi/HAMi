@@ -72,6 +72,9 @@ func GetPendingPod(node string) (*corev1.Pod, error) {
 		return nil, err
 	}
 	for _, p := range podlist.Items {
+		if p.Status.Phase != corev1.PodPending {
+			continue
+		}
 		if _, ok := p.Annotations[BindTimeAnnotations]; !ok {
 			continue
 		}

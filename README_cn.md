@@ -61,7 +61,7 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 一个硬隔离的简单展示：
 一个使用以下方式定义的任务提交后
-```
+```yaml
       resources:
         limits:
           nvidia.com/gpu: 1 # requesting 1 vGPU
@@ -96,10 +96,9 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 以下步骤要在所有GPU节点执行,这份README文档假定GPU节点已经安装NVIDIA驱动。它还假设您已经安装docker或container并且需要将nvidia-container-runtime配置为要使用的默认低级运行时。
 
-安装步骤举例：
+#### 安装步骤举例：
 
-####
-```
+```bash
 # 加入套件仓库
 distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
 curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
@@ -111,7 +110,7 @@ sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
 ##### 配置docker
 你需要在节点上将nvidia runtime做为你的docker runtime预设值。我们将编辑docker daemon的配置文件，此文件通常在`/etc/docker/daemon.json`路径：
 
-```
+```json
 {
     "default-runtime": "nvidia",
     "runtimes": {
@@ -122,12 +121,12 @@ sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
     }
 }
 ```
-```
+```bash
 systemctl daemon-reload && systemctl restart docker
 ```
 ##### 配置containerd
 你需要在节点上将nvidia runtime做为你的containerd runtime预设值。我们将编辑containerd daemon的配置文件，此文件通常在`/etc/containerd/config.toml`路径
-```
+```toml
 version = 2
 [plugins]
   [plugins."io.containerd.grpc.v1.cri"]
@@ -143,7 +142,7 @@ version = 2
           [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
             BinaryName = "/usr/bin/nvidia-container-runtime"
 ```
-```
+```bash
 systemctl daemon-reload && systemctl restart containerd
 ```
 
@@ -153,8 +152,8 @@ systemctl daemon-reload && systemctl restart containerd
 
 最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
 
-```
-$ kubectl label nodes {nodeid} gpu=on
+```bash
+kubectl label nodes {nodeid} gpu=on
 ```
 
 </details>
@@ -165,28 +164,28 @@ $ kubectl label nodes {nodeid} gpu=on
 
 首先使用helm添加我们的 repo
 
-```
+```bash
 helm repo add hami-charts https://project-hami.github.io/HAMi/
 ```
 
 随后，使用下列指令获取集群服务端版本
 
-```
+```bash
 kubectl version
 ```
 
 在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
 
-```
-$ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+```bash
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
 
 你可以修改这里的[配置](docs/config_cn.md)来定制安装
 
 通过kubectl get pods指令看到 `vgpu-device-plugin` 与 `vgpu-scheduler` 两个pod 状态为*Running*  即为安装成功
 
-```
-$ kubectl get pods -n kube-system
+```bash
+kubectl get pods -n kube-system
 ```
 
 </details>
@@ -195,10 +194,10 @@ $ kubectl get pods -n kube-system
 
 只需要更新helm repo，并重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
 
-```
-$ helm uninstall hami -n kube-system
-$ helm repo update
-$ helm install hami hami-charts/hami -n kube-system
+```bash
+helm uninstall hami -n kube-system
+helm repo update
+helm install hami hami-charts/hami -n kube-system
 ```
 
 > **注意:** *如果你没有清理完任务就进行热更新的话，正在运行的任务可能会出现段错误等报错.*
@@ -207,8 +206,8 @@ $ helm install hami hami-charts/hami -n kube-system
 
 <details> <summary> 卸载 </summary>
 
-```
-$ helm uninstall hami -n kube-system
+```bash
+helm uninstall hami -n kube-system
 ```
 
 > **注意:** *卸载组件并不会使正在运行的任务失败.*
@@ -221,7 +220,7 @@ $ helm uninstall hami -n kube-system
 
 NVIDIA vGPUs 现在能透过资源类型`nvidia.com/gpu`被容器请求：
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -234,8 +233,8 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # 请求2个vGPUs
-	  nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选，整数类型）
-	  nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
+          nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选，整数类型）
+          nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
 ```
 
 如果你的任务无法运行在任何一个节点上（例如任务的`nvidia.com/gpu`大于集群中任意一个GPU节点的实际GPU数量）,那么任务会卡在`pending`状态
@@ -259,7 +258,7 @@ spec:
 
 调度器部署成功后，监控默认自动开启，你可以通过
 
-```
+```http
 http://{nodeip}:{monitorPort}/metrics
 ```
 
