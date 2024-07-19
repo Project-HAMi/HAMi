@@ -54,6 +54,7 @@ spec:
             - name: scheduler-config
               mountPath: /config
         {{- end }}
+          {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             failureThreshold: 8
             httpGet:
@@ -64,6 +65,7 @@ spec:
             periodSeconds: 10
             successThreshold: 1
             timeoutSeconds: 15
+          {{- end }}
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
@@ -104,6 +106,7 @@ spec:
           volumeMounts:
             - name: tls-config
               mountPath: /tls
+          {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -111,6 +114,7 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
+          {{- end }}
       volumes:
         - name: tls-config
           secret:
