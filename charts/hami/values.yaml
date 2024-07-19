@@ -45,9 +45,9 @@ global:
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
-  vmBmMixMode: false
-  vmBmMixModeSelector:
-    gpu: "on"
+  managedNodeSelectorEnable: false
+  managedNodeSelector:
+    usage: "gpu"
 
 
 scheduler:

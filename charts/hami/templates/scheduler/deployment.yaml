@@ -70,8 +70,8 @@ spec:
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
           env:
-          {{- if .Values.global.vmBmMixMode }}
-          {{- range $key, $value := .Values.global.vmBmMixModeSelector }}
+          {{- if .Values.global.managedNodeSelectorEnable }}
+          {{- range $key, $value := .Values.global.managedNodeSelector }}
             - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" }}
               value: "{{ $value }}"
           {{- end }}
