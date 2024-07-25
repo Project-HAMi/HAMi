@@ -4,7 +4,7 @@ env:
   IMAGE_REPO: ${{ github.repository }}
   REGISTRY: ghcr.io
   IMAGE_ROOT_PATH: docker
-  BUILD_PLATFORM: linux/amd64,linux/arm64
+  BUILD_PLATFORM: linux/amd64
   REGISTER_USER: ${{ github.actor }}
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
