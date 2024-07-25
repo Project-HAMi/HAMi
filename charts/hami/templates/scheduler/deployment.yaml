@@ -69,6 +69,13 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
+          env:
+          {{- if .Values.global.managedNodeSelectorEnable }}
+          {{- range $key, $value := .Values.global.managedNodeSelector }}
+            - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" }}
+              value: "{{ $value }}"
+          {{- end }}
+          {{- end }}
           command:
             - scheduler
             - --resource-name={{ .Values.resourceName }}
@@ -111,9 +118,11 @@ spec:
             httpGet:
               path: /healthz
               port: 443
+              scheme: HTTPS
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
+            timeoutSeconds: 5
           {{- end }}
       volumes:
         - name: tls-config

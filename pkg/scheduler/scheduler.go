@@ -158,13 +158,15 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			return
 		}
-		nodes, err := s.nodeLister.List(labels.Everything())
+		rawNodes, err := s.nodeLister.List(labels.Everything())
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
 			continue
 		}
-		nodeNames := []string{}
-		for _, val := range nodes {
+		nodeSelector := getNodeSelectorFromEnv()
+		filteredNodes := filterNodesBySelector(rawNodes, nodeSelector)
+		var nodeNames []string
+		for _, val := range filteredNodes {
 			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devInstance := range device.GetDevices() {
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
@@ -321,8 +323,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		node, err := s.GetNode(nodeID)
 		if err != nil {
 			// The identified node does not have a gpu device, so the log here has no practical meaning,increase log priority.
-			klog.V(5).InfoS("node unregisterd", "node", nodeID, "error", err)
-			failedNodes[nodeID] = "node unregisterd"
+			klog.V(5).InfoS("node unregistered", "node", nodeID, "error", err)
+			failedNodes[nodeID] = "node unregistered"
 			continue
 		}
 		cachenodeMap[node.ID] = overallnodeMap[node.ID]
@@ -457,7 +459,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod)
 	if err != nil {
-		klog.Infoln("err=", err.Error())
+		klog.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
