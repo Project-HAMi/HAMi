@@ -62,7 +62,7 @@ jobs:
           platforms: ${{ env.BUILD_PLATFORM }}
           build-args: |
             VERSION=${{ steps.get_version.outputs.VERSION }}
-            GOLANG_IMAGE=golang:1.21-bullseye
+            GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ steps.meta.outputs.tags }}
