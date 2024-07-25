@@ -34,6 +34,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      
+      - name: Checkout submodule
+        uses: Mushus/checkout-submodule@v1.0.1
+        with:
+          basePath: # optional, default is .
+          submodulePath: libvgpu 
 
       - name: Login registry
         run: |
