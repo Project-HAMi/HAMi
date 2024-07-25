@@ -1,0 +1,71 @@
+name: Build & Release Image
+
+env:
+  IMAGE_REPO: ${{ github.repository }}
+  REGISTRY: ghcr.io
+  IMAGE_ROOT_PATH: docker
+  BUILD_PLATFORM: linux/amd64,linux/arm64
+  REGISTER_USER: ${{ github.actor }}
+  REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - master
+    tags:
+      - v*
+
+jobs:
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@master
+      - name: Get the version
+        id: get_version
+        run: |
+          VERSION=${GITHUB_REF#refs/tags/}
+          if [[ ${GITHUB_REF} == "refs/heads/main" ]]; then
+            VERSION=latest
+          fi
+          echo ::set-output name=VERSION::${VERSION}
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Login registry
+        run: |
+          echo "${{ env.REGISTER_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ env.REGISTER_USER }} --password-stdin
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          driver-opts: image=moby/buildkit:master
+
+      - name: Extract metadata (tags, labels) for Docker
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
+
+      - name: Build & Pushing hami image
+        uses: docker/build-push-action@v5.1.0
+        with:
+          context: .
+          file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
+          labels: ${{ steps.meta.outputs.labels }}
+          platforms: ${{ env.BUILD_PLATFORM }}
+          build-args: |
+            VERSION=${{ steps.get_version.outputs.VERSION }}
+            GOLANG_IMAGE=golang:1.21-bullseye
+            NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+            DEST_DIR=/usr/local
+          tags: ${{ steps.meta.outputs.tags }}
+          push: true
+          github-token: ${{ env.REGISTER_PASSWORD }}
+
