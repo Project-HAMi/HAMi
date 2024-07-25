@@ -395,7 +395,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 			if err == nil {
 				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-					ContainerPath: "/vgpu/license",
+					ContainerPath: "/tmp/license",
 					HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
 					ReadOnly:      true,
 				})
