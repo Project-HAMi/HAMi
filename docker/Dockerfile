@@ -12,7 +12,6 @@ COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
-RUN rm -r ./build
 RUN bash ./build.sh
 
 FROM nvidia/cuda:12.4.1-base-ubuntu22.04
