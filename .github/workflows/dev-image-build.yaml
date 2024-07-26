@@ -1,4 +1,4 @@
-name: CI
+name: Build dev image
 on:
   pull_request_target:
     types:
