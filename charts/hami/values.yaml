@@ -55,6 +55,8 @@ scheduler:
   # if we install the nvidia-vgpu-scheduler-scheduler as default scheduler, we need to remove the k8s default
   # scheduler pod from the cluster first, we must specify node name to skip the schedule workflow.
   nodeName: ""
+#  nodeLabelSelector:
+#    "gpu": "on"
   defaultMem: 0
   defaultCores: 0
   defaultGPUNum: 1
