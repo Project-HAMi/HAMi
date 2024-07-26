@@ -1,10 +1,10 @@
-name: Build & Release Image
+name: Release Arm Image
 
 env:
-  IMAGE_REPO: ${{ github.repository }}
-  REGISTRY: ghcr.io
+  REGISTRY: docker.io
+  IMAGE_REPO: projecthami
   IMAGE_ROOT_PATH: docker
-  BUILD_PLATFORM: linux/amd64,linux/arm64
+  BUILD_PLATFORM: linux/arm64
   REGISTER_USER: ${{ github.actor }}
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
@@ -44,6 +44,12 @@ jobs:
       - name: Login registry
         run: |
           echo "${{ env.REGISTER_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ env.REGISTER_USER }} --password-stdin
+
+      - name: Docker Login
+        uses: docker/login-action@v3.2.0
+        with:
+            username: ${{ secrets.DOCKERHUB_TOKEN }}
+            password: ${{ secrets.DOCKERHUB_PASSWD }}
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
