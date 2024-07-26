@@ -9,4 +9,6 @@ Please see the [AUTHORS](./AUTHORS) file for the full list of contributors to th
 | Maintainer                                        | Email | Emplolyer |
 |---------------------------------------------------|-----------|-----------|
 | [Li Mengxuan](https://github.com/archlitchi)      | limengxuan@4paradigm.com | 4Paradigm |
+| [william-wang](wang.platform@gmail.com)           | wang.platform@gmail.com | Huawei Cloud |
 | [Xiao Zhang](https://github.com/wawa0210)         | xiaozhang0210@hotmail.com | DaoCloud |
+ 
