@@ -103,6 +103,14 @@ spec:
             - --overwrite-env={{ .Values.scheduler.overwriteEnv }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
+            {{- if .Values.scheduler.nodeLabelSelector }}
+            - --node-label-selector={{- $first := true -}}
+              {{- range $key, $value := .Values.scheduler.nodeLabelSelector -}}
+              {{- if not $first }},{{ end -}}
+              {{- $key }}={{ $value -}}
+              {{- $first = false -}}
+              {{- end -}}
+            {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}
