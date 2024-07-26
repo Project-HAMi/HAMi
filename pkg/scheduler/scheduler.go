@@ -162,15 +162,17 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			return
 		}
-		rawNodes, err := s.nodeLister.List(labels.Everything())
+		labelSelector := labels.Everything()
+		if config.NodeLabelSelector != nil && len(config.NodeLabelSelector) > 0 {
+			labelSelector = (labels.Set)(config.NodeLabelSelector).AsSelector()
+		}
+		rawNodes, err := s.nodeLister.List(labelSelector)
 		if err != nil {
 			klog.Errorln("nodes list failed", err.Error())
 			continue
 		}
-		nodeSelector := getNodeSelectorFromEnv()
-		filteredNodes := filterNodesBySelector(rawNodes, nodeSelector)
 		var nodeNames []string
-		for _, val := range filteredNodes {
+		for _, val := range rawNodes {
 			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devInstance := range device.GetDevices() {
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
