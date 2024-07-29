@@ -10,3 +10,4 @@ Please see the [AUTHORS](./AUTHORS) file for the full list of contributors to th
 |---------------------------------------------------|-----------|-----------|
 | [Li Mengxuan](https://github.com/archlitchi)      | limengxuan@4paradigm.com | 4Paradigm |
 | [Xiao Zhang](https://github.com/wawa0210)         | xiaozhang0210@hotmail.com | DaoCloud |
+| [Wang Leibo](https://github.com/william-wang)     | wang.platform@gmail.com | HuaweiCloud |
