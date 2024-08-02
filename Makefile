@@ -9,6 +9,7 @@ docker:
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
+	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
 
 dockerwithlib:
@@ -18,6 +19,7 @@ dockerwithlib:
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
+	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile.withlib -t ${IMG_TAG}
 
 tidy:
