@@ -4,7 +4,6 @@ FROM $GOLANG_IMAGE AS build
 
 FROM $GOLANG_IMAGE AS GOBUILD
 ADD . /k8s-vgpu
-ARG GOPROXY=https://goproxy.cn,direct
 RUN cd /k8s-vgpu && make all
 
 FROM $NVIDIA_IMAGE AS NVBUILD
