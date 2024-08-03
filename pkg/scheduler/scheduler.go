@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 )
@@ -53,6 +55,8 @@ type Scheduler struct {
 	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
+
+	eventRecorder record.EventRecorder
 }
 
 func NewScheduler() *Scheduler {
@@ -141,7 +145,7 @@ func (s *Scheduler) Start() {
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
-
+	s.addAllEventHandlers()
 }
 
 func (s *Scheduler) Stop() {
@@ -380,6 +384,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node", "node", args.Node)
+		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %v", args.Node))
 		res = &extenderv1.ExtenderBindingResult{
 			Error: err.Error(),
 		}
@@ -415,6 +420,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
 	}
 	if err == nil {
+		s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 		res = &extenderv1.ExtenderBindingResult{
 			Error: "",
 		}
@@ -426,6 +432,7 @@ ReleaseNodeLocks:
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
 	}
+	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{
 		Error: err.Error(),
 	}, nil
@@ -442,6 +449,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	if total == 0 {
 		klog.V(1).Infof("pod %v not find resource", args.Pod.Name)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("does not request any resource"))
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
@@ -452,6 +460,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
@@ -459,10 +468,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod)
 	if err != nil {
-		klog.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
+		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
+		klog.V(4).Infof("All node scores do not meet for pod %v", args.Pod.Name)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("no available node, all node scores do not meet"))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -486,9 +498,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
 		s.delPod(args.Pod)
 		return nil, err
 	}
+	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, []string{m.NodeID}, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
 }

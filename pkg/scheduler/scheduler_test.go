@@ -122,6 +122,7 @@ test case matrix.
 func Test_Filter(t *testing.T) {
 	s := NewScheduler()
 	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	informer := informerFactory.Core().V1().Pods().Informer()
@@ -132,6 +133,7 @@ func Test_Filter(t *testing.T) {
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+	s.addAllEventHandlers()
 
 	pod1 := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
