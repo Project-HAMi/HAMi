@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2022, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright 2024 The HAMi Authors.
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -9,7 +9,25 @@
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY Type, either express or implied.
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+/*
+ * Original Copyright Notice:
+ *
+ * Copyright (c) NVIDIA CORPORATION. All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
@@ -23,10 +41,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
-
-	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 )
 
 const (
@@ -45,14 +61,8 @@ type nvmlMigDevice nvmlDevice
 var _ deviceInfo = (*nvmlDevice)(nil)
 var _ deviceInfo = (*nvmlMigDevice)(nil)
 
-func newGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
-	index := fmt.Sprintf("%v", i)
-	isWsl, _ := info.New().HasDXCore()
-	if isWsl {
-		return index, wslDevice{gpu}
-	}
-
-	return index, nvmlDevice{gpu}
+func newGPUDevice(i int, gpu nvml.Device) (string, nvmlDevice) {
+	return fmt.Sprintf("%v", i), nvmlDevice{gpu}
 }
 
 func newMigDevice(i int, j int, mig nvml.Device) (string, nvmlMigDevice) {
@@ -132,13 +142,13 @@ func (d nvmlMigDevice) GetPaths() ([]string, error) {
 
 // GetNumaNode returns the NUMA node associated with the GPU device
 func (d nvmlDevice) GetNumaNode() (bool, int, error) {
-	pciInfo, ret := d.GetPciInfo()
+	info, ret := d.GetPciInfo()
 	if ret != nvml.SUCCESS {
 		return false, 0, fmt.Errorf("error getting PCI Bus Info of device: %v", ret)
 	}
 
 	// Discard leading zeros.
-	busID := strings.ToLower(strings.TrimPrefix(int8Slice(pciInfo.BusId[:]).String(), "0000"))
+	busID := strings.ToLower(strings.TrimPrefix(int8Slice(info.BusId[:]).String(), "0000"))
 
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
