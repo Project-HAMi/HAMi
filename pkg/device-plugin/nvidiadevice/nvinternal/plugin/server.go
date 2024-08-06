@@ -232,7 +232,7 @@ func (plugin *NvidiaDevicePlugin) Register() error {
 		Endpoint:     path.Base(plugin.socket),
 		ResourceName: string(plugin.rm.Resource()),
 		Options: &kubeletdevicepluginv1beta1.DevicePluginOptions{
-			GetPreferredAllocationAvailable: true,
+			GetPreferredAllocationAvailable: false,
 		},
 	}
 
@@ -246,7 +246,7 @@ func (plugin *NvidiaDevicePlugin) Register() error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
-		GetPreferredAllocationAvailable: true,
+		GetPreferredAllocationAvailable: false,
 	}
 	return options, nil
 }
