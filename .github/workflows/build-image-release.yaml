@@ -40,7 +40,7 @@ jobs:
           submodulePath: libvgpu 
 
       - name: Docker Login
-        uses: docker/login-action@v3.2.0
+        uses: docker/login-action@v3.3.0
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
@@ -60,7 +60,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@v5.1.0
+        uses: docker/build-push-action@v6.5.0
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
