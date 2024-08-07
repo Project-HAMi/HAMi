@@ -74,7 +74,7 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	}
 }
 
-func (m *podManager) ListPods() ([]*corev1.Pod, error) {
+func (m *podManager) ListPodsUID() ([]*corev1.Pod, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	pods := make([]*corev1.Pod, 0)
@@ -86,6 +86,17 @@ func (m *podManager) ListPods() ([]*corev1.Pod, error) {
 		})
 	}
 	return pods, nil
+}
+
+func (m *podManager) ListPodsInfo() []*podInfo {
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
+	pods := make([]*podInfo, 0)
+	for key := range m.pods {
+		values := m.pods[key]
+		pods = append(pods, values)
+	}
+	return pods
 }
 
 func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
