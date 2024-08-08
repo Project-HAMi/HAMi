@@ -39,6 +39,7 @@ import (
 
 type Devices interface {
 	MutateAdmission(ctr *corev1.Container) (bool, error)
+	ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error)
