@@ -77,7 +77,7 @@ data:
                       "ignoredByScheduler": true
                     },
                     {
-                      "name": "{{ .Values.ascend310PResourceName }}",
+                      "name": "{{ .Values.ascend310PResourceMem }}",
                       "ignoredByScheduler": true
                     }
                 ],
