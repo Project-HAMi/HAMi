@@ -3,7 +3,7 @@ kind: Service
 metadata:
   name: {{ include "hami-vgpu.device-plugin" . }}-monitor
   labels:
-    app.kubernetes.io/component: hami-scheduler
+    app.kubernetes.io/component: hami-device-plugin
     {{- include "hami-vgpu.labels" . | nindent 4 }}
     {{- if .Values.scheduler.service.labels }}
     {{ toYaml .Values.scheduler.service.labels | indent 4 }}
