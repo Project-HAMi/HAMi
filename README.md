@@ -199,6 +199,13 @@ During installation, set the Kubernetes scheduler image version to match your Ku
 helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
 ```
 
+Install Volcano for advanced scheduling:
+
+```
+helm repo add volcano-sh https://volcano-sh.github.io/helm-charts
+helm install volcano volcano-sh/volcano -n kube-system
+```
+
 Customize your installation by adjusting the [configs](docs/config.md).
 
 Verify your installation using the following command:
@@ -229,6 +236,7 @@ helm install hami hami-charts/hami -n kube-system
 
 ```
 helm uninstall hami -n kube-system
+helm uninstall volcano -n kube-system
 ```
 
 > **NOTICE:** *Uninstallation won't kill running tasks.*
@@ -247,6 +255,7 @@ kind: Pod
 metadata:
   name: gpu-pod
 spec:
+  schedulerName: volcano
   containers:
     - name: ubuntu-container
       image: ubuntu:18.04
