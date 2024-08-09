@@ -304,7 +304,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		overallnodeMap[node.ID] = nodeInfo
 	}
 
-	for _, p := range s.pods {
+	podsInfo := s.ListPodsInfo()
+	for _, p := range podsInfo {
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			continue
