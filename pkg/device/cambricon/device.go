@@ -299,3 +299,7 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 	}
 	return *annoinput
 }
+
+func (dev *CambriconDevices) ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	return resources
+}

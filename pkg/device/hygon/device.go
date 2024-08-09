@@ -19,12 +19,14 @@ package hygon
 import (
 	"errors"
 	"flag"
+	math "math"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
 
@@ -232,4 +234,14 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[HygonDCUDevice], deviceStr)
 	}
 	return *annoinput
+}
+
+func (dev *DCUDevices) ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	if v, ok := resources.Limits[corev1.ResourceName(HygonResourceMemory)]; ok {
+		resources.Limits[corev1.ResourceName(HygonResourceMemory)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	if v, ok := resources.Requests[corev1.ResourceName(HygonResourceMemory)]; ok {
+		resources.Requests[corev1.ResourceName(HygonResourceMemory)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	return resources
 }

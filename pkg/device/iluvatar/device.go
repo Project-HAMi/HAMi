@@ -213,3 +213,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	}
 	return util.ContainerDeviceRequest{}
 }
+
+func (dev *IluvatarDevices) ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	return resources
+}

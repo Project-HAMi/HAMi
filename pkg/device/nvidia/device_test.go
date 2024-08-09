@@ -208,6 +208,7 @@ func Test_CheckUUID(t *testing.T) {
 }
 
 func Test_CheckType(t *testing.T) {
+
 	gpuDevices := &NvidiaGPUDevices{}
 	tests := []struct {
 		name string
@@ -272,6 +273,92 @@ func Test_CheckType(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
 			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func Test_ResourceMemoryUnitConversion(t *testing.T) {
+	tests := []struct {
+		name string
+		args corev1.ResourceRequirements
+		want corev1.ResourceRequirements
+	}{
+		{
+			name: "not set memory field",
+			args: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"cpu":            resource.MustParse("1"),
+					"nvidia.com/gpu": resource.MustParse("2"),
+				},
+			},
+			want: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"cpu":            resource.MustParse("1"),
+					"nvidia.com/gpu": resource.MustParse("2"),
+				},
+			},
+		},
+		{
+			name: "memory limits set 1Gi",
+			args: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1"),
+				},
+			},
+			want: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1024"),
+				},
+			},
+		},
+		{
+			name: "memory limits set 0.001Gi",
+			args: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("0.001"),
+				},
+			},
+			want: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1"),
+				},
+			},
+		},
+
+		{
+			name: "memory limits and request set 0.001Gi",
+			args: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1"),
+				},
+				Requests: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("0.001"),
+				},
+			},
+			want: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1024"),
+				},
+				Requests: corev1.ResourceList{
+					"nvidia.com/gpu":    resource.MustParse("2"),
+					"nvidia.com/gpumem": resource.MustParse("1"),
+				},
+			},
+		},
+	}
+	gpuDevices := &NvidiaGPUDevices{}
+	ResourceMem = "nvidia.com/gpumem"
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := gpuDevices.ResourceMemoryUnitConversion(test.args)
+			assert.DeepEqual(t, got, test.want)
 		})
 	}
 }

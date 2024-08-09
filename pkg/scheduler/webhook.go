@@ -71,6 +71,9 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 		}
 		for _, val := range device.GetDevices() {
+			if config.MemoryUserGIUnit {
+				c.Resources = val.ResourceMemoryUnitConversion(c.Resources)
+			}
 			found, err := val.MutateAdmission(c)
 			if err != nil {
 				klog.Errorf("validating pod failed:%s", err.Error())
