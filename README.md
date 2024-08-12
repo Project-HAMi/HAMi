@@ -330,6 +330,10 @@ Heterogeneous AI Computing device to support
 - [ ] Support Intel GPU device
 - [ ] Support AMD GPU device
 
+## Governance
+
+The project is governed by a group of [Maintainers and Committers](https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS). How they are selected and govern is outlined in our [Governance Document](https://github.com/Project-HAMi/community/blob/main/governance.md).
+
 ## Contributing
 
 If you're interested in being a contributor and want to get involved in
