@@ -1,3 +1,3 @@
-# Code of Conduct
+# HAMi Community Code of Conduct
 
-This project follows the [CNCF Code of Conduct](https://github.com/cncf/foundation/blob/master/code-of-conduct.md).
+Please refer to our [HAMi Community Code of Conduct](https://github.com/Project-HAMi/community/blob/main/CODE_OF_CONDUCT.md).

@@ -321,8 +321,8 @@ Heterogeneous AI Computing device to support
 - [ ] Support video codec processing
 - [ ] Support Multi-Instance GPUs (MIG)
 - [ ] Support Flexible scheduling  policies
-  - [ ] binpack
-  - [ ] spread
+  - [x] binpack
+  - [x] spread
   - [ ] numa affinity
 - [ ] integrated gpu-operator
 - [ ] Rich observability support
