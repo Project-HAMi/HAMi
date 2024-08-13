@@ -6,7 +6,7 @@ on:
       - synchronize
       - reopened
   push:
-    branches: ['master']
+    branches: ["master"]
 
 jobs:
   build:
@@ -43,3 +43,11 @@ jobs:
           echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
       - run: make tidy
       - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh
+      - name: Run Trivy vulnerability scanner for the built image
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
+          exit-code: "1"
+          format: "table"
+          ignore-unfixed: true
+          severity: "HIGH,CRITICAL"
