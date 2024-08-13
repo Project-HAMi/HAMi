@@ -1,15 +1,6 @@
 name: Trivy Scan
 on:
-  pull_request:
-    # only run on PRs where go.mod/go.sum/etc have been updated
-    paths:
-      - go.*
   push:
-    branches:
-      - master
-    paths:
-      - go.*
-
 jobs:
   trivy-scan:
     permissions:
