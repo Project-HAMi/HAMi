@@ -1,0 +1,69 @@
+name: Trivy Scan
+on:
+  pull_request:
+    # only run on PRs where go.mod/go.sum/etc have been updated
+    paths:
+      - go.*
+  push:
+    branches:
+      - master
+    paths:
+      - go.*
+  schedule:
+    - cron: "0 0 * * 0"
+
+jobs:
+  trivy-scan:
+    permissions:
+      contents: read # for actions/checkout to fetch code
+      security-events: write # for github/codeql-action/upload-sarif to upload SARIF results
+      actions: read # only required for a private repository by github/codeql-action/upload-sarif to get the Action run status
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Checkout submodule
+        uses: Mushus/checkout-submodule@v1.0.1
+        with:
+          basePath: # optional, default is .
+          submodulePath: libvgpu
+      - name: Get branch name
+        uses: nelonoel/branch-name@v1.0.1
+      - name: Docker Login
+        uses: docker/login-action@v3.3.0
+        with:
+          username: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWD }}
+      - name: Set up Docker Buildx
+        id: buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Generating image tag
+        id: runtime-tag
+        run: |
+          echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - run: make tidy
+      - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh
+      - name: Run Trivy vulnerability scanner (table output)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
+          format: "table"
+          ignore-unfixed: true
+          severity: "HIGH,CRITICAL"
+          vuln-type: "os,library"
+          trivyignores: .trivyignore
+      - name: Run Trivy vulnerability scanner (SARIF)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
+          format: "sarif"
+          output: "trivy-results.sarif"
+          ignore-unfixed: true
+          vuln-type: "os,library"
+          trivyignores: .trivyignore
+        if: always() && github.repository == 'Project-HAMi/HAMi'
+      - name: Upload Trivy scan results to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: "trivy-results.sarif"
+        if: always() && github.repository == 'Project-HAMi/HAMi'
