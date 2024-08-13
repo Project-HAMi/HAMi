@@ -88,6 +88,11 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 ## 快速入门
 
+### 选择你的集群调度器
+
+[![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](https://github.com/Project-HAMi/HAMi#quick-start)
+[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
+
 ### 准备节点
 
 <details> <summary> 配置 nvidia-container-toolkit </summary>
