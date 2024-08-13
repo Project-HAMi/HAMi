@@ -9,8 +9,6 @@ on:
       - master
     paths:
       - go.*
-  schedule:
-    - cron: "0 0 * * 0"
 
 jobs:
   trivy-scan:
