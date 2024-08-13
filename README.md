@@ -81,6 +81,11 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 
 ## Quick Start
 
+### Choose your orchestrator
+
+[![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](https://github.com/Project-HAMi/HAMi#quick-start)
+[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
+
 ### Prerequisites
 
 The list of prerequisites for running the NVIDIA device plugin is described below:
