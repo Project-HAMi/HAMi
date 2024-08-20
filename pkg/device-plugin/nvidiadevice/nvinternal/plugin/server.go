@@ -291,7 +291,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
-	current, err := util.GetPendingPod(nodename)
+	current, err := util.GetPendingPod(ctx, nodename)
 	if err != nil {
 		nodelock.ReleaseNodeLock(nodename, NodeLockNvidia)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err

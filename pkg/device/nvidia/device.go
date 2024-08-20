@@ -96,7 +96,7 @@ func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
-	return nodelock.LockNode(n.Name, NodeLockNvidia)
+	return nodelock.LockNode(n.Name, NodeLockNvidia, p)
 }
 
 func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
