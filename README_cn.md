@@ -1,4 +1,4 @@
-<img src="./HAMi.jpg" width="200px">
+<img src="imgs/hami-graph-color.png" width="200px">
 
 # HAMi--异构算力虚拟化中间件
 
