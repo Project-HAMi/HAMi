@@ -1,6 +1,6 @@
 English version|[中文版](README_cn.md)
 
-<img src="./HAMi.jpg" width="200px">
+<img src="imgs/hami-graph-color.png" width="200px">
 
 # Heterogeneous AI Computing Virtualization Middleware
 
