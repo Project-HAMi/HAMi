@@ -1,6 +1,6 @@
 English version|[中文版](README_cn.md)
 
-<img src="./HAMi.jpg" width="200px">
+<img src="imgs/hami-graph-color.png" width="200px">
 
 # Heterogeneous AI Computing Virtualization Middleware
 
@@ -67,7 +67,7 @@ will see 3G device memory inside container
 
 ## Architect
 
-<img src="./imgs/arch.png" width = "600" /> 
+<img src="./imgs/hami-arch.jpg" width = "600" /> 
 
 HAMi consists of several components, including a unified mutatingwebhook, a unified scheduler extender, different device-plugins and different in-container virtualization technics for each heterogeneous AI devices.
 

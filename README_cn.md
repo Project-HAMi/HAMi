@@ -1,4 +1,4 @@
-<img src="./HAMi.jpg" width="200px">
+<img src="imgs/hami-graph-color.png" width="200px">
 
 # HAMi--异构算力虚拟化中间件
 
@@ -51,7 +51,7 @@
 
 ## 产品设计
 
-!<img src="./imgs/arch.png" width = "600" /> 
+<img src="./imgs/hami-arch.jpg" width = "600" />
 
 HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的调度器，以及针对各种不同的异构算力设备对应的设备插件和容器内的控制组件，整体的架构特性如上图所示。
 
