@@ -17,7 +17,6 @@ package scheduler
 
 import (
 	"sort"
-	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -37,7 +36,7 @@ func viewStatus(usage NodeUsage) {
 
 func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
 	//General type check, NVIDIA->NVIDIA MLU->MLU
-	if !strings.Contains(d.Type, n.Type) {
+	if d.Type != n.Type {
 		return false, false
 	}
 	for _, val := range device.GetDevices() {
