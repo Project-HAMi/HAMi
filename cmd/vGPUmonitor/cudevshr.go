@@ -138,6 +138,10 @@ func mmapcachefile(filename string, nc *nvidiaCollector) error {
 		fmt.Println("openfile error=", err.Error())
 		return err
 	}
+	ss, _ := f.Stat()
+	if ss.Size() < int64(unsafe.Sizeof(*m)) {
+		return fmt.Errorf("cache file %s size %d is less than %d", filename, ss.Size(), unsafe.Sizeof(*m))
+	}
 	data, err := syscall.Mmap(int(f.Fd()), 0, int(unsafe.Sizeof(*m)), syscall.PROT_WRITE|syscall.PROT_READ, syscall.MAP_SHARED)
 	if err != nil {
 		return err
