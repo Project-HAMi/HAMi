@@ -17,35 +17,25 @@ limitations under the License.
 package main
 
 import (
-	"errors"
-	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
-	"sync"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
 var cgroupDriver int
 
-type hostGPUPid struct {
-	hostGPUPid int
-	mtime      uint64
-}
+//type hostGPUPid struct {
+//	hostGPUPid int
+//	mtime      uint64
+//}
 
 type UtilizationPerDevice []int
-
-var mutex sync.Mutex
-var srPodList map[string]podusage
-
-func init() {
-	srPodList = make(map[string]podusage)
-}
 
 func setcGgroupDriver() int {
 	// 1 for cgroupfs 2 for systemd
@@ -96,93 +86,94 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	return result, nvml.SUCCESS
 }
 
-func setHostPid(pod corev1.Pod, ctr corev1.ContainerStatus, sr *podusage) error {
-	var pids []string
-	mutex.Lock()
-	defer mutex.Unlock()
+//func setHostPid(pod corev1.Pod, ctr corev1.ContainerStatus, sr *podusage) error {
+//	var pids []string
+//	mutex.Lock()
+//	defer mutex.Unlock()
+//
+//	if cgroupDriver == 0 {
+//		cgroupDriver = setcGgroupDriver()
+//	}
+//	if cgroupDriver == 0 {
+//		return errors.New("can not identify cgroup driver")
+//	}
+//	usedGPUArray, err := getUsedGPUPid()
+//	if err != nvml.SUCCESS {
+//		return errors.New("get usedGPUID failed, ret:" + nvml.ErrorString(err))
+//	}
+//	if len(usedGPUArray) == 0 {
+//		return nil
+//	}
+//	qos := strings.ToLower(string(pod.Status.QOSClass))
+//	var filename string
+//	if cgroupDriver == 1 {
+//		/* Cgroupfs */
+//		filename = fmt.Sprintf("/sysinfo/fs/cgroup/memory/kubepods/%s/pod%s/%s/tasks", qos, pod.UID, strings.TrimPrefix(ctr.ContainerID, "docker://"))
+//	}
+//	if cgroupDriver == 2 {
+//		/* Systemd */
+//		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
+//		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
+//	}
+//	fmt.Println("filename=", filename)
+//	content, ferr := os.ReadFile(filename)
+//	if ferr != nil {
+//		return ferr
+//	}
+//	pids = strings.Split(string(content), "\n")
+//	hostPidArray := []hostGPUPid{}
+//	for _, val := range pids {
+//		tmp, _ := strconv.Atoi(val)
+//		if tmp != 0 {
+//			var stat os.FileInfo
+//			var err error
+//			if stat, err = os.Lstat(fmt.Sprintf("/proc/%v", tmp)); err != nil {
+//				return err
+//			}
+//			mtime := stat.ModTime().Unix()
+//			hostPidArray = append(hostPidArray, hostGPUPid{
+//				hostGPUPid: tmp,
+//				mtime:      uint64(mtime),
+//			})
+//		}
+//	}
+//	usedGPUHostArray := []hostGPUPid{}
+//	for _, val := range usedGPUArray {
+//		for _, hostpid := range hostPidArray {
+//			if uint(hostpid.hostGPUPid) == val {
+//				usedGPUHostArray = append(usedGPUHostArray, hostpid)
+//			}
+//		}
+//	}
+//	//fmt.Println("usedHostGPUArray=", usedGPUHostArray)
+//	sort.Slice(usedGPUHostArray, func(i, j int) bool { return usedGPUHostArray[i].mtime > usedGPUHostArray[j].mtime })
+//	if sr == nil || sr.sr == nil {
+//		return nil
+//	}
+//	for idx, val := range sr.sr.procs {
+//		//fmt.Println("pid=", val.pid)
+//		if val.pid == 0 {
+//			break
+//		}
+//		if idx < len(usedGPUHostArray) {
+//			if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
+//				fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
+//				sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
+//				fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
+//			}
+//		}
+//	}
+//	return nil
+//
+//}
 
-	if cgroupDriver == 0 {
-		cgroupDriver = setcGgroupDriver()
-	}
-	if cgroupDriver == 0 {
-		return errors.New("can not identify cgroup driver")
-	}
-	usedGPUArray, err := getUsedGPUPid()
-	if err != nvml.SUCCESS {
-		return errors.New("get usedGPUID failed, ret:" + nvml.ErrorString(err))
-	}
-	if len(usedGPUArray) == 0 {
-		return nil
-	}
-	qos := strings.ToLower(string(pod.Status.QOSClass))
-	var filename string
-	if cgroupDriver == 1 {
-		/* Cgroupfs */
-		filename = fmt.Sprintf("/sysinfo/fs/cgroup/memory/kubepods/%s/pod%s/%s/tasks", qos, pod.UID, strings.TrimPrefix(ctr.ContainerID, "docker://"))
-	}
-	if cgroupDriver == 2 {
-		/* Systemd */
-		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
-		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
-	}
-	fmt.Println("filename=", filename)
-	content, ferr := os.ReadFile(filename)
-	if ferr != nil {
-		return ferr
-	}
-	pids = strings.Split(string(content), "\n")
-	hostPidArray := []hostGPUPid{}
-	for _, val := range pids {
-		tmp, _ := strconv.Atoi(val)
-		if tmp != 0 {
-			var stat os.FileInfo
-			var err error
-			if stat, err = os.Lstat(fmt.Sprintf("/proc/%v", tmp)); err != nil {
-				return err
-			}
-			mtime := stat.ModTime().Unix()
-			hostPidArray = append(hostPidArray, hostGPUPid{
-				hostGPUPid: tmp,
-				mtime:      uint64(mtime),
-			})
-		}
-	}
-	usedGPUHostArray := []hostGPUPid{}
-	for _, val := range usedGPUArray {
-		for _, hostpid := range hostPidArray {
-			if uint(hostpid.hostGPUPid) == val {
-				usedGPUHostArray = append(usedGPUHostArray, hostpid)
-			}
-		}
-	}
-	//fmt.Println("usedHostGPUArray=", usedGPUHostArray)
-	sort.Slice(usedGPUHostArray, func(i, j int) bool { return usedGPUHostArray[i].mtime > usedGPUHostArray[j].mtime })
-	if sr == nil || sr.sr == nil {
-		return nil
-	}
-	for idx, val := range sr.sr.procs {
-		//fmt.Println("pid=", val.pid)
-		if val.pid == 0 {
-			break
-		}
-		if idx < len(usedGPUHostArray) {
-			if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
-				fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
-				sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
-				fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
-			}
-		}
-	}
-	return nil
-
-}
-
-func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
-	for _, devuuid := range pu.sr.uuids {
-		_, ok := utSwitchOn[string(devuuid.uuid[:])]
+func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
+	for i := 0; i < c.Info.DeviceMax(); i++ {
+		uuid := c.Info.DeviceUUID(i)
+		_, ok := utSwitchOn[uuid]
 		if ok {
 			for i := 0; i < p; i++ {
-				if utSwitchOn[string(devuuid.uuid[:])][i] > 0 {
+				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
 			}
@@ -193,16 +184,17 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusag
 }
 
 // Check whether task with higher priority use GPU or there are other tasks with the same priority.
-func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
-	for _, devuuid := range pu.sr.uuids {
-		_, ok := utSwitchOn[string(devuuid.uuid[:])]
+func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
+	for i := 0; i < c.Info.DeviceMax(); i++ {
+		uuid := c.Info.DeviceUUID(i)
+		_, ok := utSwitchOn[uuid]
 		if ok {
 			for i := 0; i < p; i++ {
-				if utSwitchOn[string(devuuid.uuid[:])][i] > 0 {
+				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
 			}
-			if utSwitchOn[string(devuuid.uuid[:])][p] > 1 {
+			if utSwitchOn[uuid][p] > 1 {
 				return true
 			}
 		}
@@ -210,76 +202,74 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusag
 	return false
 }
 
-func Observe(srlist *map[string]podusage) error {
+func Observe(lister *nvidia.ContainerLister) {
 	utSwitchOn := map[string]UtilizationPerDevice{}
+	containers := lister.ListContainers()
 
-	for idx, val := range *srlist {
-		if val.sr == nil {
-			continue
-		}
-		/*for ii, _ := range val.sr.uuids {
-			fmt.Println("using uuid=", string(val.sr.uuids[ii].uuid[:]))
-		}*/
-		if val.sr.recentKernel > 0 {
-			(*srlist)[idx].sr.recentKernel--
-			if (*srlist)[idx].sr.recentKernel > 0 {
-				for _, devuuid := range val.sr.uuids {
+	for _, c := range containers {
+		recentKernel := c.Info.GetRecentKernel()
+		if recentKernel > 0 {
+			recentKernel--
+			if recentKernel > 0 {
+				for i := 0; i < c.Info.DeviceMax(); i++ {
+					//for _, devuuid := range val.sr.uuids {
 					// Null device condition
-					if devuuid.uuid[0] == 0 {
+					if !c.Info.IsValidUUID(i) {
 						continue
 					}
-					if len(utSwitchOn[string(devuuid.uuid[:])]) == 0 {
-						utSwitchOn[string(devuuid.uuid[:])] = []int{0, 0}
+					uuid := c.Info.DeviceUUID(i)
+					if len(utSwitchOn[uuid]) == 0 {
+						utSwitchOn[uuid] = []int{0, 0}
 					}
-					utSwitchOn[string(devuuid.uuid[:])][val.sr.priority]++
+					utSwitchOn[uuid][c.Info.GetPriority()]++
 				}
 			}
+			c.Info.SetRecentKernel(recentKernel)
 		}
 	}
-	for idx, val := range *srlist {
-		if val.sr == nil {
-			continue
-		}
-		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
-			if (*srlist)[idx].sr.recentKernel >= 0 {
+	for idx, c := range containers {
+		priority := c.Info.GetPriority()
+		recentKernel := c.Info.GetRecentKernel()
+		utilizationSwitch := c.Info.GetUtilizationSwitch()
+		if CheckBlocking(utSwitchOn, priority, c) {
+			if recentKernel >= 0 {
 				klog.Infof("utSwitchon=%v", utSwitchOn)
 				klog.Infof("Setting Blocking to on %v", idx)
-				(*srlist)[idx].sr.recentKernel = -1
+				c.Info.SetRecentKernel(-1)
 			}
 		} else {
-			if (*srlist)[idx].sr.recentKernel < 0 {
+			if recentKernel < 0 {
 				klog.Infof("utSwitchon=%v", utSwitchOn)
 				klog.Infof("Setting Blocking to off %v", idx)
-				(*srlist)[idx].sr.recentKernel = 0
+				c.Info.SetRecentKernel(0)
 			}
 		}
-		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
-			if (*srlist)[idx].sr.utilizationSwitch != 1 {
+		if CheckPriority(utSwitchOn, priority, c) {
+			if utilizationSwitch != 1 {
 				klog.Infof("utSwitchon=%v", utSwitchOn)
 				klog.Infof("Setting UtilizationSwitch to on %v", idx)
-				(*srlist)[idx].sr.utilizationSwitch = 1
+				c.Info.SetUtilizationSwitch(1)
 			}
 		} else {
-			if (*srlist)[idx].sr.utilizationSwitch != 0 {
+			if utilizationSwitch != 0 {
 				klog.Infof("utSwitchon=%v", utSwitchOn)
 				klog.Infof("Setting UtilizationSwitch to off %v", idx)
-				(*srlist)[idx].sr.utilizationSwitch = 0
+				c.Info.SetUtilizationSwitch(0)
 			}
 		}
 	}
-	return nil
 }
 
-func watchAndFeedback() {
+func watchAndFeedback(lister *nvidia.ContainerLister) {
 	nvml.Init()
 	for {
 		time.Sleep(time.Second * 5)
-		err := monitorpath(srPodList)
+		err := lister.Update()
 		if err != nil {
-			klog.Errorf("monitorPath failed %v", err.Error())
+			klog.Errorf("Failed to update container list: %v", err)
+			continue
 		}
-		klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
-		Observe(&srPodList)
-
+		//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
+		Observe(lister)
 	}
 }

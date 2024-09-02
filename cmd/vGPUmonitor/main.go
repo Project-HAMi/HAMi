@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+
 	"k8s.io/klog/v2"
 )
 
@@ -29,11 +31,15 @@ func main() {
 	if err := ValidateEnvVars(); err != nil {
 		klog.Fatalf("Failed to validate environment variables: %v", err)
 	}
+	containerLister, err := nvidia.NewContainerLister()
+	if err != nil {
+		klog.Fatalf("Failed to create container lister: %v", err)
+	}
 	cgroupDriver = 0
 	errchannel := make(chan error)
-	go serveInfo(errchannel)
-	go initMetrics()
-	go watchAndFeedback()
+	//go serveInfo(errchannel)
+	go initMetrics(containerLister)
+	go watchAndFeedback(containerLister)
 	for {
 		err := <-errchannel
 		klog.Errorf("failed to serve: %v", err)
