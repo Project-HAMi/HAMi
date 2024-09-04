@@ -15,7 +15,7 @@ English version|[中文版](README_cn.md)
 <img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
 </p>
 
-**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) Landscape project.**
+**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) sandbox project & [Landscape project](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) & [CNAI Landscape project](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).**
 
 ## Supperted devices
 
