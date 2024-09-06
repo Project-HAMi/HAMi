@@ -43,3 +43,17 @@ jobs:
           go-version: "1.21"
       - run: make tidy
       - run: make test
+      - name: Upload coverage to Codecov
+        # Prevent running from the forked repository that doesn't need to upload coverage.
+        # In addition, running on the forked repository would fail as missing the necessary secret.
+        if: ${{ github.repository == 'Project-HAMi/HAMi' }}
+        uses: codecov/codecov-action@v4
+        with:
+          # Even though token upload token is not required for public repos,
+          # but adding a token might increase successful uploads as per:
+          # https://community.codecov.com/t/upload-issues-unable-to-locate-build-via-github-actions-api/3954
+          token: ${{secrets.CODECOV_TOKEN}}
+          files: ./_output/coverage/coverage.out
+          flags: unittests
+          fail_ci_if_error: false
+          verbose: true

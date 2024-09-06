@@ -40,15 +40,13 @@ else
   echo "Use local kubeconfig"
 fi
 
-tmpDir=$(mktemp -d)
-mergeF="${tmpDir}/merge.out"
+mkdir -p ./_output/coverage/
+mergeF="./_output/coverage/merge.out"
 rm -f ${mergeF}
-ls $tmpDir
-cov_file="${tmpDir}/c.cover"
+cov_file="./_output/coverage/coverage_pkg.txt"
 go test $(go list ./pkg/... | grep -v ./pkg/device-plugin/...) -short --race -count=1 -covermode=atomic -coverprofile=${cov_file}
 cat $cov_file | grep -v mode: | grep -v pkg/version | grep -v fake | grep -v main.go >>${mergeF}
 #merge them
 echo "mode: atomic" >coverage.out
-cat ${mergeF} >>coverage.out
+cat ${mergeF} >>./_output/coverage/coverage.out
 go tool cover -func=coverage.out
-rm -rf coverage.out ${tmpDir} ${mergeF}
