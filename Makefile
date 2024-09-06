@@ -44,6 +44,7 @@ clean:
 .PHONY: all build docker clean $(CMDS)
 
 test:
+	mkdir -p ./_output/coverage/
 	bash hack/unit-test.sh
 
 lint:
