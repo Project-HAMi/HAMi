@@ -31,6 +31,8 @@ proto:
 
 build: $(CMDS) $(DEVICES)
 
+
+
 $(CMDS):
 	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
 
