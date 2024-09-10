@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"k8s.io/apimachinery/pkg/util/wait"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
@@ -260,16 +261,13 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(lister *nvidia.ContainerLister) {
+func watchAndFeedback(lister *nvidia.ContainerLister, stopChan <-chan struct{}) {
 	nvml.Init()
-	for {
-		time.Sleep(time.Second * 5)
+	wait.Until(func() {
 		err := lister.Update()
 		if err != nil {
 			klog.Errorf("Failed to update container list: %v", err)
-			continue
 		}
-		//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
 		Observe(lister)
-	}
+	}, time.Second*5, stopChan)
 }

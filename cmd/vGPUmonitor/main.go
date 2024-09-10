@@ -17,7 +17,17 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"github.com/Project-HAMi/HAMi/pkg/lister"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/clientcmd"
 
 	"k8s.io/klog/v2"
 )
@@ -31,17 +41,38 @@ func main() {
 	if err := ValidateEnvVars(); err != nil {
 		klog.Fatalf("Failed to validate environment variables: %v", err)
 	}
-	containerLister, err := nvidia.NewContainerLister()
+	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
+	if err != nil {
+		klog.Fatalf("Failed to build kubeconfig: %v", err)
+	}
+	clientset, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		klog.Fatalf("Failed to build clientset: %v", err)
+	}
+
+	cgroupDriver = 0
+	stopChan := make(chan struct{})
+	//go serveInfo(errchannel)
+
+	podInformer := lister.NewPodInformer(clientset)
+	go podInformer.Run(stopChan)
+	ctx, _ := context.WithTimeout(context.Background(), 2*time.Minute)
+	if !cache.WaitForCacheSync(ctx.Done(), podInformer.HasSynced) {
+		klog.Fatalf("Timed out waiting for caches to sync.")
+	}
+	podLister := lister.NewPodLister(podInformer.GetIndexer())
+	containerLister, err := nvidia.NewContainerLister(podLister)
 	if err != nil {
 		klog.Fatalf("Failed to create container lister: %v", err)
 	}
-	cgroupDriver = 0
-	errchannel := make(chan error)
-	//go serveInfo(errchannel)
-	go initMetrics(containerLister)
-	go watchAndFeedback(containerLister)
-	for {
-		err := <-errchannel
-		klog.Errorf("failed to serve: %v", err)
+	go watchAndFeedback(containerLister, stopChan)
+	go initMetrics(podLister, containerLister, stopChan)
+	sigChan := make(chan os.Signal, 1)
+	signal.Notify(sigChan, syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	select {
+	case <-stopChan:
+		klog.Fatalf("Service terminated abnormally")
+	case s := <-sigChan:
+		klog.Infof("Received signal %v, shutting down.", s)
 	}
 }

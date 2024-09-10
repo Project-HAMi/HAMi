@@ -18,20 +18,17 @@ package main
 
 import (
 	"fmt"
-	"log"
 	"net/http"
-	"strings"
+	"os"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/lister"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"k8s.io/apimachinery/pkg/labels"
-	"k8s.io/client-go/informers"
-	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -49,7 +46,8 @@ import (
 type ClusterManager struct {
 	Zone string
 	// Contains many more fields not listed in this example.
-	PodLister       listerscorev1.PodLister
+	nodeName        string
+	podLister       lister.PodLister
 	containerLister *nvidia.ContainerLister
 }
 
@@ -179,9 +177,11 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 	containerLister := cc.ClusterManager.containerLister
-	if err := containerLister.Update(); err != nil {
-		klog.Error("Update container error: %s", err.Error())
-	}
+
+	// Why do we still need to manually update after starting another goroutine
+	//if err := containerLister.Update(); err != nil {
+	//	klog.Error("Update container error: %s", err.Error())
+	//}
 
 	nvret := nvml.Init()
 	if nvret != nvml.SUCCESS {
@@ -229,96 +229,81 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 
 		}
 	}
-
-	pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
+	pods, err := cc.ClusterManager.podLister.GetByIndex(lister.PodIndexerKey, cc.ClusterManager.nodeName)
 	if err != nil {
 		klog.Error("failed to list pods with err=", err.Error())
+		return
 	}
 	nowSec := time.Now().Unix()
 
-	containers := containerLister.ListContainers()
 	for _, pod := range pods {
-		for _, c := range containers {
-			//for sridx := range srPodList {
-			//	if srPodList[sridx].sr == nil {
-			//		continue
-			//	}
-			if c.Info == nil {
-				continue
-			}
-			//podUID := strings.Split(srPodList[sridx].idstr, "_")[0]
-			//ctrName := strings.Split(srPodList[sridx].idstr, "_")[1]
-			podUID := c.PodUID
-			ctrName := c.ContainerName
-			if strings.Compare(string(pod.UID), podUID) != 0 {
-				continue
-			}
-			fmt.Println("Pod matched!", pod.Name, pod.Namespace, pod.Labels)
-			for _, ctr := range pod.Spec.Containers {
-				if strings.Compare(ctr.Name, ctrName) != 0 {
-					continue
-				}
-				fmt.Println("container matched", ctr.Name)
-				//err := setHostPid(pod, pod.Status.ContainerStatuses[ctridx], &srPodList[sridx])
-				//if err != nil {
-				//	fmt.Println("setHostPid filed", err.Error())
-				//}
-				//fmt.Println("sr.list=", srPodList[sridx].sr)
-				podlabels := make(map[string]string)
-				for idx, val := range pod.Labels {
-					idxfix := strings.ReplaceAll(idx, "-", "_")
-					valfix := strings.ReplaceAll(val, "-", "_")
-					podlabels[idxfix] = valfix
-				}
-				for i := 0; i < c.Info.DeviceNum(); i++ {
-					uuid := c.Info.DeviceUUID(i)[0:40]
-					memoryTotal := c.Info.DeviceMemoryTotal(i)
-					memoryLimit := c.Info.DeviceMemoryLimit(i)
-					memoryContextSize := c.Info.DeviceMemoryContextSize(i)
-					memoryModuleSize := c.Info.DeviceMemoryModuleSize(i)
-					memoryBufferSize := c.Info.DeviceMemoryBufferSize(i)
-					memoryOffset := c.Info.DeviceMemoryOffset(i)
-					smUtil := c.Info.DeviceSmUtil(i)
-					lastKernelTime := c.Info.LastKernelTime()
 
-					//fmt.Println("uuid=", uuid, "length=", len(uuid))
-					ch <- prometheus.MustNewConstMetric(
-						ctrvGPUdesc,
-						prometheus.GaugeValue,
-						float64(memoryTotal),
-						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
-					)
-					ch <- prometheus.MustNewConstMetric(
-						ctrvGPUlimitdesc,
-						prometheus.GaugeValue,
-						float64(memoryLimit),
-						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
-					)
-					ch <- prometheus.MustNewConstMetric(
-						ctrDeviceMemorydesc,
-						prometheus.CounterValue,
-						float64(memoryTotal),
-						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid,
-						fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset),
-					)
-					ch <- prometheus.MustNewConstMetric(
-						ctrDeviceUtilizationdesc,
-						prometheus.GaugeValue,
-						float64(smUtil),
-						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid,
-					)
-					if lastKernelTime > 0 {
-						lastSec := nowSec - lastKernelTime
-						if lastSec < 0 {
-							lastSec = 0
-						}
-						ch <- prometheus.MustNewConstMetric(
-							ctrDeviceLastKernelDesc,
-							prometheus.GaugeValue,
-							float64(lastSec),
-							pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid,
-						)
+		for _, ctr := range pod.Spec.Containers {
+			key := fmt.Sprintf("%s_%s", pod.UID, ctr.Name)
+			c, ok := containerLister.GetUsage(key)
+			if !ok {
+				continue
+			}
+			fmt.Println("container matched", ctr.Name)
+			//err := setHostPid(pod, pod.Status.ContainerStatuses[ctridx], &srPodList[sridx])
+			//if err != nil {
+			//	fmt.Println("setHostPid filed", err.Error())
+			//}
+			//fmt.Println("sr.list=", srPodList[sridx].sr)
+			//podlabels := make(map[string]string)
+			//for idx, val := range pod.Labels {
+			//	idxfix := strings.ReplaceAll(idx, "-", "_")
+			//	valfix := strings.ReplaceAll(val, "-", "_")
+			//	podlabels[idxfix] = valfix
+			//}
+			for i := 0; i < c.Info.DeviceNum(); i++ {
+				uuid := c.Info.DeviceUUID(i)[0:40]
+				memoryTotal := c.Info.DeviceMemoryTotal(i)
+				memoryLimit := c.Info.DeviceMemoryLimit(i)
+				memoryContextSize := c.Info.DeviceMemoryContextSize(i)
+				memoryModuleSize := c.Info.DeviceMemoryModuleSize(i)
+				memoryBufferSize := c.Info.DeviceMemoryBufferSize(i)
+				memoryOffset := c.Info.DeviceMemoryOffset(i)
+				smUtil := c.Info.DeviceSmUtil(i)
+				lastKernelTime := c.Info.LastKernelTime()
+
+				//fmt.Println("uuid=", uuid, "length=", len(uuid))
+				ch <- prometheus.MustNewConstMetric(
+					ctrvGPUdesc,
+					prometheus.GaugeValue,
+					float64(memoryTotal),
+					pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+				)
+				ch <- prometheus.MustNewConstMetric(
+					ctrvGPUlimitdesc,
+					prometheus.GaugeValue,
+					float64(memoryLimit),
+					pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+				)
+				ch <- prometheus.MustNewConstMetric(
+					ctrDeviceMemorydesc,
+					prometheus.CounterValue,
+					float64(memoryTotal),
+					pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid,
+					fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset),
+				)
+				ch <- prometheus.MustNewConstMetric(
+					ctrDeviceUtilizationdesc,
+					prometheus.GaugeValue,
+					float64(smUtil),
+					pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid,
+				)
+				if lastKernelTime > 0 {
+					lastSec := nowSec - lastKernelTime
+					if lastSec < 0 {
+						lastSec = 0
 					}
+					ch <- prometheus.MustNewConstMetric(
+						ctrDeviceLastKernelDesc,
+						prometheus.GaugeValue,
+						float64(lastSec),
+						pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid,
+					)
 				}
 			}
 		}
@@ -330,23 +315,20 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 // ClusterManager. Finally, it registers the ClusterManagerCollector with a
 // wrapping Registerer that adds the zone as a label. In this way, the metrics
 // collected by different ClusterManagerCollectors do not collide.
-func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister) *ClusterManager {
+func NewClusterManager(zone string, reg prometheus.Registerer, podLister lister.PodLister, containerLister *nvidia.ContainerLister) *ClusterManager {
 	c := &ClusterManager{
 		Zone:            zone,
 		containerLister: containerLister,
+		nodeName:        os.Getenv("NODE_NAME"),
+		podLister:       podLister,
 	}
-
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
-	c.PodLister = informerFactory.Core().V1().Pods().Lister()
-	stopCh := make(chan struct{})
-	informerFactory.Start(stopCh)
 
 	cc := ClusterManagerCollector{ClusterManager: c}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
 }
 
-func initMetrics(containerLister *nvidia.ContainerLister) {
+func initMetrics(podLister lister.PodLister, containerLister *nvidia.ContainerLister, stopChan chan<- struct{}) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	klog.Info("Initializing metrics for vGPUmonitor")
@@ -355,7 +337,7 @@ func initMetrics(containerLister *nvidia.ContainerLister) {
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
-	NewClusterManager("vGPU", reg, containerLister)
+	NewClusterManager("vGPU", reg, podLister, containerLister)
 	//NewClusterManager("ca", reg)
 
 	// Add the standard process and Go metrics to the custom registry.
@@ -365,5 +347,8 @@ func initMetrics(containerLister *nvidia.ContainerLister) {
 	//)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(":9394", nil))
+	if err := http.ListenAndServe(":9394", nil); err != nil {
+		klog.Errorf("failed to serve: %v", err)
+		close(stopChan)
+	}
 }
