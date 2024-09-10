@@ -30,7 +30,8 @@ var (
 	NodeSchedulerPolicy = policy.NodeSchedulerPolicyBinpack.String()
 	// GPUSchedulerPolicy is config this scheduler GPU to use `binpack` or `spread`. default value is spread.
 	GPUSchedulerPolicy = policy.GPUSchedulerPolicySpread.String()
-
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
+	// MemoryUserGIUnit set memory resource unit is Gi.
+	MemoryUserGIUnit bool = false
 )

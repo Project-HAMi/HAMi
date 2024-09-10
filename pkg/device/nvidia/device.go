@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 
@@ -318,4 +319,14 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *NvidiaGPUDevices) ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	if v, ok := resources.Limits[corev1.ResourceName(ResourceMem)]; ok {
+		resources.Limits[corev1.ResourceName(ResourceMem)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	if v, ok := resources.Requests[corev1.ResourceName(ResourceMem)]; ok {
+		resources.Requests[corev1.ResourceName(ResourceMem)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	return resources
 }

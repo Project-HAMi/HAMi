@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"time"
@@ -230,4 +231,14 @@ func (dev *AscendDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *AscendDevices) ResourceMemoryUnitConversion(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	if v, ok := resources.Limits[corev1.ResourceName(AscendResourceMemory)]; ok {
+		resources.Limits[corev1.ResourceName(AscendResourceMemory)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	if v, ok := resources.Requests[corev1.ResourceName(AscendResourceMemory)]; ok {
+		resources.Requests[corev1.ResourceName(AscendResourceMemory)] = *resource.NewQuantity(int64(math.Floor(v.AsApproximateFloat64()*1024)), resource.BinarySI)
+	}
+	return resources
 }
