@@ -3,7 +3,7 @@ English version|[中文版](README_cn.md)
 <img src="imgs/hami-graph-color.png" width="200px">
 
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
-[![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/main.yml)
+[![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/build-image-release.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/build-image-release.yaml)
 [![Releases](https://img.shields.io/github/v/release/Project-HAMi/HAMi)](https://github.com/Project-HAMi/HAMi/releases/latest)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
