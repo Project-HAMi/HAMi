@@ -49,12 +49,10 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.iluvatarResourceName }}
         ignoredByScheduler: true
-      - name: {{ .Values.ascendResourceMem }}
+      {{- if .Values.devices.ascend.enabled }}
+      {{- range .Values.devices.ascend.resources }}
+      - name: {{ . }}
         ignoredByScheduler: true
-      - name: {{ .Values.ascendResourceName }}
-        ignoredByScheduler: true
-      - name: {{ .Values.ascend310PResourceMem }}
-        ignoredByScheduler: true
-      - name: {{ .Values.ascend310PResourceName }}
-        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
 {{- end }}

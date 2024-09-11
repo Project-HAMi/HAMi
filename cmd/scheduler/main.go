@@ -68,6 +68,7 @@ func init() {
 }
 
 func start() {
+	device.InitDevices()
 	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()

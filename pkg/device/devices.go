@@ -38,6 +38,7 @@ import (
 )
 
 type Devices interface {
+	CommonWord() string
 	MutateAdmission(ctr *corev1.Container) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
@@ -49,7 +50,8 @@ type Devices interface {
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
-	ParseConfig(fs *flag.FlagSet)
+	// This should not be associated with a specific device object
+	//ParseConfig(fs *flag.FlagSet)
 }
 
 var (
@@ -65,21 +67,25 @@ func GetDevices() map[string]Devices {
 	return devices
 }
 
-func init() {
+func InitDevices() {
 	devices = make(map[string]Devices)
+	DevicesToHandle = []string{}
 	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice()
 	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
-	devices[ascend.AscendDevice] = ascend.InitDevice()
-	devices[ascend.Ascend310PName] = ascend.InitAscend310P()
-	DevicesToHandle = []string{}
+	//devices[d.AscendDevice] = d.InitDevice()
+	//devices[ascend.Ascend310PName] = ascend.InitAscend310P()
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, ascend.AscendDevice)
-	DevicesToHandle = append(DevicesToHandle, ascend.Ascend310PName)
+	//DevicesToHandle = append(DevicesToHandle, d.AscendDevice)
+	//DevicesToHandle = append(DevicesToHandle, ascend.Ascend310PName)
+	for _, dev := range ascend.InitDevices() {
+		devices[dev.CommonWord()] = dev
+		DevicesToHandle = append(DevicesToHandle, dev.CommonWord())
+	}
 }
 
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
@@ -127,9 +133,11 @@ func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockname string) {
 
 func GlobalFlagSet() *flag.FlagSet {
 	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	for _, val := range devices {
-		val.ParseConfig(fs)
-	}
+	ascend.ParseConfig(fs)
+	cambricon.ParseConfig(fs)
+	hygon.ParseConfig(fs)
+	iluvatar.ParseConfig(fs)
+	nvidia.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
 	klog.InitFlags(fs)
 	return fs

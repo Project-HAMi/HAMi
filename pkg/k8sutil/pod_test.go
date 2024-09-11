@@ -19,6 +19,7 @@ package k8sutil
 import (
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -32,6 +33,8 @@ func Test_Resourcereqs(t *testing.T) {
 	nvidia.ResourceMem = "hami.io/gpumem"
 	nvidia.ResourceMemPercentage = "hami.io/gpumem-percentage"
 	nvidia.ResourceCores = "hami.io/gpucores"
+	device.InitDevices()
+
 	tests := []struct {
 		name string
 		args *corev1.Pod

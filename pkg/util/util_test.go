@@ -21,6 +21,8 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
+
+	"github.com/Project-HAMi/HAMi/pkg/api"
 )
 
 var inRequestDevices map[string]string
@@ -168,6 +170,115 @@ func Test_DecodePodDevices(t *testing.T) {
 			got, gotErr := DecodePodDevices(test.args.checklist, test.args.annos)
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
+
+func TestMarshalNodeDevices(t *testing.T) {
+	type args struct {
+		dlist []*api.DeviceInfo
+	}
+	tests := []struct {
+		name string
+		args args
+		want string
+	}{
+		// TODO: Add test cases.
+		{
+			name: "test one",
+			args: args{
+				dlist: []*api.DeviceInfo{
+					{
+						Index:   1,
+						ID:      "id-1",
+						Count:   1,
+						Devmem:  1024,
+						Devcore: 10,
+						Type:    "type",
+						Numa:    0,
+						Health:  true,
+					},
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := MarshalNodeDevices(tt.args.dlist)
+			//fmt.Println(got)
+			assert.Assert(t, got != "")
+		})
+	}
+}
+
+func TestUnMarshalNodeDevices(t *testing.T) {
+	type args struct {
+		str string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		want    []*api.DeviceInfo
+		wantErr bool
+	}{
+		{
+			name: "test one",
+			args: args{
+				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}]\n",
+			},
+			want: []*api.DeviceInfo{
+				{
+					Index:   1,
+					ID:      "id-1",
+					Count:   1,
+					Devmem:  1024,
+					Devcore: 10,
+					Type:    "type",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			wantErr: false,
+		},
+		{
+			name: "test two",
+			args: args{
+				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}," +
+					"{\"index\":2,\"id\":\"id-2\",\"count\":2,\"devmem\":4096,\"devcore\":20,\"type\":\"type2\",\"health\":false}]",
+			},
+			want: []*api.DeviceInfo{
+				{
+					Index:   1,
+					ID:      "id-1",
+					Count:   1,
+					Devmem:  1024,
+					Devcore: 10,
+					Type:    "type",
+					Numa:    0,
+					Health:  true,
+				},
+				{
+					Index:   2,
+					ID:      "id-2",
+					Count:   2,
+					Devmem:  4096,
+					Devcore: 20,
+					Type:    "type2",
+					Numa:    0,
+					Health:  false,
+				},
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := UnMarshalNodeDevices(tt.args.str)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("UnMarshalNodeDevices() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			assert.DeepEqual(t, got, tt.want)
 		})
 	}
 }

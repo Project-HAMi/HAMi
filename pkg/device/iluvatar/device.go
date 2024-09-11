@@ -54,7 +54,11 @@ func InitIluvatarDevice() *IluvatarDevices {
 	return &IluvatarDevices{}
 }
 
-func (dev *IluvatarDevices) ParseConfig(fs *flag.FlagSet) {
+func (dev *IluvatarDevices) CommonWord() string {
+	return IluvatarGPUCommonWord
+}
+
+func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&IluvatarResourceCount, "iluvatar-name", "iluvatar.ai/vgpu", "iluvatar resource count")
 	fs.StringVar(&IluvatarResourceMemory, "iluvatar-memory", "iluvatar.ai/vcuda-memory", "iluvatar memory resource")
 	fs.StringVar(&IluvatarResourceCores, "iluvatar-cores", "iluvatar.ai/vcuda-core", "iluvatar core resource")
@@ -79,7 +83,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 		i++
 		nodedevices = append(nodedevices, &api.DeviceInfo{
 			Index:   i,
-			Id:      n.Name + "-iluvatar-" + fmt.Sprint(i),
+			ID:      n.Name + "-iluvatar-" + fmt.Sprint(i),
 			Count:   100,
 			Devmem:  int32(memoryTotal * 256 * 100 / cards),
 			Devcore: 100,

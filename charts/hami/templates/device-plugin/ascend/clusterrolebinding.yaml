@@ -1,0 +1,14 @@
+{{- if .Values.devices.ascend.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-ascend
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.fullname" . }}-ascend
+    namespace: {{ .Release.Namespace | quote }}
+roleRef:
+  kind: ClusterRole
+  name: {{ include "hami-vgpu.fullname" . }}-ascend
+  apiGroup: rbac.authorization.k8s.io
+{{- end }}

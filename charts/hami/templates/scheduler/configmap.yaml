@@ -24,6 +24,14 @@ data:
                     "insecure": true
                 },
                 "managedResources": [
+                    {{- if .Values.devices.ascend.enabled }}
+                    {{- range .Values.devices.ascend.resources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
@@ -63,22 +71,6 @@ data:
                     {
                         "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
-                    },
-                    {
-                        "name": "{{ .Values.ascendResourceMem }}",
-                        "ignoredByScheduler": true
-                    },
-                    {
-                        "name": "{{ .Values.ascendResourceName }}",
-                        "ignoredByScheduler": true
-                    },
-                    {
-                      "name": "{{ .Values.ascend310PResourceName }}",
-                      "ignoredByScheduler": true
-                    },
-                    {
-                      "name": "{{ .Values.ascend310PResourceMem }}",
-                      "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false
