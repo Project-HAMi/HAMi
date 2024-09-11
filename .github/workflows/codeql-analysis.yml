@@ -8,7 +8,7 @@ name: "CodeQL"
 on:
   workflow_dispatch:
   push:
-    branches: ["master"]
+    branches: ["master","dev"]
     paths-ignore:
       - "**/*.json"
       - "**/*.md"
@@ -35,7 +35,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["cpp", "go"]
+        language: ["c", "go"]
 
     steps:
       - name: Checkout repository
