@@ -4,13 +4,14 @@ env:
   REGISTRY: docker.io
   IMAGE_REPO: projecthami/hami
   IMAGE_ROOT_PATH: docker
-  BUILD_PLATFORM: linux/arm64
+  BUILD_PLATFORM: linux/arm64,linux/amd64
   REGISTER_USER: ${{ github.actor }}
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 on:
   workflow_dispatch:
   push:
+    branches: ["master"]
     tags:
       - v*
 
@@ -19,6 +20,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@master
+      - name: Free disk space
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "=========original CI disk space"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "=========after clean up, the left CI disk space"
+          df -h
+
       - name: Get the version
         id: get_version
         run: |
