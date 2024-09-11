@@ -1,4 +1,4 @@
-name: Release Arm Image
+name: Release Image
 
 env:
   REGISTRY: docker.io
@@ -34,7 +34,7 @@ jobs:
         id: get_version
         run: |
           VERSION=${GITHUB_REF#refs/tags/}
-          if [[ ${GITHUB_REF} == "refs/heads/main" ]]; then
+          if [[ ${GITHUB_REF} == "refs/heads/master" ]]; then
             VERSION=latest
           fi
           echo ::set-output name=VERSION::${VERSION}

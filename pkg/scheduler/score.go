@@ -37,7 +37,7 @@ func viewStatus(usage NodeUsage) {
 
 func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
 	//General type check, NVIDIA->NVIDIA MLU->MLU
-	klog.Infoln("containes======", d.Type, n.Type)
+	klog.Infoln("Type contains", d.Type, n.Type)
 	if !strings.Contains(d.Type, n.Type) {
 		return false, false
 	}
