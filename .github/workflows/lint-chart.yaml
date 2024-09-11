@@ -3,7 +3,7 @@ name: Chart Lint
 on:
   pull_request:
   push:
-    branches: ["master"]
+    branches: ["master","dev"]
 
 jobs:
   chart-lint-test:
