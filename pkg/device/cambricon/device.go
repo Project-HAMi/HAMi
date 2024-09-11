@@ -242,20 +242,25 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
 	mluResourceCores := corev1.ResourceName(MLUResourceCores)
+	for idx, val := range ctr.Resources.Limits {
+		klog.Infoln("idx=", idx, "val=", val, ctr.Resources.Limits[mluResourceMem])
+	}
 	v, ok := ctr.Resources.Limits[mluResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[mluResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			klog.Info("Found iluvatar devices")
+			klog.Info("Found cambricon devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[mluResourceMem]
 			}
+			klog.Infoln("mluResourceMem", mem, "ok=", ok, "memoryname=", mluResourceMem)
 			if ok {
 				memnums, ok := mem.AsInt64()
+				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
 					memnum = int(memnums) * 256
 				}
