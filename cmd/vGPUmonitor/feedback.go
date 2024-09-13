@@ -22,8 +22,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"k8s.io/apimachinery/pkg/util/wait"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
