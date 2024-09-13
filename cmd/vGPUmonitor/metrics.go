@@ -178,7 +178,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 	containerLister := cc.ClusterManager.containerLister
 
-	// Why do we still need to manually update after starting another goroutine
+	// Why do we still need to manually update after starting another goroutine ?
 	//if err := containerLister.Update(); err != nil {
 	//	klog.Error("Update container error: %s", err.Error())
 	//}
