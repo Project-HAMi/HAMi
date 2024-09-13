@@ -23,11 +23,12 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/lister"
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
+
+	"github.com/Project-HAMi/HAMi/pkg/lister"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 
 	"k8s.io/klog/v2"
 )
