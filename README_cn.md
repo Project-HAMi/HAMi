@@ -1,4 +1,4 @@
-<img src="imgs/hami-graph-color.png" width="200px">
+<img src="imgs/hami-horizontal-colordark.png" width="600px">
 
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/build-image-release.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/build-image-release.yaml)
@@ -10,16 +10,11 @@
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
 [![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
+[![website](https://img.shields.io/badge/website-blue)](http://project-hami.io)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
 
 
-# HAMi--异构算力虚拟化中间件
-
-<p>
-<img src="https://github.com/cncf/artwork/blob/main/other/illustrations/ashley-mcnamara/transparent/cncf-cloud-gophers-transparent.png" style="width:700px;" />
-</p>
-
-**HAMi is a [Cloud Native Computing Foundation](https://cncf.io/) sandbox project & [Landscape project](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) & [CNAI Landscape project](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).**
+# Project-HAMi；异构算力虚拟化中间件
 
 ## 支持设备：
 
@@ -31,41 +26,32 @@
 
 ## 简介
 
-!<img src="./imgs/example.png" width = "600" /> 
+HAMi，原名“k8s-vGPU-scheduler”，是管理Kubernetes中异构设备的中间件。它可以管理不同类型的异构设备（如GPU、NPU等），在Pod之间共享异构设备，根据设备的拓扑信息和调度策略做出更好的调度决策。
 
-异构算力虚拟化中间件HAMi满足了所有你对于管理异构算力集群所需要的能力，包括：
+它旨在消除不同异构设备之间的差距，为用户提供一个统一的管理接口，且无需更改应用程序。截至 2024年6月，HAMi已广泛应用于全球互联网/云/金融/制造等多个行业，被超过40多家公司或机构采纳。他们中的许多不仅是最终用户，也是项目积极的贡献者。
 
-***设备复用***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
+![cncf_logo](imgs/cncf-logo.png)
 
-***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）或者显存比例（例如50%）来分配GPU，vGPU调度器会确保任务使用的显存不会超过分配数值
+HAMi 是[Cloud Native Computing Foundation](https://cncf.io/)(CNCF)基金会的sandbox项目和[landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami)项目，并且是
+[CNAI Landscape project](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
 
-***指定设备型号***：当前任务可以通过设置annotation的方式，来选择使用或者不使用某些具体型号的设备
+## 虚拟化能力
 
-***设备指定UUID***：当前任务可以通过设置`annotation`的方式，来选择使用或者不使用指定的设备，比如："nvidia.com/use-gpuuuid" or "nvidia.com/nouse-gpuuuid"
+HAMi通过支持设备共享和设备资源隔离，为包括GPU在内的多个异构设备提供设备虚拟化。有关支持设备虚拟化的设备列表，请参阅 [支持的设备]（#支持设备）
 
-***无侵入***:  vGPU调度器兼容nvidia官方插件的显卡分配方式，所以安装完毕后，你不需要修改原有的任务文件就可以使用vGPU的功能。当然，你也可以自定义的资源名称
+### 设备复用能力
 
-***调度策略***:  vGPU调度器支持多种调度策略，包括节点、GPU卡纬度的调度策略，可以通过调度器的参数来进行默认设置，同时也可以根据应用场景，通过设置 Pod 的`annotation`来选择，比如："hami.io/node-scheduler-policy" or "hami.io/gpu-scheduler-policy"，两个纬度都支持`binpack`和`spread`两种策略。
+- 允许通过指定显存来申请算力设备
+- 算力资源的硬隔离
+- 允许通过指定算力使用比例来申请算力设备
+- 对已有程序零改动
 
-## 使用场景
+<img src="./imgs/example.png" width = "500" /> 
 
-1. 云原生场景下需要复用算力设备的场合
-2. 需要定制异构算力申请的场合，如申请特定显存大小的虚拟GPU，每个虚拟GPU使用特定比例的算力。
-3. 在多个异构算力节点组成的集群中，任务需要根据自身的显卡需求分配到合适的节点执行。
-4. 显存、计算单元利用率低的情况，如在一张GPU卡上运行10个tf-serving。
-5. 需要大量小显卡的情况，如教学场景把一张GPU提供给多个学生使用、云平台提供小GPU实例。
+### 设备资源隔离能力
 
-## 产品设计
-
-<img src="./imgs/hami-arch.png" width = "600" />
-
-HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的调度器，以及针对各种不同的异构算力设备对应的设备插件和容器内的控制组件，整体的架构特性如上图所示。
-
-## 产品特性
-
-- 显存资源的硬隔离
-
-一个硬隔离的简单展示：
+HAMi支持设备资源的硬隔离
+一个以NVIDIA GPU为例硬隔离的简单展示：
 一个使用以下方式定义的任务提交后
 ```yaml
       resources:
@@ -77,12 +63,21 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 
 ![img](./imgs/hard_limit.jpg)
 
-- 允许通过指定显存来申请算力设备
-- 算力资源的硬隔离
-- 允许通过指定算力使用比例来申请算力设备
-- 对已有程序零改动
+## 项目架构图
 
-## 安装要求
+<img src="./imgs/hami-arch.png" width = "600" />
+
+HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的调度器，以及针对各种不同的异构算力设备对应的设备插件和容器内的控制组件，整体的架构特性如上图所示。
+
+
+## 快速入门
+
+### 选择你的集群调度器
+
+[![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](https://github.com/Project-HAMi/HAMi#quick-start)
+[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
+
+### 安装要求
 
 * NVIDIA drivers >= 440
 * nvidia-docker version > 2.0 
@@ -92,86 +87,7 @@ HAMi 包含以下几个组件，一个统一的mutatingwebhook，一个统一的
 * kernel version >= 3.10
 * helm > 3.0 
 
-## 快速入门
-
-### 选择你的集群调度器
-
-[![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](https://github.com/Project-HAMi/HAMi#quick-start)
-[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
-
-### 准备节点
-
-<details> <summary> 配置 nvidia-container-toolkit </summary>
-
-### GPU节点准备
-
-以下步骤要在所有GPU节点执行,这份README文档假定GPU节点已经安装NVIDIA驱动。它还假设您已经安装docker或container并且需要将nvidia-container-runtime配置为要使用的默认低级运行时。
-
-#### 安装步骤举例：
-
-```bash
-# 加入套件仓库
-distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-curl -s -L https://nvidia.github.io/libnvidia-container/gpgkey | sudo apt-key add -
-curl -s -L https://nvidia.github.io/libnvidia-container/$distribution/libnvidia-container.list | sudo tee /etc/apt/sources.list.d/libnvidia-container.list
-
-sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
-```
-
-##### 配置docker
-你需要在节点上将nvidia runtime做为你的docker runtime预设值。我们将编辑docker daemon的配置文件，此文件通常在`/etc/docker/daemon.json`路径：
-
-```json
-{
-    "default-runtime": "nvidia",
-    "runtimes": {
-        "nvidia": {
-            "path": "/usr/bin/nvidia-container-runtime",
-            "runtimeArgs": []
-        }
-    }
-}
-```
-```bash
-systemctl daemon-reload && systemctl restart docker
-```
-##### 配置containerd
-你需要在节点上将nvidia runtime做为你的containerd runtime预设值。我们将编辑containerd daemon的配置文件，此文件通常在`/etc/containerd/config.toml`路径
-```toml
-version = 2
-[plugins]
-  [plugins."io.containerd.grpc.v1.cri"]
-    [plugins."io.containerd.grpc.v1.cri".containerd]
-      default_runtime_name = "nvidia"
-
-      [plugins."io.containerd.grpc.v1.cri".containerd.runtimes]
-        [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia]
-          privileged_without_host_devices = false
-          runtime_engine = ""
-          runtime_root = ""
-          runtime_type = "io.containerd.runc.v2"
-          [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.nvidia.options]
-            BinaryName = "/usr/bin/nvidia-container-runtime"
-```
-```bash
-systemctl daemon-reload && systemctl restart containerd
-```
-
-</details>
-
-<details> <summary> 为GPU节点打上标签 </summary>
-
-最后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
-
-```bash
-kubectl label nodes {nodeid} gpu=on
-```
-
-</details>
-
-### 安装，更新与卸载
-
-<details> <summary> 安装 </summary>
+### 安装
 
 首先使用helm添加我们的 repo
 
@@ -179,7 +95,13 @@ kubectl label nodes {nodeid} gpu=on
 helm repo add hami-charts https://project-hami.github.io/HAMi/
 ```
 
-随后，使用下列指令获取集群服务端版本
+随后，你需要将所有要使用到的GPU节点打上gpu=on标签，否则该节点不会被调度到
+
+```bash
+kubectl label nodes {nodeid} gpu=on
+```
+
+使用下列指令获取集群服务端版本
 
 ```bash
 kubectl version
@@ -198,32 +120,6 @@ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.
 ```bash
 kubectl get pods -n kube-system
 ```
-
-</details>
-
-<details> <summary> 更新 </summary>
-
-只需要更新helm repo，并重新启动整个Chart即可自动完成更新，最新的镜像会被自动下载
-
-```bash
-helm uninstall hami -n kube-system
-helm repo update
-helm install hami hami-charts/hami -n kube-system
-```
-
-> **注意:** *如果你没有清理完任务就进行热更新的话，正在运行的任务可能会出现段错误等报错.*
-
-</details>
-
-<details> <summary> 卸载 </summary>
-
-```bash
-helm uninstall hami -n kube-system
-```
-
-> **注意:** *卸载组件并不会使正在运行的任务失败.*
-
-</details>
 
 ### 提交任务
 
@@ -256,12 +152,11 @@ spec:
 > 
 > *2. 不要设置nodeName字段，类似需求请使用nodeSelector.* 
 
-</details>
-
 #### 更多范例
 
 点击 [范例](examples/nvidia)
 
+</details>
 
 ### 监控：
 
@@ -281,9 +176,7 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 
 </details>
 
-## [性能测试](docs/benchmark_cn.md)
-
-## 已知问题
+## 注意事项
 
 - 目前仅支持计算任务，不支持视频编解码处理。
 - 暂时仅支持MIG的"none"和"mixed"模式，暂时不支持single模式
@@ -292,32 +185,23 @@ grafana dashboard [示例](docs/dashboard_cn.md)
   - 手动执行`kubectl edit daemonset` 修改 `device-plugin` 的环境变量从`NodeName` 改为 `NODE_NAME`。
   - 使用helm升级到最新版本，最新版`device-plugin`的镜像版本是`v2.3.10`，执行 `helm upgrade hami hami/hami -n kube-system`, 会自动修复。
 
-## 开发计划
+## 社区治理
 
-- 目前支持的异构算力设备及其对应的复用特性如下表所示
-
-| 产品  | 制造商 | 显存隔离 | 算力隔离 | 多卡支持 |
-|-------------|------------|-----------------|---------------|-------------------|
-| GPU         | NVIDIA     | ✅              | ✅            | ✅                |
-| MLU         | 寒武纪  | ✅              | ❌            | ❌                |
-| DCU         | 海光      | ✅              | ✅            | ❌                |
-| Ascend      | 华为     | 开发中     | 开发中   | ❌                |
-| GPU         | 天数智芯   | 开发中     | 开发中   | ❌                |
-| DPU         | 太初       | 开发中     | 开发中   | ❌                | 
-
-- [ ] 支持视频编解码处理。
-- [ ] 支持Multi-Instance GPUs (MIG)。
-- [ ] 支持更加灵活的调度策略。
-  - [ ] binpack
-  - [ ] spread
-  - [ ] numa affinity
-- [ ] 与 nvidia gpu-operator 集成。
-- [ ] 更丰富的可观测性能力支持。
-- [ ] 支持 DRA。
-- [ ] 支持 Intel GPU device。
-- [ ] 支持 AMD GPU device。
-
-
-## 参与贡献
+该项目由一组 [Maintainers and Committers]（https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS） 管理。我们的 [治理文件]（https://github.com/Project-HAMi/community/blob/main/governance.md） 中概述了如何选择和管理它们。
 
 如果你想成为 HAMi 的贡献者，请参[考贡献者指南](CONTRIBUTING.md),里面有详细的贡献流程。
+
+请参阅 [RoadMap]（docs/develop/roadmap.md） 查看您感兴趣的任何内容。
+
+## 项目周会和联系方式
+
+HAMi 社区致力于营造一个开放和友好的环境，并通过多种方式与其他用户和开发人员互动。
+
+如果您有任何问题，请随时通过以下渠道与我们联系：
+
+- 定期社区会议：周五 16：00 UTC+8（中文）(每周). [转换为您的时区](https://www.thetimezoneconverter.com/?t=14%3A30&tz=GMT%2B8&)。
+  - [会议纪要及议程](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
+  - [会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
+- 电子邮件：请参阅[MAINTAINERS.md](MAINTAINERS.md)以查找所有维护者的电子邮件地址。请随时通过电子邮件与他们联系以报告任何问题或提出问题。
+- [邮件列表](https://groups.google.com/forum/#!forum/hami-project)
+- [slack](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
