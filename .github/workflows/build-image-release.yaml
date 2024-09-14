@@ -2,7 +2,7 @@ name: Release Image
 
 env:
   REGISTRY: docker.io
-  IMAGE_REPO: projecthami/hami
+  IMAGE_REPO: ${{ secrets.IMAGE_REPO || 'projecthami/hami' }}
   IMAGE_ROOT_PATH: docker
   BUILD_PLATFORM: linux/arm64,linux/amd64
   REGISTER_USER: ${{ github.actor }}

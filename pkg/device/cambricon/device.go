@@ -63,7 +63,7 @@ var (
 type CambriconDevices struct {
 }
 
-func (dev *CambriconDevices) ParseConfig(fs *flag.FlagSet) {
+func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&MLUResourceCount, "cambricon-mlu-name", "cambricon.com/mlu", "cambricon mlu resource count")
 	fs.StringVar(&MLUResourceMemory, "cambricon-mlu-memory", "cambricon.com/mlu.smlu.vmemory", "cambricon mlu memory resource")
 	fs.StringVar(&MLUResourceCores, "cambricon-mlu-cores", "cambricon.com/mlu.smlu.vcore", "cambricon mlu core resource")
@@ -73,6 +73,10 @@ func InitMLUDevice() *CambriconDevices {
 	util.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
 	util.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
 	return &CambriconDevices{}
+}
+
+func (dev *CambriconDevices) CommonWord() string {
+	return CambriconMLUCommonWord
 }
 
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
@@ -179,7 +183,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, e
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &api.DeviceInfo{
 			Index:   i,
-			Id:      n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
+			ID:      n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:   100,
 			Devmem:  int32(memoryTotal * 256 * 100 / cards),
 			Devcore: 100,

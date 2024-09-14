@@ -147,7 +147,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
 		res = append(res, &api.DeviceInfo{
-			Id:      UUID,
+			ID:      UUID,
 			Count:   int32(*util.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(*util.DeviceCoresScaling * 100),

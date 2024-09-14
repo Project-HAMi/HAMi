@@ -1,0 +1,12 @@
+{{- if .Values.devices.ascend.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}-device
+  labels:
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+data:
+  ascend-config.yaml: |-
+    {{ .Files.Get "device-spec/ascend-config.yaml" | nindent 4}}
+{{- end }}
