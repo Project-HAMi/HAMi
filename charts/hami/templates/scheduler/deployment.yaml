@@ -96,13 +96,13 @@ spec:
             - --cambricon-mlu-name={{ .Values.mluResourceName }}
             - --cambricon-mlu-memory={{ .Values.mluResourceMem }}
             - --cambricon-mlu-cores={{ .Values.mluResourceCores }}
-            - --ascend-name={{ .Values.ascendResourceName }}
-            - --ascend-memory={{ .Values.ascendResourceMem }}
-            - --ascend310p-name={{ .Values.ascend310PResourceName }}
-            - --ascend310p-memory={{ .Values.ascend310PResourceMem }}
             - --overwrite-env={{ .Values.scheduler.overwriteEnv }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
+            {{- if .Values.devices.ascend.enabled }}
+            - --ascend-config-file=/ascend-config.yaml
+            - --enable-ascend=true
+            {{- end }}
             {{- if .Values.scheduler.nodeLabelSelector }}
             - --node-label-selector={{- $first := true -}}
               {{- range $key, $value := .Values.scheduler.nodeLabelSelector -}}
@@ -121,6 +121,11 @@ spec:
           volumeMounts:
             - name: tls-config
               mountPath: /tls
+            {{- if .Values.devices.ascend.enabled }}
+            - name: ascend-config
+              mountPath: /ascend-config.yaml
+              subPath: ascend-config.yaml
+            {{- end }}
           {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             httpGet:
@@ -144,6 +149,11 @@ spec:
             {{- else }}
             name: {{ template "hami-vgpu.scheduler" . }}
             {{- end }}
+        {{- end }}
+        {{- if .Values.devices.ascend.enabled }}
+        - name: ascend-config
+          configMap:
+            name: {{ include "hami-vgpu.scheduler" . }}-ascend
         {{- end }}
       {{- if .Values.scheduler.nodeSelector }}
       nodeSelector: {{ toYaml .Values.scheduler.nodeSelector | nindent 8 }}

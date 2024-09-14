@@ -57,7 +57,11 @@ func InitDCUDevice() *DCUDevices {
 	return &DCUDevices{}
 }
 
-func (dev *DCUDevices) ParseConfig(fs *flag.FlagSet) {
+func (dev *DCUDevices) CommonWord() string {
+	return HygonDCUCommonWord
+}
+
+func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&HygonResourceCount, "dcu-name", "hygon.com/dcunum", "dcu resource count")
 	fs.StringVar(&HygonResourceMemory, "dcu-memory", "hygon.com/dcumem", "dcu memory resource")
 	fs.StringVar(&HygonResourceCores, "dcu-cores", "hygon.com/dcucores", "dcu core resource")

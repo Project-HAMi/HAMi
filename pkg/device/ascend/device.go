@@ -17,9 +17,11 @@ limitations under the License.
 package ascend
 
 import (
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -32,124 +34,168 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type AscendDevices struct {
+type Devices struct {
+	config           VNPUConfig
+	nodeRegisterAnno string
+	useUUIDAnno      string
+	noUseUUIDAnno    string
+	handshakeAnno    string
 }
 
-const (
-	AscendDevice          = "Ascend"
-	AscendDeviceSelection = "huawei.com/predicate-ascend-idx-"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
-	AscendDeviceUseUUID = "huawei.com/use-ascenduuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
-	AscendNoUseUUID = "huawei.com/nouse-ascenduuid"
-)
+type RuntimeInfo struct {
+	UUID string `json:"UUID,omitempty"`
+	Temp string `json:"temp,omitempty"`
+}
+
+//const (
+//	useUUIDAnno   = "huawei.com/use-ascend-uuid"
+//	noUseUUIDAnno = "huawei.com/no-use-ascend-uuid"
+//)
 
 var (
-	AscendResourceCount  string
-	AscendResourceMemory string
-	AscendResourceCores  string
+	enableAscend bool
+	configFile   string
 )
 
-func InitDevice() *AscendDevices {
-	util.InRequestDevices[AscendDevice] = "hami.io/ascend-devices-to-allocate"
-	util.SupportDevices[AscendDevice] = "hami.io/ascend-devices-allocated"
-	return &AscendDevices{}
-}
-
-func (dev *AscendDevices) ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&AscendResourceCount, "ascend-name", "huawei.com/Ascend910", "iluvatar resource count")
-	fs.StringVar(&AscendResourceMemory, "ascend-memory", "huawei.com/Ascend910-memory", "iluvatar memory resource")
-}
-
-func (dev *AscendDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
-	count, ok := ctr.Resources.Limits[corev1.ResourceName(AscendResourceCount)]
-	if ok {
-		if count.Value() > 1 {
-			memory, ok := ctr.Resources.Limits[corev1.ResourceName(AscendResourceMemory)]
-			if ok && memory.Value() != 65536 {
-				return true, errors.New("vNPU nor supported for multiple devices")
-			}
-			return true, nil
-		}
-		if count.Value() == 1 {
-			memory, ok := ctr.Resources.Limits[corev1.ResourceName(AscendResourceMemory)]
-			if ok {
-				ctr.Resources.Limits[corev1.ResourceName(AscendResourceMemory)] = resource.MustParse(fmt.Sprint(trimMemory(memory.Value())))
-				ctr.Resources.Requests[corev1.ResourceName(AscendResourceMemory)] = resource.MustParse(fmt.Sprint(trimMemory(memory.Value())))
-			}
-			return true, nil
+func (dev *Devices) trimMemory(m int64) (int64, string) {
+	for i := 0; i < len(dev.config.Templates); i++ {
+		if m <= dev.config.Templates[i].Memory {
+			return dev.config.Templates[i].Memory, dev.config.Templates[i].Name
 		}
 	}
-	return false, nil
+	if m <= dev.config.MemoryCapacity {
+		return dev.config.MemoryAllocatable, ""
+	}
+	return 0, ""
 }
 
-func (dev *AscendDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
-	nodedevices := []*api.DeviceInfo{}
-	i := 0
-	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(AscendResourceCount), resource.DecimalSI).AsInt64()
-	for int64(i)*10 < cards {
-		nodedevices = append(nodedevices, &api.DeviceInfo{
-			Index:   i,
-			Id:      n.Name + "-Ascend910-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(65536),
-			Devcore: 100,
-			Type:    AscendDevice,
-			Numa:    0,
-			Health:  true,
+func InitDevices() []*Devices {
+	var devs []*Devices
+	if !enableAscend {
+		return devs
+	}
+	config, err := LoadConfig(configFile)
+	if err != nil {
+		klog.Fatalf("failed to load ascend vnpu config file %s: %v", configFile, err)
+	}
+	for _, vnpu := range config.VNPUs {
+		commonWord := vnpu.CommonWord
+		dev := &Devices{
+			config:           vnpu,
+			nodeRegisterAnno: fmt.Sprintf("hami.io/node-register-%s", commonWord),
+			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
+			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
+			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+		}
+		sort.Slice(dev.config.Templates, func(i, j int) bool {
+			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
 		})
-		i++
+		util.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+		util.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		devs = append(devs, dev)
+		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
 	}
-	return nodedevices, nil
+	return devs
 }
 
-func (dev *AscendDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
-	devlist, ok := pd[AscendDevice]
-	if ok && len(devlist) > 0 {
-		(*annoinput)[util.InRequestDevices[AscendDevice]] = util.EncodePodSingleDevice(devlist)
-		(*annoinput)[util.SupportDevices[AscendDevice]] = util.EncodePodSingleDevice(devlist)
-		(*annoinput)["predicate-time"] = strconv.FormatInt(time.Now().Unix(), 10)
-		allocateStr := "huawei.com/Ascend910"
-		for _, dp := range devlist {
-			value := ""
-			for _, val := range dp {
-				value = value + "Ascend910-"
-				if val.Usedmem == 16384 {
-					value = value + "vir05_1c_16g-"
-				} else if val.Usedmem == 32768 {
-					value = value + "vir10_3c_32g-"
-				}
-				value = value + fmt.Sprint(val.Idx) + ","
-			}
-			if len(value) > 0 {
-				(*annoinput)[allocateStr] = strings.TrimRight(value, ",")
-			}
+func ParseConfig(fs *flag.FlagSet) {
+	fs.BoolVar(&enableAscend, "enable-ascend", false, "enable ascend device")
+	fs.StringVar(&configFile, "ascend-config-file", "", "ascend vnpu config file")
+}
+
+func (dev *Devices) CommonWord() string {
+	return dev.config.CommonWord
+}
+
+func (dev *Devices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
+	if !ok {
+		return false, nil
+	}
+	trimMem := dev.config.MemoryAllocatable
+	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	if ok {
+		trimMem, _ = dev.trimMemory(memory.Value())
+		if trimMem <= 0 {
+			return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, memory.Value())
 		}
 	}
-	return *annoinput
+	if count.Value() > 1 {
+		if trimMem != dev.config.MemoryAllocatable {
+			return true, errors.New("vNPU nor supported for multiple devices")
+		}
+	}
+	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
+	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
+	return true, nil
 }
 
-func (dev *AscendDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+	anno, ok := n.Annotations[dev.nodeRegisterAnno]
+	if !ok {
+		return []*api.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
+	}
+	nodeDevices, err := util.UnMarshalNodeDevices(anno)
+	if err != nil {
+		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
+		return []*api.DeviceInfo{}, err
+	}
+	if len(nodeDevices) == 0 {
+		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
+		return []*api.DeviceInfo{}, errors.New("no device found on node")
+	}
+	return nodeDevices, nil
+}
+
+func (dev *Devices) PatchAnnotations(annoInput *map[string]string, pd util.PodDevices) map[string]string {
+	commonWord := dev.CommonWord()
+	devList, ok := pd[commonWord]
+	if ok && len(devList) > 0 {
+		(*annoInput)[util.InRequestDevices[commonWord]] = util.EncodePodSingleDevice(devList)
+		(*annoInput)[util.SupportDevices[commonWord]] = util.EncodePodSingleDevice(devList)
+		(*annoInput)["predicate-time"] = strconv.FormatInt(time.Now().Unix(), 10)
+		allocateStr := fmt.Sprintf("huawei.com/%s", dev.CommonWord())
+		var rtInfo []RuntimeInfo
+		for _, dp := range devList {
+			for _, val := range dp {
+				_, temp := dev.trimMemory(int64(val.Usedmem))
+				rtInfo = append(rtInfo, RuntimeInfo{
+					UUID: val.UUID,
+					Temp: temp,
+				})
+			}
+		}
+		s, err := json.Marshal(rtInfo)
+		if err != nil {
+			klog.ErrorS(err, "failed to marshal runtime info", "runtime info", rtInfo)
+		}
+		(*annoInput)[allocateStr] = string(s)
+	}
+	return *annoInput
+}
+
+func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *AscendDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *AscendDevices) NodeCleanUp(nn string) error {
-	return nil
+func (dev *Devices) NodeCleanUp(nn string) error {
+	return util.MarkAnnotationsToDelete(dev.handshakeAnno, nn)
 }
 
-func (dev *AscendDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, AscendDevice) == 0 {
+func (dev *Devices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+	if strings.Compare(n.Type, dev.CommonWord()) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *AscendDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
-	userUUID, ok := annos[AscendDeviceUseUUID]
+func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+	userUUID, ok := annos[dev.useUUIDAnno]
 	if ok {
 		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
@@ -162,7 +208,7 @@ func (dev *AscendDevices) CheckUUID(annos map[string]string, d util.DeviceUsage)
 		return false
 	}
 
-	noUserUUID, ok := annos[AscendNoUseUUID]
+	noUserUUID, ok := annos[dev.noUseUUIDAnno]
 	if ok {
 		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
@@ -177,31 +223,21 @@ func (dev *AscendDevices) CheckUUID(annos map[string]string, d util.DeviceUsage)
 	return true
 }
 
-func (dev *AscendDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	return util.CheckHealth(devType, n)
 }
 
-func trimMemory(i int64) int64 {
-	if i <= 16384 {
-		return 16384
-	}
-	if i <= 32768 {
-		return 32768
-	}
-	return 0
-}
-
-func (dev *AscendDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting ascend 910B devices")
-	ascendResourceCount := corev1.ResourceName(AscendResourceCount)
-	ascendResourceMem := corev1.ResourceName(AscendResourceMemory)
+func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+	klog.Infof("Counting %s devices", dev.config.CommonWord)
+	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
+	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	v, ok := ctr.Resources.Limits[ascendResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[ascendResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			klog.Info("Found ascend 910B devices")
+			klog.Info("Found AscendDevices devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[ascendResourceMem]
 			if !ok {
@@ -210,7 +246,8 @@ func (dev *AscendDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
-					memnum = int(trimMemory(memnums))
+					m, _ := dev.trimMemory(memnums)
+					memnum = int(m)
 				}
 			}
 			corenum := int32(0)
@@ -222,7 +259,7 @@ func (dev *AscendDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 
 			return util.ContainerDeviceRequest{
 				Nums:             int32(n),
-				Type:             AscendDevice,
+				Type:             dev.CommonWord(),
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,

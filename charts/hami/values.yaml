@@ -27,15 +27,6 @@ iluvatarResourceName: "iluvatar.ai/vgpu"
 iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
 iluvatarResourceCore: "iluvatar.ai/vcuda-core"
 
-#Ascend 910B Parameters
-ascendResourceName: "huawei.com/Ascend910"
-ascendResourceMem: "huawei.com/Ascend910-memory"
-
-#Ascend 310P Parameters
-ascend310PResourceName: "huawei.com/Ascend310P"
-ascend310PResourceMem: "huawei.com/Ascend310P-memory"
-
-
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -143,3 +134,19 @@ devicePlugin:
     gpu: "on"
   tolerations: []
 
+devices:
+  ascend:
+    enabled: false
+    image: ""
+    imagePullPolicy: IfNotPresent
+    extraArgs: []
+    nodeSelector:
+      ascend: "on"
+    tolerations: []
+    resources:
+      - huawei.com/Ascend910A
+      - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910B
+      - huawei.com/Ascend910B-memory
+      - huawei.com/Ascend310P
+      - huawei.com/Ascend310P-memory

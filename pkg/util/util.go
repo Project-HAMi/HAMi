@@ -138,7 +138,7 @@ func DecodeNodeDevices(str string) ([]*api.DeviceInfo, error) {
 				health, _ := strconv.ParseBool(items[6])
 				numa, _ := strconv.Atoi(items[5])
 				i := api.DeviceInfo{
-					Id:      items[0],
+					ID:      items[0],
 					Count:   int32(count),
 					Devmem:  int32(devmem),
 					Devcore: int32(devcore),
@@ -158,10 +158,24 @@ func DecodeNodeDevices(str string) ([]*api.DeviceInfo, error) {
 func EncodeNodeDevices(dlist []*api.DeviceInfo) string {
 	tmp := ""
 	for _, val := range dlist {
-		tmp += val.Id + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + OneContainerMultiDeviceSplitSymbol
+		tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + OneContainerMultiDeviceSplitSymbol
 	}
 	klog.Infof("Encoded node Devices: %s", tmp)
 	return tmp
+}
+
+func MarshalNodeDevices(dlist []*api.DeviceInfo) string {
+	data, err := json.Marshal(dlist)
+	if err != nil {
+		return ""
+	}
+	return string(data)
+}
+
+func UnMarshalNodeDevices(str string) ([]*api.DeviceInfo, error) {
+	var dlist []*api.DeviceInfo
+	err := json.Unmarshal([]byte(str), &dlist)
+	return dlist, err
 }
 
 func EncodeContainerDevices(cd ContainerDevices) string {

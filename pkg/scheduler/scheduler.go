@@ -176,7 +176,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			nodeNames = append(nodeNames, val.Name)
 			for devhandsk, devInstance := range device.GetDevices() {
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
-				klog.V(5).InfoS("node", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
+				klog.V(5).InfoS("device check health", "node", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 				if !health {
 					err := devInstance.NodeCleanUp(val.Name)
 					// If the device is not healthy, the device is removed from the node.
@@ -219,7 +219,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					_, ok := s.nodes[val.Name]
 					if ok {
 						for i1, val1 := range s.nodes[val.Name].Devices {
-							if strings.Compare(val1.ID, deviceinfo.Id) == 0 {
+							if strings.Compare(val1.ID, deviceinfo.ID) == 0 {
 								found = true
 								s.nodes[val.Name].Devices[i1].Devmem = deviceinfo.Devmem
 								s.nodes[val.Name].Devices[i1].Devcore = deviceinfo.Devcore
@@ -229,7 +229,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					}
 					if !found {
 						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
-							ID:           deviceinfo.Id,
+							ID:           deviceinfo.ID,
 							Index:        uint(deviceinfo.Index),
 							Count:        deviceinfo.Count,
 							Devmem:       deviceinfo.Devmem,

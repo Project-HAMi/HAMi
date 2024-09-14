@@ -68,7 +68,11 @@ func InitNvidiaDevice() *NvidiaGPUDevices {
 	return &NvidiaGPUDevices{}
 }
 
-func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
+func (dev *NvidiaGPUDevices) CommonWord() string {
+	return NvidiaGPUCommonWord
+}
+
+func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
 	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
