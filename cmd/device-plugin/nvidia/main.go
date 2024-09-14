@@ -250,7 +250,8 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 	//fmt.Println("NodeName=", config.NodeName)
 	devConfig, err := generateDeviceConfigFromNvidia(config, c, flags)
 	if err != nil {
-		fmt.Printf("failed to load config file %s", err.Error())
+		klog.Errorf("failed to load config file %s", err.Error())
+		return nil, false, err
 	}
 
 	// Update the configuration file with default resources.
