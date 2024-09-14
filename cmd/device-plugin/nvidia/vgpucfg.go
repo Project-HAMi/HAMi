@@ -107,7 +107,7 @@ func readFromConfigFile() error {
 	}
 	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
 	for _, val := range deviceConfigs.Nodeconfig {
-		if strings.Compare(os.Getenv(util.NodeNameEnvName), val.Name) == 0 {
+		if os.Getenv(util.NodeNameEnvName) == val.Name {
 			klog.Infof("Reading config from file %s", val.Name)
 			if val.Devicememoryscaling > 0 {
 				*util.DeviceMemoryScaling = val.Devicememoryscaling
@@ -118,6 +118,10 @@ func readFromConfigFile() error {
 			if val.Devicesplitcount > 0 {
 				*util.DeviceSplitCount = val.Devicesplitcount
 			}
+			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
+				util.DevicePluginFilterDevice = val.FilterDevice
+			}
+			klog.Infof("FilterDevice: %v", val.FilterDevice)
 		}
 	}
 	return nil
@@ -149,6 +153,8 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 			}
 		}
 	}
-	readFromConfigFile()
+	if err := readFromConfigFile(); err != nil {
+		return devcfg, err
+	}
 	return devcfg, nil
 }

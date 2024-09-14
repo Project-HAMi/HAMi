@@ -13,7 +13,11 @@ data:
                 "name": "m5-cloudinfra-online02",
                 "devicememoryscaling": 1.8,
                 "devicesplitcount": 10,
-                "migstrategy":"none"
+                "migstrategy":"none",
+                "filterdevices": {
+                  "uuid": [],
+                  "index": []
+                }
             }
         ]
     }

@@ -94,6 +94,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 	devs := plugin.Devices()
+	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
 	idx := 0
