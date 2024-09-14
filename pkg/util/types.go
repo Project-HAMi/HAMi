@@ -48,13 +48,21 @@ const (
 	NodeNameEnvName = "NODE_NAME"
 )
 
+type FilterDevice struct {
+	// UUID is the device ID.
+	UUID []string `json:"uuid"`
+	// Index is the device index.
+	Index []uint `json:"index"`
+}
+
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
-		Name                string  `json:"name"`
-		Devicememoryscaling float64 `json:"devicememoryscaling"`
-		Devicecorescaling   float64 `json:"devicecorescaling"`
-		Devicesplitcount    uint    `json:"devicesplitcount"`
-		Migstrategy         string  `json:"migstrategy"`
+		Name                string        `json:"name"`
+		Devicememoryscaling float64       `json:"devicememoryscaling"`
+		Devicecorescaling   float64       `json:"devicecorescaling"`
+		Devicesplitcount    uint          `json:"devicesplitcount"`
+		Migstrategy         string        `json:"migstrategy"`
+		FilterDevice        *FilterDevice `json:"filterdevices"`
 	} `json:"nodeconfig"`
 }
 
@@ -74,6 +82,9 @@ var (
 	NodeName            string
 	RuntimeSocketFlag   string
 	DisableCoreLimit    *bool
+
+	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
+	DevicePluginFilterDevice *FilterDevice
 )
 
 //	type ContainerDevices struct {

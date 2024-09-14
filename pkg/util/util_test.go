@@ -282,3 +282,142 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 		})
 	}
 }
+
+func Test_FilterDeviceToRegister(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			uuid string
+			idx  string
+			*FilterDevice
+		}
+		want bool
+	}{
+		{
+			name: "filter is nil",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid:         "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:          "0",
+				FilterDevice: nil,
+			},
+			want: false,
+		},
+		{
+			name: "uuid is empty",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "uuid is not in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b77"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "uuid is in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "idx is empty",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "idx is not in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					Index: []uint{1},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "idx is in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "idx is invalid",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "a",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			DevicePluginFilterDevice = test.args.FilterDevice
+			got := FilterDeviceToRegister(test.args.uuid, test.args.idx)
+			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
