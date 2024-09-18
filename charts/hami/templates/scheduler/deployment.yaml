@@ -122,7 +122,7 @@ spec:
             - name: tls-config
               mountPath: /tls
             {{- if .Values.devices.ascend.enabled }}
-            - name: ascend-config
+            - name: device-config
               mountPath: /ascend-config.yaml
               subPath: ascend-config.yaml
             {{- end }}
@@ -151,9 +151,9 @@ spec:
             {{- end }}
         {{- end }}
         {{- if .Values.devices.ascend.enabled }}
-        - name: ascend-config
+        - name: device-config
           configMap:
-            name: {{ include "hami-vgpu.scheduler" . }}-ascend
+            name: {{ include "hami-vgpu.scheduler" . }}-device
         {{- end }}
       {{- if .Values.scheduler.nodeSelector }}
       nodeSelector: {{ toYaml .Values.scheduler.nodeSelector | nindent 8 }}
