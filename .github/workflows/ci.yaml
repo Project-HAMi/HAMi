@@ -2,7 +2,11 @@ name: CI Workflow
 on:
   # Run this workflow every time a new commit pushed to upstream/fork repository.
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
-  pull_request:
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
   push:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
