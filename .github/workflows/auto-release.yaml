@@ -70,4 +70,9 @@ jobs:
         with:
           branch: 'release-${{ env.RUN_YBranchName }}'
           sha: '${{ github.sha }}'
-  
+  build-release-image:
+    needs: get-tag
+    uses: ./.github/workflows/call-image-release.yaml
+    with:
+      ref: ${{ needs.get-tag.outputs.tag }}
+    secrets: inherit
