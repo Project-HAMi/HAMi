@@ -1,5 +1,5 @@
 ##### Global variables #####
-include version.mk
+include version.mk Makefile.defs
 
 all: build
 
@@ -54,3 +54,22 @@ lint:
 verify:
 	hack/verify-all.sh
 
+.PHONY: lint_dockerfile
+lint_dockerfile:
+	@ docker run --rm \
+          -v $(ROOT_DIR)/.trivyignore:/.trivyignore \
+          -v /tmp/trivy:/root/trivy.cache/  \
+          -v $(ROOT_DIR):/tmp/src  \
+          aquasec/trivy:$(TRIVY_VERSION) config --exit-code 1  --severity $(LINT_TRIVY_SEVERITY_LEVEL) /tmp/src/docker  ; \
+      (($$?==0)) || { echo "error, failed to check dockerfile trivy" && exit 1 ; } ; \
+      echo "dockerfile trivy check: pass"
+
+.PHONY: lint_chart
+lint_chart:
+	@ docker run --rm \
+          -v $(ROOT_DIR)/.trivyignore:/.trivyignore \
+          -v /tmp/trivy:/root/trivy.cache/  \
+          -v $(ROOT_DIR):/tmp/src  \
+          aquasec/trivy:$(TRIVY_VERSION) config --exit-code 1  --severity $(LINT_TRIVY_SEVERITY_LEVEL) /tmp/src/charts  ; \
+      (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
+      echo "chart trivy check: pass"
