@@ -1,0 +1,144 @@
+name: 1.Release
+
+# it is trigger by tag event:
+# 1 build the release image, push images to ghcr.io, and build image like: ghcr.io/xxxx:v1.0.0
+# 2 package the chart package, update index.yaml and commit to '/charts' of branch 'github_pages' ( PR with label pr/release/robot_update_githubpage )
+# 3 create changelog file, commit to '/changelogs' of branch 'github_pages' for githubPage ( PR with label pr/release/robot_update_githubpage )
+# 4 commit '/docs' to '/docs' of branch 'github_pages'
+# 5 create a release , attached with the chart and changelog
+
+on:
+  release:
+    types:
+    - prereleased
+  push:
+    tags:
+      - v[0-9]+.[0-9]+.[0-9]+
+      - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag'
+        required: true
+        default: v1.0.0
+permissions: write-all
+
+jobs:
+  pre-release:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ env.RUN_TAG }}
+    steps:
+    - name: Check Version
+      run: |
+        TagVersion="${{ env.RUN_TAG }}"
+        RecordVersion=` cat VERSION  | tr -d ' ' | tr -d '\n' `
+        if [ "$RecordVersion" != "$TagVersion" ] ; then
+          echo "error, version $RecordVersion of '/VERSION' is different with Tag $TagVersion "
+          exit 1
+        fi
+        #no need to check chart version, which will auto update to /VERSION by CI
+      # generate release notes for the new release branch
+    - name: Generate pre release notes
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        prerelease: true
+        generate_release_notes: true
+
+  ensure-tag:
+    runs-on: ubuntu-latest
+    needs: pre-release
+    outputs:
+      tag: ${{ env.RUN_TAG }}
+    steps:
+      - name: Free disk space
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "=========original CI disk space"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "=========after clean up, the left CI disk space"
+          df -h
+      - name: Get Ref
+        id: get_ref
+        run: |
+          if ${{ github.event_name == 'workflow_dispatch' }} ; then
+            echo "call by self workflow_dispatch"
+            echo "RUN_TAG=${{ github.event.inputs.tag }}" >> $GITHUB_ENV
+            YBranchName=` grep -Eo "v[0-9]+\.[0-9]+" <<< "${{ github.event.inputs.tag }}" `
+          elif ${{ github.event_name == 'push' }} ; then
+            echo "call by push tag"
+            echo "RUN_TAG=${GITHUB_REF##*/}" >> $GITHUB_ENV
+            YBranchName=` grep -Eo "v[0-9]+\.[0-9]+" <<< "${GITHUB_REF##*/}" `
+          else
+            echo "unexpected event: ${{ github.event_name }}"
+            exit 1
+          fi
+          echo "YBranchName=${YBranchName}"
+          if [ -n "$YBranchName" ] ; then
+              echo "RUN_YBranchName=${YBranchName}" >> $GITHUB_ENV
+          else
+              echo "error, failed to find y branch"
+              exit 1
+          fi
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.RUN_TAG }}
+        # if branch exists, the action will no fail, and it output created=false
+      - name: release Y branch
+        uses: peterjgrainger/action-create-branch@v3.0.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          branch: 'release-${{ env.RUN_YBranchName }}'
+          sha: '${{ github.sha }}'
+
+
+  release-image:
+    needs: ensure-tag
+    uses: ./.github/workflows/call-release-image.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+    secrets: inherit
+
+  release-chart:
+    needs: [ensure-tag]
+    uses: ./.github/workflows/call-release-helm.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+      submit: true
+    secrets: inherit
+
+  # generate changelog and update to github releases pages
+  release-notes:
+    needs: [release-chart,release-image]
+    uses: ./.github/workflows/call-release-notes.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+  
+  release-website:
+    needs: [release-notes]
+    uses: ./.github/workflows/call-release-website.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+  # excute a full e2e test when hami release
+  release-e2e:
+    needs: [release-notes]
+    uses: ./.github/workflows/call-e2e.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+
+  # excute a compatibility test when hami release
+  release-e2e-upgrade:
+      needs: [release-notes]
+      uses: ./.github/workflows/call-e2e-upgrade.yaml
+      with:
+        ref: ${{ needs.ensure-tag.outputs.tag }}
+  

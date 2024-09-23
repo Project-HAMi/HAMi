@@ -10,5 +10,7 @@ type: application
 maintainers:
   - name: limengxuan
     email: limengxuan@4paradigm.com
-appVersion: 2.3
+  - name: zhangxiao
+    email: xiaozhang0210@hotmail.com
+appVersion: "2.3"
 
