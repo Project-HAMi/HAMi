@@ -1,0 +1,21 @@
+
+SHELL := /bin/bash
+.SHELLFLAGS := -eu -o pipefail -c
+
+ROOT_DIR := $(shell dirname $(realpath $(lastword $(MAKEFILE_LIST))))
+
+INSTALL = install
+
+PREFIX?=/usr
+BINDIR?=$(PREFIX)/bin
+TARGETARCH ?= amd64
+
+DESTDIR_BIN ?= $(ROOT_DIR)/output/$(TARGETARCH)/bin
+DESTDIR_BASH_COMPLETION ?= $(ROOT_DIR)/output/$(TARGETARCH)/bash-completion
+
+VERSION = $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))/VERSION)
+
+ECHO_GEN=echo "  GEN   $(RELATIVE_DIR)/"
+
+LINT_TRIVY_SEVERITY_LEVEL ?= CRITICAL
+TRIVY_VERSION=0.36.0
