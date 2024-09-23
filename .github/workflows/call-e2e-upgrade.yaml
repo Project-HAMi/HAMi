@@ -1,0 +1,18 @@
+name: Call e2e upgrade test
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+permissions: write-all
+
+jobs:
+  upgrade-e2e:
+    runs-on: ubuntu-latest
+    steps:
+      - name: e2e upgrade test
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "Need to add e2e upgrade test"
