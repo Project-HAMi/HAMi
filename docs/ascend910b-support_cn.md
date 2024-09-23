@@ -32,6 +32,90 @@ wget https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/master/
 kubectl apply -f ascendplugin-910-hami.yaml
 ```
 
+## 自定义 NPU 虚拟化参数
+HAMi 目前有一个 NPU 内置[虚拟化配置文件](https://github.com/Project-HAMi/HAMi/blob/master/charts/hami/templates/scheduler/device-configmap.yaml).
+
+当然 HAMi 也支持通过以下方式自定义虚拟化参数:
+<details>
+  <summary>自定义配置</summary>
+
+  ### 在 HAMi charts 创建 files 的目录，创建后的目录架构应为如下所示
+  
+  ```bash
+  tree -L 1
+  .
+  ├── Chart.yaml
+  ├── files
+  ├── templates
+  └── values.yaml
+  ```
+
+  ### 在 files 目录下创建 Create the ascend-config.yaml 文件，配置文件如下所示, 可以按需调整
+
+  ```yaml
+  vnpus:
+- chipName: 910B
+  commonWord: Ascend910A
+  resourceName: huawei.com/Ascend910A
+  resourceMemoryName: huawei.com/Ascend910A-memory
+  memoryAllocatable: 32768
+  memoryCapacity: 32768
+  aiCore: 30
+  templates:
+    - name: vir02
+      memory: 2184
+      aiCore: 2
+    - name: vir04
+      memory: 4369
+      aiCore: 4
+    - name: vir08
+      memory: 8738
+      aiCore: 8
+    - name: vir16
+      memory: 17476
+      aiCore: 16
+- chipName: 910B3
+  commonWord: Ascend910B
+  resourceName: huawei.com/Ascend910B
+  resourceMemoryName: huawei.com/Ascend910B-memory
+  memoryAllocatable: 65536
+  memoryCapacity: 65536
+  aiCore: 20
+  aiCPU: 7
+  templates:
+    - name: vir05_1c_16g
+      memory: 16384
+      aiCore: 5
+      aiCPU: 1
+    - name: vir10_3c_32g
+      memory: 32768
+      aiCore: 10
+      aiCPU: 3
+- chipName: 310P3
+  commonWord: Ascend310P
+  resourceName: huawei.com/Ascend310P
+  resourceMemoryName: huawei.com/Ascend310P-memory
+  memoryAllocatable: 21527
+  memoryCapacity: 24576
+  aiCore: 8
+  aiCPU: 7
+  templates:
+    - name: vir01
+      memory: 3072
+      aiCore: 1
+      aiCPU: 1
+    - name: vir02
+      memory: 6144
+      aiCore: 2
+      aiCPU: 2
+    - name: vir04
+      memory: 12288
+      aiCore: 4
+      aiCPU: 4
+  ```
+  ### Helm 安装、更新将基于该配置文件，覆盖默认的配置文件
+</details>
+
 
 ## 运行NPU任务
 
