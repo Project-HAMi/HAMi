@@ -4,7 +4,7 @@ env:
   REGISTRY: docker.io
   IMAGE_REPO: ${{ secrets.IMAGE_REPO || 'projecthami/hami' }}
   IMAGE_ROOT_PATH: docker
-  BUILD_PLATFORM: linux/arm64,linux/amd64
+  BUILD_PLATFORM: linux/amd64
   REGISTER_USER: ${{ github.actor }}
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
@@ -102,7 +102,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ env.BUILD_PLATFORM }}
           build-args: |
-            VERSION=${{ steps.get_version.outputs.VERSION }}
+            VERSION=${{ env.ref }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
