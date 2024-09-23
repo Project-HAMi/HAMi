@@ -1,0 +1,106 @@
+name: Call Release Helm Charts
+
+# must set branch 'github_pages' as github page
+# this workflow will create the tgz from "/charts/*" of branch main,
+# and deploy to "/charts" of branch "github_pages"
+# and on branch "github_pages", update '/index.yaml' for '/charts/*.tgz'
+
+env:
+  HELM_VERSION: v3.8.1
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      submit:
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: "name of artifact"
+        value: chart_package_artifact
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: 'tag, sha, branch'
+        required: true
+        default: v1.0.0
+
+permissions: write-all
+
+jobs:
+
+  get_ref:
+    runs-on: ubuntu-latest
+    outputs:
+      ref: ${{ env.REF }}
+      submit: ${{ env.SUBMIT }}
+    steps:
+      - name: Get Original Ref
+        id: get_original_ref
+        run: |
+          if ${{ inputs.ref != '' }} ; then
+              echo "call by workflow_call"
+              echo "REF=${{ inputs.ref }}" >> $GITHUB_ENV
+              echo "SUBMIT=${{ inputs.submit }}" >> $GITHUB_ENV
+          elif ${{ github.event_name == 'workflow_dispatch' }} ; then
+              echo "call by self workflow_dispatch"
+              echo "REF=${{ inputs.ref }}" >> $GITHUB_ENV
+              echo "SUBMIT=true" >> $GITHUB_ENV
+          else
+              echo "unexpected event: ${{ github.event_name }}"
+              exit 1
+          fi
+
+  # packages tgz from /charts of original branch, deploy to /charts of target branch
+  helm-release:
+    runs-on: ubuntu-latest
+    needs: get_ref
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.get_ref.outputs.ref }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      # - name: Run chart-releaser
+      #   uses: helm/chart-releaser-action@v1.6.0
+      #   with:
+      #     charts_dir: charts
+      #   env:
+      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+
+      - name: Package Chart
+        continue-on-error: false
+        run: |
+          cd charts
+          make clean
+          make
+          # make -e VERSION=${{ needs.get_ref.outputs.ref }}
+          if ! ls *.tgz &>/dev/null ; then
+            echo "failed to generate chart"
+            exit 1
+          fi
+          cd ..
+          mkdir -p tmp
+          mv charts/*.tgz tmp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v3.1.3
+        with:
+          name: chart_package_artifact
+          path: tmp/*
+          retention-days: 1
+          if-no-files-found: error
