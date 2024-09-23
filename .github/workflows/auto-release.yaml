@@ -1,4 +1,4 @@
-name: Auto Version Release
+name: 1.Release
 
 # it is trigger by tag event:
 # 1 build the release image, push images to ghcr.io, and build image like: ghcr.io/xxxx:v1.0.0
@@ -70,7 +70,16 @@ jobs:
         with:
           branch: 'release-${{ env.RUN_YBranchName }}'
           sha: '${{ github.sha }}'
-  build-release-image:
+        # generate release notes for the new release branch
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          prerelease: true
+          generate_release_notes: true
+  release-image:
     needs: get-tag
     uses: ./.github/workflows/call-release-image.yaml
     with:
@@ -78,9 +87,30 @@ jobs:
     secrets: inherit
 
   release-chart:
-    needs: [build-release-image, get-tag]
-    uses: ./.github/workflows/call-release-chart.yaml
+    needs: [get-tag]
+    # needs: [build-release-image, get-tag]
+    uses: ./.github/workflows/call-release-helm.yaml
     with:
       ref: ${{ needs.get-tag.outputs.tag }}
       submit: true
     secrets: inherit
+  
+  release-website:
+    needs: [release-chart,release-image]
+    uses: ./.github/workflows/call-release-website.yaml
+    with:
+      ref: ${{ needs.get-tag.outputs.tag }}
+  # excute a full e2e test when hami release
+  release-e2e:
+    needs: [release-chart,release-image]
+    uses: ./.github/workflows/call-e2e.yaml
+    with:
+      ref: ${{ needs.get-tag.outputs.tag }}
+
+  # excute a compatibility test when hami release
+  release-e2e-upgrade:
+      needs: [release-chart,release-image]
+      uses: ./.github/workflows/call-e2e-upgrade.yaml
+      with:
+        ref: ${{ needs.get-tag.outputs.tag }}
+  

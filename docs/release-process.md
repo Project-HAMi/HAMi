@@ -25,3 +25,10 @@ The release description will be automatically generated in the second step, and 
 6. Release the z version
 Before releasing the z version, you need to ensure that all changes have been merged into the release branch, including the changelogs for the new z version release. All the changelogs for z relases should be put in one changelog file, then based on the latest relase branch generate a new tag.
 
+
+1. 生成 token --> https://cpina.github.io/push-to-another-repository-docs/setup-using-personal-access-token.html#setup-personal-access-token
+
+
+### known issues
+
+- [] chart tgz cannot be generated

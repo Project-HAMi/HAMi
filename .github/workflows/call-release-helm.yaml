@@ -7,7 +7,7 @@ name: Call Release Helm Charts
 
 env:
   HELM_VERSION: v3.8.1
-
+  MERGE_BRANCH: gh-pages
 on:
   workflow_call:
     inputs:
@@ -31,7 +31,6 @@ on:
 permissions: write-all
 
 jobs:
-
   get_ref:
     runs-on: ubuntu-latest
     outputs:
@@ -55,32 +54,22 @@ jobs:
           fi
 
   # packages tgz from /charts of original branch, deploy to /charts of target branch
-  helm-release:
+  package_chart:
     runs-on: ubuntu-latest
-    needs: get_ref
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
           ref: ${{ needs.get_ref.outputs.ref }}
-
       - name: Configure Git
         run: |
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
-
       - name: Install Helm
         uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}
-
-      # - name: Run chart-releaser
-      #   uses: helm/chart-releaser-action@v1.6.0
-      #   with:
-      #     charts_dir: charts
-      #   env:
-      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
 
       - name: Package Chart
         continue-on-error: false
@@ -88,7 +77,6 @@ jobs:
           cd charts
           make clean
           make
-          # make -e VERSION=${{ needs.get_ref.outputs.ref }}
           if ! ls *.tgz &>/dev/null ; then
             echo "failed to generate chart"
             exit 1
@@ -96,7 +84,6 @@ jobs:
           cd ..
           mkdir -p tmp
           mv charts/*.tgz tmp
-
       - name: Upload Artifact
         uses: actions/upload-artifact@v3.1.3
         with:
@@ -104,3 +91,55 @@ jobs:
           path: tmp/*
           retention-days: 1
           if-no-files-found: error
+      # - name: Run chart-releaser
+      #   uses: helm/chart-releaser-action@v1.6.0
+      #   with:
+      #     charts_dir: charts/
+      #   env:
+      #     CR_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+      #     CR_RELEASE_NAME_TEMPLATE: "{{ .Version }}"
+
+
+  # update /index.yaml in the target branch
+  update_githubpage:
+    runs-on: ubuntu-latest
+    needs: [package_chart, get_ref]
+    if: ${{ needs.get_ref.outputs.submit == 'true' }}
+    steps:
+      - name: Get Base Chart URL
+        id: get_base_url
+        run: |
+          name=${{ github.repository }}
+          proj=${name#*/}
+          url=https://${{ github.repository_owner }}.github.io/${proj}
+          echo "URL=${url}" >> $GITHUB_ENV
+
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.MERGE_BRANCH }}
+          persist-credentials: "true"
+
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: chart_package_artifact
+          path: charts/
+
+      - name: Update Chart Yaml
+        run: |
+          helm repo index  ./charts  --url ${{ env.URL }}/charts
+          mv ./charts/index.yaml ./index.yaml
+      - name: update helm release
+        id: push_directory
+        uses: cpina/github-action-push-to-another-repository@v1.7.2
+        env:
+          API_TOKEN_GITHUB: ${{ secrets.API_TOKEN_GITHUB }}
+        with:
+          source-directory: .
+          destination-github-username: ${{ github.repository_owner }}
+          destination-repository-name: hami
+          user-email: xiaozhang0210@hotmail.com
+          commit-message: sync ORIGIN_COMMIT from $GITHUB_REF
+          target-branch: ${{ env.MERGE_BRANCH }}
+  
