@@ -1,7 +1,13 @@
 name: Trivy Scan
 on:
-  schedule:
-    - cron: "0 0 * * *"
+  push:
+    # Exclude branches created by Dependabot to avoid triggering current workflow
+    # for PRs initiated by Dependabot.
+    branches-ignore:
+      - 'dependabot/**'
+  pull_request:
+  # schedule:
+  #   - cron: "0 0 * * *"
 jobs:
   trivy-scan:
     permissions:
@@ -12,6 +18,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Free disk space
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "=========original CI disk space"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "=========after clean up, the left CI disk space"
+          df -h
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
@@ -19,27 +34,27 @@ jobs:
           submodulePath: libvgpu
       - name: Get branch name
         uses: nelonoel/branch-name@v1.0.1
-      - name: Docker Login
-        uses: docker/login-action@v3.3.0
-        with:
-          username: ${{ secrets.DOCKERHUB_TOKEN }}
-          password: ${{ secrets.DOCKERHUB_PASSWD }}
-      - name: Set up Docker Buildx
-        id: buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Generating image tag
-        id: runtime-tag
-        run: |
-          echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-      - run: make tidy
-      - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh
+      # - name: Docker Login
+      #   uses: docker/login-action@v3.3.0
+      #   with:
+      #     username: ${{ secrets.DOCKERHUB_TOKEN }}
+      #     password: ${{ secrets.DOCKERHUB_PASSWD }}
+      # - name: Set up Docker Buildx
+      #   id: buildx
+      #   uses: docker/setup-buildx-action@v3
+      # - name: Generating image tag
+      #   id: runtime-tag
+      #   run: |
+      #     echo tag="$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      # - run: make tidy
+      # - run: SHORT_VERSION=${{ steps.runtime-tag.outputs.tag }} bash ./hack/build.sh
       - name: Run Trivy vulnerability scanner (table output)
         # Prevent running from the forked repository that doesn't need to upload coverage.
         # In addition, running on the forked repository would fail as missing the necessary secret.
-        if: ${{ github.repository == 'Project-HAMi/HAMi' }}
+        # if: ${{ github.repository == 'Project-HAMi/HAMi' }}
         uses: aquasecurity/trivy-action@0.24.0
         with:
-          image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
+          image-ref: "projecthami/hami:cd5b74f"
           format: "table"
           ignore-unfixed: true
           severity: "HIGH,CRITICAL"
@@ -48,7 +63,7 @@ jobs:
       - name: Run Trivy vulnerability scanner (SARIF)
         uses: aquasecurity/trivy-action@0.24.0
         with:
-          image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
+          image-ref: "projecthami/hami:cd5b74f"
           format: "sarif"
           output: "trivy-results.sarif"
           ignore-unfixed: true
