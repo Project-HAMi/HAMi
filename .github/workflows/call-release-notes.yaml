@@ -1,4 +1,5 @@
-name: Call Release webiste
+name: save release notes
+
 
 on:
   workflow_call:
@@ -6,25 +7,73 @@ on:
       ref:
         required: true
         type: string
+      submit:
+        required: true
+        type: string
+    outputs:
+      artifact:
+        description: "name of artifact"
+        value: chart_package_artifact
+
 permissions: write-all
 
 jobs:
-  # generate release notes and upload the chart package to the release artifact
-  gen_releaes_notes:
+  save-release-notes-to-file:
     runs-on: ubuntu-latest
     steps:
-      - name: Download Artifact
-        uses: actions/download-artifact@v3
-        with:
-          name: chart_package_artifact
-          path: charts/
-      # generate release notes for the new release branch
-      - name: Generate release notes
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          prerelease: true
-          generate_release_notes: true
-          files: "charts/*.tgz"
+    - name: Download Artifact
+      uses: actions/download-artifact@v3
+      with:
+        name: chart_package_artifact
+        path: charts/
+    # generate release notes for the new release branch
+    - name: Generate release notes
+      if: startsWith(github.ref, 'refs/tags/')
+      uses: softprops/action-gh-release@v2
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        prerelease: true
+        generate_release_notes: true
+        files: "charts/*.tgz"
+    - name: Checkout
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+        persist-credentials: false
+        ref: ${{ inputs.ref }}
+
+    - name: Create release notes markdown
+      run: |
+        # 1. get pre-release id
+        pre_release_id=$(curl -H "Accept: application/vnd.github+json" -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" https://api.github.com/repos/${GITHUB_REPOSITORY}/releases | yq '.[] | select(.prerelease == true) | .id')
+        echo "pre_release_id: ${pre_release_id}"
+
+        # 2. update release status from pre-release to latest-release
+        curl -L \
+          -X PATCH \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          -H "X-GitHub-Api-Version: 2022-11-28" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/${pre_release_id} \
+          -d '{"draft":false,"prerelease":false,"make_latest":"true"}'
+
+        # 3. generate release notes content for new release
+        latest_tag=${GITHUB_REF#refs/*/}
+        curl \
+          -H "Accept: application/vnd.github+json" \
+          -H "Authorization: Bearer ${{ secrets.GITHUB_TOKEN }}" \
+          https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${latest_tag} |yq '.body' > docs/overrides/releases/${latest_tag}.md
+
+    - name: Push release notes
+      id: push_directory
+      uses: cpina/github-action-push-to-another-repository@v1.7.2
+      env:
+        API_TOKEN_GITHUB: ${{ secrets.API_TOKEN_GITHUB }}
+      with:
+        source-directory: .
+        destination-github-username: ${{ github.repository_owner }}
+        destination-repository-name: hami
+        user-email: xiaozhang0210@hotmail.com
+        commit-message: upgrade ORIGIN_COMMIT from $GITHUB_REF
+        target-branch: master

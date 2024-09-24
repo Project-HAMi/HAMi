@@ -27,6 +27,15 @@ jobs:
     outputs:
       tag: ${{ env.RUN_TAG }}
     steps:
+      - name: Free disk space
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "=========original CI disk space"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "=========after clean up, the left CI disk space"
+          df -h
       - name: Get Ref
         id: get_ref
         run: |
@@ -94,20 +103,20 @@ jobs:
       ref: ${{ needs.get-tag.outputs.tag }}
   
   release-website:
-    needs: [release-chart,release-image]
+    needs: [release-notes]
     uses: ./.github/workflows/call-release-website.yaml
     with:
       ref: ${{ needs.get-tag.outputs.tag }}
   # excute a full e2e test when hami release
   release-e2e:
-    needs: [release-chart,release-image]
+    needs: [release-notes]
     uses: ./.github/workflows/call-e2e.yaml
     with:
       ref: ${{ needs.get-tag.outputs.tag }}
 
   # excute a compatibility test when hami release
   release-e2e-upgrade:
-      needs: [release-chart,release-image]
+      needs: [release-notes]
       uses: ./.github/workflows/call-e2e-upgrade.yaml
       with:
         ref: ${{ needs.get-tag.outputs.tag }}
