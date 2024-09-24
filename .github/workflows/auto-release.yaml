@@ -70,15 +70,6 @@ jobs:
         with:
           branch: 'release-${{ env.RUN_YBranchName }}'
           sha: '${{ github.sha }}'
-        # generate release notes for the new release branch
-      - name: Generate release notes
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          prerelease: true
-          generate_release_notes: true
   release-image:
     needs: get-tag
     uses: ./.github/workflows/call-release-image.yaml
@@ -94,6 +85,13 @@ jobs:
       ref: ${{ needs.get-tag.outputs.tag }}
       submit: true
     secrets: inherit
+
+  # generate changelog and update to github releases pages
+  release-notes:
+    needs: [release-chart,release-image]
+    uses: ./.github/workflows/call-release-notes.yaml
+    with:
+      ref: ${{ needs.get-tag.outputs.tag }}
   
   release-website:
     needs: [release-chart,release-image]

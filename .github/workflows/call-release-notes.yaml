@@ -1,0 +1,30 @@
+name: Call Release webiste
+
+on:
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+permissions: write-all
+
+jobs:
+  # generate release notes and upload the chart package to the release artifact
+  gen_releaes_notes:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Artifact
+        uses: actions/download-artifact@v3
+        with:
+          name: chart_package_artifact
+          path: charts/
+      # generate release notes for the new release branch
+      - name: Generate release notes
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          prerelease: true
+          generate_release_notes: true
+          files: "charts/*.tgz"

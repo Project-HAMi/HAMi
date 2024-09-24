@@ -142,4 +142,3 @@ jobs:
           user-email: xiaozhang0210@hotmail.com
           commit-message: sync ORIGIN_COMMIT from $GITHUB_REF
           target-branch: ${{ env.MERGE_BRANCH }}
-  
