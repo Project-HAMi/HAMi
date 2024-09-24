@@ -7,13 +7,6 @@ on:
       ref:
         required: true
         type: string
-      submit:
-        required: true
-        type: string
-    outputs:
-      artifact:
-        description: "name of artifact"
-        value: chart_package_artifact
 
 permissions: write-all
 
