@@ -76,6 +76,8 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
+  serviceMonitor:
+    enable: false
   podAnnotations: {}
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
@@ -133,6 +135,8 @@ devicePlugin:
   nvidianodeSelector:
     gpu: "on"
   tolerations: []
+  serviceMonitor:
+    enable: false
 
 devices:
   ascend:
