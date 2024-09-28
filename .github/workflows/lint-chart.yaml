@@ -23,7 +23,9 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.7.1
-
+      - name: Lint Chart
+        run: |
+          make lint_chart
       - name: Check chart version
         run: bash ./hack/verify-chart-version.sh
 

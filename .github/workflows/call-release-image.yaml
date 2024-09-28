@@ -1,4 +1,4 @@
-name: Release Image
+name: Call Release Image
 
 env:
   REGISTRY: docker.io
@@ -9,11 +9,18 @@ env:
   REGISTER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
 
 on:
-  workflow_dispatch:
-  push:
-    branches: ["master"]
-    tags:
-      - v*
+  workflow_call:
+    inputs:
+      ref:
+        required: true
+        type: string
+      suffix:
+        required: false
+        type: string
+      tagoverride:
+        required: false
+        type: string
+permissions: write-all
 
 jobs:
   docker-build:
@@ -29,26 +36,47 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           echo "=========after clean up, the left CI disk space"
           df -h
-
-      - name: Get the version
-        id: get_version
+      - name: Getting Image Ref
+        id: ref
         run: |
-          VERSION=${GITHUB_REF#refs/tags/}
-          if [[ ${GITHUB_REF} == "refs/heads/master" ]]; then
-            VERSION=latest
+          if ${{ inputs.ref != '' }} ; then
+              echo "call by workflow_call"
+              image_ref=${{ inputs.ref }}
+              image_suffix=${{ inputs.suffix }}
+          elif ${{ github.event_name == 'workflow_dispatch' }} ; then
+              echo "call by workflow_dispatch"
+              image_ref=${{ github.event.inputs.ref }}
+              image_suffix=${{ github.event.inputs.suffix }}
+          else
+              echo "unexpected event: ${{ github.event_name }}"
+              exit 1
           fi
-          echo ::set-output name=VERSION::${VERSION}
+          echo "ref=${image_ref}" >> $GITHUB_ENV
+          [ -n "${image_suffix}" ] && echo "suffix=-${image_suffix}" >> $GITHUB_ENV
+          if ${{ inputs.tagoverride != '' }} ; then
+              echo "imagetag=${{ inputs.tagoverride }}" >> $GITHUB_ENV
+          else
+              # it is invalid if the ref is branch name "xx/xx/xx"
+              echo "imagetag=${image_ref##*/}" >> $GITHUB_ENV
+          fi
+          exit 0
+  
 
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ steps.ref.outputs.ref }}
       
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
           basePath: # optional, default is .
           submodulePath: libvgpu 
+
+      - name: Lint Dockerfile
+        run: |
+          make lint_dockerfile
 
       - name: Docker Login
         uses: docker/login-action@v3.3.0
@@ -78,7 +106,7 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ env.BUILD_PLATFORM }}
           build-args: |
-            VERSION=${{ steps.get_version.outputs.VERSION }}
+            VERSION=${{ env.ref }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
