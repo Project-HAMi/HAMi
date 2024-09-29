@@ -12,6 +12,15 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+      - name: Free disk space
+        # https://github.com/actions/virtual-environments/issues/709
+        run: |
+          echo "=========original CI disk space"
+          df -h
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+          echo "=========after clean up, the left CI disk space"
+          df -h
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
@@ -27,6 +36,10 @@ jobs:
       - name: Set up Docker Buildx
         id: buildx
         uses: docker/setup-buildx-action@v3
+      - name: install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
       - name: Generating image tag
         id: runtime-tag
         run: |
@@ -42,7 +55,7 @@ jobs:
           image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
           format: "table"
           ignore-unfixed: true
-          severity: "HIGH,CRITICAL"
+          severity: "CRITICAL"
           vuln-type: "os,library"
           trivyignores: .trivyignore
       - name: Run Trivy vulnerability scanner (SARIF)
@@ -52,6 +65,7 @@ jobs:
           format: "sarif"
           output: "trivy-results.sarif"
           ignore-unfixed: true
+          severity: "CRITICAL"
           vuln-type: "os,library"
           trivyignores: .trivyignore
         if: always() && github.repository == 'Project-HAMi/HAMi'

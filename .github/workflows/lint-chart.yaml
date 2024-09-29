@@ -1,9 +1,14 @@
 name: Chart Lint
 
 on:
-  pull_request:
   push:
-    branches: ["master","dev"]
+    # Exclude branches created by Dependabot to avoid triggering current workflow
+    # for PRs initiated by Dependabot.
+    branches-ignore:
+      - 'dependabot/**'
+  pull_request:
+    paths:
+      - "charts/**"
 
 jobs:
   chart-lint-test:
@@ -18,7 +23,9 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.7.1
-
+      - name: Lint Chart
+        run: |
+          make lint_chart
       - name: Check chart version
         run: bash ./hack/verify-chart-version.sh
 
