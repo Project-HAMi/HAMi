@@ -19,7 +19,9 @@ package iluvatar
 import (
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -80,7 +82,6 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
-		i++
 		nodedevices = append(nodedevices, &api.DeviceInfo{
 			Index:   i,
 			ID:      n.Name + "-iluvatar-" + fmt.Sprint(i),
@@ -91,6 +92,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 			Numa:    0,
 			Health:  true,
 		})
+		i++
 	}
 	return nodedevices, nil
 }
@@ -100,6 +102,8 @@ func (dev *IluvatarDevices) PatchAnnotations(annoinput *map[string]string, pd ut
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.InRequestDevices[IluvatarGPUDevice]] = util.EncodePodSingleDevice(devlist)
 		(*annoinput)[util.SupportDevices[IluvatarGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)["iluvatar.ai/gpu-assigned"] = "false"
+		(*annoinput)["iluvatar.ai/predicate-time"] = strconv.FormatInt(time.Now().UnixNano(), 10)
 		for idx, dp := range devlist {
 			annoKey := IluvatarDeviceSelection + fmt.Sprint(idx)
 			value := ""
