@@ -3,9 +3,14 @@ changelog:
   exclude:
     labels:
     - ignore-for-release
+    - github-actions
+    authors:
+    - dependabot[bot]
   categories:
   - title: ✨ New Features
     labels:
+    - feature
+    - design
     - enhancement
   - title: 🐛 Bug Fixes
     labels:
