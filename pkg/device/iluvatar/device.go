@@ -80,7 +80,6 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
-		i++
 		nodedevices = append(nodedevices, &api.DeviceInfo{
 			Index:   i,
 			ID:      n.Name + "-iluvatar-" + fmt.Sprint(i),
@@ -91,6 +90,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, er
 			Numa:    0,
 			Health:  true,
 		})
+		i++
 	}
 	return nodedevices, nil
 }
