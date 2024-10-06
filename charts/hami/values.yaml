@@ -79,7 +79,7 @@ scheduler:
   podAnnotations: {}
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
-  webhook:
+  admissionWebhook:
     customURL:
       enabled: false
       # must be an endpoint using https.
@@ -93,6 +93,7 @@ scheduler:
       # - kube-system
       # - istio-system
     reinvocationPolicy: Never
+    failurePolicy: Ignore
   patch:
     image: docker.io/jettech/kube-webhook-certgen:v1.5.2
     imageNew: liangjw/kube-webhook-certgen:v1.1.1
@@ -102,8 +103,6 @@ scheduler:
     nodeSelector: {}
     tolerations: []
     runAsUser: 2000
-  mutatingWebhookConfiguration:
-    failurePolicy: Ignore
   service:
     httpPort: 443
     schedulerPort: 31998
