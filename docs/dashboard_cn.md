@@ -1,19 +1,18 @@
-## Grafana Dashboard
+# hami-vgpu-dashboard
 
-- 你可以在 grafana 中导入此 [gpu-dashboard.json](./gpu-dashboard.json)
-- 此 dashboard 还包括一部分 NVIDIA DCGM 监控指标:
+- 你可以在此找到 hami-vgpu-dashboard：[https://grafana.com/grafana/dashboards/21833-hami-vgpu-dashboard](https://grafana.com/grafana/dashboards/21833-hami-vgpu-dashboard)
 
-  [dcgm-exporter](https://github.com/NVIDIA/dcgm-exporter)部署：`kubectl create -f https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/master/dcgm-exporter.yaml`
+- 此 dashboard 还包括一部分 [NVIDIA DCGM 监控指标](https://github.com/NVIDIA/dcgm-exporter)： `kubectl create -f https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/master/dcgm-exporter.yaml`
 
 - 添加 prometheus 自定义的监控项:
 
 ```yaml
-- job_name: 'kubernetes-vgpu-exporter'
+- job_name: 'kubernetes-hami-exporter'
     kubernetes_sd_configs:
     - role: endpoints
     relabel_configs:
     - source_labels: [__meta_kubernetes_endpoints_name]
-      regex: vgpu-device-plugin-monitor
+      regex: hami-.*
       replacement: $1
       action: keep
     - source_labels: [__meta_kubernetes_pod_node_name]
@@ -46,7 +45,7 @@
       action: replace
 ```
 
-- 加载 promethues 配置：
+- 热加载 promethues 配置：
 
 ```bash
 curl -XPOST http://{promethuesServer}:{port}/-/reload
