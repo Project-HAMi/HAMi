@@ -22,6 +22,7 @@ import (
 )
 
 var requiredEnvVars = map[string]bool{
+	"NODE_NAME":     true,
 	"HOOK_PATH":     true,
 	"OTHER_ENV_VAR": false,
 }
