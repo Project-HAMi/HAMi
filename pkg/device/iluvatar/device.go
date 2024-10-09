@@ -19,7 +19,9 @@ package iluvatar
 import (
 	"flag"
 	"fmt"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -100,6 +102,8 @@ func (dev *IluvatarDevices) PatchAnnotations(annoinput *map[string]string, pd ut
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.InRequestDevices[IluvatarGPUDevice]] = util.EncodePodSingleDevice(devlist)
 		(*annoinput)[util.SupportDevices[IluvatarGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)["iluvatar.ai/gpu-assigned"] = "false"
+		(*annoinput)["iluvatar.ai/predicate-time"] = strconv.FormatInt(time.Now().UnixNano(), 10)
 		for idx, dp := range devlist {
 			annoKey := IluvatarDeviceSelection + fmt.Sprint(idx)
 			value := ""

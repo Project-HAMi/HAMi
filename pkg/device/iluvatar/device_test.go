@@ -17,13 +17,16 @@ limitations under the License.
 package iluvatar
 
 import (
+	"strconv"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -91,6 +94,76 @@ func TestGetNodeDevices(t *testing.T) {
 				}
 				if device.Devmem != tt.expected[i].Devmem {
 					t.Errorf("Expected cevmem %d, got %d", tt.expected[i].Devmem, device.Devmem)
+				}
+			}
+		})
+	}
+}
+
+func TestPatchAnnotations(t *testing.T) {
+	InitIluvatarDevice()
+
+	tests := []struct {
+		name       string
+		annoInput  map[string]string
+		podDevices util.PodDevices
+		expected   map[string]string
+	}{
+		{
+			name:       "No devices",
+			annoInput:  map[string]string{},
+			podDevices: util.PodDevices{},
+			expected:   map[string]string{},
+		},
+		{
+			name:      "With devices",
+			annoInput: map[string]string{},
+			podDevices: util.PodDevices{
+				IluvatarGPUDevice: util.PodSingleDevice{
+					[]util.ContainerDevice{
+						util.ContainerDevice{
+							Idx:  0,
+							UUID: "k8s-gpu-iluvatar-0",
+							Type: "Iluvatar",
+						},
+					},
+				},
+			},
+			expected: map[string]string{
+				util.InRequestDevices[IluvatarGPUDevice]: "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
+				util.SupportDevices[IluvatarGPUDevice]:   "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
+				"iluvatar.ai/gpu-assigned":               "false",
+				"iluvatar.ai/predicate-time":             strconv.FormatInt(time.Now().UnixNano(), 10),
+				IluvatarDeviceSelection + "0":            "0",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			annoInputCopy := make(map[string]string)
+			for k, v := range tt.annoInput {
+				annoInputCopy[k] = v
+			}
+
+			dev := &IluvatarDevices{}
+			got := dev.PatchAnnotations(&annoInputCopy, tt.podDevices)
+
+			if len(got) != len(tt.expected) {
+				t.Errorf("PatchAnnotations() got %d annotations, expected %d", len(got), len(tt.expected))
+				return
+			}
+
+			for k, v := range tt.expected {
+				if k == "iluvatar.ai/predicate-time" {
+					if len(got[k]) != len(v) {
+						t.Errorf("Expected %s %s, got %s", k, v, got[k])
+					}
+					continue
+				}
+
+				if got[k] != v {
+					t.Errorf("Expected %s %s, got %s", k, v, got[k])
 				}
 			}
 		})
