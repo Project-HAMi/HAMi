@@ -121,7 +121,7 @@ func TestPatchAnnotations(t *testing.T) {
 			podDevices: util.PodDevices{
 				IluvatarGPUDevice: util.PodSingleDevice{
 					[]util.ContainerDevice{
-						util.ContainerDevice{
+						{
 							Idx:  0,
 							UUID: "k8s-gpu-iluvatar-0",
 							Type: "Iluvatar",
