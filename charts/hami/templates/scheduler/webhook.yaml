@@ -6,8 +6,8 @@ webhooks:
   - admissionReviewVersions:
     - v1beta1
     clientConfig:
-      {{- if .Values.scheduler.customWebhook.enabled }}
-      url: https://{{ .Values.scheduler.customWebhook.host}}:{{.Values.scheduler.customWebhook.port}}{{.Values.scheduler.customWebhook.path}}
+      {{- if .Values.scheduler.admissionWebhook.customURL.enabled }}
+      url: https://{{ .Values.scheduler.admissionWebhook.customURL.host}}:{{.Values.scheduler.admissionWebhook.customURL.port}}{{.Values.scheduler.admissionWebhook.customURL.path}}
       {{- else }}
       service:
         name: {{ include "hami-vgpu.scheduler" . }}
@@ -15,7 +15,7 @@ webhooks:
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
       {{- end }}
-    failurePolicy: {{ .Values.scheduler.mutatingWebhookConfiguration.failurePolicy }}
+    failurePolicy: {{ .Values.scheduler.admissionWebhook.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.hami.io
     namespaceSelector:
@@ -24,11 +24,11 @@ webhooks:
         operator: NotIn
         values:
         - ignore
-      {{- if .Values.scheduler.customWebhook.whitelistNamespaces }}
+      {{- if .Values.scheduler.admissionWebhook.whitelistNamespaces }}
       - key: kubernetes.io/metadata.name
         operator: NotIn
         values:
-        {{- toYaml .Values.scheduler.customWebhook.whitelistNamespaces | nindent 10 }}
+        {{- toYaml .Values.scheduler.admissionWebhook.whitelistNamespaces | nindent 10 }}
       {{- end }}
     objectSelector:
       matchExpressions:
@@ -36,7 +36,7 @@ webhooks:
         operator: NotIn
         values:
         - ignore
-    reinvocationPolicy: Never
+    reinvocationPolicy: {{ .Values.scheduler.admissionWebhook.reinvocationPolicy }}
     rules:
       - apiGroups:
           - ""
