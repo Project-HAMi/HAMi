@@ -4,6 +4,7 @@ ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
+WORKDIR /k8s-vgpu
 ADD go.mod /k8s-vgpu
 ADD go.sum /k8s-vgpu
 RUN go mod download
