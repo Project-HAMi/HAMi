@@ -268,15 +268,15 @@ func parseMigDeviceUUID(mig string) (string, int, int, error) {
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
-	gi, err := strconv.Atoi(tokens[1])
+	gi, err := strconv.ParseInt(tokens[1], 10, 32)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
-	ci, err := strconv.Atoi(tokens[2])
+	ci, err := strconv.ParseInt(tokens[2], 10, 32)
 	if err != nil {
 		return "", 0, 0, fmt.Errorf("unable to parse UUID as MIG device")
 	}
 
-	return tokens[0], gi, ci, nil
+	return tokens[0], int(gi), int(ci), nil
 }
