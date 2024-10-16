@@ -37,13 +37,12 @@ func viewStatus(usage NodeUsage) {
 
 func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
 	//General type check, NVIDIA->NVIDIA MLU->MLU
-	klog.Infoln("Type contains", d.Type, n.Type)
+	klog.V(3).InfoS("Type check", "device", d.Type, "req", n.Type)
 	if !strings.Contains(d.Type, n.Type) {
 		return false, false
 	}
-	for idx, val := range device.GetDevices() {
+	for _, val := range device.GetDevices() {
 		found, pass, numaAssert := val.CheckType(annos, d, n)
-		klog.Infoln("idx", idx, found, pass)
 		if found {
 			return pass, numaAssert
 		}
@@ -63,7 +62,7 @@ func checkUUID(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 	return result
 }
 
-func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod) (bool, map[string]util.ContainerDevices) {
+func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -122,6 +121,9 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			klog.V(5).InfoS("can't allocate core=0 job to an already full GPU", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
 			continue
 		}
+		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, tmpDevs[k.Type], node.Devices.DeviceLists[i].Device) {
+			continue
+		}
 		if k.Nums > 0 {
 			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices.DeviceLists[i].Device.ID)
 			k.Nums--
@@ -159,7 +161,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 			return false, 0
 		}
 		sort.Sort(node.Devices)
-		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod)
+		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod, devinput)
 		if fit {
 			for _, val := range tmpDevs[k.Type] {
 				total += node.Devices.DeviceLists[val.Idx].Device.Count

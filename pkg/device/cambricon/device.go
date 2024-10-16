@@ -200,7 +200,7 @@ func (dev *CambriconDevices) AssertNuma(annos map[string]string) bool {
 	return false
 }
 
-func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(MLUResourceCount)]
 	return ok, nil
 }
@@ -307,4 +307,8 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 		(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", devlist[0][0].Idx, devlist[0][0].Usedcores, devlist[0][0].Usedmem/256)
 	}
 	return *annoinput
+}
+
+func (dev *CambriconDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	return true
 }
