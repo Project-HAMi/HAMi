@@ -66,7 +66,7 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&IluvatarResourceCores, "iluvatar-cores", "iluvatar.ai/vcuda-core", "iluvatar core resource")
 }
 
-func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(IluvatarResourceCount)]
 	if ok {
 		if count.Value() > 1 {
@@ -220,4 +220,8 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *IluvatarDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	return true
 }

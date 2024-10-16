@@ -108,7 +108,7 @@ func (dev *Devices) CommonWord() string {
 	return dev.config.CommonWord
 }
 
-func (dev *Devices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
 		return false, nil
@@ -197,7 +197,7 @@ func (dev *Devices) CheckType(annos map[string]string, d util.DeviceUsage, n uti
 func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[dev.useUUIDAnno]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
+		klog.V(5).Infof("check uuid for ascend user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
 		for _, uuid := range userUUIDs {
@@ -210,7 +210,7 @@ func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool 
 
 	noUserUUID, ok := annos[dev.noUseUUIDAnno]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		klog.V(5).Infof("check uuid for ascend not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		for _, uuid := range noUserUUIDs {
@@ -267,4 +267,8 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *Devices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	return true
 }

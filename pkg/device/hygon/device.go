@@ -67,7 +67,7 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&HygonResourceCores, "dcu-cores", "hygon.com/dcucores", "dcu core resource")
 }
 
-func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
 	return ok, nil
 }
@@ -236,4 +236,8 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[HygonDCUDevice], deviceStr)
 	}
 	return *annoinput
+}
+
+func (dev *DCUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	return true
 }
