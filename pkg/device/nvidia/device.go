@@ -136,7 +136,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, e
 	return nodedevices, nil
 }
 
-func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) (bool, error) {
+func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(ResourcePriority)]
 	if ok {
@@ -322,4 +322,8 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 		}
 	}
 	return util.ContainerDeviceRequest{}
+}
+
+func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	return true
 }

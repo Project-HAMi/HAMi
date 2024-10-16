@@ -136,6 +136,10 @@ devicePlugin:
   tolerations: []
 
 devices:
+  mthreads:
+    enabled: false
+    resources:
+      - mthreads.com/vgpu
   ascend:
     enabled: false
     image: ""

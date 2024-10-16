@@ -71,7 +71,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 		}
 		for _, val := range device.GetDevices() {
-			found, err := val.MutateAdmission(c)
+			found, err := val.MutateAdmission(c, pod)
 			if err != nil {
 				klog.Errorf("validating pod failed:%s", err.Error())
 				return admission.Errored(http.StatusInternalServerError, err)

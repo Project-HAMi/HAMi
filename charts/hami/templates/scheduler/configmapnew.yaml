@@ -55,4 +55,10 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      {{- if .Values.devices.mthreads.enabled }}
+      {{- range .Values.devices.mthreads.resources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
 {{- end }}

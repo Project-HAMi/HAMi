@@ -27,6 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -39,7 +40,7 @@ import (
 
 type Devices interface {
 	CommonWord() string
-	MutateAdmission(ctr *corev1.Container) (bool, error)
+	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error)
@@ -50,6 +51,7 @@ type Devices interface {
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
+	CustomFilterRule(allocated *util.PodDevices, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
 	// This should not be associated with a specific device object
 	//ParseConfig(fs *flag.FlagSet)
 }
@@ -74,12 +76,14 @@ func InitDevices() {
 	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
+	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice()
 	//devices[d.AscendDevice] = d.InitDevice()
 	//devices[ascend.Ascend310PName] = ascend.InitAscend310P()
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
+	DevicesToHandle = append(DevicesToHandle, mthreads.MthreadsGPUCommonWord)
 	//DevicesToHandle = append(DevicesToHandle, d.AscendDevice)
 	//DevicesToHandle = append(DevicesToHandle, ascend.Ascend310PName)
 	for _, dev := range ascend.InitDevices() {
@@ -138,6 +142,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	hygon.ParseConfig(fs)
 	iluvatar.ParseConfig(fs)
 	nvidia.ParseConfig(fs)
+	mthreads.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
 	klog.InitFlags(fs)
 	return fs

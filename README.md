@@ -65,6 +65,8 @@ will see 3G device memory inside container
 [![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
 [![hygon DCU](https://img.shields.io/badge/Hygon-DCU-blue)](docs/hygon-dcu-support.md)
 [![iluvatar GPU](https://img.shields.io/badge/Iluvatar-GPU-blue)](docs/iluvatar-gpu-support.md)
+[![mthreads GPU](https://img.shields.io/badge/Mthreads-GPU-blue)](docs/mthreads-support.md)
+[![ascend NPU](https://img.shields.io/badge/Ascend-GPU-blue)](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)
 
 ## Architect
 
