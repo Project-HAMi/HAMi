@@ -132,9 +132,9 @@ func DecodeNodeDevices(str string) ([]*api.DeviceInfo, error) {
 		if strings.Contains(val, ",") {
 			items := strings.Split(val, ",")
 			if len(items) == 7 {
-				count, _ := strconv.Atoi(items[1])
-				devmem, _ := strconv.Atoi(items[2])
-				devcore, _ := strconv.Atoi(items[3])
+				count, _ := strconv.ParseInt(items[1], 10, 32)
+				devmem, _ := strconv.ParseInt(items[2], 10, 32)
+				devcore, _ := strconv.ParseInt(items[3], 10, 32)
 				health, _ := strconv.ParseBool(items[6])
 				numa, _ := strconv.Atoi(items[5])
 				i := api.DeviceInfo{
