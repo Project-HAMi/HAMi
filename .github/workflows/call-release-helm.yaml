@@ -24,7 +24,7 @@ on:
   workflow_dispatch:
     inputs:
       ref:
-        description: 'tag, sha, branch'
+        description: "tag, sha, branch"
         required: true
         default: v1.0.0
 
