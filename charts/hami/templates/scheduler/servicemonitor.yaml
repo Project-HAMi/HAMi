@@ -1,0 +1,21 @@
+{{- if .Values.scheduler.serviceMonitor.enable }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: vgpu-scheduler
+  namespace: {{ .Release.Namespace | quote }}
+spec:
+  endpoints:
+  - bearerTokenSecret:
+      key: ""
+    interval: 15s
+    path: /metrics
+    port: monitor
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+    - {{ .Release.Namespace | quote }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: 4pd-scheduler
+{{- end }}
