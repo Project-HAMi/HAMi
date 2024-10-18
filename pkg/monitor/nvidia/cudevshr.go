@@ -17,7 +17,6 @@ limitations under the License.
 package nvidia
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -28,13 +27,11 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Project-HAMi/HAMi/pkg/lister"
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
@@ -76,30 +73,23 @@ type ContainerUsage struct {
 
 type ContainerLister struct {
 	containerPath string
+	nodeName      string
 	containers    map[string]*ContainerUsage
-	mutex         sync.Mutex
-	clientset     *kubernetes.Clientset
+	mutex         sync.RWMutex
+	podLister     lister.PodLister
 }
 
-func NewContainerLister() (*ContainerLister, error) {
+func NewContainerLister(lister lister.PodLister) (*ContainerLister, error) {
 	hookPath, ok := os.LookupEnv("HOOK_PATH")
 	if !ok {
 		return nil, fmt.Errorf("HOOK_PATH not set")
 	}
-	config, err := clientcmd.BuildConfigFromFlags("", os.Getenv("KUBECONFIG"))
-	if err != nil {
-		klog.Errorf("Failed to build kubeconfig: %v", err)
-		return nil, err
-	}
-	clientset, err := kubernetes.NewForConfig(config)
-	if err != nil {
-		klog.Errorf("Failed to build clientset: %v", err)
-		return nil, err
-	}
+
 	return &ContainerLister{
 		containerPath: filepath.Join(hookPath, "containers"),
+		nodeName:      os.Getenv("NODE_NAME"),
 		containers:    make(map[string]*ContainerUsage),
-		clientset:     clientset,
+		podLister:     lister,
 	}, nil
 }
 
@@ -115,19 +105,34 @@ func (l *ContainerLister) ListContainers() map[string]*ContainerUsage {
 	return l.containers
 }
 
-func (l *ContainerLister) Clientset() *kubernetes.Clientset {
-	return l.clientset
+func (l *ContainerLister) GetUsage(key string) (*ContainerUsage, bool) {
+	l.mutex.RLock()
+	usage, ok := l.containers[key]
+	l.mutex.RUnlock()
+	return usage, ok
+}
+
+func (l *ContainerLister) addUsage(key string, usage *ContainerUsage) {
+	l.mutex.Lock()
+	l.containers[key] = usage
+	l.mutex.Unlock()
+}
+
+func (l *ContainerLister) delUsage(key string) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	if usage, ok := l.containers[key]; ok {
+		_ = syscall.Munmap(usage.data)
+		delete(l.containers, key)
+	}
 }
 
 func (l *ContainerLister) Update() error {
-	pods, err := l.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	entries, err := os.ReadDir(l.containerPath)
 	if err != nil {
 		return err
 	}
-
-	l.mutex.Lock()
-	defer l.mutex.Unlock()
-	entries, err := os.ReadDir(l.containerPath)
+	pods, err := l.podLister.GetByIndex(lister.PodIndexerKey, l.nodeName)
 	if err != nil {
 		return err
 	}
@@ -142,14 +147,11 @@ func (l *ContainerLister) Update() error {
 				continue
 			}
 			klog.Infof("Removing dirname %s in monitorpath", dirName)
-			if c, ok := l.containers[entry.Name()]; ok {
-				syscall.Munmap(c.data)
-				delete(l.containers, entry.Name())
-			}
+			l.delUsage(entry.Name())
 			_ = os.RemoveAll(dirName)
 			continue
 		}
-		if _, ok := l.containers[entry.Name()]; ok {
+		if _, ok := l.GetUsage(entry.Name()); ok {
 			continue
 		}
 		usage, err := loadCache(dirName)
@@ -161,9 +163,10 @@ func (l *ContainerLister) Update() error {
 			// no cuInit in container
 			continue
 		}
-		usage.PodUID = strings.Split(entry.Name(), "_")[0]
-		usage.ContainerName = strings.Split(entry.Name(), "_")[1]
-		l.containers[entry.Name()] = usage
+		split := strings.Split(entry.Name(), "_")
+		usage.PodUID = split[0]
+		usage.ContainerName = split[1]
+		l.addUsage(entry.Name(), usage)
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
 	}
 	return nil
@@ -234,8 +237,8 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	return usage, nil
 }
 
-func isValidPod(name string, pods *corev1.PodList) bool {
-	for _, val := range pods.Items {
+func isValidPod(name string, pods []*corev1.Pod) bool {
+	for _, val := range pods {
 		if strings.Contains(name, string(val.UID)) {
 			return true
 		}
