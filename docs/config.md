@@ -17,7 +17,7 @@ helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `devicePlugin.disablecorelimit:`
   String type, "true" for disable core limit, "false" for enable core limit, default: false
 * `scheduler.defaultMem:` 
-  Integer type, by default: 5000. The default device memory of the current task, in MB
+  Integer type, by default: 0. The default device memory of the current task, in MB
 * `scheduler.defaultCores:` 
   Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
 * `scheduler.defaultGPUNum:`
