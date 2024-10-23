@@ -8,7 +8,7 @@
 [![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/4pdosc/k8s-vgpu.svg)](https://hub.docker.com/r/4pdosc/k8s-vgpu)
-[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
+[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://cloud-native.slack.com/archives/C07T10BU4R2)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![website](https://img.shields.io/badge/website-blue)](http://project-hami.io)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
@@ -206,4 +206,4 @@ HAMi 社区致力于营造一个开放和友好的环境，并通过多种方式
   - [会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
 - 电子邮件：请参阅[MAINTAINERS.md](MAINTAINERS.md)以查找所有维护者的电子邮件地址。请随时通过电子邮件与他们联系以报告任何问题或提出问题。
 - [邮件列表](https://groups.google.com/forum/#!forum/hami-project)
-- [slack](https://join.slack.com/t/hami-hsf3791/shared_invite/zt-2gcteqiph-Ls8Atnpky6clrspCAQ_eGQ)
+- [slack]( https://cloud-native.slack.com/archives/C07T10BU4R2) | [Join](https://slack.cncf.io/)
