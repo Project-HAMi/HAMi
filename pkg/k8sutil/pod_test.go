@@ -132,3 +132,144 @@ func Test_Resourcereqs(t *testing.T) {
 		})
 	}
 }
+func Test_IsPodInTerminatedState(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "pod in failed state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodFailed,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod in succeeded state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodSucceeded,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod in running state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "pod in pending state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "pod in unknown state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodUnknown,
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodInTerminatedState(test.args)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+func Test_AllContainersCreated(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "all containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+						{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "not all containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "no containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "more container statuses than containers",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+						{},
+					},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := AllContainersCreated(test.args)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
