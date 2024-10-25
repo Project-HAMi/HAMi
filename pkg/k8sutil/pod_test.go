@@ -123,6 +123,141 @@ func Test_Resourcereqs(t *testing.T) {
 				{},
 			},
 		},
+		{
+			name: "three containers gpu container first",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+									"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+									"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"cpu": *resource.NewQuantity(1, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"memory": *resource.NewQuantity(2000, resource.BinarySI),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []util.ContainerDeviceRequests{
+				{
+					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						Nums:             1,
+						Type:             nvidia.NvidiaGPUDevice,
+						Memreq:           1000,
+						MemPercentagereq: 101,
+						Coresreq:         30,
+					},
+				},
+				{},
+				{},
+			},
+		},
+		{
+			name: "three containers gpu container in the middle",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"cpu": *resource.NewQuantity(1, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+									"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+									"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"memory": *resource.NewQuantity(2000, resource.BinarySI),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []util.ContainerDeviceRequests{
+				{},
+				{
+					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						Nums:             1,
+						Type:             nvidia.NvidiaGPUDevice,
+						Memreq:           1000,
+						MemPercentagereq: 101,
+						Coresreq:         30,
+					},
+				},
+				{},
+			},
+		},
+		{
+			name: "three containers gpu container last",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"cpu": *resource.NewQuantity(1, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"memory": *resource.NewQuantity(2000, resource.BinarySI),
+								},
+							},
+						},
+						{
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+									"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+									"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+								},
+							},
+						},
+					},
+				},
+			},
+			want: []util.ContainerDeviceRequests{
+				{},
+				{},
+				{
+					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						Nums:             1,
+						Type:             nvidia.NvidiaGPUDevice,
+						Memreq:           1000,
+						MemPercentagereq: 101,
+						Coresreq:         30,
+					},
+				},
+			},
+		},
 	}
 
 	for _, test := range tests {

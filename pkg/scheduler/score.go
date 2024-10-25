@@ -213,7 +213,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 
 			if sums == 0 {
 				for idx := range score.Devices {
-					if len(score.Devices[idx]) <= ctrid {
+					for len(score.Devices[idx]) <= ctrid {
 						score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
 					}
 					score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
