@@ -16,7 +16,7 @@ limitations under the License.
 
 package config
 
-import "github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+import "github.com/Project-HAMi/HAMi/pkg/util"
 
 var (
 	HTTPBind           string
@@ -27,9 +27,9 @@ var (
 	MetricsBindAddress string
 
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
-	NodeSchedulerPolicy = policy.NodeSchedulerPolicyBinpack.String()
+	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
 	// GPUSchedulerPolicy is config this scheduler GPU to use `binpack` or `spread`. default value is spread.
-	GPUSchedulerPolicy = policy.GPUSchedulerPolicySpread.String()
+	GPUSchedulerPolicy = util.GPUSchedulerPolicySpread.String()
 
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string

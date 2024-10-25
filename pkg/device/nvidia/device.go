@@ -327,3 +327,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
+
+func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+	return 0
+}

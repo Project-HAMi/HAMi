@@ -17,13 +17,16 @@ limitations under the License.
 package policy
 
 import (
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
 type NodeScore struct {
 	NodeID  string
+	Node    *corev1.Node
 	Devices util.PodDevices
 	// Score recode every node all device user/allocate score
 	Score float32
@@ -43,15 +46,26 @@ func (l NodeScoreList) Swap(i, j int) {
 }
 
 func (l NodeScoreList) Less(i, j int) bool {
-	if l.Policy == NodeSchedulerPolicySpread.String() {
+	if l.Policy == util.NodeSchedulerPolicySpread.String() {
 		return l.NodeList[i].Score > l.NodeList[j].Score
 	}
 	// default policy is Binpack
 	return l.NodeList[i].Score < l.NodeList[j].Score
 }
 
-func (ns *NodeScore) ComputeScore(devices DeviceUsageList) {
+func (ns *NodeScore) OverrideScore(devices DeviceUsageList, policy string) {
 	// current user having request resource
+	devscore := float32(0)
+	for idx, val := range ns.Devices {
+		devscore += device.GetDevices()[idx].ScoreNode(ns.Node, val, policy)
+	}
+	if devscore > 0 {
+		ns.Score = devscore
+		klog.V(2).Infof("node %s computer overrided score is %f", ns.NodeID, ns.Score)
+	}
+}
+
+func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
 	used, usedCore, usedMem := int32(0), int32(0), int32(0)
 	for _, device := range devices.DeviceLists {
 		used += device.Device.Used
@@ -70,5 +84,5 @@ func (ns *NodeScore) ComputeScore(devices DeviceUsageList) {
 	coreScore := float32(usedCore) / float32(totalCore)
 	memScore := float32(usedMem) / float32(totalMem)
 	ns.Score = float32(Weight) * (useScore + coreScore + memScore)
-	klog.V(2).Infof("node %s computer score is %f", ns.NodeID, ns.Score)
+	klog.V(2).Infof("node %s computer default score is %f", ns.NodeID, ns.Score)
 }

@@ -241,3 +241,7 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 func (dev *DCUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
+
+func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+	return 0
+}
