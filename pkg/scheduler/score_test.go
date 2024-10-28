@@ -51,7 +51,7 @@ func Test_calcScore(t *testing.T) {
 		If you're running `make test`, keep this commented out, as there's another test
 		(pkg/k8sutil/pod_test.go) that may cause a DATA RACE when calling device.InitDevices().
 	*/
-	// device.InitDevices()
+	//device.InitDevices()
 
 	tests := []struct {
 		name string
@@ -77,7 +77,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -137,7 +137,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -172,7 +172,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -232,7 +232,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -267,7 +267,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -343,7 +343,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -378,7 +378,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -454,7 +454,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -489,7 +489,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -565,7 +565,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -607,7 +607,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -683,7 +683,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -725,7 +725,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -748,7 +748,7 @@ func Test_calcScore(t *testing.T) {
 					},
 					"node2": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -808,7 +808,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -860,7 +860,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -883,7 +883,7 @@ func Test_calcScore(t *testing.T) {
 					},
 					"node2": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -943,7 +943,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -995,7 +995,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.NodeSchedulerPolicyBinpack.String(),
+							Policy: util.NodeSchedulerPolicyBinpack.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -1062,7 +1062,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
@@ -1106,7 +1106,7 @@ func Test_calcScore(t *testing.T) {
 				nodes: &map[string]*NodeUsage{
 					"node1": {
 						Devices: policy.DeviceUsageList{
-							Policy: policy.GPUSchedulerPolicySpread.String(),
+							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
 									Device: &util.DeviceUsage{
@@ -1181,7 +1181,7 @@ func Test_calcScore(t *testing.T) {
 				err  error
 			}{
 				want: &policy.NodeScoreList{
-					Policy: policy.NodeSchedulerPolicyBinpack.String(),
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",

@@ -27,6 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -52,6 +53,7 @@ type Devices interface {
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
 	CustomFilterRule(allocated *util.PodDevices, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
+	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32
 	// This should not be associated with a specific device object
 	//ParseConfig(fs *flag.FlagSet)
 }
@@ -77,15 +79,14 @@ func InitDevices() {
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
 	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice()
-	//devices[d.AscendDevice] = d.InitDevice()
-	//devices[ascend.Ascend310PName] = ascend.InitAscend310P()
+	devices[metax.MetaxGPUDevice] = metax.InitMetaxDevice()
+
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, mthreads.MthreadsGPUCommonWord)
-	//DevicesToHandle = append(DevicesToHandle, d.AscendDevice)
-	//DevicesToHandle = append(DevicesToHandle, ascend.Ascend310PName)
+	DevicesToHandle = append(DevicesToHandle, metax.MetaxGPUCommonWord)
 	for _, dev := range ascend.InitDevices() {
 		devices[dev.CommonWord()] = dev
 		DevicesToHandle = append(DevicesToHandle, dev.CommonWord())
@@ -143,6 +144,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	iluvatar.ParseConfig(fs)
 	nvidia.ParseConfig(fs)
 	mthreads.ParseConfig(fs)
+	metax.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
 	klog.InitFlags(fs)
 	return fs

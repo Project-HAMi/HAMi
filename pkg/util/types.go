@@ -18,6 +18,7 @@ package util
 
 import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	corev1 "k8s.io/api/core/v1"
 )
 
 const (
@@ -148,5 +149,23 @@ type DeviceInfo struct {
 
 type NodeInfo struct {
 	ID      string
+	Node    *corev1.Node
 	Devices []DeviceInfo
+}
+
+type SchedulerPolicyName string
+
+const (
+	// NodeSchedulerPolicyBinpack is node use binpack scheduler policy.
+	NodeSchedulerPolicyBinpack SchedulerPolicyName = "binpack"
+	// NodeSchedulerPolicySpread is node use spread scheduler policy.
+	NodeSchedulerPolicySpread SchedulerPolicyName = "spread"
+	// GPUSchedulerPolicyBinpack is GPU use binpack scheduler.
+	GPUSchedulerPolicyBinpack SchedulerPolicyName = "binpack"
+	// GPUSchedulerPolicySpread is GPU use spread scheduler.
+	GPUSchedulerPolicySpread SchedulerPolicyName = "spread"
+)
+
+func (s SchedulerPolicyName) String() string {
+	return string(s)
 }
