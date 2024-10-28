@@ -312,3 +312,7 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 func (dev *CambriconDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
+
+func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+	return 0
+}

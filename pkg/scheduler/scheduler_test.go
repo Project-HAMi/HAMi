@@ -327,8 +327,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test1",
 						UID:  "test1-uid1",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  policy.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: policy.NodeSchedulerPolicyBinpack.String(),
+							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -364,8 +364,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test2",
 						UID:  "test2-uid2",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  policy.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: policy.NodeSchedulerPolicyBinpack.String(),
+							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -401,8 +401,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test3",
 						UID:  "test3-uid3",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  policy.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: policy.NodeSchedulerPolicySpread.String(),
+							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -438,8 +438,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test4",
 						UID:  "test4-uid4",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  policy.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: policy.NodeSchedulerPolicySpread.String(),
+							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{

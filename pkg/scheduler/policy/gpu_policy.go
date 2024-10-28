@@ -42,7 +42,7 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	if l.Policy == GPUSchedulerPolicyBinpack.String() {
+	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
 		if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
 			return l.DeviceLists[i].Score < l.DeviceLists[j].Score
 		}

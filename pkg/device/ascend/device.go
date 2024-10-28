@@ -272,3 +272,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 func (dev *Devices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
+
+func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+	return 0
+}
