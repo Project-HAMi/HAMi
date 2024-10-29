@@ -124,6 +124,12 @@ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.
 kubectl get pods -n kube-system
 ```
 
+### WebUI
+
+HAMi在2.4.0版本后支持了[HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI)
+
+有关具体的部署方式，点击[这里](https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md)获取
+
 ### 提交任务
 
 <details> <summary> 任务样例 </summary>
