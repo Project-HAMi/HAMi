@@ -130,6 +130,12 @@ kubectl get pods -n kube-system
 
 If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](https://github.com/Project-HAMi/HAMi/blob/newprofile/examples/nvidia/default_use.yaml) 
 
+### WebUI
+
+[HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) is available after HAMi v2.4
+
+For installation guide, click [here](https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md)
+
 ### Monitor
 
 Monitoring is automatically enabled after installation. Obtain an overview of cluster information by visiting the following URL:
