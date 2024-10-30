@@ -5,7 +5,7 @@
 在单台服务器上配置多张 GPU 时，GPU 卡间根据双方是否连接在相同的 PCIe Switch 或 MetaXLink
 下，存在近远（带宽高低）关系。服务器上所有卡间据此形成一张拓扑，如下图所示。
 
-![img](../imgs/metax_topo.jpg)
+![img](../imgs/metax_topo.png)
 
 用户作业请求一定数量的 metax-tech.com/gpu 资源，Kubernetes 选择剩余资源数量满足要求的
 节点，并将 Pod 调度到相应节点。gpu‑device 进一步处理资源节点上剩余资源的分配逻辑，并按照以
@@ -17,11 +17,11 @@
 
 2. 当任务使用 `node-scheduler-policy=spread` ,分配GPU资源尽可能位于相同 MetaXLink或PCIe Switch下，如下图所示:
 
-![img](../imgs/metax_spread.jpg)
+![img](../imgs/metax_spread.png)
 
 3. 当使用 `node-scheduler-policy=binpack`,分配GPU资源后，剩余资源尽可能完整，如下图所示：
 
-![img](../imgs/metax_binpack.jpg)
+![img](../imgs/metax_binpack.png)
 
 ## 注意：
 
