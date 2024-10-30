@@ -214,3 +214,17 @@ HAMi 社区致力于营造一个开放和友好的环境，并通过多种方式
 - 电子邮件：请参阅[MAINTAINERS.md](MAINTAINERS.md)以查找所有维护者的电子邮件地址。请随时通过电子邮件与他们联系以报告任何问题或提出问题。
 - [邮件列表](https://groups.google.com/forum/#!forum/hami-project)
 - [slack]( https://cloud-native.slack.com/archives/C07T10BU4R2) | [Join](https://slack.cncf.io/)
+
+## 演讲和分享
+
+|                  | Link                                                                                                                    |
+|------------------|-------------------------------------------------------------------------------------------------------------------------|
+| 中国云计算基础架构开发者大会 (Beijing 2024) | [在 Kubernetes 集群式解锁异构 AI 基础设施](https://live.csdn.net/room/csdnnews/3zwDP09S) Starting from 03:06:15 |
+| KubeDay(Japan 2024) | [Unlocking Heterogeneous AI Infrastructure K8s Cluster:Leveraging the Power of HAMi](https://www.youtube.com/watch?v=owoaSb4nZwg) |
+| KubeCon & AI_dev Open Source GenAI & ML Summit(China 2024) | [Is Your GPU Really Working Efficiently in the Data Center?N Ways to Improve GPU Usage](https://www.youtube.com/watch?v=ApkyK3zLF5Q) |
+| KubeCon & AI_dev Open Source GenAI & ML Summit(China 2024) | [Unlocking Heterogeneous AI Infrastructure K8s Cluster](https://www.youtube.com/watch?v=kcGXnp_QShs)                                     |
+| KubeCon(EU 2024)| [Cloud Native Batch Computing with Volcano: Updates and Future](https://youtu.be/fVYKk6xSOsw) |
+
+## License
+
+HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
