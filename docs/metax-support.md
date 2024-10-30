@@ -5,7 +5,7 @@
 When multiple GPUs are configured on a single server, the GPU cards are connected to the same PCIe Switch or MetaXLink depending on whether they are connected
 , there is a near-far relationship. This forms a topology among all the cards on the server, as shown in the following figure:
 
-![img](../imgs/metax_topo.jpg)
+![img](../imgs/metax_topo.png)
 
 A user job requests a certain number of metax-tech.com/gpu resources, Kubernetes schedule pods to the appropriate node. gpu-device further processes the logic of allocating the remaining resources on the resource node following criterias below:
 1. MetaXLink takes precedence over PCIe Switch in two way:
@@ -15,11 +15,11 @@ Equipped with MetaXLink interconnected resources.
 
 2. When using `node-scheduler-policy=spread` , Allocate Metax resources to be under the same Metaxlink or Paiswich as much as possible, as the following figure shows:
 
-![img](../imgs/metax_spread.jpg)
+![img](../imgs/metax_spread.png)
 
 3. When using `node-scheduler-policy=binpack`, Assign GPU resources, so minimize the damage to MetaxXLink topology, as the following figure shows:
 
-![img](../imgs/metax_binpack.jpg)
+![img](../imgs/metax_binpack.png)
 
 ## Important Notes
 
