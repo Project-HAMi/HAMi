@@ -164,16 +164,21 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod, devinput)
 		if fit {
 			for _, val := range tmpDevs[k.Type] {
-				total += node.Devices.DeviceLists[val.Idx].Device.Count
-				totalCore += node.Devices.DeviceLists[val.Idx].Device.Totalcore
-				totalMem += node.Devices.DeviceLists[val.Idx].Device.Totalmem
-				free += node.Devices.DeviceLists[val.Idx].Device.Count - node.Devices.DeviceLists[val.Idx].Device.Used
-				freeCore += node.Devices.DeviceLists[val.Idx].Device.Totalcore - node.Devices.DeviceLists[val.Idx].Device.Usedcores
-				freeMem += node.Devices.DeviceLists[val.Idx].Device.Totalmem - node.Devices.DeviceLists[val.Idx].Device.Usedmem
-
-				node.Devices.DeviceLists[val.Idx].Device.Used++
-				node.Devices.DeviceLists[val.Idx].Device.Usedcores += val.Usedcores
-				node.Devices.DeviceLists[val.Idx].Device.Usedmem += val.Usedmem
+				for _, v := range node.Devices.DeviceLists {
+					//bc node.Devices has been sorted, so we should find out the correct device
+					if int(v.Device.Index) != val.Idx {
+						continue
+					}
+					total += v.Device.Count
+					totalCore += v.Device.Totalcore
+					totalMem += v.Device.Totalmem
+					free += v.Device.Count - v.Device.Used
+					freeCore += v.Device.Totalcore - v.Device.Usedcores
+					freeMem += v.Device.Totalmem - v.Device.Usedmem
+					v.Device.Used++
+					v.Device.Usedcores += val.Usedcores
+					v.Device.Usedmem += val.Usedmem
+				}
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
 		} else {
