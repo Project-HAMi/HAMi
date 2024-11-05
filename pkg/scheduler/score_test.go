@@ -19,6 +19,7 @@ package scheduler
 import (
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -1207,15 +1208,159 @@ func Test_calcScore(t *testing.T) {
 				err: nil,
 			},
 		},
+		{
+			name: "one node two device one pod two containers use two device with spread,should not in same device.",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  util.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid2",
+										Index:     1,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+				},
+				nums: util.PodDeviceRequests{
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   8000,
+							Coresreq: 30,
+						},
+					},
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test1",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(8000, resource.BinarySI),
+									},
+								},
+							},
+							{
+								Name:  "gpu-burn1",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want *policy.NodeScoreList
+				err  error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: util.PodDevices{
+								"NVIDIA": util.PodSingleDevice{
+									{
+										{
+											Idx:       1,
+											UUID:      "uuid2",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   8000,
+										},
+									},
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+					},
+				},
+				err: nil,
+			},
+		},
 	}
 	s := NewScheduler()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			device.InitDevices()
 			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task)
 			assert.DeepEqual(t, test.wants.err, gotErr)
 			wantMap := make(map[string]*policy.NodeScore)
 			for index, node := range (*(test.wants.want)).NodeList {
 				wantMap[node.NodeID] = (*(test.wants.want)).NodeList[index]
+			}
+			if gotErr == nil && len(got.NodeList) == 0 {
+				t.Fatal("empty error and empty result")
 			}
 			for i := 0; i < got.Len(); i++ {
 				gotI := (*(got)).NodeList[i]
