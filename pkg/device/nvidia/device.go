@@ -49,13 +49,14 @@ const (
 )
 
 var (
-	ResourceName          string
-	ResourceMem           string
-	ResourceCores         string
-	ResourceMemPercentage string
-	ResourcePriority      string
-	DebugMode             bool
-	OverwriteEnv          bool
+	ResourceName             string
+	ResourceMem              string
+	ResourceCores            string
+	ResourceMemPercentage    string
+	ResourcePriority         string
+	LIBCUDALogVerbosityLevel string
+	DebugMode                bool
+	OverwriteEnv             bool
 )
 
 type NvidiaGPUDevices struct {
@@ -78,6 +79,7 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
 	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
 	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
+	fs.StringVar(&LIBCUDALogVerbosityLevel, "libcuda-log-verbosity-level", "2", "verbosity level of LIBCUDA")
 	fs.BoolVar(&OverwriteEnv, "overwrite-env", false, "If set NVIDIA_VISIBLE_DEVICES=none to pods with no-gpu allocation")
 }
 
@@ -136,18 +138,32 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, e
 	return nodedevices, nil
 }
 
+func setOrUpdateEnvVar(ctr *corev1.Container, name string, value string) {
+	// Check if the env var already exists
+	for i, envVar := range ctr.Env {
+		if envVar.Name == name {
+			// If found, update the value
+			ctr.Env[i].Value = value
+			return
+		}
+	}
+	// If not found, append it as a new env var
+	ctr.Env = append(ctr.Env, corev1.EnvVar{
+		Name:  name,
+		Value: value,
+	})
+}
+
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(ResourcePriority)]
 	if ok {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  api.TaskPriority,
-			Value: fmt.Sprint(priority.Value()),
-		})
+		setOrUpdateEnvVar(ctr, api.TaskPriority, fmt.Sprint(priority.Value()))
 	}
 
 	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
 	if resourceNameOK {
+		setOrUpdateEnvVar(ctr, "LIBCUDA_LOG_LEVEL", LIBCUDALogVerbosityLevel)
 		return resourceNameOK, nil
 	}
 
@@ -159,14 +175,12 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		if config.DefaultResourceNum > 0 {
 			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(config.DefaultResourceNum), resource.BinarySI)
 			resourceNameOK = true
+			setOrUpdateEnvVar(ctr, "LIBCUDA_LOG_LEVEL", LIBCUDALogVerbosityLevel)
 		}
 	}
 
 	if !resourceNameOK && OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
+		setOrUpdateEnvVar(ctr, "NVIDIA_VISIBLE_DEVICES", "none")
 	}
 	return resourceNameOK, nil
 }

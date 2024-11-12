@@ -11,6 +11,8 @@ resourceMem: "nvidia.com/gpumem"
 resourceMemPercentage: "nvidia.com/gpumem-percentage"
 resourceCores: "nvidia.com/gpucores"
 resourcePriority: "nvidia.com/priority"
+## Use environment variable LIBCUDA_LOG_LEVEL to set the visibility of logs in containers
+libcudaLogVerbosity: "2"
 
 #MLU Parameters
 mluResourceName: "cambricon.com/vmlu"

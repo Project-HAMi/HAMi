@@ -83,6 +83,7 @@ spec:
             - --resource-cores={{ .Values.resourceCores }}
             - --resource-mem-percentage={{ .Values.resourceMemPercentage }}
             - --resource-priority={{ .Values.resourcePriority }}
+            - --libcuda-log-verbosity-level={{ .Values.libcudaLogVerbosity }}
             - --http_bind=0.0.0.0:443
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
