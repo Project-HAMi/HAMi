@@ -1352,7 +1352,14 @@ func Test_calcScore(t *testing.T) {
 	s := NewScheduler()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			device.InitDevices()
+			device.InitDevicesWithConfig(&device.Config{
+				NvidiaConfig: nvidia.NvidiaConfig{
+					ResourceCountName:            "hami.io/gpu",
+					ResourceMemoryName:           "hami.io/gpumem",
+					ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+					ResourceCoreName:             "hami.io/gpucores",
+				},
+			})
 			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task)
 			assert.DeepEqual(t, test.wants.err, gotErr)
 			wantMap := make(map[string]*policy.NodeScore)

@@ -50,7 +50,16 @@ var (
 	IluvatarResourceCores  string
 )
 
-func InitIluvatarDevice() *IluvatarDevices {
+type IluvatarConfig struct {
+	ResourceCountName  string `yaml:"resourceCountName"`
+	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
+}
+
+func InitIluvatarDevice(config IluvatarConfig) *IluvatarDevices {
+	IluvatarResourceCount = config.ResourceCountName
+	IluvatarResourceMemory = config.ResourceMemoryName
+	IluvatarResourceCores = config.ResourceCoreName
 	util.InRequestDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-to-allocate"
 	util.SupportDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-allocated"
 	return &IluvatarDevices{}

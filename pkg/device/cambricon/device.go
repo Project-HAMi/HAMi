@@ -60,6 +60,12 @@ var (
 	MLUResourceCores  string
 )
 
+type CambriconConfig struct {
+	ResourceCountName  string `yaml:"resourceCountName"`
+	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
+}
+
 type CambriconDevices struct {
 }
 
@@ -69,7 +75,10 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&MLUResourceCores, "cambricon-mlu-cores", "cambricon.com/mlu.smlu.vcore", "cambricon mlu core resource")
 }
 
-func InitMLUDevice() *CambriconDevices {
+func InitMLUDevice(config CambriconConfig) *CambriconDevices {
+	MLUResourceCount = config.ResourceCountName
+	MLUResourceMemory = config.ResourceMemoryName
+	MLUResourceCores = config.ResourceCoreName
 	util.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
 	util.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
 	return &CambriconDevices{}

@@ -21,10 +21,11 @@ import "github.com/Project-HAMi/HAMi/pkg/util"
 var (
 	HTTPBind           string
 	SchedulerName      string
+	MetricsBindAddress string
+
 	DefaultMem         int32
 	DefaultCores       int32
 	DefaultResourceNum int32
-	MetricsBindAddress string
 
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()

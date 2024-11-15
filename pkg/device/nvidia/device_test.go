@@ -19,7 +19,6 @@ package nvidia
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -35,11 +34,6 @@ func Test_DefaultResourceNum(t *testing.T) {
 }
 
 func Test_MutateAdmission(t *testing.T) {
-	ResourceName = "nvidia.com/gpu"
-	ResourceMem = "nvidia.com/gpumem"
-	ResourceMemPercentage = "nvidia.com/gpumem-percentage"
-	ResourceCores = "nvidia.com/gpucores"
-	config.DefaultResourceNum = 1
 	tests := []struct {
 		name string
 		args *corev1.Container
@@ -105,7 +99,15 @@ func Test_MutateAdmission(t *testing.T) {
 		},
 	}
 
-	gpuDevices := &NvidiaGPUDevices{}
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got, _ := gpuDevices.MutateAdmission(test.args, &corev1.Pod{})
@@ -117,7 +119,15 @@ func Test_MutateAdmission(t *testing.T) {
 }
 
 func Test_CheckUUID(t *testing.T) {
-	gpuDevices := &NvidiaGPUDevices{}
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
 	tests := []struct {
 		name string
 		args struct {
@@ -208,7 +218,15 @@ func Test_CheckUUID(t *testing.T) {
 }
 
 func Test_CheckType(t *testing.T) {
-	gpuDevices := &NvidiaGPUDevices{}
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
 	tests := []struct {
 		name string
 		args struct {
@@ -272,6 +290,145 @@ func Test_CheckType(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			_, got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
 			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func Test_FilterDeviceToRegister(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			uuid string
+			idx  string
+			*FilterDevice
+		}
+		want bool
+	}{
+		{
+			name: "filter is nil",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid:         "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:          "0",
+				FilterDevice: nil,
+			},
+			want: false,
+		},
+		{
+			name: "uuid is empty",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "uuid is not in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b77"},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "uuid is in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					UUID: []string{"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "idx is empty",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "idx is not in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					Index: []uint{1},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "idx is in filter",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "0",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "idx is invalid",
+			args: struct {
+				uuid string
+				idx  string
+				*FilterDevice
+			}{
+				uuid: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				idx:  "a",
+				FilterDevice: &FilterDevice{
+					Index: []uint{0},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			DevicePluginFilterDevice = test.args.FilterDevice
+			got := FilterDeviceToRegister(test.args.uuid, test.args.idx)
+			assert.DeepEqual(t, test.want, got)
 		})
 	}
 }

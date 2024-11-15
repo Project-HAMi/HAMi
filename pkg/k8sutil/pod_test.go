@@ -29,11 +29,14 @@ import (
 )
 
 func Test_Resourcereqs(t *testing.T) {
-	nvidia.ResourceName = "hami.io/gpu"
-	nvidia.ResourceMem = "hami.io/gpumem"
-	nvidia.ResourceMemPercentage = "hami.io/gpumem-percentage"
-	nvidia.ResourceCores = "hami.io/gpucores"
-	device.InitDevices()
+	device.InitDevicesWithConfig(&device.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+		},
+	})
 
 	tests := []struct {
 		name string

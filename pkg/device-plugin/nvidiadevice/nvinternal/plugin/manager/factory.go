@@ -24,7 +24,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 type manager struct {
@@ -34,7 +34,7 @@ type manager struct {
 
 	cdiHandler cdi.Interface
 	cdiEnabled bool
-	config     *util.DeviceConfig
+	config     *nvidia.DeviceConfig
 	infolib    info.Interface
 }
 

@@ -23,7 +23,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -162,7 +161,7 @@ func start(c *cli.Context, flags []cli.Flag) error {
 		return fmt.Errorf("failed to create FS watcher: %v", err)
 	}
 	defer watcher.Close()
-	device.InitDevices()
+	//device.InitDevices()
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)

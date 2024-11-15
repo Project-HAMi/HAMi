@@ -108,16 +108,10 @@ Add our repo in helm
 helm repo add hami-charts https://project-hami.github.io/HAMi/
 ```
 
-Check your Kubernetes version by using the following command:
+Use the following command for deployment:
 
 ```
-kubectl version
-```
-
-During installation, set the Kubernetes scheduler image version to match your Kubernetes server version. For instance, if your cluster server version is 1.16.8, use the following command for deployment:
-
-```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+helm install hami hami-charts/hami  -n kube-system
 ```
 
 Customize your installation by adjusting the [configs](docs/config.md).

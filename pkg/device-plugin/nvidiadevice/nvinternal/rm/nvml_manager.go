@@ -19,7 +19,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"k8s.io/klog/v2"
@@ -33,7 +33,7 @@ type nvmlResourceManager struct {
 var _ ResourceManager = (*nvmlResourceManager)(nil)
 
 // NewNVMLResourceManagers returns a set of ResourceManagers, one for each NVML resource in 'config'.
-func NewNVMLResourceManagers(nvmllib nvml.Interface, config *util.DeviceConfig) ([]ResourceManager, error) {
+func NewNVMLResourceManagers(nvmllib nvml.Interface, config *nvidia.DeviceConfig) ([]ResourceManager, error) {
 	ret := nvmllib.Init()
 	if ret != nvml.SUCCESS {
 		return nil, fmt.Errorf("failed to initialize NVML: %v", ret)
@@ -56,7 +56,7 @@ func NewNVMLResourceManagers(nvmllib nvml.Interface, config *util.DeviceConfig) 
 			continue
 		}
 		for key, value := range devices {
-			if util.FilterDeviceToRegister(value.ID, value.Index) {
+			if nvidia.FilterDeviceToRegister(value.ID, value.Index) {
 				klog.V(5).InfoS("Filtering device", "device", value.ID)
 				delete(devices, key)
 				continue
