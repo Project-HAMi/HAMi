@@ -17,7 +17,6 @@ limitations under the License.
 package util
 
 import (
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -33,10 +32,6 @@ const (
 	DeviceBindFailed     = "failed"
 	DeviceBindSuccess    = "success"
 
-	//Set default mem to 5000m
-	//DefaultMem   = 5000
-	//DefaultCores = 0.
-
 	DeviceLimit = 100
 	//TimeLayout = "ANSIC"
 	//DefaultTimeout = time.Second * 60.
@@ -49,52 +44,13 @@ const (
 	NodeNameEnvName = "NODE_NAME"
 )
 
-type FilterDevice struct {
-	// UUID is the device ID.
-	UUID []string `json:"uuid"`
-	// Index is the device index.
-	Index []uint `json:"index"`
-}
-
-type DevicePluginConfigs struct {
-	Nodeconfig []struct {
-		Name                string        `json:"name"`
-		Devicememoryscaling float64       `json:"devicememoryscaling"`
-		Devicecorescaling   float64       `json:"devicecorescaling"`
-		Devicesplitcount    uint          `json:"devicesplitcount"`
-		Migstrategy         string        `json:"migstrategy"`
-		FilterDevice        *FilterDevice `json:"filterdevices"`
-	} `json:"nodeconfig"`
-}
-
-type DeviceConfig struct {
-	*spec.Config
-
-	ResourceName *string
-	DebugMode    *bool
-}
-
 var (
 	DebugMode bool
 
-	DeviceSplitCount    *uint
-	DeviceMemoryScaling *float64
-	DeviceCoresScaling  *float64
-	NodeName            string
-	RuntimeSocketFlag   string
-	DisableCoreLimit    *bool
-
-	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
-	DevicePluginFilterDevice *FilterDevice
+	NodeName          string
+	RuntimeSocketFlag string
 )
 
-//	type ContainerDevices struct {
-//	   Devices []string `json:"devices,omitempty"`
-//	}
-//
-//	type PodDevices struct {
-//	   Containers []ContainerDevices `json:"containers,omitempty"`
-//	}
 type ContainerDevice struct {
 	// TODO current Idx cannot use, because EncodeContainerDevices method not encode this filed.
 	Idx       int

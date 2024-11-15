@@ -8,7 +8,7 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- if gt (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 25}}
+    {{- if gt (.Capabilities.KubeVersion.Minor | int) 25}}
     apiVersion: kubescheduler.config.k8s.io/v1
     {{- else }}
     apiVersion: kubescheduler.config.k8s.io/v1beta2
@@ -50,13 +50,13 @@ data:
       - name: {{ .Values.iluvatarResourceName }}
         ignoredByScheduler: true
       {{- if .Values.devices.ascend.enabled }}
-      {{- range .Values.devices.ascend.resources }}
+      {{- range .Values.devices.ascend.customresources }}
       - name: {{ . }}
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
       {{- if .Values.devices.mthreads.enabled }}
-      {{- range .Values.devices.mthreads.resources }}
+      {{- range .Values.devices.mthreads.customresources }}
       - name: {{ . }}
         ignoredByScheduler: true
       {{- end }}

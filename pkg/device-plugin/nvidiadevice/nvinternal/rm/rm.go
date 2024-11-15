@@ -24,13 +24,13 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"k8s.io/klog/v2"
 )
 
 // resourceManager forms the base type for specific resource manager implementations
 type resourceManager struct {
-	config   *util.DeviceConfig
+	config   *nvidia.DeviceConfig
 	resource spec.ResourceName
 	devices  Devices
 }
@@ -45,7 +45,7 @@ type ResourceManager interface {
 }
 
 // NewResourceManagers returns a []ResourceManager, one for each resource in 'config'.
-func NewResourceManagers(nvmllib nvml.Interface, config *util.DeviceConfig) ([]ResourceManager, error) {
+func NewResourceManagers(nvmllib nvml.Interface, config *nvidia.DeviceConfig) ([]ResourceManager, error) {
 	// logWithReason logs the output of the has* / is* checks from the info.Interface
 	logWithReason := func(f func() (bool, string), tag string) bool {
 		is, reason := f()
@@ -111,7 +111,7 @@ func (r *resourceManager) Devices() Devices {
 }
 
 // AddDefaultResourcesToConfig adds default resource matching rules to config.Resources
-func AddDefaultResourcesToConfig(config *util.DeviceConfig) error {
+func AddDefaultResourcesToConfig(config *nvidia.DeviceConfig) error {
 	//config.Resources.AddGPUResource("*", "gpu")
 	config.Resources.GPUs = append(config.Resources.GPUs, spec.Resource{
 		Pattern: "*",

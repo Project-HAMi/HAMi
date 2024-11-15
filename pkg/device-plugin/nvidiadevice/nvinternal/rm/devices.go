@@ -21,8 +21,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -142,12 +140,12 @@ func (ds Devices) GetIDs() []string {
 }
 
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
-func (ds Devices) GetPluginDevices() []*kubeletdevicepluginv1beta1.Device {
+func (ds Devices) GetPluginDevices(count uint) []*kubeletdevicepluginv1beta1.Device {
 	var res []*kubeletdevicepluginv1beta1.Device
 
 	if !strings.Contains(ds.GetIDs()[0], "MIG") {
 		for _, dev := range ds {
-			for i := uint(0); i < *util.DeviceSplitCount; i++ {
+			for i := uint(0); i < count; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
 				res = append(res, &kubeletdevicepluginv1beta1.Device{
 					ID:       id,

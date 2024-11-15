@@ -19,7 +19,7 @@ package manager
 import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 // Option is a function that configures a manager
@@ -61,7 +61,7 @@ func WithMigStrategy(migStrategy string) Option {
 }
 
 // WithConfig sets the config reference for the manager
-func WithConfig(config *util.DeviceConfig) Option {
+func WithConfig(config *nvidia.DeviceConfig) Option {
 	return func(m *manager) {
 		m.config = config
 	}

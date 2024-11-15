@@ -22,7 +22,7 @@ import (
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/stretchr/testify/require"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -143,7 +143,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 		t.Run(tc.description, func(t *testing.T) {
 			deviceListStrategies, _ := v1.NewDeviceListStrategies(tc.deviceListStrategies)
 			plugin := NvidiaDevicePlugin{
-				config: &util.DeviceConfig{
+				config: &nvidia.DeviceConfig{
 					Config: &v1.Config{
 						Flags: v1.Flags{
 							CommandLineFlags: v1.CommandLineFlags{

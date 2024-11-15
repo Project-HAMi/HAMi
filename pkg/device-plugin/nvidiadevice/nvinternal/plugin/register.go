@@ -126,10 +126,10 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
-		if *util.DeviceMemoryScaling != 1 {
-			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
+		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+			registeredmem = int32(float64(registeredmem) * plugin.schedulerConfig.DeviceMemoryScaling)
 		}
-		klog.Infoln("MemoryScaling=", *util.DeviceMemoryScaling, "registeredmem=", registeredmem)
+		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -149,9 +149,9 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 		}
 		res = append(res, &api.DeviceInfo{
 			ID:      UUID,
-			Count:   int32(*util.DeviceSplitCount),
+			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
-			Devcore: int32(*util.DeviceCoresScaling * 100),
+			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
 			Numa:    numa,
 			Health:  health,

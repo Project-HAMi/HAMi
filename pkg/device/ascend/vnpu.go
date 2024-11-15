@@ -16,44 +16,21 @@ limitations under the License.
 
 package ascend
 
-import (
-	"os"
-
-	"k8s.io/apimachinery/pkg/util/yaml"
-)
-
 type Template struct {
-	Name   string `json:"name"`
-	Memory int64  `json:"memory"`
-	AICore int32  `json:"aiCore,omitempty"`
-	AICPU  int32  `json:"aiCPU,omitempty"`
+	Name   string `yaml:"name"`
+	Memory int64  `yaml:"memory"`
+	AICore int32  `yaml:"aiCore,omitempty"`
+	AICPU  int32  `yaml:"aiCPU,omitempty"`
 }
 
 type VNPUConfig struct {
-	CommonWord         string     `json:"commonWord"`
-	ChipName           string     `json:"chipName"`
-	ResourceName       string     `json:"resourceName"`
-	ResourceMemoryName string     `json:"resourceMemoryName"`
-	MemoryAllocatable  int64      `json:"memoryAllocatable"`
-	MemoryCapacity     int64      `json:"memoryCapacity"`
-	AICore             int32      `json:"aiCore"`
-	AICPU              int32      `json:"aiCPU"`
-	Templates          []Template `json:"templates"`
-}
-
-type Config struct {
-	VNPUs []VNPUConfig `json:"vnpus"`
-}
-
-func LoadConfig(path string) (*Config, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var yamlData Config
-	err = yaml.Unmarshal(data, &yamlData)
-	if err != nil {
-		return nil, err
-	}
-	return &yamlData, nil
+	CommonWord         string     `yaml:"commonWord"`
+	ChipName           string     `yaml:"chipName"`
+	ResourceName       string     `yaml:"resourceName"`
+	ResourceMemoryName string     `yaml:"resourceMemoryName"`
+	MemoryAllocatable  int64      `yaml:"memoryAllocatable"`
+	MemoryCapacity     int64      `yaml:"memoryCapacity"`
+	AICore             int32      `yaml:"aiCore"`
+	AICPU              int32      `yaml:"aiCPU"`
+	Templates          []Template `yaml:"templates"`
 }
