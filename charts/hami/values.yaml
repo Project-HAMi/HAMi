@@ -3,7 +3,7 @@
 nameOverride: ""
 fullnameOverride: ""
 imagePullSecrets: [ ]
-version: "v2.4.0"
+version: "latest"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -46,11 +46,8 @@ scheduler:
   # if we install the nvidia-vgpu-scheduler-scheduler as default scheduler, we need to remove the k8s default
   # scheduler pod from the cluster first, we must specify node name to skip the schedule workflow.
   nodeName: ""
-#  nodeLabelSelector:
-#    "gpu": "on"
-  defaultMem: 0
-  defaultCores: 0
-  defaultGPUNum: 1
+  #nodeLabelSelector:
+  #  "gpu": "on"
   overwriteEnv: "false"
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
@@ -61,7 +58,6 @@ scheduler:
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
-    imageTag: "v1.20.0"
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
     imagePullPolicy: IfNotPresent
     extraNewArgs:
@@ -115,9 +111,6 @@ devicePlugin:
   monitorimage: "projecthami/hami"
   monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
-  deviceSplitCount: 10
-  deviceMemoryScaling: 1
-  deviceCoreScaling: 1
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
@@ -138,7 +131,7 @@ devicePlugin:
 devices:
   mthreads:
     enabled: false
-    resources:
+    customresources:
       - mthreads.com/vgpu
   ascend:
     enabled: false
@@ -148,7 +141,7 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
-    resources:
+    customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
       - huawei.com/Ascend910B

@@ -94,11 +94,14 @@ func TestHandle(t *testing.T) {
 
 func TestPodHasNodeName(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
-	nvidia.ResourceName = "hami.io/gpu"
-	nvidia.ResourceMem = "hami.io/gpumem"
-	nvidia.ResourceMemPercentage = "hami.io/gpumem-percentage"
-	nvidia.ResourceCores = "hami.io/gpucores"
-	device.InitDevices()
+	device.InitDevicesWithConfig(&device.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+		},
+	})
 	// create a Pod object
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

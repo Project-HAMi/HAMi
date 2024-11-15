@@ -415,32 +415,3 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 	}
 	return PatchNodeAnnotations(n, tmppat)
 }
-
-func FilterDeviceToRegister(uuid, indexStr string) bool {
-	if DevicePluginFilterDevice == nil || (len(DevicePluginFilterDevice.UUID) == 0 && len(DevicePluginFilterDevice.Index) == 0) {
-		return false
-	}
-	uuidMap, indexMap := make(map[string]struct{}), make(map[uint]struct{})
-	for _, u := range DevicePluginFilterDevice.UUID {
-		uuidMap[u] = struct{}{}
-	}
-	for _, index := range DevicePluginFilterDevice.Index {
-		indexMap[index] = struct{}{}
-	}
-	if uuid != "" {
-		if _, ok := uuidMap[uuid]; ok {
-			return true
-		}
-	}
-	if indexStr != "" {
-		index, err := strconv.Atoi(indexStr)
-		if err != nil {
-			klog.Errorf("Error converting index to int: %v", err)
-			return false
-		}
-		if _, ok := indexMap[uint(index)]; ok {
-			return true
-		}
-	}
-	return false
-}

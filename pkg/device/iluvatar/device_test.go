@@ -101,7 +101,7 @@ func TestGetNodeDevices(t *testing.T) {
 }
 
 func TestPatchAnnotations(t *testing.T) {
-	InitIluvatarDevice()
+	InitIluvatarDevice(IluvatarConfig{})
 
 	tests := []struct {
 		name       string

@@ -11,7 +11,7 @@
 
 ## Prerequisites
 
-* Ascend device type: 910B(300T A2)
+* Ascend device type: 910B,910B3,310P
 * driver version >= 24.1.rc1
 * Ascend docker runtime
 
@@ -52,7 +52,7 @@ You can customize the ascend share configuration by following the steps below:
   └── values.yaml
   ```
 
-  ### Create the ascend-config.yaml file, the content is as follows
+  ### Create the device-config.yaml file, the content is as follows
 
   ```yaml
   vnpus:

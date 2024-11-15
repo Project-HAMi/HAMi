@@ -44,7 +44,12 @@ var (
 	MetaxResourceCount string
 )
 
-func InitMetaxDevice() *MetaxDevices {
+type MetaxConfig struct {
+	ResourceCountName string `yaml:"resourceCountName"`
+}
+
+func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
+	MetaxResourceCount = config.ResourceCountName
 	util.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
 	util.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
 	return &MetaxDevices{}

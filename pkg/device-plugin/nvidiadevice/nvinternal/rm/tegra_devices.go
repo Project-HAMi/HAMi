@@ -19,7 +19,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 const (
@@ -28,7 +28,7 @@ const (
 
 // buildTegraDeviceMap creates a DeviceMap for the tegra devices in the sytesm.
 // NOTE: At present only a single tegra device is expected.
-func buildTegraDeviceMap(config *util.DeviceConfig) (DeviceMap, error) {
+func buildTegraDeviceMap(config *nvidia.DeviceConfig) (DeviceMap, error) {
 	devices := make(DeviceMap)
 
 	name := tegraDeviceName
