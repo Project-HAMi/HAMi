@@ -17,7 +17,7 @@ Please refer to  [Quick Start](https://github.com/NVIDIA/k8s-device-plugin?tab=r
 ## Run the benchmark
 
 ```bash
-cd HAMi/deployments
+cd HAMi/benchmarks/deployments
 
 kubectl apply -f job-on-hami.yml
 
