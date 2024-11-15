@@ -2,8 +2,27 @@ apiVersion: v1
 entries:
   hami:
   - apiVersion: v2
+    appVersion: 2.4.1
+    created: "2024-11-15T06:57:47.121136769Z"
+    description: Heterogeneous AI Computing Virtualization Middleware
+    digest: a9151a78340c06525b9071bef1f0f24cf52bddc3aa5f20d3045310449b37657a
+    keywords:
+    - vgpu
+    - gpu
+    kubeVersion: '>= 1.16.0'
+    maintainers:
+    - email: limengxuan@4paradigm.com
+      name: limengxuan
+    - email: xiaozhang0210@hotmail.com
+      name: zhangxiao
+    name: hami
+    type: application
+    urls:
+    - https://Project-HAMi.github.io/HAMi/charts/hami-2.4.1.tgz
+    version: 2.4.1
+  - apiVersion: v2
     appVersion: 2.4.0
-    created: "2024-11-15T06:19:56.825983303Z"
+    created: "2024-11-15T06:57:47.120433474Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 1b25c767b32433b02fb3b4fa6194e8946e9f9233de4046ea0536051f8f6c2af2
     keywords:
@@ -20,4 +39,4 @@ entries:
     urls:
     - https://Project-HAMi.github.io/HAMi/charts/hami-2.4.0.tgz
     version: 2.4.0
-generated: "2024-11-15T06:19:56.825065532Z"
+generated: "2024-11-15T06:57:47.119514116Z"
