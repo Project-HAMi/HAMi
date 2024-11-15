@@ -85,8 +85,8 @@ func GetDevices() map[string]Devices {
 func InitDevicesWithConfig(config *Config) {
 	devices = make(map[string]Devices)
 	DevicesToHandle = []string{}
-	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice(config.CambriconConfig)
 	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice(config.NvidiaConfig)
+	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice(config.CambriconConfig)
 	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice(config.HygonConfig)
 	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice(config.IluvatarConfig)
 	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice(config.MthreadsConfig)
@@ -105,6 +105,9 @@ func InitDevicesWithConfig(config *Config) {
 }
 
 func InitDevices() {
+	if len(devices) > 0 {
+		return
+	}
 	config, err := LoadConfig(configFile)
 	klog.Infoln("reading config=", config, "configfile=", configFile)
 	if err != nil {
