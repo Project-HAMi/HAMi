@@ -25,7 +25,7 @@ data:
                 },
                 "managedResources": [
                     {{- if .Values.devices.ascend.enabled }}
-                    {{- range .Values.devices.ascend.resources }}
+                    {{- range .Values.devices.ascend.customresources }}
                     {
                       "name": "{{ . }}",
                       "ignoredByScheduler": true
@@ -33,7 +33,7 @@ data:
                     {{- end }}
                     {{- end }}
                     {{- if .Values.devices.mthreads.enabled }}
-                    {{- range .Values.devices.mthreads.resources }}
+                    {{- range .Values.devices.mthreads.customresources }}
                     {
                       "name": "{{ . }}",
                       "ignoredByScheduler": true

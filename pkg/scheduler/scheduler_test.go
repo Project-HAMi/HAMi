@@ -135,7 +135,14 @@ func Test_Filter(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	s.addAllEventHandlers()
-	device.InitDevices()
+	device.InitDevicesWithConfig(&device.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+		},
+	})
 
 	pod1 := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -469,9 +476,6 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
-	nvidia.ResourceName = "hami.io/gpu"
-	nvidia.ResourceMem = "hami.io/gpumem"
-	nvidia.ResourceCores = "hami.io/gpucores"
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			initNode()

@@ -24,10 +24,10 @@ import (
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/api"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -49,23 +49,67 @@ const (
 )
 
 var (
-	ResourceName          string
-	ResourceMem           string
-	ResourceCores         string
-	ResourceMemPercentage string
-	ResourcePriority      string
-	DebugMode             bool
-	OverwriteEnv          bool
+	NodeName          string
+	RuntimeSocketFlag string
+	DisableCoreLimit  *bool
+
+	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
+	DevicePluginFilterDevice *FilterDevice
 )
 
-type NvidiaGPUDevices struct {
+type NvidiaConfig struct {
+	ResourceCountName            string  `yaml:"resourceCountName"`
+	ResourceMemoryName           string  `yaml:"resourceMemoryName"`
+	ResourceCoreName             string  `yaml:"resourceCoreName"`
+	ResourceMemoryPercentageName string  `yaml:"resourceMemoryPercentageName"`
+	ResourcePriority             string  `yaml:"resourcePriorityName"`
+	OverwriteEnv                 bool    `yaml:"overwriteEnv"`
+	DefaultMemory                int32   `yaml:"defaultMemory"`
+	DefaultCores                 int32   `yaml:"defaultCores"`
+	DefaultGPUNum                int32   `yaml:"defaultGPUNum"`
+	DeviceSplitCount             uint    `yaml:"deviceSplitCount"`
+	DeviceMemoryScaling          float64 `yaml:"deviceMemoryScaling"`
+	DeviceCoreScaling            float64 `yaml:"deviceCoreScaling"`
+	DisableCoreLimit             bool    `yaml:"disableCoreLimit"`
 }
 
-func InitNvidiaDevice() *NvidiaGPUDevices {
+type FilterDevice struct {
+	// UUID is the device ID.
+	UUID []string `json:"uuid"`
+	// Index is the device index.
+	Index []uint `json:"index"`
+}
+
+type DevicePluginConfigs struct {
+	Nodeconfig []struct {
+		Name                string        `json:"name"`
+		Devicememoryscaling float64       `json:"devicememoryscaling"`
+		Devicecorescaling   float64       `json:"devicecorescaling"`
+		Devicesplitcount    uint          `json:"devicesplitcount"`
+		Migstrategy         string        `json:"migstrategy"`
+		FilterDevice        *FilterDevice `json:"filterdevices"`
+	} `json:"nodeconfig"`
+}
+
+type DeviceConfig struct {
+	*spec.Config
+
+	ResourceName *string
+	DebugMode    *bool
+}
+
+type NvidiaGPUDevices struct {
+	config NvidiaConfig
+}
+
+func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
+	klog.InfoS("initializing nvidia device", "resourceName", nvconfig.ResourceCountName, "resourceMem", nvconfig.ResourceMemoryName, "DefaultGPUNum", nvconfig.DefaultGPUNum)
 	util.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
 	util.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 	util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
-	return &NvidiaGPUDevices{}
+	return &NvidiaGPUDevices{
+		config: nvconfig,
+	}
 }
 
 func (dev *NvidiaGPUDevices) CommonWord() string {
@@ -73,12 +117,35 @@ func (dev *NvidiaGPUDevices) CommonWord() string {
 }
 
 func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
-	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
-	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
-	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
-	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
-	fs.BoolVar(&OverwriteEnv, "overwrite-env", false, "If set NVIDIA_VISIBLE_DEVICES=none to pods with no-gpu allocation")
+}
+
+func FilterDeviceToRegister(uuid, indexStr string) bool {
+	if DevicePluginFilterDevice == nil || (len(DevicePluginFilterDevice.UUID) == 0 && len(DevicePluginFilterDevice.Index) == 0) {
+		return false
+	}
+	uuidMap, indexMap := make(map[string]struct{}), make(map[uint]struct{})
+	for _, u := range DevicePluginFilterDevice.UUID {
+		uuidMap[u] = struct{}{}
+	}
+	for _, index := range DevicePluginFilterDevice.Index {
+		indexMap[index] = struct{}{}
+	}
+	if uuid != "" {
+		if _, ok := uuidMap[uuid]; ok {
+			return true
+		}
+	}
+	if indexStr != "" {
+		index, err := strconv.Atoi(indexStr)
+		if err != nil {
+			klog.Errorf("Error converting index to int: %v", err)
+			return false
+		}
+		if _, ok := indexMap[uint(index)]; ok {
+			return true
+		}
+	}
+	return false
 }
 
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
@@ -138,7 +205,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, e
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
-	priority, ok := ctr.Resources.Limits[corev1.ResourceName(ResourcePriority)]
+	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
 			Name:  api.TaskPriority,
@@ -146,23 +213,23 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 
-	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
+	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)]
 	if resourceNameOK {
 		return resourceNameOK, nil
 	}
 
-	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(ResourceCores)]
-	_, resourceMemOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMem)]
-	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(ResourceMemPercentage)]
+	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+	_, resourceMemOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	_, resourceMemPercentageOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryPercentageName)]
 
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
-		if config.DefaultResourceNum > 0 {
-			ctr.Resources.Limits[corev1.ResourceName(ResourceName)] = *resource.NewQuantity(int64(config.DefaultResourceNum), resource.BinarySI)
+		if dev.config.DefaultGPUNum > 0 {
+			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
 			resourceNameOK = true
 		}
 	}
 
-	if !resourceNameOK && OverwriteEnv {
+	if !resourceNameOK && dev.config.OverwriteEnv {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
 			Name:  "NVIDIA_VISIBLE_DEVICES",
 			Value: "none",
@@ -262,10 +329,10 @@ func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd u
 }
 
 func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	resourceName := corev1.ResourceName(ResourceName)
-	resourceMem := corev1.ResourceName(ResourceMem)
-	resourceMemPercentage := corev1.ResourceName(ResourceMemPercentage)
-	resourceCores := corev1.ResourceName(ResourceCores)
+	resourceName := corev1.ResourceName(dev.config.ResourceCountName)
+	resourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
+	resourceMemPercentage := corev1.ResourceName(dev.config.ResourceMemoryPercentageName)
+	resourceCores := corev1.ResourceName(dev.config.ResourceCoreName)
 	v, ok := ctr.Resources.Limits[resourceName]
 	if !ok {
 		v, ok = ctr.Resources.Requests[resourceName]
@@ -295,13 +362,13 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
-				if config.DefaultMem != 0 {
-					memnum = int(config.DefaultMem)
+				if dev.config.DefaultMemory != 0 {
+					memnum = int(dev.config.DefaultMemory)
 				} else {
 					mempnum = 100
 				}
 			}
-			corenum := config.DefaultCores
+			corenum := dev.config.DefaultCores
 			core, ok := ctr.Resources.Limits[resourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[resourceCores]

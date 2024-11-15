@@ -19,7 +19,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 type tegraResourceManager struct {
@@ -29,7 +29,7 @@ type tegraResourceManager struct {
 var _ ResourceManager = (*tegraResourceManager)(nil)
 
 // NewTegraResourceManagers returns a set of ResourceManagers for tegra resources
-func NewTegraResourceManagers(config *util.DeviceConfig) ([]ResourceManager, error) {
+func NewTegraResourceManagers(config *nvidia.DeviceConfig) ([]ResourceManager, error) {
 	deviceMap, err := buildTegraDeviceMap(config)
 	if err != nil {
 		return nil, fmt.Errorf("error building Tegra device map: %v", err)

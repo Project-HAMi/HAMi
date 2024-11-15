@@ -17,11 +17,13 @@ limitations under the License.
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -95,66 +97,25 @@ func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 	}
 }
 
-func readFromConfigFile() error {
-	jsonbyte, err := os.ReadFile("/config/config.json")
-	if err != nil {
-		return err
-	}
-	var deviceConfigs util.DevicePluginConfigs
-	err = json.Unmarshal(jsonbyte, &deviceConfigs)
-	if err != nil {
-		return err
-	}
-	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
-	for _, val := range deviceConfigs.Nodeconfig {
-		if os.Getenv(util.NodeNameEnvName) == val.Name {
-			klog.Infof("Reading config from file %s", val.Name)
-			if val.Devicememoryscaling > 0 {
-				*util.DeviceMemoryScaling = val.Devicememoryscaling
-			}
-			if val.Devicecorescaling > 0 {
-				*util.DeviceCoresScaling = val.Devicecorescaling
-			}
-			if val.Devicesplitcount > 0 {
-				*util.DeviceSplitCount = val.Devicesplitcount
-			}
-			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
-				util.DevicePluginFilterDevice = val.FilterDevice
-			}
-			klog.Infof("FilterDevice: %v", val.FilterDevice)
-		}
-	}
-	return nil
-}
-
-func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cli.Flag) (util.DeviceConfig, error) {
-	devcfg := util.DeviceConfig{}
+func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cli.Flag) (nvidia.DeviceConfig, error) {
+	devcfg := nvidia.DeviceConfig{}
 	devcfg.Config = cfg
 
 	klog.Infoln("flags=", flags)
 	for _, flag := range flags {
 		for _, n := range flag.Names() {
 			// Common flags
-			if strings.Compare(n, "device-split-count") == 0 {
-				updateFromCLIFlag(&util.DeviceSplitCount, c, n)
-			}
-			if strings.Compare(n, "device-memory-scaling") == 0 {
-				updateFromCLIFlag(&util.DeviceMemoryScaling, c, n)
-				klog.Infoln("DeviceMemoryScaling", *util.DeviceMemoryScaling)
-			}
-			if strings.Compare(n, "device-cores-scaling") == 0 {
-				updateFromCLIFlag(&util.DeviceCoresScaling, c, n)
-			}
-			if strings.Compare(n, "disable-core-limit") == 0 {
-				updateFromCLIFlag(&util.DisableCoreLimit, c, n)
-			}
-			if strings.Compare(n, "resource-name") == 0 {
-				updateFromCLIFlag(&devcfg.ResourceName, c, n)
+			if strings.Compare(n, "config-file") == 0 {
+				updateFromCLIFlag(&plugin.ConfigFile, c, n)
 			}
 		}
 	}
-	if err := readFromConfigFile(); err != nil {
-		return devcfg, err
+
+	config, err := device.LoadConfig(*plugin.ConfigFile)
+	if err != nil {
+		klog.Fatalf("failed to load ascend vnpu config file %s: %v", *plugin.ConfigFile, err)
 	}
+	devcfg.ResourceName = &config.NvidiaConfig.ResourceCountName
+	klog.Infoln("reading config=", config.NvidiaConfig.ResourceCountName, "devcfg", *devcfg.ResourceName, "configfile=", *plugin.ConfigFile)
 	return devcfg, nil
 }

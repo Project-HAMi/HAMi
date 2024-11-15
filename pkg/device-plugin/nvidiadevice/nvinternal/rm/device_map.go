@@ -19,7 +19,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvml"
@@ -28,14 +28,14 @@ import (
 
 type deviceMapBuilder struct {
 	device.Interface
-	config *util.DeviceConfig
+	config *nvidia.DeviceConfig
 }
 
 // DeviceMap stores a set of devices per resource name.
 type DeviceMap map[spec.ResourceName]Devices
 
 // NewDeviceMap creates a device map for the specified NVML library and config.
-func NewDeviceMap(nvmllib nvml.Interface, config *util.DeviceConfig) (DeviceMap, error) {
+func NewDeviceMap(nvmllib nvml.Interface, config *nvidia.DeviceConfig) (DeviceMap, error) {
 	b := deviceMapBuilder{
 		Interface: device.New(device.WithNvml(nvmllib)),
 		config:    config,
@@ -265,7 +265,7 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 }
 
 // updateDeviceMapWithReplicas returns an updated map of resource names to devices with replica information from spec.Config.Sharing.TimeSlicing.Resources
-func updateDeviceMapWithReplicas(config *util.DeviceConfig, oDevices DeviceMap) (DeviceMap, error) {
+func updateDeviceMapWithReplicas(config *nvidia.DeviceConfig, oDevices DeviceMap) (DeviceMap, error) {
 	devices := make(DeviceMap)
 
 	// Begin by walking config.Sharing.TimeSlicing.Resources and building a map of just the resource names.
