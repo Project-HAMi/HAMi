@@ -69,16 +69,12 @@ func (dev *Devices) trimMemory(m int64) (int64, string) {
 	return 0, ""
 }
 
-func InitDevices() []*Devices {
+func InitDevices(config []VNPUConfig) []*Devices {
 	var devs []*Devices
 	if !enableAscend {
 		return devs
 	}
-	config, err := LoadConfig(configFile)
-	if err != nil {
-		klog.Fatalf("failed to load ascend vnpu config file %s: %v", configFile, err)
-	}
-	for _, vnpu := range config.VNPUs {
+	for _, vnpu := range config {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
 			config:           vnpu,
@@ -101,7 +97,6 @@ func InitDevices() []*Devices {
 
 func ParseConfig(fs *flag.FlagSet) {
 	fs.BoolVar(&enableAscend, "enable-ascend", false, "enable ascend device")
-	fs.StringVar(&configFile, "ascend-config-file", "", "ascend vnpu config file")
 }
 
 func (dev *Devices) CommonWord() string {

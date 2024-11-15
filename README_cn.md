@@ -104,16 +104,10 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 kubectl label nodes {nodeid} gpu=on
 ```
 
-使用下列指令获取集群服务端版本
+使用如下指令进行安装
 
 ```bash
-kubectl version
-```
-
-在安装过程中须根据集群服务端版本（上一条指令的结果）指定调度器镜像版本，例如集群服务端版本为1.16.8，则可以使用如下指令进行安装
-
-```bash
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag=v1.16.8 -n kube-system
+helm install hami hami-charts/hami -n kube-system
 ```
 
 你可以修改这里的[配置](docs/config_cn.md)来定制安装

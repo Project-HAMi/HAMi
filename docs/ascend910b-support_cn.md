@@ -12,7 +12,7 @@
 
 * Ascend docker runtime
 * driver version > 24.1.rc1
-* Ascend device type: 910B(300T A2)
+* Ascend device type: 910B,910B3,310P
 
 ## 开启NPU复用
 
@@ -50,7 +50,7 @@ HAMi 目前有一个 NPU 内置[虚拟化配置文件](https://github.com/Projec
   └── values.yaml
   ```
 
-  ### 在 files 目录下创建 Create the ascend-config.yaml 文件，配置文件如下所示, 可以按需调整
+  ### 在 files 目录下创建 Create the device-config.yaml 文件，配置文件如下所示, 可以按需调整
 
   ```yaml
   vnpus:

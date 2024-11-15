@@ -57,7 +57,16 @@ var (
 	legalMemoryslices      = []int64{2, 4, 8, 16, 32, 64, 96}
 )
 
-func InitMthreadsDevice() *MthreadsDevices {
+type MthreadsConfig struct {
+	ResourceCountName  string `yaml:"resourceCountName"`
+	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
+}
+
+func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
+	MthreadsResourceCount = config.ResourceCountName
+	MthreadsResourceCores = config.ResourceCoreName
+	MthreadsResourceMemory = config.ResourceMemoryName
 	util.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
 	util.SupportDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-allocated"
 	return &MthreadsDevices{}

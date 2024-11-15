@@ -34,6 +34,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
+	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
@@ -58,28 +59,38 @@ type Devices interface {
 	//ParseConfig(fs *flag.FlagSet)
 }
 
+type Config struct {
+	NvidiaConfig    nvidia.NvidiaConfig       `yaml:"nvidia"`
+	MetaxConfig     metax.MetaxConfig         `yaml:"metax"`
+	HygonConfig     hygon.HygonConfig         `yaml:"hygon"`
+	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
+	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
+	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
+}
+
 var (
 	HandshakeAnnos  = map[string]string{}
 	RegisterAnnos   = map[string]string{}
+	devices         map[string]Devices
 	DevicesToHandle []string
+	configFile      string
+	DebugMode       bool
 )
-
-var devices map[string]Devices
-var DebugMode bool
 
 func GetDevices() map[string]Devices {
 	return devices
 }
 
-func InitDevices() {
+func InitDevicesWithConfig(config *Config) {
 	devices = make(map[string]Devices)
 	DevicesToHandle = []string{}
-	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice()
-	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice()
-	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice()
-	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice()
-	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice()
-	devices[metax.MetaxGPUDevice] = metax.InitMetaxDevice()
+	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice(config.NvidiaConfig)
+	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice(config.CambriconConfig)
+	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice(config.HygonConfig)
+	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice(config.IluvatarConfig)
+	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice(config.MthreadsConfig)
+	devices[metax.MetaxGPUDevice] = metax.InitMetaxDevice(config.MetaxConfig)
 
 	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
@@ -87,10 +98,22 @@ func InitDevices() {
 	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, mthreads.MthreadsGPUCommonWord)
 	DevicesToHandle = append(DevicesToHandle, metax.MetaxGPUCommonWord)
-	for _, dev := range ascend.InitDevices() {
+	for _, dev := range ascend.InitDevices(config.VNPUs) {
 		devices[dev.CommonWord()] = dev
 		DevicesToHandle = append(DevicesToHandle, dev.CommonWord())
 	}
+}
+
+func InitDevices() {
+	if len(devices) > 0 {
+		return
+	}
+	config, err := LoadConfig(configFile)
+	klog.Infoln("reading config=", config, "configfile=", configFile)
+	if err != nil {
+		klog.Fatalf("failed to load device config file %s: %v", configFile, err)
+	}
+	InitDevicesWithConfig(config)
 }
 
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
@@ -146,6 +169,20 @@ func GlobalFlagSet() *flag.FlagSet {
 	mthreads.ParseConfig(fs)
 	metax.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
+	fs.StringVar(&configFile, "device-config-file", "", "device config file")
 	klog.InitFlags(fs)
 	return fs
+}
+
+func LoadConfig(path string) (*Config, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var yamlData Config
+	err = yaml.Unmarshal(data, &yamlData)
+	if err != nil {
+		return nil, err
+	}
+	return &yamlData, nil
 }

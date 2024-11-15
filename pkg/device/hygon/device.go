@@ -50,7 +50,16 @@ var (
 	HygonResourceCores  string
 )
 
-func InitDCUDevice() *DCUDevices {
+type HygonConfig struct {
+	ResourceCountName  string `yaml:"resourceCountName"`
+	ResourceMemoryName string `yaml:"resourceMemoryName"`
+	ResourceCoreName   string `yaml:"resourceCoreName"`
+}
+
+func InitDCUDevice(config HygonConfig) *DCUDevices {
+	HygonResourceCount = config.ResourceCountName
+	HygonResourceMemory = config.ResourceMemoryName
+	HygonResourceCores = config.ResourceCoreName
 	util.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
 	util.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
 	util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos

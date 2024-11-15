@@ -1,4 +1,3 @@
-{{- if .Values.devices.ascend.enabled }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -7,10 +6,41 @@ metadata:
     app.kubernetes.io/component: hami-scheduler
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
-  ascend-config.yaml: |-
-  {{- if .Files.Glob "files/ascend-config.yaml" }}
-  {{- .Files.Get "files/ascend-config.yaml" | nindent 4}}
+  device-config.yaml: |-
+  {{- if .Files.Glob "files/device-config.yaml" }}
+  {{- .Files.Get "files/device-config.yaml" | nindent 4}}
   {{- else }}
+    nvidia:
+      resourceCountName: {{ .Values.resourceName }}
+      resourceMemoryName: {{ .Values.resourceMem }}
+      resourceMemoryPercentageName: {{ .Values.resourceMemPercentage }}
+      resourceCoreName: {{ .Values.resourceCores }}
+      resourcePriorityName: {{ .Values.resourcePriority }}
+      overwriteEnv: false
+      defaultMemory: 0
+      defaultCores: 0
+      defaultGPUNum: 1
+      deviceSplitCount: 10
+      deviceMemoryScaling: 1
+      deviceCoreScaling: 1
+    cambricon:
+      resourceCountName: {{ .Values.mluResourceName }}
+      resourceMemoryName: {{ .Values.mluResourceMem }}
+      resourceCoreName: {{ .Values.mluResourceCores }}
+    hygon:
+      resourceCountName: {{ .Values.dcuResourceName }}
+      resourceMemoryName: {{ .Values.dcuResourceMem }}
+      resourceCoreName: {{ .Values.dcuResourceCores }}
+    metax:
+      resourceCountName: "metax-tech.com/gpu"
+    mthreads:
+      resourceCountName: "mthreads.com/vgpu"
+      resourceMemoryName: "mthreads.com/sgpu-memory"
+      resourceCoreName: "mthreads.com/sgpu-core"
+    iluvatar: 
+      resourceCountName: {{ .Values.iluvatarResourceName }}
+      resourceMemoryName: {{ .Values.iluvatarResourceMem }}
+      resourceCoreName: {{ .Values.iluvatarResourceCore }}
     vnpus:
     - chipName: 910B
       commonWord: Ascend910A
@@ -71,5 +101,3 @@ data:
           aiCore: 4
           aiCPU: 4
   {{ end }}
-
-{{- end }}

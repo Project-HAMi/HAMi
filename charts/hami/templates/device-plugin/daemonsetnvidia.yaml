@@ -30,7 +30,6 @@ spec:
       runtimeClassName: {{ .Values.devicePlugin.runtimeClassName }}
       {{- end }}
       {{- include "hami-vgpu.imagePullSecrets" . | nindent 6}}
-      # serviceAccountName:
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: true
@@ -45,11 +44,8 @@ spec:
                 command: ["/bin/sh","-c", {{ printf "cp -f /k8s-vgpu/lib/nvidia/* %s/vgpu/" .Values.global.gpuHookPath | quote }}]
           command:
             - nvidia-device-plugin
-            - --resource-name={{ .Values.resourceName }}
+            - --config-file=/device-config.yaml
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
-            - --device-memory-scaling={{ .Values.devicePlugin.deviceMemoryScaling }}
-            - --device-cores-scaling={{ .Values.devicePlugin.deviceCoreScaling }}
-            - --device-split-count={{ .Values.devicePlugin.deviceSplitCount }}
             - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
@@ -79,6 +75,9 @@ spec:
               mountPath: /config
             - name: hosttmp
               mountPath: /tmp
+            - name: device-config
+              mountPath: /device-config.yaml
+              subPath: device-config.yaml
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
@@ -137,6 +136,9 @@ spec:
         - name: deviceconfig
           configMap:
             name: {{ template "hami-vgpu.device-plugin" . }}
+        - name: device-config
+          configMap:
+            name: {{ include "hami-vgpu.scheduler" . }}-device
       {{- if .Values.devicePlugin.nvidianodeSelector }}
       nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
       {{- end }}

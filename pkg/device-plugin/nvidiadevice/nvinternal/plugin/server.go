@@ -17,6 +17,7 @@
 package plugin
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -54,6 +55,7 @@ const (
 
 var (
 	hostHookPath string
+	ConfigFile   *string
 )
 
 func init() {
@@ -63,10 +65,11 @@ func init() {
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
 	rm                   rm.ResourceManager
-	config               *util.DeviceConfig
+	config               *nvidia.DeviceConfig
 	deviceListEnvvar     string
 	deviceListStrategies spec.DeviceListStrategies
 	socket               string
+	schedulerConfig      nvidia.NvidiaConfig
 
 	cdiHandler          cdi.Interface
 	cdiEnabled          bool
@@ -77,11 +80,51 @@ type NvidiaDevicePlugin struct {
 	stop   chan interface{}
 }
 
+func readFromConfigFile(sConfig *nvidia.NvidiaConfig) error {
+	jsonbyte, err := os.ReadFile("/config/config.json")
+	if err != nil {
+		return err
+	}
+	var deviceConfigs nvidia.DevicePluginConfigs
+	err = json.Unmarshal(jsonbyte, &deviceConfigs)
+	if err != nil {
+		return err
+	}
+	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
+	for _, val := range deviceConfigs.Nodeconfig {
+		if os.Getenv(util.NodeNameEnvName) == val.Name {
+			klog.Infof("Reading config from file %s", val.Name)
+			if val.Devicememoryscaling > 0 {
+				sConfig.DeviceMemoryScaling = val.Devicememoryscaling
+			}
+			if val.Devicecorescaling > 0 {
+				sConfig.DeviceCoreScaling = val.Devicecorescaling
+			}
+			if val.Devicesplitcount > 0 {
+				sConfig.DeviceSplitCount = val.Devicesplitcount
+			}
+			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
+				nvidia.DevicePluginFilterDevice = val.FilterDevice
+			}
+			klog.Infof("FilterDevice: %v", val.FilterDevice)
+		}
+	}
+	return nil
+}
+
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
-func NewNvidiaDevicePlugin(config *util.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool) *NvidiaDevicePlugin {
+func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool) *NvidiaDevicePlugin {
 	_, name := resourceManager.Resource().Split()
 
 	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+
+	sConfig, err := device.LoadConfig(*ConfigFile)
+	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile)
+	if err != nil {
+		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
+	}
+	readFromConfigFile(&sConfig.NvidiaConfig)
+	device.InitDevicesWithConfig(sConfig)
 
 	return &NvidiaDevicePlugin{
 		rm:                   resourceManager,
@@ -92,6 +135,7 @@ func NewNvidiaDevicePlugin(config *util.DeviceConfig, resourceManager rm.Resourc
 		cdiHandler:           cdiHandler,
 		cdiEnabled:           cdiEnabled,
 		cdiAnnotationPrefix:  *config.Flags.Plugin.CDIAnnotationPrefix,
+		schedulerConfig:      sConfig.NvidiaConfig,
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -356,10 +400,10 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 			response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
-			if *util.DeviceMemoryScaling > 1 {
+			if plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 				response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 			}
-			if *util.DisableCoreLimit {
+			if plugin.schedulerConfig.DisableCoreLimit {
 				response.Envs[api.CoreLimitSwitch] = "disable"
 			}
 			cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
@@ -540,7 +584,7 @@ func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) 
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
-	return plugin.rm.Devices().GetPluginDevices()
+	return plugin.rm.Devices().GetPluginDevices(plugin.schedulerConfig.DeviceSplitCount)
 }
 
 func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
