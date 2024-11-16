@@ -33,7 +33,7 @@ spec:
       containers:
       {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: kube-scheduler
-          image: {{ .Values.scheduler.kubeScheduler.image }}:{{ .Capabilities.KubeVersion.Version }}
+          image: "{{ .Values.scheduler.kubeScheduler.image }}:{{ include "resolvedKubeSchedulerTag" . }}"
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
           command:
             - kube-scheduler
