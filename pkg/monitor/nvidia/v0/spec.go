@@ -129,6 +129,14 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 	return v
 }
 
+func (s Spec) SetDeviceSmLimit(l uint64) {
+	idx := uint64(0)
+	for idx < s.sr.num {
+		s.sr.smLimit[idx] = l
+		idx += 1
+	}
+}
+
 func (s Spec) IsValidUUID(idx int) bool {
 	return s.sr.uuids[idx].uuid[0] != 0
 }
@@ -139,6 +147,14 @@ func (s Spec) DeviceUUID(idx int) string {
 
 func (s Spec) DeviceMemoryLimit(idx int) uint64 {
 	return s.sr.limit[idx]
+}
+
+func (s Spec) SetDeviceMemoryLimit(l uint64) {
+	idx := uint64(0)
+	for idx < s.sr.num {
+		s.sr.limit[idx] = l
+		idx += 1
+	}
 }
 
 func (s Spec) LastKernelTime() int64 {

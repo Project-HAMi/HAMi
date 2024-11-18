@@ -61,6 +61,8 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 		pi := &podInfo{Name: pod.Name, UID: pod.UID, Namespace: pod.Namespace, NodeID: nodeID, Devices: devices}
 		m.pods[pod.UID] = pi
 		klog.Infof("Pod added: Name: %s, UID: %s, Namespace: %s, NodeID: %s", pod.Name, pod.UID, pod.Namespace, nodeID)
+	} else {
+		m.pods[pod.UID].Devices = devices
 	}
 }
 
