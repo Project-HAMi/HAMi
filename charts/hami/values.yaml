@@ -59,6 +59,7 @@ scheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
+    imageTag: ""
     imagePullPolicy: IfNotPresent
     extraNewArgs:
       - --config=/config/config.yaml
@@ -111,6 +112,9 @@ devicePlugin:
   monitorimage: "projecthami/hami"
   monitorctrPath: /usr/local/vgpu/containers
   imagePullPolicy: IfNotPresent
+  deviceSplitCount: 10
+  deviceMemoryScaling: 1
+  deviceCoreScaling: 1
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"

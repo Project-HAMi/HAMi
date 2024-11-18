@@ -1,9 +1,19 @@
 # Global Config
+**Note:**
+All the configurations listed below are managed within the hami-scheduler-device ConfigMap.
+You can update these configurations using one of the following methods:
+
+1. Directly edit the ConfigMap: If HAMi has already been successfully installed, you can manually update the hami-scheduler-device ConfigMap using the kubectl edit command to manually update the hami-scheduler-device ConfigMap.
+    ```bash
+    kubectl edit configmap hami-scheduler-device -n <namespace>
+    ```
+    After making changes, restart the related HAMi components to apply the updated configurations.
+2. Modify Helm Chart: Update the corresponding values in the [ConfigMap](../charts/hami/templates/scheduler/device-configmap.yaml), then reapply the Helm Chart to regenerate the ConfigMap.
 
 you can customize your vGPU support by setting the following parameters using `-set`, for example
 
 ```
-helm install vgpu-charts/vgpu vgpu --set devicePlugin.deviceMemoryScaling=5 ...
+helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 ```
 
 * `devicePlugin.service.schedulerPort:`
