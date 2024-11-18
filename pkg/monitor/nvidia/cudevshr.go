@@ -55,9 +55,11 @@ type UsageInfo interface {
 	DeviceMemoryOffset(idx int) uint64
 	DeviceMemoryTotal(idx int) uint64
 	DeviceSmUtil(idx int) uint64
+	SetDeviceSmLimit(l uint64)
 	IsValidUUID(idx int) bool
 	DeviceUUID(idx int) string
 	DeviceMemoryLimit(idx int) uint64
+	SetDeviceMemoryLimit(l uint64)
 	LastKernelTime() int64
 	//UsedMemory(idx int) (uint64, error)
 	GetPriority() int
