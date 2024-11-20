@@ -131,6 +131,14 @@ devicePlugin:
   nvidianodeSelector:
     gpu: "on"
   tolerations: []
+  # The updateStrategy for DevicePlugin DaemonSet.
+  # If you want to update the DaemonSet by manual, set type as "OnDelete".
+  # We recommend use OnDelete update strategy because DevicePlugin pod restart will cause business pod restart, this behavior is destructive.
+  # Otherwise, you can use RollingUpdate update strategy to rolling update DevicePlugin pod.
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxUnavailable: 1
 
 devices:
   mthreads:
