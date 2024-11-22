@@ -12,6 +12,10 @@ metadata:
   annotations: {{ toYaml .Values.global.annotations | nindent 4}}
   {{- end }}
 spec:
+  updateStrategy:
+    {{- with .Values.devicePlugin.updateStrategy }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: hami-device-plugin
