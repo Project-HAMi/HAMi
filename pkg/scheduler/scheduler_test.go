@@ -112,6 +112,117 @@ func Test_getNodesUsage(t *testing.T) {
 
 // test case matrix
 /**
+| pod name     | node name|  pod status | annotations                 |             result                  |
+|--------------|----------|-------------|---------------------------- |-------------------------------------|
+| test-pod-1   | node11   |  Succeeded  |  hami.io/bind-phase:success |  node11:{TotalPod:1,UseDevicePod:1} |
+| test-pod-2   | node12   |  Running    |  none                       |  node12:{TotalPod:0;UseDevicePod:0} |
+| test-pod-3   | node13   |  Succeeded  |  none                       |  node13:{TotalPod:1;UseDevicePod:0} |
+test case matrix.
+*/
+
+func Test_getPodUsage(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	tests := []struct {
+		name    string
+		pods    []*corev1.Pod
+		want    map[string]PodUseDeviceStat
+		wantErr error
+	}{
+		{
+			name: "One pod running",
+			pods: []*corev1.Pod{
+				{
+					Status: corev1.PodStatus{Phase: corev1.PodRunning},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod-2",
+						Namespace: "default",
+						UID:       "uuid12",
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "node12",
+					},
+				},
+			},
+			want: map[string]PodUseDeviceStat{
+				"node12": {
+					TotalPod:     0, // Running pod does not count
+					UseDevicePod: 0,
+				},
+			},
+		},
+		{
+			name: "one pod succeeded,no annotation",
+			pods: []*corev1.Pod{
+				{
+					Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test-pod-3",
+						Namespace: "default",
+						UID:       "uuid14",
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "node13",
+					},
+				},
+			},
+			want: map[string]PodUseDeviceStat{
+				"node13": {
+					TotalPod:     1,
+					UseDevicePod: 0, // No annotation
+				},
+			},
+		},
+		{
+			name: "All pods succeeded with device bind success",
+			pods: []*corev1.Pod{
+				{
+					Status: corev1.PodStatus{Phase: corev1.PodSucceeded},
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        "test-pod-1",
+						Namespace:   "default",
+						UID:         "uuid11",
+						Annotations: map[string]string{util.DeviceBindPhase: util.DeviceBindSuccess},
+					},
+					Spec: corev1.PodSpec{
+						NodeName: "node11",
+					},
+				},
+			},
+			want: map[string]PodUseDeviceStat{
+				"node11": {
+					TotalPod:     1,
+					UseDevicePod: 1,
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			for _, pod := range test.pods {
+				client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+				s.addPod(pod, pod.Spec.NodeName, util.PodDevices{})
+			}
+
+			result, err := s.getPodUsage()
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			assert.Equal(t, test.want[test.pods[0].Namespace], result[test.pods[0].Namespace])
+		})
+	}
+}
+
+// test case matrix
+/**
 | node policy|  gpu policy| node num | per node device | pod use device | device use info           | result       |
 |------------|------------|----------|-----------------|----------------|---------------------------|--------------|
 | binpack    |  binpack	  | 2        |  2              |  1             ｜device1: 25%,device4: 75% ｜ node2-device4|
