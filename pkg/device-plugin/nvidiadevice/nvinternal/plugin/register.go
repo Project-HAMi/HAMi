@@ -113,13 +113,15 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	nvml.Init()
 	res := make([]*api.DeviceInfo, 0, len(devs))
-	idx := 0
-	for idx < len(devs) {
-		ndev, ret := nvml.DeviceGetHandleByIndex(idx)
-		//ndev, err := nvml.NewDevice(uint(idx))
-		//klog.V(3).Infoln("ndev type=", ndev.Model)
+	for UUID := range devs {
+		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml new device by index error idx=", idx, "err=", ret)
+			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
+			panic(0)
+		}
+		idx, ret := ndev.GetIndex()
+		if ret != nvml.SUCCESS {
+			klog.Errorln("nvml get index error ret=", ret)
 			panic(0)
 		}
 		memoryTotal := 0
@@ -128,11 +130,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 			memoryTotal = int(memory.Total)
 		} else {
 			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
-		}
-		UUID, ret := ndev.GetUUID()
-		if ret != nvml.SUCCESS {
-			klog.Error("nvml get uuid error ret=", ret)
 			panic(0)
 		}
 		Model, ret := ndev.GetName()
@@ -172,7 +169,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 			Numa:    numa,
 			Health:  health,
 		})
-		idx++
 		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
 	}
 	return &res
