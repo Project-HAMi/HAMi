@@ -4,7 +4,7 @@ metadata:
   name: gpu-pod
 spec:
   containers:
-    - name: ubuntu-container
+    - name: container-name
       image: ubuntu:22.04
       command: ["bash", "-c", "sleep 86400"]
       resources:

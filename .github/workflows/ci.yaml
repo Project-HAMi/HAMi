@@ -98,12 +98,12 @@ jobs:
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
           basePath: # optional, default is .
-          submodulePath: libvgpu 
+          submodulePath: libvgpu
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -134,3 +134,62 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           push: false
           github-token: ${{ env.REGISTER_PASSWORD }}
+
+
+  # packages tgz from /charts of original branch, deploy to /charts of target branch
+  package_chart:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.get_ref.outputs.ref }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Get the version
+        id: get_version
+        run: |
+          tag="$(git rev-parse --short HEAD)"
+          echo ::set-output name=VERSION::${tag}
+
+      - name: Lint helm chart
+        run: |
+          make lint_chart
+
+      - name: Package Chart
+        continue-on-error: false
+        run: |
+          cd charts
+          make clean
+          make
+          if ! ls *.tgz &>/dev/null ; then
+            echo "failed to generate chart"
+            exit 1
+          fi
+          cd ..
+          mkdir -p tmp
+          mv charts/*.tgz tmp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: chart_package_artifact
+          path: tmp/*
+          retention-days: 1
+          if-no-files-found: error
+
+  # execute a full e2e test when hami release
+  release-e2e:
+    uses: ./.github/workflows/call-e2e.yaml
+    with:
+      ref: $(git rev-parse --short HEAD)
