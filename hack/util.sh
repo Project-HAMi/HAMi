@@ -43,3 +43,46 @@ function util::install_helm {
     curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 }
 
+# util::exec_cmd will using eval to parse command
+function util::exec_cmd() {
+   if [ $# -eq 0 ] ; then
+     echo "[Error] no command specified for util::exec_cmd()..."
+     exit 2
+   fi
+   local tmpLog=$(mktemp)
+   set +e
+   eval "$@" &> $tmpLog
+   if [ $? -ne 0 ];then
+      echo "[Error] Failed to do $1. detail logs as below:"
+      set +x
+      echo "$(cat $tmpLog)"
+      set -x
+      rm -f $tmpLog
+      exit 3
+   fi
+   echo "$1 successful."
+   rm -f $tmpLog
+   set -e
+}
+
+### Wait a node reachable
+function util::wait_ip_reachable(){
+    local vm_ip=${1:-""}
+    local loop_time=${2:-"10"}
+    local sleep_time=${2:-"60"}
+    echo "Wait vm_ip=$1 reachable ... "
+    for ((i=1;i<=$((loop_time));i++)); do
+      pingOK=0
+      ping -w 2 -c 1 "${vm_ip}"|grep "0%" || pingOK=false
+      echo "==> ping ""${vm_ip}" $pingOK
+      if [[ ${pingOK} == false ]];then
+        sleep "$sleep_time"
+      else
+        break
+      fi
+      if [ $i -eq $((loop_time)) ];then
+        echo "node not reachable exit!"
+        exit 1
+      fi
+    done
+}

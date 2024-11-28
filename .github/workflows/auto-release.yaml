@@ -134,6 +134,7 @@ jobs:
     uses: ./.github/workflows/call-e2e.yaml
     with:
       ref: ${{ needs.ensure-tag.outputs.tag }}
+      type: "release"
 
   # excute a compatibility test when hami release
   release-e2e-upgrade:

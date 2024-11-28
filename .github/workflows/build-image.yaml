@@ -1,0 +1,55 @@
+name: Build Image
+
+on:
+  workflow_run:
+    workflows:
+      - CI Workflow
+    types:
+      - completed
+
+jobs:
+  on-success:
+    name: check data
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check if SECRET exists
+        run: |
+          echo "Success"
+          if [ -z "${{ vars.MY_VARS_NAME }}" ]; then
+            echo "Vars does not exist or is empty!"
+            exit 0
+          else
+            echo "Secret exists"
+            exit 0
+          fi
+
+      - name: Docker Login
+        uses: docker/login-action@v3.3.0
+        with:
+          username: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWD }}
+
+  on-failure:
+    name: check data
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Check if SECRET exists
+        run: |
+          echo "Failure"
+          if [ -z "${{ vars.MY_VARS_NAME }}" ]; then
+            echo "ars does not exist or is empty!"
+            exit 0
+          else
+            echo "Secret exists"
+            exit 0
+          fi
+
+      - name: Docker Login
+        uses: docker/login-action@v3.3.0
+        with:
+          username: ${{ secrets.DOCKERHUB_TOKEN }}
+          password: ${{ secrets.DOCKERHUB_PASSWD }}
+
+
+
+
