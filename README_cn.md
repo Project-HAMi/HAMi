@@ -142,9 +142,9 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # 请求2个vGPUs
-          nvidia.com/gpumem: 3000 # 每个vGPU申请3000m显存 （可选，整数类型）
-          nvidia.com/gpucores: 30 # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
+          nvidia.com/gpu: "2" # 请求2个vGPUs
+          nvidia.com/gpumem: "3000" # 每个vGPU申请3000m显存 （可选，整数类型）
+          nvidia.com/gpucores: "30" # 每个vGPU的算力为30%实际显卡的算力 （可选，整数类型）
 ```
 
 如果你的任务无法运行在任何一个节点上（例如任务的`nvidia.com/gpu`大于集群中任意一个GPU节点的实际GPU数量）,那么任务会卡在`pending`状态
@@ -190,7 +190,7 @@ grafana dashboard [示例](docs/dashboard_cn.md)
 
 ## 社区治理
 
-该项目由一组 [Maintainers and Committers]（https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS） 管理。我们的 [治理文件]（https://github.com/Project-HAMi/community/blob/main/governance.md） 中概述了如何选择和管理它们。
+该项目由一组 [Maintainers and Committers](https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS) 管理。我们的[治理文件](https://github.com/Project-HAMi/community/blob/main/governance.md) 中概述了如何选择和管理它们。
 
 如果你想成为 HAMi 的贡献者，请参[考贡献者指南](CONTRIBUTING.md),里面有详细的贡献流程。
 
