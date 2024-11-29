@@ -271,6 +271,9 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			if len(cd) == 0 {
 				continue
 			}
+			if cd[0].UUID == "" {
+				continue
+			}
 			pd[devID] = append(pd[devID], cd)
 		}
 	}

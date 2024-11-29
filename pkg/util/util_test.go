@@ -163,6 +163,32 @@ func Test_DecodePodDevices(t *testing.T) {
 			},
 			wantErr: nil,
 		},
+		{
+			name: "annos having two data, but only one device",
+			args: struct {
+				checklist map[string]string
+				annos     map[string]string
+			}{
+				checklist: InRequestDevices,
+				annos: map[string]string{
+					InRequestDevices["NVIDIA"]: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:;,,0,0:;",
+					SupportDevices["NVIDIA"]:   "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:;,,0,0:;",
+				},
+			},
+			want: PodDevices{
+				"NVIDIA": {
+					{
+						{
+							UUID:      "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+							Type:      "NVIDIA",
+							Usedmem:   500,
+							Usedcores: 3,
+						},
+					},
+				},
+			},
+			wantErr: nil,
+		},
 	}
 
 	for _, test := range tests {
