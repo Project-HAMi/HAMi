@@ -1,0 +1,12 @@
+HAMi(https://project-hami.io/)
+Copyright HAMi Contributors
+
+This product includes software developed by
+NVIDIA CORPORATION (https://www.nvidia.com).
+Copyright (c) NVIDIA CORPORATION. All rights reserved.
+
+This product includes software developed by
+The HAMi Authors.
+Copyright 2024 The HAMi Authors.
+
+Both are licensed under the Apache License, Version 2.0.
