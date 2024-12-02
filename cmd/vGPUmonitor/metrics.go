@@ -18,8 +18,10 @@ package main
 
 import (
 	"fmt"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -229,8 +231,8 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 
 		}
 	}
-
-	pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	pods, err := cc.ClusterManager.PodLister.List(labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: nodeName}))
 	if err != nil {
 		klog.Error("failed to list pods with err=", err.Error())
 	}

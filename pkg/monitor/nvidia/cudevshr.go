@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -122,7 +123,13 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 }
 
 func (l *ContainerLister) Update() error {
-	pods, err := l.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+	nodename := os.Getenv(util.NodeNameEnvName)
+	if nodename == "" {
+		return fmt.Errorf("env %s not set", util.NodeNameEnvName)
+	}
+	pods, err := l.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
+		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodename),
+	})
 	if err != nil {
 		return err
 	}
