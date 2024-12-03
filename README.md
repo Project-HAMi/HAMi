@@ -45,7 +45,7 @@ HAMi provides device virtualization for several heterogeneous devices including 
 
 ### Device Resources Isolation
 
-A simple demostration for device isolation:
+A simple demonstration for device isolation:
 A task with the following resources.
 
 ```
