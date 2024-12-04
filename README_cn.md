@@ -56,8 +56,8 @@ HAMi支持设备资源的硬隔离
 ![img](./imgs/hard_limit.jpg)
 
 > 注意：
-1. **安装HAMi后，节点上注册的 `nvidia.com/gpu` 值默认为“vGPU数量”**
-2. **pod中申请资源时，`nvidia.com/gpu` 指“当前pod需要的物理GPU数量”**
+1. **安装HAMi后，节点上注册的 `nvidia.com/gpu` 值默认为vGPU数量**
+2. **pod中申请资源时，`nvidia.com/gpu` 指当前pod需要的物理GPU数量**
 
 ### 支持的设备
 

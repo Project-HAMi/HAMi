@@ -113,6 +113,6 @@ spec:
       command:["bash"，"-c"，"sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # Declare how many physical GPUs the pod needs
+          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
 ```
 

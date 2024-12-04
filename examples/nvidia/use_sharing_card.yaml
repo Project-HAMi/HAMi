@@ -1,3 +1,4 @@
+# Gpu-pod1 and gpu-pod2 could share the same GPU
 apiVersion: v1
 kind: Pod
 metadata:
@@ -9,10 +10,9 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
-          nvidia.com/gpumem-percentage: 40 # Identifies 40% GPU memory each physical GPU allocates to the pod （Optional,Integer)
-          nvidia.com/gpucores: 60 # Identifies 60% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
-
+          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
+          nvidia.com/gpumem-percentage: 40 # identifies 40% GPU memory each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpucores: 60 # identifies 60% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
 ---
 apiVersion: v1
 kind: Pod
@@ -25,8 +25,6 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
-          nvidia.com/gpumem-percentage: 60 # Identifies 60% GPU memory each physical GPU allocates to the pod （Optional,Integer)
-          nvidia.com/gpucores: 40 # Identifies 40% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
-
-# gpu-pod1 and gpu-pod2 could share the same GPU
+          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
+          nvidia.com/gpumem-percentage: 60 # identifies 60% GPU memory each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpucores: 40 # identifies 40% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
