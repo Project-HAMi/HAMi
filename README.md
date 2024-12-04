@@ -19,9 +19,9 @@ English version|[中文版](README_cn.md)
 
 ## Introduction
 
-HAMi, formerly known as 'k8s-vGPU-scheduler', is a Heterogeneous device management middleware for Kubernetes. It can manage different types of heterogeneous devices(like GPU,NPU,etc...), share heterogeneous devices among pods, make better scheduling decision based on topology of devices and schedule policies.
+HAMi, formerly known as 'k8s-vGPU-scheduler', is a Heterogeneous device management middleware for Kubernetes. It can manage different types of heterogeneous devices (like GPU, NPU, etc.), share heterogeneous devices among pods, make better scheduling decisions based on topology of devices and scheduling policies.
 
-It aims to remove the gap between different Heterogeneous devices, and provide a unified interface for user to manage with no change to your application. Until June 2024, HAMi has been widely used around the world at a variety of industries such as Internet/Cloud/Finance/ Manufacturing. More than 40 companies or institutions are not only end users but also active contributors. 
+It aims to remove the gap between different Heterogeneous devices, and provide a unified interface for users to manage with no changes to their applications. As of December 2024, HAMi has been widely used not only in Internet, public cloud and private cloud, but also broadly adopted in various vertical industries including finance, securities, energy, telecommunications, education, and manufacturing. More than 50 companies or institutions are not only end users but also active contributors. 
 
 ![cncf_logo](imgs/cncf-logo.png)
 
@@ -36,17 +36,17 @@ HAMi provides device virtualization for several heterogeneous devices including 
 
 ### Device sharing
 
-- Allows partial device allocation by specifying device memory.
+- Allows partial device allocation by specifying device core usage.
+- Allows partial device allocation by specifying device  memory.
 - Imposes a hard limit on streaming multiprocessors.
-- Permits partial device allocation by specifying device core usage.
 - Requires zero changes to existing programs.
 
 <img src="./imgs/example.png" width = "500" /> 
 
 ### Device Resources Isolation
 
-A simple demostration for device isolation:
-A task with the following resources.
+A simple demonstration of device isolation:
+A task with the following resources:
 
 ```
       resources:
@@ -88,7 +88,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 
 - NVIDIA drivers >= 440
 - nvidia-docker version > 2.0
-- config default runtime is nvidia for containerd/docker/cri-o container runtime.
+- default runtime configured as nvidia for containerd/docker/cri-o container runtime
 - Kubernetes version >= 1.16
 - glibc >= 2.17 & glibc < 2.3.0
 - kernel version >= 3.10
