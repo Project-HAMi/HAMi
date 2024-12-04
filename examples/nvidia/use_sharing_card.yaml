@@ -10,6 +10,9 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
+          nvidia.com/gpumem-percentage: 40 # Identifies 40% GPU memory each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpucores: 60 # Identifies 60% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
+
 ---
 apiVersion: v1
 kind: Pod
@@ -23,4 +26,7 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
-# gpu-pod1 and gpu-pod2 will NOT share the same GPU
+          nvidia.com/gpumem-percentage: 60 # Identifies 60% GPU memory each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpucores: 40 # Identifies 40% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
+
+# gpu-pod1 and gpu-pod2 could share the same GPU
