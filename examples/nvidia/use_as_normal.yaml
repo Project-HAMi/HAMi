@@ -1,3 +1,4 @@
+# Gpu-pod1 and gpu-pod2 will NOT share the same GPU
 apiVersion: v1
 kind: Pod
 metadata:
@@ -9,7 +10,7 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
+          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
 ---
 apiVersion: v1
 kind: Pod
@@ -22,5 +23,4 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
-# gpu-pod1 and gpu-pod2 will NOT share the same GPU
+          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs

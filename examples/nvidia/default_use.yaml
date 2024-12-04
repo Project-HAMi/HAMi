@@ -9,6 +9,6 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # Declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 3000 # Identifies 3000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
-          nvidia.com/gpucores: 30 # Identifies 30% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
+          nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
+          nvidia.com/gpucores: 30 # identifies 30% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)

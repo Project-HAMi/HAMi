@@ -51,8 +51,8 @@ A task with the following resources:
 ```
       resources:
         limits:
-          nvidia.com/gpu: 1 # Declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 3000 # Identifies 3G GPU memory each physical GPU allocates to the pod
+          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
+          nvidia.com/gpumem: 3000 # identifies 3G GPU memory each physical GPU allocates to the pod
 ```
 
 will see 3G device memory inside container
@@ -60,8 +60,8 @@ will see 3G device memory inside container
 ![img](./imgs/hard_limit.jpg)
 
 > Note:
-1. **After installing HAMi, the value of `nvidia.com/gpu` registered on the node defaults to the "number of vGPUs".**
-2. **When requesting resources in a pod, `nvidia.com/gpu` refers to the "number of physical GPUs required by the current pod".**
+1. **After installing HAMi, the value of `nvidia.com/gpu` registered on the node defaults to the number of vGPUs.**
+2. **When requesting resources in a pod, `nvidia.com/gpu` refers to the number of physical GPUs required by the current pod.**
 
 ### Supported devices
 
