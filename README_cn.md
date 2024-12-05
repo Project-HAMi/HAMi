@@ -1,8 +1,8 @@
-[English version](README.md)|中文版
+[English version](./README.md)|中文版
 
-<img src="imgs/hami-horizontal-colordark.png" width="600px">
+<img src="./imgs/hami-horizontal-colordark.png" width="600px">
 
-[![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
+[![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](./LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
 [![Releases](https://img.shields.io/github/v/release/Project-HAMi/HAMi)](https://github.com/Project-HAMi/HAMi/releases/latest)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
@@ -23,7 +23,7 @@ HAMi（前身为 'k8s-vGPU-scheduler'）是一个面向 Kubernetes 的异构设�
 
 HAMi 旨在消除不同异构设备之间的差异，为用户提供统一的管理接口，无需对应用程序进行任何修改。截至 2024 年 12 月，HAMi 除了在互联网、公有云、私有云等领域外，在金融、证券、能源、运营商、教育、制造业等垂直领域，也得到了广泛采纳。超过 40 家企业和机构不仅是最终用户，同时也是活跃的贡献者。
 
-![cncf_logo](imgs/cncf-logo.png)
+![cncf_logo](./imgs/cncf-logo.png)
 
 HAMi 是 [Cloud Native Computing Foundation](https://cncf.io/)(CNCF) 基金会的沙箱项目和 [landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) 项目，同时也是 [CNAI Landscape 项目](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami)。
 
@@ -58,12 +58,12 @@ HAMi支持设备资源的硬隔离
 ### 支持的设备
 
 [![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
-[![cambricon MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](docs/cambricon-mlu-support.md)
-[![hygon DCU](https://img.shields.io/badge/海光-DCU-blue)](docs/hygon-dcu-support.md)
-[![iluvatar GPU](https://img.shields.io/badge/壁仞-GPU-blue)](docs/iluvatar-gpu-support.md)
-[![mthreads GPU](https://img.shields.io/badge/摩尔线程-GPU-blue)](docs/mthreads-support.md)
+[![cambricon MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](./docs/cambricon-mlu-support.md)
+[![hygon DCU](https://img.shields.io/badge/海光-DCU-blue)](./docs/hygon-dcu-support.md)
+[![iluvatar GPU](https://img.shields.io/badge/壁仞-GPU-blue)](./docs/iluvatar-gpu-support.md)
+[![mthreads GPU](https://img.shields.io/badge/摩尔线程-GPU-blue)](./docs/mthreads-support.md)
 [![ascend NPU](https://img.shields.io/badge/昇腾-NPU-blue)](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)
-[![metax GPU](https://img.shields.io/badge/沐曦-GPU-blue)](docs/metax-support.md)
+[![metax GPU](https://img.shields.io/badge/沐曦-GPU-blue)](./docs/metax-support.md)
 
 ## 架构
 
@@ -71,12 +71,62 @@ HAMi支持设备资源的硬隔离
 
 HAMi 由多个组件组成，包括统一的 mutatingwebhook、统一的调度器扩展器、不同的设备插件以及针对每种异构 AI 设备的容器内虚拟化技术。
 
+## 更新日志
+
+### v2.4.0
+
+**主要功能**
+- 增加对华为 Ascend 设备的全面支持
+  - 支持 Ascend 910B 和 310P
+  - 支持 Ascend NPU 虚拟化的自定义配置
+  - 动态 NPU 虚拟化能力
+
+**增强功能**
+- 在节点注册期间通过 UUID 或索引添加设备过滤
+- 添加详细的调度事件信息以便更好地排查问题
+- 添加 HAMi WebUI 用于资源可视化和管理
+  - 资源概览和监控
+  - 节点管理
+  - GPU/NPU 设备管理
+  - 任务管理和调度
+  - 实时状态监控
+
+<details><summary>完整更新日志</summary>
+
+### v2.3.11
+
+- 增加对 Ascend910B 设备的支持
+- 为非 GPU 任务添加 "NVIDIA_VISIBLE_DEVICES=none"
+
+### v2.3.10
+
+- 修复设备插件无法启动的问题
+
+### v2.3.9
+
+- 增加对 iluvatar GPU 设备的支持
+- 修复 HAMi-core 中 "get_host_pid" 函数的问题
+- 常规设备 API，使添加新设备更容易
+
+### v2.3.8
+
+- 修复设备插件在驱动版本 < 500 时的启动错误
+- 支持手动配置 MutatingWebhookConfiguration 的 failurePolicy
+- 为调度器添加指标绑定地址标志
+- 改进日志消息
+- 修复：vdeivce 重启后指标丢失
+- 修复：在大集群中设备插件监控服务过慢的问题
+
+更多更新日志请参考[CHANGELOG](./CHANGELOG.md)
+
+</details>
+
 ## 快速开始
 
 ### 选择你的调度器
 
 [![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](#前置条件)
-[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
+[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](./docs/how-to-use-volcano-vgpu.md)
 
 ### 前置条件
 
@@ -110,7 +160,7 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm install hami hami-charts/hami  -n kube-system
 ```
 
-通过调整[配置](docs/config.md)来自定义你的安装。
+通过调整[配置](./docs/config.md)来自定义你的安装。
 
 使用以下命令验证你的安装：
 
@@ -136,7 +186,7 @@ http://{scheduler ip}:{monitorPort}/metrics
 
 默认 monitorPort 为 31993；可以在安装时使用 `--set devicePlugin.service.httpPort` 设置其他值。
 
-Grafana 仪表板[示例](docs/dashboard.md)
+Grafana 仪表板[示例](./docs/dashboard.md)
 
 > **注意** 在提交任务之前不会收集节点状态
 
@@ -150,9 +200,9 @@ Grafana 仪表板[示例](docs/dashboard.md)
 
 本项目由一组[维护者和提交者](https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS)管理。他们的选择和管理方式在我们的[治理文档](https://github.com/Project-HAMi/community/blob/main/governance.md)中有详细说明。
 
-如果你有兴趣成为贡献者并希望参与 HAMi 代码开发，请查看 [CONTRIBUTING](CONTRIBUTING.md) 了解提交补丁和贡献工作流程的详细信息。
+如果你有兴趣成为贡献者并希望参与 HAMi 代码开发，请查看 [CONTRIBUTING](./CONTRIBUTING.md) 了解提交补丁和贡献工作流程的详细信息。
 
-查看[路线图](docs/develop/roadmap.md)了解你感兴趣的内容。
+查看[路线图](./docs/develop/roadmap.md)了解你感兴趣的内容。
 
 ## 会议与联系方式
 
@@ -163,7 +213,7 @@ HAMi 社区致力于营造开放和友好的环境，提供多种方式与其他
 - 常规社区会议：每周五 16:00（UTC+8）（中文）。[转换为你的时区](https://www.thetimezoneconverter.com/?t=14%3A30&tz=GMT%2B8&)。
   - [会议记录和议程](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
   - [会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- 电子邮件：请参考 [MAINTAINERS.md](MAINTAINERS.md) 查找所有维护者的电子邮件地址。如有任何问题或需要报告问题，请随时通过电子邮件联系他们。
+- 电子邮件：请参考 [MAINTAINERS.md](./MAINTAINERS.md) 查找所有维护者的电子邮件地址。如有任何问题或需要报告问题，请随时通过电子邮件联系他们。
 - [邮件列表](https://groups.google.com/forum/#!forum/hami-project)
 - [Slack](https://cloud-native.slack.com/archives/C07T10BU4R2) | [加入](https://slack.cncf.io/)
 
@@ -179,4 +229,8 @@ HAMi 社区致力于营造开放和友好的环境，提供多种方式与其他
 
 ## 许可证
 
-HAMi 采用 Apache 2.0 许可证。详情请参见 [LICENSE](LICENSE) 文件。
+HAMi 采用 Apache 2.0 许可证。详情请参见 [LICENSE](./LICENSE) 文件。
+
+## Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)
