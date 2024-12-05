@@ -1,4 +1,4 @@
-English version|[中文版](README_cn.md)
+English version | [中文版](README_cn.md)
 
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
 
@@ -96,6 +96,7 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
   - Real-time status monitoring
 
 <details><summary>Full Changelog</summary>
+
 ### v2.3.11
 
 - Add support for Ascend910B device

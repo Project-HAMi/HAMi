@@ -1,4 +1,4 @@
-[English version](./README.md)|中文版
+[English version](./README.md) | 中文版
 
 <img src="./imgs/hami-horizontal-colordark.png" width="600px">
 
