@@ -77,7 +77,7 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 
 ## Change Log
 
-### [2024/11/05]v2.4.1 
+### v2.4.1 - 2024/11/05
 
 **Major Features**
 - Support Metax scheduling optimazation
@@ -85,7 +85,7 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 - Add a configMap hami-scheduler-device for all configurations of HAMi
 - Optimize installation process
 
-### [2024/09/29] v2.4.0 
+### v2.4.0 - 2024/09/29
 
 **Major Features**
 - Add full support for Huawei Ascend devices
@@ -105,7 +105,7 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 
 <details><summary>Full Changelog</summary>
 
-### v2.3.11
+### v2.3.11 - 2024/07/29
 
 - Add support for Ascend910B device
 - Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
