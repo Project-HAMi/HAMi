@@ -63,6 +63,10 @@ spec:
               value: all
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
+            {{- if typeIs "bool" .Values.devicePlugin.compatWithCPUManager }}
+            - name: PASS_DEVICE_SPECS
+              value: {{ .Values.devicePlugin.compatWithCPUManager | quote }}
+            {{- end }}
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
