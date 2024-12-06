@@ -77,22 +77,21 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 
 ## Change Log
 
-## v2.4.1 2024-11-05
+### v2.4.1 [2024/11/05]
 
 **Major Features**
-
 - Support Metax scheduling optimazation
 - Support Mthreads sGPU
 - Add a configMap hami-scheduler-device for all configurations of HAMi
 - Optimize installation process
 
-### v2.4.0 2024-09-29
+### v2.4.0 [2024/09/29]
 
 **Major Features**
 - Add full support for Huawei Ascend devices
-  - Support for Ascend 910B and 310P
-  - Custom configuration support for Ascend NPU virtualization
-  - Dynamic NPU virtualization capabilities
+- Support for Ascend 910B and 310P
+- Custom configuration support for Ascend NPU virtualization
+- Dynamic NPU virtualization capabilities
 
 **Enhancements**
 - Add device filtering by UUID or index during node registration
