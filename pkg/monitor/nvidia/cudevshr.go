@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"os"
 	"path/filepath"
 	"strings"
@@ -31,6 +30,7 @@ import (
 
 	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
