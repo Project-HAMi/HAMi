@@ -212,6 +212,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 		ctrfit := false
 		for ctrid, n := range nums {
 			sums := 0
+			if len(n) == 0 {
+				continue
+			}
 			for _, k := range n {
 				sums += int(k.Nums)
 			}
