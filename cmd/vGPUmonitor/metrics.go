@@ -18,7 +18,6 @@ package main
 
 import (
 	"fmt"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"log"
 	"net/http"
 	"os"
@@ -26,11 +25,11 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
