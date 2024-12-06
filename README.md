@@ -77,7 +77,16 @@ HAMi consists of several components, including a unified mutatingwebhook, a unif
 
 ## Change Log
 
-### v2.4.0
+## v2.4.1 2024-11-05
+
+**Major Features**
+
+- Support Metax scheduling optimazation
+- Support Mthreads sGPU
+- Add a configMap hami-scheduler-device for all configurations of HAMi
+- Optimize installation process
+
+### v2.4.0 2024-09-29
 
 **Major Features**
 - Add full support for Huawei Ascend devices

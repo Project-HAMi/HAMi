@@ -73,7 +73,16 @@ HAMi 由多个组件组成，包括统一的 mutatingwebhook、统一的调度�
 
 ## 更新日志
 
-### v2.4.0
+## v2.4.1 2024-11-05
+
+**Major Features**
+
+- 支持沐曦（Metax）
+- 支持摩尔线程（Mthreads）
+- 添加 hami-scheduler-device 配置映射以统一管理 HAMi 所有配置
+- 优化安装流程
+
+### v2.4.0 2024-09-29
 
 **主要功能**
 - 增加对华为 Ascend 设备的全面支持
