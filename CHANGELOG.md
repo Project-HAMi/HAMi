@@ -1,6 +1,6 @@
 # CHANGELOG
 
-## v2.4.1 2024-11-05
+## [2024/11/05] v2.4.1 
 
 **Major Features**
 
@@ -9,7 +9,7 @@
 - Add a configMap hami-scheduler-device for all configurations of HAMi
 - Optimize installation process
 
-## v2.4.0 2024-09-29
+## [2024/09/29] v2.4.0 
 
 **Major Features**
 
@@ -29,7 +29,7 @@
   - Task management and scheduling
   - Real-time status monitoring
 
-## v2.3.11
+## [2024/07/29] v2.3.11
 
 Add support for Ascend910B device
 
