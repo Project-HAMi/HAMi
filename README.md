@@ -75,64 +75,6 @@ will see 3G device memory inside container
 
 HAMi consists of several components, including a unified mutatingwebhook, a unified scheduler extender, different device-plugins and different in-container virtualization technics for each heterogeneous AI devices.
 
-## Change Log
-
-### v2.4.1 - 2024/11/05
-
-**Major Features**
-- Support Metax scheduling optimazation
-- Support Mthreads sGPU
-- Add a configMap hami-scheduler-device for all configurations of HAMi
-- Optimize installation process
-
-### v2.4.0 - 2024/09/29
-
-**Major Features**
-- Add full support for Huawei Ascend devices
-- Support for Ascend 910B and 310P
-- Custom configuration support for Ascend NPU virtualization
-- Dynamic NPU virtualization capabilities
-
-**Enhancements**
-- Add device filtering by UUID or index during node registration
-- Add detailed scheduling event information for better troubleshooting
-- Add HAMi WebUI for resource visualization and management
-  - Resource overview and monitoring
-  - Node management
-  - GPU/NPU device management
-  - Task management and scheduling
-  - Real-time status monitoring
-
-<details><summary>Full Changelog</summary>
-
-### v2.3.11 - 2024/07/29
-
-- Add support for Ascend910B device
-- Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
-
-### v2.3.10
-
-Fix issue where device-plugin failed to start
-
-### v2.3.9
-
-- Add support for iluvatar GPU devices
-- Fix issue on "get_host_pid" func in HAMi-core
-- Regular devices API, make it easier to add new devices
-
-### v2.3.8
-
-- Fix device-plugin launch error on driver version < 500
-- Support manual config MutatingWebhookConfiguration failurePolicy
-- Add metrics bind address flag for scheduler
-- Improved log messages
-- Fix: loss of metrics after vdeivce restart
-- Fix: device-plugin monitor serves too slowly in big cluster
-
-See [CHANGELOG](./CHANGELOG.md) for more details.
-
-</details>
-
 ## Quick Start
 
 ### Choose your orchestrator

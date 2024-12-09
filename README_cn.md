@@ -71,67 +71,6 @@ HAMi支持设备资源的硬隔离
 
 HAMi 由多个组件组成，包括统一的 mutatingwebhook、统一的调度器扩展器、不同的设备插件以及针对每种异构 AI 设备的容器内虚拟化技术。
 
-## 更新日志
-
-### v2.4.1 - 2024/11/05
-
-**主要功能**
-
-- 支持沐曦（Metax）
-- 支持摩尔线程（Mthreads）
-- 添加 hami-scheduler-device 配置映射以统一管理 HAMi 所有配置
-- 优化安装流程
-
-### v2.4.0 - 2024/09/29
-
-**主要功能**
-
-- 增加对华为 Ascend 设备的全面支持
-- 支持 Ascend 910B 和 310P
-- 支持 Ascend NPU 虚拟化的自定义配置
-- 动态 NPU 虚拟化能力
-
-**增强功能**
-
-- 在节点注册期间通过 UUID 或索引添加设备过滤
-- 添加详细的调度事件信息以便更好地排查问题
-- 添加 HAMi WebUI 用于资源可视化和管理
-  - 资源概览和监控
-  - 节点管理
-  - GPU/NPU 设备管理
-  - 任务管理和调度
-  - 实时状态监控
-
-<details><summary>完整更新日志</summary>
-
-### v2.3.11 - 2024/07/29
-
-- 增加对 Ascend910B 设备的支持
-- 为非 GPU 任务添加 "NVIDIA_VISIBLE_DEVICES=none"
-
-### v2.3.10
-
-- 修复设备插件无法启动的问题
-
-### v2.3.9
-
-- 增加对 iluvatar GPU 设备的支持
-- 修复 HAMi-core 中 "get_host_pid" 函数的问题
-- 常规设备 API，使添加新设备更容易
-
-### v2.3.8
-
-- 修复设备插件在驱动版本 < 500 时的启动错误
-- 支持手动配置 MutatingWebhookConfiguration 的 failurePolicy
-- 为调度器添加指标绑定地址标志
-- 改进日志消息
-- 修复：vdeivce 重启后指标丢失
-- 修复：在大集群中设备插件监控服务过慢的问题
-
-更多更新日志请参考[CHANGELOG](./CHANGELOG.md)
-
-</details>
-
 ## 快速开始
 
 ### 选择你的调度器
