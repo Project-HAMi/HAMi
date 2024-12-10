@@ -17,16 +17,20 @@ limitations under the License.
 package cambricon
 
 import (
+	"context"
 	"flag"
+	"fmt"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"k8s.io/apimachinery/pkg/api/resource"
+	"k8s.io/klog/v2"
 )
 
 func Test_GetNodeDevices(t *testing.T) {
@@ -442,6 +446,352 @@ func Test_PatchAnnotations(t *testing.T) {
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k], "pod add annotation key [%s], values is [%s]", k, result[k])
 			}
+		})
+	}
+}
+
+func Test_setNodeLock(t *testing.T) {
+	tests := []struct {
+		name string
+		args corev1.Node
+		err  error
+	}{
+		{
+			name: "node is locked",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-01",
+					Annotations: map[string]string{
+						"cambricon.com/dsmlu.lock": "test123",
+					},
+				},
+			},
+			err: fmt.Errorf("node node-01 is locked"),
+		},
+		{
+			name: "set node lock",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "node-02",
+					Annotations: map[string]string{},
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "no node name",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctx := context.Background()
+			client.GetClient().CoreV1().Nodes().Create(ctx, &test.args, metav1.CreateOptions{})
+			dev := CambriconDevices{}
+			result := dev.setNodeLock(&test.args)
+			if result != nil {
+				klog.Errorf("expected an error, got %v", result)
+			}
+			client.GetClient().CoreV1().Nodes().Delete(ctx, test.args.Name, metav1.DeleteOptions{})
+		})
+	}
+}
+
+func Test_LockNode(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node corev1.Node
+			pod  corev1.Pod
+		}
+		err error
+	}{
+		{
+			name: "nums is zero",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-11",
+						Annotations: map[string]string{
+							"cambricon.com/dsmlu.lock": "2024-12-01T00:00:00Z",
+						},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-01",
+								Resources: corev1.ResourceRequirements{
+									Limits:   corev1.ResourceList{},
+									Requests: corev1.ResourceList{},
+								},
+							},
+						},
+					},
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "annotation is empty",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:        "node-12",
+						Annotations: map[string]string{},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-02",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+									Requests: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			err: nil,
+		},
+		{
+			name: "set node lock",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-13",
+						Annotations: map[string]string{
+							"cambricon.com/dsmlu.lock": "2024-12-01T00:00:00Z",
+						},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-03",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+									Requests: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "time parse is wrong",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-14",
+						Annotations: map[string]string{
+							"cambricon.com/dsmlu.lock": "2024-12-0100:00:00",
+						},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-04",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+									Requests: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "node has been locked within 2 minutes",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-15",
+						Annotations: map[string]string{
+							"cambricon.com/dsmlu.lock": "2038-12-01T00:00:00Z",
+						},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-05",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+									Requests: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "failed to patch node annotation",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"cambricon.com/dsmlu.lock": "2024-12-01T00:00:00Z",
+						},
+					},
+				},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name: "container-05",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+									Requests: corev1.ResourceList{
+										"cambricon.com/mlu":              resource.MustParse("1"),
+										"cambricon.com/mlu.smlu.vmemory": resource.MustParse("1000"),
+										"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := CambriconConfig{
+				ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+				ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+				ResourceCountName:  "cambricon.com/mlu",
+			}
+			InitMLUDevice(config)
+			ctx := context.Background()
+			client.GetClient().CoreV1().Nodes().Create(ctx, &test.args.node, metav1.CreateOptions{})
+			dev := CambriconDevices{}
+			result := dev.LockNode(&test.args.node, &test.args.pod)
+			if result != nil {
+				klog.Errorf("expected an error, got %v", result)
+			}
+			client.GetClient().CoreV1().Nodes().Delete(ctx, test.args.node.Name, metav1.DeleteOptions{})
+		})
+	}
+}
+
+func Test_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node corev1.Node
+			pod  corev1.Pod
+		}
+		err error
+	}{
+		{
+			name: "no annation",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-01",
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			err: nil,
+		},
+		{
+			name: "annation no lock value",
+			args: struct {
+				node corev1.Node
+				pod  corev1.Pod
+			}{
+				node: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node-02",
+						Annotations: map[string]string{
+							"test": "test123",
+						},
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			err: nil,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := CambriconDevices{}
+			result := dev.ReleaseNodeLock(&test.args.node, &test.args.pod)
+			assert.Equal(t, test.err, result)
 		})
 	}
 }
