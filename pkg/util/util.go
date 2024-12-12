@@ -363,6 +363,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
+		Labels      map[string]string `json:"labels,omitempty"`
 	}
 	type patchPod struct {
 		Metadata patchMetadata `json:"metadata"`
@@ -371,6 +372,11 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 
 	p := patchPod{}
 	p.Metadata.Annotations = annotations
+	label := make(map[string]string)
+	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
+		label[AssignedNodeAnnotations] = v
+		p.Metadata.Labels = label
+	}
 
 	bytes, err := json.Marshal(p)
 	if err != nil {
