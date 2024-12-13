@@ -162,6 +162,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 		}
 		res = append(res, &api.DeviceInfo{
 			ID:      UUID,
+			Index:   idx,
 			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
