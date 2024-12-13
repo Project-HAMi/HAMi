@@ -20,15 +20,16 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -229,8 +230,8 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 
 		}
 	}
-
-	pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	pods, err := cc.ClusterManager.PodLister.List(labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: nodeName}))
 	if err != nil {
 		klog.Error("failed to list pods with err=", err.Error())
 	}
