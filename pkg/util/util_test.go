@@ -21,8 +21,6 @@ import (
 	"testing"
 
 	"gotest.tools/v3/assert"
-
-	"github.com/Project-HAMi/HAMi/pkg/api"
 )
 
 var inRequestDevices map[string]string
@@ -176,7 +174,7 @@ func Test_DecodePodDevices(t *testing.T) {
 
 func TestMarshalNodeDevices(t *testing.T) {
 	type args struct {
-		dlist []*api.DeviceInfo
+		dlist []*DeviceInfo
 	}
 	tests := []struct {
 		name string
@@ -187,7 +185,7 @@ func TestMarshalNodeDevices(t *testing.T) {
 		{
 			name: "test one",
 			args: args{
-				dlist: []*api.DeviceInfo{
+				dlist: []*DeviceInfo{
 					{
 						Index:   1,
 						ID:      "id-1",
@@ -218,7 +216,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    []*api.DeviceInfo
+		want    []*DeviceInfo
 		wantErr bool
 	}{
 		{
@@ -226,7 +224,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 			args: args{
 				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}]\n",
 			},
-			want: []*api.DeviceInfo{
+			want: []*DeviceInfo{
 				{
 					Index:   1,
 					ID:      "id-1",
@@ -246,7 +244,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}," +
 					"{\"index\":2,\"id\":\"id-2\",\"count\":2,\"devmem\":4096,\"devcore\":20,\"type\":\"type2\",\"health\":false}]",
 			},
-			want: []*api.DeviceInfo{
+			want: []*DeviceInfo{
 				{
 					Index:   1,
 					ID:      "id-1",

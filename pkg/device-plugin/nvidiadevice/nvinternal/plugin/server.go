@@ -17,11 +17,13 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -29,7 +31,6 @@ import (
 	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -42,6 +43,7 @@ import (
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 
+	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
@@ -75,20 +77,24 @@ type NvidiaDevicePlugin struct {
 	cdiEnabled          bool
 	cdiAnnotationPrefix string
 
+	operatingMode string
+	migCurrent    nvidia.MigPartedSpec
+
 	server *grpc.Server
 	health chan *rm.Device
 	stop   chan interface{}
 }
 
-func readFromConfigFile(sConfig *nvidia.NvidiaConfig) error {
+func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
 	jsonbyte, err := os.ReadFile("/config/config.json")
+	mode := "hami-core"
 	if err != nil {
-		return err
+		return "", err
 	}
 	var deviceConfigs nvidia.DevicePluginConfigs
 	err = json.Unmarshal(jsonbyte, &deviceConfigs)
 	if err != nil {
-		return err
+		return "", err
 	}
 	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
 	for _, val := range deviceConfigs.Nodeconfig {
@@ -106,10 +112,13 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig) error {
 			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
 				nvidia.DevicePluginFilterDevice = val.FilterDevice
 			}
+			if len(val.OperatingMode) > 0 {
+				mode = val.OperatingMode
+			}
 			klog.Infof("FilterDevice: %v", val.FilterDevice)
 		}
 	}
-	return nil
+	return mode, nil
 }
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
@@ -119,13 +128,15 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
 
 	sConfig, err := device.LoadConfig(*ConfigFile)
-	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile)
+	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
 	if err != nil {
 		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
 	}
-	readFromConfigFile(&sConfig.NvidiaConfig)
+	mode, err := readFromConfigFile(&sConfig.NvidiaConfig)
+	if err != nil {
+		klog.Errorf("readFromConfigFile err:%s", err.Error())
+	}
 	device.InitDevicesWithConfig(sConfig)
-
 	return &NvidiaDevicePlugin{
 		rm:                   resourceManager,
 		config:               config,
@@ -136,6 +147,8 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 		cdiEnabled:           cdiEnabled,
 		cdiAnnotationPrefix:  *config.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:      sConfig.NvidiaConfig,
+		operatingMode:        mode,
+		migCurrent:           nvidia.MigPartedSpec{},
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -184,6 +197,28 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
 
+	if plugin.operatingMode == "mig" {
+		cmd := exec.Command("nvidia-mig-parted", "export")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err != nil {
+			klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+		}
+		outStr := stdout.Bytes()
+		yaml.Unmarshal(outStr, &plugin.migCurrent)
+		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
+		if len(plugin.migCurrent.MigConfigs["current"]) == 1 && len(plugin.migCurrent.MigConfigs["current"][0].Devices) == 0 {
+			idx := 0
+			plugin.migCurrent.MigConfigs["current"][0].Devices = make([]int32, 0)
+			for idx < GetDeviceNums() {
+				plugin.migCurrent.MigConfigs["current"][0].Devices = append(plugin.migCurrent.MigConfigs["current"][0].Devices, int32(idx))
+				idx++
+			}
+		}
+		klog.Infoln("Mig export", plugin.migCurrent)
+	}
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health)
 		if err != nil {
@@ -366,7 +401,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
-			currentCtr, devreq, err := util.GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
+			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
 				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -376,85 +411,80 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
-			response, err := plugin.getAllocateResponse(util.GetContainerDeviceStrArray(devreq))
+			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			err = util.EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
+			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
 				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
-			for i, dev := range devreq {
-				limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
-				response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
-
-				/*tmp := response.Envs["NVIDIA_VISIBLE_DEVICES"]
-				if i > 0 {
-					response.Envs["NVIDIA_VISIBLE_DEVICES"] = fmt.Sprintf("%v,%v", tmp, dev.UUID)
-				} else {
-					response.Envs["NVIDIA_VISIBLE_DEVICES"] = dev.UUID
-				}*/
-			}
-			response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
-			if plugin.schedulerConfig.DeviceMemoryScaling > 1 {
-				response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
-			}
-			if plugin.schedulerConfig.DisableCoreLimit {
-				response.Envs[api.CoreLimitSwitch] = "disable"
-			}
-			cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-			os.RemoveAll(cacheFileHostDirectory)
-
-			os.MkdirAll(cacheFileHostDirectory, 0777)
-			os.Chmod(cacheFileHostDirectory, 0777)
-			os.MkdirAll("/tmp/vgpulock", 0777)
-			os.Chmod("/tmp/vgpulock", 0777)
-			response.Mounts = append(response.Mounts,
-				&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
-					HostPath: hostHookPath + "/vgpu/libvgpu.so",
-					ReadOnly: true},
-				&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
-					HostPath: cacheFileHostDirectory,
-					ReadOnly: false},
-				&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
-					HostPath: "/tmp/vgpulock",
-					ReadOnly: false},
-			)
-			found := false
-			for _, val := range currentCtr.Env {
-				if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
-					// if env existed but is set to false or can not be parsed, ignore
-					t, _ := strconv.ParseBool(val.Value)
-					if !t {
-						continue
-					}
-					// only env existed and set to true, we mark it "found"
-					found = true
-					break
+			if plugin.operatingMode != "mig" {
+				for i, dev := range devreq {
+					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
+					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 				}
-			}
-			if !found {
-				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
-					HostPath: hostHookPath + "/vgpu/ld.so.preload",
-					ReadOnly: true},
+				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
+				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
+				if plugin.schedulerConfig.DeviceMemoryScaling > 1 {
+					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+				}
+				if plugin.schedulerConfig.DisableCoreLimit {
+					response.Envs[util.CoreLimitSwitch] = "disable"
+				}
+				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
+				os.RemoveAll(cacheFileHostDirectory)
+
+				os.MkdirAll(cacheFileHostDirectory, 0777)
+				os.Chmod(cacheFileHostDirectory, 0777)
+				os.MkdirAll("/tmp/vgpulock", 0777)
+				os.Chmod("/tmp/vgpulock", 0777)
+				response.Mounts = append(response.Mounts,
+					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
+						HostPath: hostHookPath + "/vgpu/libvgpu.so",
+						ReadOnly: true},
+					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
+						HostPath: cacheFileHostDirectory,
+						ReadOnly: false},
+					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
+						HostPath: "/tmp/vgpulock",
+						ReadOnly: false},
 				)
-			}
-			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
-			if err == nil {
-				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-					ContainerPath: "/tmp/license",
-					HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
-					ReadOnly:      true,
-				})
-				response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-					ContainerPath: "/usr/bin/vgpuvalidator",
-					HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
-					ReadOnly:      true,
-				})
+				found := false
+				for _, val := range currentCtr.Env {
+					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+						// if env existed but is set to false or can not be parsed, ignore
+						t, _ := strconv.ParseBool(val.Value)
+						if !t {
+							continue
+						}
+						// only env existed and set to true, we mark it "found"
+						found = true
+						break
+					}
+				}
+				if !found {
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
+						HostPath: hostHookPath + "/vgpu/ld.so.preload",
+						ReadOnly: true},
+					)
+				}
+				_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
+				if err == nil {
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: "/tmp/license",
+						HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
+						ReadOnly:      true,
+					})
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: "/usr/bin/vgpuvalidator",
+						HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
+						ReadOnly:      true,
+					})
+				}
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		}
@@ -592,21 +622,6 @@ func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map
 		envvar: strings.Join(deviceIDs, ","),
 	}
 }
-
-/*
-func (plugin *NvidiaDevicePlugin) apiMounts(deviceIDs []string) []*kubeletdevicepluginv1beta1.Mount {
-	var mounts []*kubeletdevicepluginv1beta1.Mount
-
-	for _, id := range deviceIDs {
-		mount := &kubeletdevicepluginv1beta1.Mount{
-			HostPath:      deviceListAsVolumeMountsHostPath,
-			ContainerPath: filepath.Join(deviceListAsVolumeMountsContainerPathRoot, id),
-		}
-		mounts = append(mounts, mount)
-	}
-
-	return mounts
-}*/
 
 func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string) []*kubeletdevicepluginv1beta1.DeviceSpec {
 	optional := map[string]bool{

@@ -26,7 +26,6 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -92,11 +91,11 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 	return result, nil
 }
 
-func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
+func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	nvml.Init()
-	res := make([]*api.DeviceInfo, 0, len(devs))
+	res := make([]*util.DeviceInfo, 0, len(devs))
 	idx := 0
 	for idx < len(devs) {
 		ndev, ret := nvml.DeviceGetHandleByIndex(idx)
@@ -147,13 +146,14 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*api.DeviceInfo {
 		if err != nil {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
-		res = append(res, &api.DeviceInfo{
+		res = append(res, &util.DeviceInfo{
 			ID:      UUID,
 			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
 			Numa:    numa,
+			Mode:    plugin.operatingMode,
 			Health:  health,
 		})
 		idx++

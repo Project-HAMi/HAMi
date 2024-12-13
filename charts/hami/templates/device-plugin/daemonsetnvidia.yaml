@@ -64,6 +64,7 @@ spec:
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
           securityContext:
+            privileged: true
             allowPrivilegeEscalation: false
             capabilities:
               drop: ["ALL"]
@@ -109,6 +110,8 @@ spec:
               mountPath: /sysinfo
             - name: hostvar
               mountPath: /hostvar
+            - name: hosttmp
+              mountPath: /tmp
       volumes:
         - name: ctrs
           hostPath:

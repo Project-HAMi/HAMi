@@ -99,9 +99,30 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"GPU Memory Allocated Percentage on a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
+	nodeGPUMigInstance := prometheus.NewDesc(
+		"nodeGPUMigInstance",
+		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "migname"}, nil,
+	)
 	nu := sher.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
+			if devs.Device.Mode == "mig" {
+				for idx, migs := range devs.Device.MigUsage.UsageList {
+					klog.Infoln("mig instances=", devs.Device.MigUsage)
+					inuse := 0
+					if migs.InUse {
+						inuse = 1
+					}
+					ch <- prometheus.MustNewConstMetric(
+						nodeGPUMigInstance,
+						prometheus.GaugeValue,
+						float64(inuse),
+						nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), migs.Name+"-"+fmt.Sprint(idx),
+					)
+				}
+			}
+
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,

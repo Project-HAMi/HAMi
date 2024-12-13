@@ -50,8 +50,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
-		tmp = append(tmp, m.nodes[nodeID].Devices...)
+		tmp := make([]util.DeviceInfo, 0, len(nodeInfo.Devices))
 		tmp = append(tmp, nodeInfo.Devices...)
 		m.nodes[nodeID].Devices = tmp
 	} else {

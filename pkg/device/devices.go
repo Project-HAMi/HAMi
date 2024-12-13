@@ -22,7 +22,6 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
@@ -45,7 +44,7 @@ type Devices interface {
 	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
-	GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error)
+	GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error)
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
 	// CheckUUID is check current device id whether in GPUUseUUID or GPUNoUseUUID set, return true is check success.
 	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
@@ -53,8 +52,9 @@ type Devices interface {
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
-	CustomFilterRule(allocated *util.PodDevices, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
+	CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
 	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32
+	AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error
 	// This should not be associated with a specific device object
 	//ParseConfig(fs *flag.FlagSet)
 }

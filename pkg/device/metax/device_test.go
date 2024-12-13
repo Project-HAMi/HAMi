@@ -19,11 +19,10 @@ package metax
 import (
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/Project-HAMi/HAMi/pkg/api"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -32,7 +31,7 @@ func TestGetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name     string
 		node     corev1.Node
-		expected []*api.DeviceInfo
+		expected []*util.DeviceInfo
 		err      error
 	}{
 		{
@@ -47,7 +46,7 @@ func TestGetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			expected: []*api.DeviceInfo{
+			expected: []*util.DeviceInfo{
 				{
 					Index:   0,
 					ID:      "test-metax-0",
