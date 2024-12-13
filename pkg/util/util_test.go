@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
@@ -277,6 +278,131 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 				return
 			}
 			assert.DeepEqual(t, got, tt.want)
+		})
+	}
+}
+
+func Test_DecodeNodeDevices(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want struct {
+			di  []*api.DeviceInfo
+			err error
+		}
+	}{
+		{
+			name: "args is invalid",
+			args: "a",
+			want: struct {
+				di  []*api.DeviceInfo
+				err error
+			}{
+				di:  []*api.DeviceInfo{},
+				err: errors.New("node annotations not decode successfully"),
+			},
+		},
+		{
+			name: "str is old format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*api.DeviceInfo
+				err error
+			}{
+				di: []*api.DeviceInfo{
+					{
+						ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+						Index:   0,
+						Count:   10,
+						Devmem:  7680,
+						Devcore: 100,
+						Type:    "NVIDIA-Tesla P4",
+						Numa:    0,
+						Health:  true,
+					},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "str is new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,1:",
+			want: struct {
+				di  []*api.DeviceInfo
+				err error
+			}{
+				di: []*api.DeviceInfo{
+					{
+						ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+						Index:   1,
+						Count:   10,
+						Devmem:  7680,
+						Devcore: 100,
+						Type:    "NVIDIA-Tesla P4",
+						Numa:    0,
+						Health:  true,
+					},
+				},
+				err: nil,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := DecodeNodeDevices(test.args)
+			assert.DeepEqual(t, test.want.di, got)
+			if err != nil {
+				assert.DeepEqual(t, test.want.err.Error(), err.Error())
+			}
+		})
+	}
+}
+
+func Test_EncodeNodeDevices(t *testing.T) {
+	tests := []struct {
+		name string
+		args []*api.DeviceInfo
+		want string
+	}{
+		{
+			name: "old format",
+			args: []*api.DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   0,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla P4",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			want: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,0:",
+		},
+		{
+			name: "test two",
+			args: []*api.DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   1,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla P4",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			want: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,1:",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := EncodeNodeDevices(test.args)
+			assert.DeepEqual(t, test.want, got)
 		})
 	}
 }

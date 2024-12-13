@@ -130,15 +130,17 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 	for _, val := range tmp {
 		if strings.Contains(val, ",") {
 			items := strings.Split(val, ",")
-			if len(items) == 7 || len(items) == 8 {
+			if len(items) == 7 || len(items) == 9 {
 				count, _ := strconv.ParseInt(items[1], 10, 32)
 				devmem, _ := strconv.ParseInt(items[2], 10, 32)
 				devcore, _ := strconv.ParseInt(items[3], 10, 32)
 				health, _ := strconv.ParseBool(items[6])
 				numa, _ := strconv.Atoi(items[5])
 				mode := "hami-core"
-				if len(items) == 8 {
-					mode = items[7]
+				index := 0
+				if len(items) == 9 {
+					index, _ = strconv.Atoi(items[7])
+					mode = items[8]
 				}
 				i := DeviceInfo{
 					ID:      items[0],
@@ -149,6 +151,7 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					Numa:    numa,
 					Health:  health,
 					Mode:    mode,
+					Index:   uint(index),
 				}
 				retval = append(retval, &i)
 			} else {
@@ -160,10 +163,29 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 }
 
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
-	tmp := ""
+	builder := strings.Builder{}
 	for _, val := range dlist {
-		tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + "," + val.Mode + OneContainerMultiDeviceSplitSymbol
+		builder.WriteString(val.ID)
+		builder.WriteString(",")
+		builder.WriteString(strconv.FormatInt(int64(val.Count), 10))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Devmem)))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Devcore)))
+		builder.WriteString(",")
+		builder.WriteString(val.Type)
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(val.Numa))
+		builder.WriteString(",")
+		builder.WriteString(strconv.FormatBool(val.Health))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Index)))
+		builder.WriteString(",")
+		builder.WriteString(val.Mode)
+		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
+		//tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + "," + strconv.Itoa(val.Index) + OneContainerMultiDeviceSplitSymbol
 	}
+	tmp := builder.String()
 	klog.Infof("Encoded node Devices: %s", tmp)
 	return tmp
 }

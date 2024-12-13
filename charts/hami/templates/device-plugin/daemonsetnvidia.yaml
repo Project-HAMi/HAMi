@@ -93,6 +93,10 @@ spec:
               drop: ["ALL"]
               add: ["SYS_ADMIN"]
           env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
             - name: NVIDIA_MIG_MONITOR_DEVICES
