@@ -23,7 +23,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -169,7 +168,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Node
-		want []*api.DeviceInfo
+		want []*util.DeviceInfo
 		err  error
 	}{
 		{
@@ -182,7 +181,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{
+			want: []*util.DeviceInfo{
 				{
 					ID:      "GPU-0",
 					Count:   int32(4),
@@ -205,7 +204,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  errors.New("no device found on node"),
 		},
 		{
@@ -215,7 +214,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Name: "node-03",
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  fmt.Errorf("annos not found"),
 		},
 		{
@@ -228,7 +227,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  fmt.Errorf("failed to unmarshal node devices"),
 		},
 	}
