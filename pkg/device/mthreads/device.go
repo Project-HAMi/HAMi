@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -112,14 +111,14 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 	return ok, nil
 }
 
-func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
-	nodedevices := []*api.DeviceInfo{}
+func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
+	nodedevices := []*util.DeviceInfo{}
 	i := 0
 	cores, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceCores), resource.DecimalSI).AsInt64()
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*coresPerMthreadsGPU < cores {
-		nodedevices = append(nodedevices, &api.DeviceInfo{
-			Index:   i,
+		nodedevices = append(nodedevices, &util.DeviceInfo{
+			Index:   uint(i),
 			ID:      n.Name + "-mthreads-" + fmt.Sprint(i),
 			Count:   100,
 			Devmem:  int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
@@ -261,7 +260,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *MthreadsDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+func (dev *MthreadsDevices) CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	for _, ctrs := range (*allocated)[device.Type] {
 		for _, ctrdev := range ctrs {
 			if strings.Compare(ctrdev.UUID, device.ID) != 0 {
@@ -275,4 +274,11 @@ func (dev *MthreadsDevices) CustomFilterRule(allocated *util.PodDevices, toAlloc
 
 func (dev *MthreadsDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
 	return 0
+}
+
+func (dev *MthreadsDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+	n.Used++
+	n.Usedcores += ctr.Usedcores
+	n.Usedmem += ctr.Usedmem
+	return nil
 }

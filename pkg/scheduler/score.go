@@ -121,7 +121,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			klog.V(5).InfoS("can't allocate core=0 job to an already full GPU", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
 			continue
 		}
-		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, tmpDevs[k.Type], node.Devices.DeviceLists[i].Device) {
+		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, request, tmpDevs[k.Type], node.Devices.DeviceLists[i].Device) {
 			continue
 		}
 		if k.Nums > 0 {
@@ -138,6 +138,9 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		if k.Nums == 0 {
 			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs
+		}
+		if node.Devices.DeviceLists[i].Device.Mode == "mig" {
+			i++
 		}
 	}
 	return false, tmpDevs
@@ -163,10 +166,10 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 		sort.Sort(node.Devices)
 		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod, devinput)
 		if fit {
-			for _, val := range tmpDevs[k.Type] {
-				for _, v := range node.Devices.DeviceLists {
+			for idx, val := range tmpDevs[k.Type] {
+				for nidx, v := range node.Devices.DeviceLists {
 					//bc node.Devices has been sorted, so we should find out the correct device
-					if int(v.Device.Index) != val.Idx {
+					if v.Device.ID != val.UUID {
 						continue
 					}
 					total += v.Device.Count
@@ -175,9 +178,12 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 					free += v.Device.Count - v.Device.Used
 					freeCore += v.Device.Totalcore - v.Device.Usedcores
 					freeMem += v.Device.Totalmem - v.Device.Usedmem
-					v.Device.Used++
-					v.Device.Usedcores += val.Usedcores
-					v.Device.Usedmem += val.Usedmem
+					err := device.GetDevices()[k.Type].AddResourceUsage(node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
+					if err != nil {
+						klog.Errorf("AddResource failed:%s", err.Error())
+						return false, 0
+					}
+					klog.Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
