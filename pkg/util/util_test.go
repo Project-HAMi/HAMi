@@ -33,12 +33,12 @@ func init() {
 
 func TestExtractMigTemplatesFromUUID(t *testing.T) {
 	originuuid := "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]"
-	expectedTmpId := 7
+	expectedTmpID := 7
 	expectedPosition := 9
 	tempid, pos := ExtractMigTemplatesFromUUID(originuuid)
 
-	if tempid != expectedTmpId || pos != expectedPosition {
-		t.Errorf("Expected %d:%d, got %d:%d", expectedTmpId, expectedPosition, tempid, pos)
+	if tempid != expectedTmpID || pos != expectedPosition {
+		t.Errorf("Expected %d:%d, got %d:%d", expectedTmpID, expectedPosition, tempid, pos)
 	}
 }
 

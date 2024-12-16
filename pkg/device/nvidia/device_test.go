@@ -20,13 +20,12 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"k8s.io/apimachinery/pkg/api/resource"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func Test_DefaultResourceNum(t *testing.T) {
