@@ -21,7 +21,6 @@ import (
 	"flag"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -121,19 +120,19 @@ func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {
-		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+		return []*util.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
 	nodedevices, err := util.DecodeNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
-		return []*api.DeviceInfo{}, err
+		return []*util.DeviceInfo{}, err
 	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
-		return []*api.DeviceInfo{}, errors.New("no gpu found on node")
+		return []*util.DeviceInfo{}, errors.New("no gpu found on node")
 	}
 	devDecoded := util.EncodeNodeDevices(nodedevices)
 	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
@@ -247,10 +246,17 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 	return *annoinput
 }
 
-func (dev *DCUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+func (dev *DCUDevices) CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
 
 func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
 	return 0
+}
+
+func (dev *DCUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+	n.Used++
+	n.Usedcores += ctr.Usedcores
+	n.Usedmem += ctr.Usedmem
+	return nil
 }

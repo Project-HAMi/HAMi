@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -68,12 +69,6 @@ func Test_addNode_ListNodes(t *testing.T) {
 					ID:   "test123",
 					Node: &corev1.Node{},
 					Devices: []util.DeviceInfo{
-						{
-							ID:      "GPU-0",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
-						},
 						{
 							ID: "node-01",
 						},
@@ -131,6 +126,7 @@ func Test_addNode_ListNodes(t *testing.T) {
 			err: nil,
 		},
 	}
+	device.InitDefaultDevices()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := nodeManager{
