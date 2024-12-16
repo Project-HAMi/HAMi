@@ -799,3 +799,83 @@ func Test_GenerateResourceRequests(t *testing.T) {
 		})
 	}
 }
+
+func TestDevices_LockNode(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend310P",
+					ResourceName:       "huawei.com/Ascend310P",
+					ResourceMemoryName: "huawei.com/Ascend310P-memory",
+				},
+			}
+			err := dev.LockNode(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestDevices_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend310P",
+					ResourceName:       "huawei.com/Ascend310P",
+					ResourceMemoryName: "huawei.com/Ascend310P-memory",
+				},
+			}
+			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}

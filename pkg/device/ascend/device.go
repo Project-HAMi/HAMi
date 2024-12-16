@@ -27,10 +27,15 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
+)
+
+const (
+	NodeLockAscend = "hami.io/mutex.lock"
 )
 
 type Devices struct {
@@ -45,11 +50,6 @@ type RuntimeInfo struct {
 	UUID string `json:"UUID,omitempty"`
 	Temp string `json:"temp,omitempty"`
 }
-
-//const (
-//	useUUIDAnno   = "huawei.com/use-ascend-uuid"
-//	noUseUUIDAnno = "huawei.com/no-use-ascend-uuid"
-//)
 
 var (
 	enableAscend bool
@@ -170,11 +170,33 @@ func (dev *Devices) PatchAnnotations(annoInput *map[string]string, pd util.PodDe
 }
 
 func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.LockNode(n.Name, NodeLockAscend, p)
 }
 
 func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockAscend)
 }
 
 func (dev *Devices) NodeCleanUp(nn string) error {
