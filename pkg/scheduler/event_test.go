@@ -111,7 +111,7 @@ func TestRecordScheduleBindingResultEvent(t *testing.T) {
 					assert.Equal(t, event.Type, corev1.EventTypeNormal)
 				}
 			} else {
-				events, err = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+				events, _ = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
 				assert.Equal(t, len(events.Items), 0)
 			}
 		})
@@ -198,7 +198,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 					assert.Equal(t, event.Type, corev1.EventTypeNormal)
 				}
 			} else {
-				events, err = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
+				events, _ = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
 				assert.Equal(t, len(events.Items), 0)
 			}
 		})
