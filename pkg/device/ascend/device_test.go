@@ -23,14 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func Test_InitDevices(t *testing.T) {
