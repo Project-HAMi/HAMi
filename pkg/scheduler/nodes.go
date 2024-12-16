@@ -24,6 +24,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -50,10 +51,23 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	defer m.mutex.Unlock()
 	_, ok := m.nodes[nodeID]
 	if ok {
-		tmp := make([]util.DeviceInfo, 0, len(m.nodes[nodeID].Devices)+len(nodeInfo.Devices))
-		tmp = append(tmp, m.nodes[nodeID].Devices...)
-		tmp = append(tmp, nodeInfo.Devices...)
-		m.nodes[nodeID].Devices = tmp
+		if len(nodeInfo.Devices) > 0 {
+			tmp := make([]util.DeviceInfo, 0, len(nodeInfo.Devices))
+			devices := device.GetDevices()
+			deviceType := ""
+			for _, val := range devices {
+				if strings.Contains(nodeInfo.Devices[0].Type, val.CommonWord()) {
+					deviceType = val.CommonWord()
+				}
+			}
+			for _, val := range m.nodes[nodeID].Devices {
+				if !strings.Contains(val.Type, deviceType) {
+					tmp = append(tmp, val)
+				}
+			}
+			m.nodes[nodeID].Devices = tmp
+			m.nodes[nodeID].Devices = append(m.nodes[nodeID].Devices, nodeInfo.Devices...)
+		}
 	} else {
 		m.nodes[nodeID] = nodeInfo
 	}
