@@ -20,7 +20,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -465,7 +464,7 @@ func Test_InitNvidiaDevice(t *testing.T) {
 			if devices == nil {
 				t.Error("Expected NvidiaGPUDevices to be initialized")
 			}
-			assert.Equal(t, test.want.config, devices.config, "Expected config to match the input config")
+			assert.DeepEqual(t, test.want.config, devices.config)
 			assert.Equal(t, "hami.io/vgpu-devices-to-allocate", util.InRequestDevices[NvidiaGPUDevice], "Expected InRequestDevices to be set")
 			assert.Equal(t, "hami.io/vgpu-devices-allocated", util.SupportDevices[NvidiaGPUDevice], "Expected SupportDevices to be set")
 			assert.Equal(t, HandshakeAnnos, util.HandshakeAnnos[NvidiaGPUDevice], "Expected HandshakeAnnos to be set")
@@ -540,7 +539,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Node
-		want []*api.DeviceInfo
+		want []*util.DeviceInfo
 		err  error
 	}{
 		{
@@ -553,7 +552,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{
+			want: []*util.DeviceInfo{
 				{
 					ID:      "GPU-0",
 					Count:   5,
@@ -576,7 +575,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  errors.New("failed to decode node devices"),
 		},
 		{
@@ -587,7 +586,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Annotations: map[string]string{},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  errors.New("annos not found " + RegisterAnnos),
 		},
 	}
