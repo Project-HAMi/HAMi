@@ -5,7 +5,7 @@ metadata:
   annotations:
     # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get gpu-type
     # UUID is like GPU-03f69c50-207a-2038-9b45-23cac89cb67d
-    nvidia.com/use-gpuuuid: "GPU-03f69c50-207a-2038-9b45-23cac89cb67d,GPU-03f69c50-207a-2038-9b45-23cac89cb67e" # Specify the card uuid for this job, use comma to seperate, will launch job on specified card
+    nvidia.com/use-gpuuuid: "GPU-03f69c50-207a-2038-9b45-23cac89cb67d,GPU-03f69c50-207a-2038-9b45-23cac89cb67e" # Specify the card UUIDs for this job, separated by commas. The job will run on the specified cards
     # In this example, we want to run this job on GPU-03f69c50-207a-2038-9b45-23cac89cb67d or GPU-03f69c50-207a-2038-9b45-23cac89cb67e
 spec:
   containers:
