@@ -29,9 +29,9 @@ import (
 )
 
 func viewStatus(usage NodeUsage) {
-	klog.Info("devices status")
+	klog.V(5).Info("devices status")
 	for _, val := range usage.Devices.DeviceLists {
-		klog.InfoS("device status", "device id", val.Device.ID, "device detail", val)
+		klog.V(5).InfoS("device status", "device id", val.Device.ID, "device detail", val)
 	}
 }
 

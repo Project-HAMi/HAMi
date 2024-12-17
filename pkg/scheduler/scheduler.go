@@ -319,8 +319,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				}
 			}
 		}
-		//klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
-		klog.Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
+		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
 	}
 	s.overviewstatus = overallnodeMap
 	for _, nodeID := range *nodes {
