@@ -4,15 +4,70 @@ on:
   workflow_call:
     inputs:
       ref:
+        description: 'Reference id to run tests against'
         required: true
         type: string
-permissions: write-all
+      type:
+        description: 'E2E type'
+        required: true
+        type: string
+        default: pullrequest
 
 jobs:
   e2e:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - device: nvidia
+            type: tesla-p4
+    #          - device: nvidia
+    #            type: rtx-4090
+    #          - device: huawei
+    #            type: ascend-910b
+    runs-on: [ "${{ matrix.device }}", "${{ matrix.type }}" ]
+    environment: ${{ matrix.device }}
+    env:
+      KUBE_CONF: ${{ secrets.GPU_KUBE_CONF}}
+      E2E_TYPE: ${{ inputs.type }}
     steps:
-      - name: e2e test
-        # https://github.com/actions/virtual-environments/issues/709
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: setup e2e env
+        env:
+          GOVC_URL: ${{ secrets.VSPHERE_SERVER }}
+          GOVC_USERNAME: ${{ secrets.VSPHERE_USER }}
+          GOVC_PASSWORD: ${{ secrets.VSPHERE_PASSWD }}
+          GOVC_DATACENTER: ${{ secrets.VSPHERE_DATACENTER }}
+          VSPHERE_GPU_VM_IP: ${{ secrets.VSPHERE_GPU_VM_IP }}
+          VSPHERE_GPU_VM_NAME: ${{ secrets.VSPHERE_GPU_VM_NAME }}
+          VSPHERE_GPU_VM_NAME_SNAPSHOT: ${{ secrets.VSPHERE_GPU_VM_NAME_SNAPSHOT }}
         run: |
-          echo "Need to add e2e test"
+          make e2e-env-setup
+
+      - name: download helm artifact
+        if: inputs.type == 'pullrequest'
+        uses: actions/download-artifact@v4
+        with:
+          name: chart_package_artifact
+          path: charts/
+
+      - name: show artifact
+        if: inputs.type == 'pullrequest'
+        run: |
+          ls -l
+
+      - name: hami helm deploy
+        env:
+          HELM_VER: ${{ inputs.type }}
+        run: |
+          make helm-deploy
+
+      - name: e2e test
+        run: |
+          make e2e-test
