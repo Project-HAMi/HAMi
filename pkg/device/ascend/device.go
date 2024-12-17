@@ -196,7 +196,7 @@ func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 		return nil
 	}
 
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockAscend)
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockAscend, p, false)
 }
 
 func (dev *Devices) NodeCleanUp(nn string) error {

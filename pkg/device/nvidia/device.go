@@ -203,7 +203,7 @@ func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia)
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, false)
 }
 
 func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
