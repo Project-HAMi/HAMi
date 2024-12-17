@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -35,7 +36,11 @@ const (
 	NodeLockSep  = ","
 )
 
+var lock sync.Mutex
+
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
+	lock.Lock()
+	defer lock.Unlock()
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -62,19 +67,25 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if err != nil {
 		return fmt.Errorf("setNodeLock exceeds retry count %d", MaxLockRetry)
 	}
-	klog.InfoS("Node lock set", "node", nodeName)
+	klog.InfoS("Node lock set", "node", nodeName, "podName", pods.Name)
 	return nil
 }
 
-func ReleaseNodeLock(nodeName string, lockname string) error {
+func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout bool) error {
+	lock.Lock()
+	defer lock.Unlock()
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
-	if _, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
-		klog.InfoS("Node lock not set", "node", nodeName)
+	if lockStr, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
 		return nil
+	} else {
+		if !strings.Contains(lockStr, pod.Name) && !timeout {
+			klog.InfoS("NodeLock is not set by this pod", lockStr, "pod", pod.Name)
+			return nil
+		}
 	}
 	newNode := node.DeepCopy()
 	delete(newNode.ObjectMeta.Annotations, NodeLockKey)
@@ -94,7 +105,7 @@ func ReleaseNodeLock(nodeName string, lockname string) error {
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", MaxLockRetry)
 	}
-	klog.InfoS("Node lock released", "node", nodeName)
+	klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
 	return nil
 }
 
@@ -113,7 +124,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	}
 	if time.Since(lockTime) > time.Minute*5 {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
-		err = ReleaseNodeLock(nodeName, lockname)
+		err = ReleaseNodeLock(nodeName, lockname, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
