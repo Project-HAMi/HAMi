@@ -236,7 +236,7 @@ func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockname string) {
 	if err != nil {
 		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
 	}
-	err = nodelock.ReleaseNodeLock(nodeName, lockname)
+	err = nodelock.ReleaseNodeLock(nodeName, lockname, pod, false)
 	if err != nil {
 		klog.Errorf("release lock failed:%v", err.Error())
 	}
@@ -249,7 +249,7 @@ func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockname string) {
 	if err != nil {
 		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
 	}
-	err = nodelock.ReleaseNodeLock(nodeName, lockname)
+	err = nodelock.ReleaseNodeLock(nodeName, lockname, pod, false)
 	if err != nil {
 		klog.Errorf("release lock failed:%v", err.Error())
 	}

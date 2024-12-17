@@ -52,7 +52,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
 
 	"github.com/google/uuid"
@@ -388,7 +387,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(ctx, nodename)
 	if err != nil {
-		nodelock.ReleaseNodeLock(nodename, NodeLockNvidia)
+		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	klog.V(5).Infof("allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
