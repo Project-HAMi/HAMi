@@ -33,16 +33,39 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `resourcePriority:`
   字符串类型，表示申请任务的任务优先级，默认: "nvidia.com/priority"
 
+# Pod配置（在注解中指定）
+
+* `nvidia.com/use-gpuuuid:` 
+  字符串类型, 如: "GPU-AAA,GPU-BBB"
+  如果设置, 该任务申请的设备只能是字符串中定义的设备之一。
+* `nvidia.com/nouse-gpuuuid`
+  字符串类型, 如: "GPU-AAA,GPU-BBB"
+  如果设置, 该任务不能使用字符串中定义的任何设备
+* `nvidia.com/nouse-gputype:`
+  字符串类型, 如: "Tesla V100-PCIE-32GB, NVIDIA A10"
+  如果设置, 该任务不能使用字符串中定义的任何设备型号
+* `nvidia.com/use-gputype`
+  字符串类型, 如: "Tesla V100-PCIE-32GB, NVIDIA A10"
+  如果设置, 该任务申请的设备只能使用字符串中定义的设备型号。
+* `hami.io/gpu-scheduler-policy`
+  字符串类型, "binpack" 或 "spread"
+  spread:, 调度器会尽量将任务均匀地分配在不同GPU中
+  binpack: 调度器会尽量将任务分配在已分配的GPU中，从而减少碎片
+* `hami.io/node-scheduler-policy`
+  字符串类型, "binpack" 或 "spread"
+  spread: 调度器会尽量将任务均匀地分配到不同节点上
+  binpack: 调度器会尽量将任务分配在已分配任务的节点上，从而减少碎片 
+* `nvidia.com/vgpu-mode`
+  字符串类型, "hami-core" 或 "mig"
+  该任务希望使用的vgpu类型
+
+
 # 容器配置（在容器的环境变量中指定）
 
 * `GPU_CORE_UTILIZATION_POLICY:`
   字符串类型，"default", "force", "disable"
   默认为"default"
   代表容器算力限制策略， "default"为默认，"force"为强制限制算力，一般用于测试算力限制的功能，"disable"为忽略算力限制
-* `ACTIVE_OOM_KILLER:`
-  布尔类型，"true", "false"
-  默认为false
-  若设置为true，则代表监控系统将会持续监控进程的显存使用量，并主动kill掉任何用超配额的进行。
 * `CUDA_DISABLE_CONTROL`
   布尔类型，"true", "false"
   默认为false
