@@ -45,7 +45,7 @@ const (
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
 	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
-	AllocateMode = "nvidia.com/mode"
+	AllocateMode = "nvidia.com/vgpu-mode"
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
