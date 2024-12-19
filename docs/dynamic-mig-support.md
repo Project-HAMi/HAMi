@@ -125,9 +125,9 @@ You can customize the mig configuration by following the steps below:
               memory: 80896
               count: 1
   ```
-  ### Helm installation and updates will be based on the configuration in this file, overwriting the built-in configuration of Helm
 
-  ### Be aware HAMi will find and use the first MIG template suitable to the task in the order of this configMap
+  > **Note** Helm installation and updates will be based on the configuration in this file, overwriting the built-in configuration of Helm
+  > **Note** Be aware HAMi will find and use the first MIG template suitable to the task in the order of this configMap
 
 ## Running MIG jobs
 

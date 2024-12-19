@@ -126,9 +126,9 @@ HAMi目前包含[MIG配置模版](https://github.com/Project-HAMi/HAMi/blob/mast
               memory: 80896
               count: 1
   ```
-  ### 修改后可以通过更新或重新部署chart来生效
+  > **Note** 修改后可以通过更新或重新部署chart来生效
 
-  ### 在收到任务请求后，HAMi会在上述定义的MIG模版中的依次查找，直到找到一个可以运行任务的模版
+  > **Note** 在收到任务请求后，HAMi会在上述定义的MIG模版中的依次查找，直到找到一个可以运行任务的模版
 
 ## 使用MIG模式运行任务
 
