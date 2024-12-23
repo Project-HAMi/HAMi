@@ -3,8 +3,10 @@ kind: Pod
 metadata:
   name: gpu-pod
   annotations:
+    # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get registered gpu info
+    # The full GPU type name is like NVIDIA-NVIDIA A100, while the short name is like A100
     nvidia.com/nouse-gputype: "1080,2080" # Specify the blacklist card type for this job, use comma to seperate, will not launch job on specified card
-    # In this job, we don't want our job to run on 1080(include 1080Ti) or 2080(include 2080Ti) type of card.
+    # In this example, we don't want our job to run on 1080(include 1080Ti) or 2080(include 2080Ti) type of card.
 spec:
   containers:
     - name: ubuntu-container
