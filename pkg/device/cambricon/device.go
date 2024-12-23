@@ -106,7 +106,7 @@ func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.StrategicMergePatchType, patchedAnnotation, metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", node.Name, "retry", i)
-		time.Sleep(time.Duration(rand.Intn(i)) * 10 * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.StrategicMergePatchType, patchedAnnotation, metav1.PatchOptions{})
 	}
 	if err != nil {
@@ -165,7 +165,7 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	_, err := client.GetClient().CoreV1().Nodes().Patch(context.TODO(), n.Name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
-		time.Sleep(time.Duration(rand.Intn(i)) * 10 * time.Millisecond)
+		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(context.TODO(), n.Name, types.JSONPatchType, patchData, metav1.PatchOptions{})
 	}
 	if err != nil {
