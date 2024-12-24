@@ -155,6 +155,19 @@ spec:
 
 In this example above, the task allocates two mig instances, each with at least 8G device memory.
 
+## Monitor MIG Instance
+
+MIG Instance managed by HAMi will be displayed in scheduler monitor(scheduler node ip:31993/metrics), as follows:
+
+```bash
+# HELP nodeGPUMigInstance GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps
+# TYPE nodeGPUMigInstance gauge
+nodeGPUMigInstance{deviceidx="0",deviceuuid="GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313",migname="3g.20gb-0",nodeid="aio-node15",zone="vGPU"} 1
+nodeGPUMigInstance{deviceidx="0",deviceuuid="GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313",migname="3g.20gb-1",nodeid="aio-node15",zone="vGPU"} 0
+nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41ef2da2",migname="3g.20gb-0",nodeid="aio-node15",zone="vGPU"} 1
+nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41ef2da2",migname="3g.20gb-1",nodeid="aio-node15",zone="vGPU"} 1
+```
+
 ## Notes
 
 1. You don't need to do anything on MIG node, all are managed by mig-parted in hami-device-plugin.
