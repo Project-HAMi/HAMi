@@ -29,6 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -69,12 +70,6 @@ func NewScheduler() *Scheduler {
 	s.nodeManager.init()
 	s.podManager.init()
 	return s
-}
-
-func check(err error) {
-	if err != nil {
-		klog.Fatal(err)
-	}
 }
 
 func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
@@ -125,9 +120,7 @@ func (s *Scheduler) onDelPod(obj interface{}) {
 }
 
 func (s *Scheduler) Start() {
-	kubeClient, err := k8sutil.NewClient()
-	check(err)
-	s.kubeClient = kubeClient
+	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
