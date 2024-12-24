@@ -21,12 +21,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,7 +28,14 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func Test_getNodesUsage(t *testing.T) {
@@ -248,15 +249,21 @@ func Test_Filter(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	s.addAllEventHandlers()
-	device.InitDevicesWithConfig(&device.Config{
+	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
 			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
 			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
 		},
-	})
+	}
 
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	pod1 := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pod1",

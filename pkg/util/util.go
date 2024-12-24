@@ -391,12 +391,36 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 	return PatchNodeAnnotations(n, tmppat)
 }
 
-func ExtractMigTemplatesFromUUID(uuid string) (int, int) {
-	tmp := strings.Split(uuid, "[")[1]
-	tmp = strings.Split(tmp, "]")[0]
-	templateIdx, _ := strconv.Atoi(strings.Split(tmp, "-")[0])
-	pos, _ := strconv.Atoi(strings.Split(tmp, "-")[1])
-	return templateIdx, pos
+// Enhanced ExtractMigTemplatesFromUUID with error handling.
+func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
+	parts := strings.Split(uuid, "[")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '[' delimiter")
+	}
+
+	tmp := parts[1]
+	parts = strings.Split(tmp, "]")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing ']' delimiter")
+	}
+
+	tmp = parts[0]
+	parts = strings.Split(tmp, "-")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '-' delimiter")
+	}
+
+	templateIdx, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid template index: %v", err)
+	}
+
+	pos, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid position: %v", err)
+	}
+
+	return templateIdx, pos, nil
 }
 
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {

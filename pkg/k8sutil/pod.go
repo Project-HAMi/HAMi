@@ -26,10 +26,17 @@ import (
 
 func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 	counts = make(util.PodDeviceRequests, len(pod.Spec.Containers))
+	klog.V(4).InfoS("Processing resource requirements",
+		"pod", klog.KObj(pod),
+		"containerCount", len(pod.Spec.Containers))
 	//Count Nvidia GPU
 	for i := 0; i < len(pod.Spec.Containers); i++ {
 		devices := device.GetDevices()
 		counts[i] = make(util.ContainerDeviceRequests)
+		klog.V(5).InfoS("Processing container resources",
+			"pod", klog.KObj(pod),
+			"containerIndex", i,
+			"containerName", pod.Spec.Containers[i].Name)
 		for idx, val := range devices {
 			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if request.Nums > 0 {
@@ -37,7 +44,14 @@ func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 			}
 		}
 	}
-	klog.InfoS("collect requestreqs", "counts", counts)
+	if len(counts) == 0 {
+		klog.V(4).InfoS("No device requests found",
+			"pod", klog.KObj(pod))
+	} else {
+		klog.V(4).InfoS("Resource requirements collected",
+			"pod", klog.KObj(pod),
+			"requests", counts)
+	}
 	return counts
 }
 
