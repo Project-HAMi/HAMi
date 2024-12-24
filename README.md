@@ -37,9 +37,10 @@ HAMi provides device virtualization for several heterogeneous devices including 
 ### Device sharing
 
 - Allows partial device allocation by specifying device core usage.
-- Allows partial device allocation by specifying device  memory.
+- Allows partial device allocation by specifying device memory.
 - Imposes a hard limit on streaming multiprocessors.
 - Requires zero changes to existing programs.
+- Support [dynamic-mig](docs/dynamic-mig-support.md) feature, [example](examples/nvidia/dynamic_mig_example.yaml)
 
 <img src="./imgs/example.png" width = "500" /> 
 
