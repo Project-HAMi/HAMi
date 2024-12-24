@@ -451,7 +451,6 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 					continue
 				} else {
 					util.PlatternMIG(&deviceUsageCurrent, device.MigTemplate, tidx)
-					deviceUsageCurrent.UsageList[0].InUse = true
 					tmpfound = true
 					break
 				}
@@ -477,7 +476,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 		for idx := range deviceUsageCurrent.UsageList {
 			if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory > request.Memreq {
 				deviceUsageCurrent.UsageList[idx].InUse = true
-				klog.Infoln("MIG entry device usage true=", deviceUsageCurrent.UsageList)
+				klog.Infoln("MIG entry device usage true=", deviceUsageCurrent.UsageList, "request", request, "toAllocate", toAllocate)
 				return true
 			}
 		}

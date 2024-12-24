@@ -155,6 +155,7 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	ticker := time.NewTicker(time.Second * 15)
+	printedLog := map[string]bool{}
 	for {
 		select {
 		case <-s.nodeNotify:
@@ -198,7 +199,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
-					klog.V(4).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
+					klog.V(5).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
@@ -220,7 +221,12 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				}
 				s.addNode(val.Name, nodeInfo)
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					klog.Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+					if printedLog[val.Name] {
+						klog.Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+						printedLog[val.Name] = true
+					} else {
+						klog.V(5).Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+					}
 				}
 			}
 		}
@@ -312,7 +318,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 									util.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
 								}
 								d.Device.MigUsage.UsageList[Instance].InUse = true
-								klog.V(3).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
+								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
 							}
 						}
 					}
