@@ -63,9 +63,9 @@ spec:
               value: all
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
-            {{- if typeIs "bool" .Values.devicePlugin.compatWithCPUManager }}
+            {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}
             - name: PASS_DEVICE_SPECS
-              value: {{ .Values.devicePlugin.compatWithCPUManager | quote }}
+              value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
           securityContext:
             privileged: true

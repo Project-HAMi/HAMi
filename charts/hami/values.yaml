@@ -118,7 +118,7 @@ devicePlugin:
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
-  compatWithCPUManager: null
+  passDeviceSpecsEnabled: true
   extraArgs:
     - -v=false
   
