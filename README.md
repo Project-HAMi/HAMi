@@ -14,6 +14,7 @@ English version|[中文版](README_cn.md)
 [![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
 [![website](https://img.shields.io/badge/website-blue)](http://project-hami.io)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 
 ## Project-HAMi: Heterogeneous AI Computing Virtualization Middleware
 
@@ -188,3 +189,6 @@ If you have any questions, please feel free to reach out to us through the follo
 ## License
 
 HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+
+
+[![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=large)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_large)
