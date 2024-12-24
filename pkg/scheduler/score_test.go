@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"k8s.io/klog/v2"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -31,14 +32,21 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	device.InitDevicesWithConfig(&device.Config{
+	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
 			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
 			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
 		},
-	})
+	}
+
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	m.Run()
 }
 

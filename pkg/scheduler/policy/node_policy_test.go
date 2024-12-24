@@ -18,6 +18,7 @@ package policy
 
 import (
 	"fmt"
+	"k8s.io/klog/v2"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -200,6 +201,9 @@ func TestOverrideScore(t *testing.T) {
 		IluvatarConfig:  iluvatar.IluvatarConfig{},
 		VNPUs:           nil,
 	}
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	tests := []struct {
 		name      string
 		nodeScore *NodeScore
@@ -302,7 +306,7 @@ func TestOverrideScore(t *testing.T) {
 			wantScore: 0,
 		},
 	}
-	device.InitDevicesWithConfig(config)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			fmt.Println("🤮", device.GetDevices())
