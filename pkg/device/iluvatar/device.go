@@ -179,7 +179,7 @@ func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting iluvatar devices")
+	klog.Info("Start to count iluvatar devices for container ", ctr.Name)
 	iluvatarResourceCount := corev1.ResourceName(IluvatarResourceCount)
 	iluvatarResourceMem := corev1.ResourceName(IluvatarResourceMemory)
 	iluvatarResourceCores := corev1.ResourceName(IluvatarResourceCores)
