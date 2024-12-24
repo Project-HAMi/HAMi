@@ -186,7 +186,7 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 		//tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + "," + strconv.Itoa(val.Index) + OneContainerMultiDeviceSplitSymbol
 	}
 	tmp := builder.String()
-	klog.Infof("Encoded node Devices: %s", tmp)
+	klog.V(5).Infof("Encoded node Devices: %s", tmp)
 	return tmp
 }
 

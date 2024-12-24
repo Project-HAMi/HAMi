@@ -154,6 +154,19 @@ spec:
 
 在上面的例子中，该任务申请了2个MIG实例，每个实例至少需要8G显存
 
+## 监控MIG实例
+
+由HAMi管理和生成的MIG实例可以从调度器监控中看到（scheduler node ip:31993/metrics），如下所示：
+
+```bash
+# HELP nodeGPUMigInstance GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps
+# TYPE nodeGPUMigInstance gauge
+nodeGPUMigInstance{deviceidx="0",deviceuuid="GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313",migname="3g.20gb-0",nodeid="aio-node15",zone="vGPU"} 1
+nodeGPUMigInstance{deviceidx="0",deviceuuid="GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313",migname="3g.20gb-1",nodeid="aio-node15",zone="vGPU"} 0
+nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41ef2da2",migname="3g.20gb-0",nodeid="aio-node15",zone="vGPU"} 1
+nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41ef2da2",migname="3g.20gb-1",nodeid="aio-node15",zone="vGPU"} 1
+```
+
 ## 备注
 
 1. 你不需要在MIG节点上进行任何操作，所有MIG实例的创建和维护都是由hami-vgpu-device-plugin进行的

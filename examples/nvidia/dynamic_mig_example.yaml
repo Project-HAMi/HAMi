@@ -6,6 +6,7 @@ metadata:
   name: gpu-pod
   annotations:
     nvidia.com/vgpu-mode: "mig"
+    hami.io/gpu-scheduler-policy: "binpack" #(Optional)
 spec:
   containers:
     - name: ubuntu-container
