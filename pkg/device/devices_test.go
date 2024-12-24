@@ -119,131 +119,129 @@ vnpus:
       memory: 12288
       aiCore: 4
       aiCPU: 4`
+
 	var yamlData Config
 	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)
 	assert.NilError(t, err)
-	assert.Equal(t, yamlData.NvidiaConfig.ResourceCountName, "nvidia.com/gpu")
-	assert.Equal(t, yamlData.NvidiaConfig.ResourceMemoryName, "nvidia.com/gpumem")
-	assert.Equal(t, yamlData.NvidiaConfig.ResourceMemoryPercentageName, "nvidia.com/gpumem-percentage")
-	assert.Equal(t, yamlData.NvidiaConfig.ResourceCoreName, "nvidia.com/gpucores")
-	assert.Equal(t, yamlData.NvidiaConfig.ResourcePriority, "nvidia.com/priority")
-	assert.Equal(t, yamlData.NvidiaConfig.OverwriteEnv, false)
-	assert.Equal(t, yamlData.NvidiaConfig.DefaultMemory, int32(0))
-	assert.Equal(t, yamlData.NvidiaConfig.DefaultCores, int32(0))
-	assert.Equal(t, yamlData.NvidiaConfig.DefaultGPUNum, int32(1))
-	cambriconConfig := cambricon.CambriconConfig{
+
+	t.Run("NVIDIA Config", func(t *testing.T) {
+		nvidiaConfig := yamlData.NvidiaConfig
+		assert.Equal(t, nvidiaConfig.ResourceCountName, "nvidia.com/gpu")
+		assert.Equal(t, nvidiaConfig.ResourceMemoryName, "nvidia.com/gpumem")
+		assert.Equal(t, nvidiaConfig.ResourceMemoryPercentageName, "nvidia.com/gpumem-percentage")
+		assert.Equal(t, nvidiaConfig.ResourceCoreName, "nvidia.com/gpucores")
+		assert.Equal(t, nvidiaConfig.ResourcePriority, "nvidia.com/priority")
+		assert.Equal(t, nvidiaConfig.OverwriteEnv, false)
+		assert.Equal(t, nvidiaConfig.DefaultMemory, int32(0))
+		assert.Equal(t, nvidiaConfig.DefaultCores, int32(0))
+		assert.Equal(t, nvidiaConfig.DefaultGPUNum, int32(1))
+	})
+
+	tests := []struct {
+		name         string
+		expected     interface{}
+		actualGetter func() interface{}
+	}{
+		{"Cambricon Config", createCambriconConfig(), func() interface{} { return yamlData.CambriconConfig }},
+		{"Hygon Config", createHygonConfig(), func() interface{} { return yamlData.HygonConfig }},
+		{"Iluvatar Config", createIluvatarConfig(), func() interface{} { return yamlData.IluvatarConfig }},
+		{"Mthreads Config", createMthreadsConfig(), func() interface{} { return yamlData.MthreadsConfig }},
+		{"Metax Config", createMetaxConfig(), func() interface{} { return yamlData.MetaxConfig }},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.DeepEqual(t, tt.expected, tt.actualGetter())
+		})
+	}
+
+	expectedVNPUs := createVNPUConfigs()
+	assert.DeepEqual(t, yamlData.VNPUs, expectedVNPUs)
+}
+
+func createCambriconConfig() cambricon.CambriconConfig {
+	return cambricon.CambriconConfig{
 		ResourceCountName:  "cambricon.com/vmlu",
 		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
 		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
 	}
-	assert.DeepEqual(t, yamlData.CambriconConfig, cambriconConfig)
-	hygonConfig := hygon.HygonConfig{
+}
+
+func createHygonConfig() hygon.HygonConfig {
+	return hygon.HygonConfig{
 		ResourceCountName:  "hygon.com/dcunum",
 		ResourceMemoryName: "hygon.com/dcumem",
 		ResourceCoreName:   "hygon.com/dcucores",
 	}
-	assert.DeepEqual(t, yamlData.HygonConfig, hygonConfig)
-	iluvatarConfig := iluvatar.IluvatarConfig{
+}
+
+func createIluvatarConfig() iluvatar.IluvatarConfig {
+	return iluvatar.IluvatarConfig{
 		ResourceCountName:  "iluvatar.ai/vgpu",
 		ResourceMemoryName: "iluvatar.ai/vcuda-memory",
 		ResourceCoreName:   "iluvatar.ai/vcuda-core",
 	}
-	assert.DeepEqual(t, yamlData.IluvatarConfig, iluvatarConfig)
-	methreadsConfig := mthreads.MthreadsConfig{
+}
+
+func createMthreadsConfig() mthreads.MthreadsConfig {
+	return mthreads.MthreadsConfig{
 		ResourceCountName:  "mthreads.com/vgpu",
 		ResourceMemoryName: "mthreads.com/sgpu-memory",
 		ResourceCoreName:   "mthreads.com/sgpu-core",
 	}
-	assert.DeepEqual(t, yamlData.MthreadsConfig, methreadsConfig)
-	metaxConfig := metax.MetaxConfig{
+}
+
+func createMetaxConfig() metax.MetaxConfig {
+	return metax.MetaxConfig{
 		ResourceCountName: "metax-tech.com/gpu",
 	}
-	assert.DeepEqual(t, yamlData.MetaxConfig, metaxConfig)
-	ascendConfig := []ascend.VNPUConfig{}
-	ascendConfig = append(ascendConfig, ascend.VNPUConfig{
-		ChipName:           "910B",
-		CommonWord:         "Ascend910A",
-		ResourceName:       "huawei.com/Ascend910A",
-		ResourceMemoryName: "huawei.com/Ascend910A-memory",
-		MemoryAllocatable:  32768,
-		MemoryCapacity:     32768,
-		AICore:             30,
-		Templates: []ascend.Template{
-			{
-				Name:   "vir02",
-				Memory: 2184,
-				AICore: 2,
-			},
-			{
-				Name:   "vir04",
-				Memory: 4369,
-				AICore: 4,
-			},
-			{
-				Name:   "vir08",
-				Memory: 8738,
-				AICore: 8,
-			},
-			{
-				Name:   "vir16",
-				Memory: 17476,
-				AICore: 16,
+}
+
+func createVNPUConfigs() []ascend.VNPUConfig {
+	return []ascend.VNPUConfig{
+		{
+			ChipName:           "910B",
+			CommonWord:         "Ascend910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  32768,
+			MemoryCapacity:     32768,
+			AICore:             30,
+			Templates: []ascend.Template{
+				{Name: "vir02", Memory: 2184, AICore: 2},
+				{Name: "vir04", Memory: 4369, AICore: 4},
+				{Name: "vir08", Memory: 8738, AICore: 8},
+				{Name: "vir16", Memory: 17476, AICore: 16},
 			},
 		},
-	})
-	ascendConfig = append(ascendConfig, ascend.VNPUConfig{
-		ChipName:           "910B3",
-		CommonWord:         "Ascend910B",
-		ResourceName:       "huawei.com/Ascend910B",
-		ResourceMemoryName: "huawei.com/Ascend910B-memory",
-		MemoryAllocatable:  65536,
-		MemoryCapacity:     65536,
-		AICore:             20,
-		AICPU:              7,
-		Templates: []ascend.Template{
-			{
-				Name:   "vir05_1c_16g",
-				Memory: 16384,
-				AICore: 5,
-				AICPU:  1,
-			},
-			{
-				Name:   "vir10_3c_32g",
-				Memory: 32768,
-				AICore: 10,
-				AICPU:  3,
+		{
+			ChipName:           "910B3",
+			CommonWord:         "Ascend910B",
+			ResourceName:       "huawei.com/Ascend910B",
+			ResourceMemoryName: "huawei.com/Ascend910B-memory",
+			MemoryAllocatable:  65536,
+			MemoryCapacity:     65536,
+			AICore:             20,
+			AICPU:              7,
+			Templates: []ascend.Template{
+				{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
+				{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
 			},
 		},
-	})
-	ascendConfig = append(ascendConfig, ascend.VNPUConfig{
-		ChipName:           "310P3",
-		CommonWord:         "Ascend310P",
-		ResourceName:       "huawei.com/Ascend310P",
-		ResourceMemoryName: "huawei.com/Ascend310P-memory",
-		MemoryAllocatable:  21527,
-		MemoryCapacity:     24576,
-		AICore:             8,
-		AICPU:              7,
-		Templates: []ascend.Template{
-			{
-				Name:   "vir01",
-				Memory: 3072,
-				AICore: 1,
-				AICPU:  1,
-			},
-			{
-				Name:   "vir02",
-				Memory: 6144,
-				AICore: 2,
-				AICPU:  2,
-			},
-			{
-				Name:   "vir04",
-				Memory: 12288,
-				AICore: 4,
-				AICPU:  4,
+		{
+			ChipName:           "310P3",
+			CommonWord:         "Ascend310P",
+			ResourceName:       "huawei.com/Ascend310P",
+			ResourceMemoryName: "huawei.com/Ascend310P-memory",
+			MemoryAllocatable:  21527,
+			MemoryCapacity:     24576,
+			AICore:             8,
+			AICPU:              7,
+			Templates: []ascend.Template{
+				{Name: "vir01", Memory: 3072, AICore: 1, AICPU: 1},
+				{Name: "vir02", Memory: 6144, AICore: 2, AICPU: 2},
+				{Name: "vir04", Memory: 12288, AICore: 4, AICPU: 4},
 			},
 		},
-	})
-	assert.DeepEqual(t, yamlData.VNPUs, ascendConfig)
+	}
 }
