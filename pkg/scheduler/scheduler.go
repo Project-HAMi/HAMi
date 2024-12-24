@@ -60,7 +60,7 @@ type Scheduler struct {
 }
 
 func NewScheduler() *Scheduler {
-	klog.Info("New Scheduler")
+	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
@@ -68,6 +68,7 @@ func NewScheduler() *Scheduler {
 	}
 	s.nodeManager.init()
 	s.podManager.init()
+	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }
 
@@ -78,23 +79,27 @@ func check(err error) {
 }
 
 func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
+	klog.V(5).InfoS("Node updated", "node", newObj.(*corev1.Node).Name)
 	s.nodeNotify <- struct{}{}
 }
 
 func (s *Scheduler) onDelNode(obj interface{}) {
+	klog.V(5).InfoS("Node deleted", "node", obj.(*corev1.Node).Name)
 	s.nodeNotify <- struct{}{}
 }
 
 func (s *Scheduler) onAddNode(obj interface{}) {
+	klog.V(5).InfoS("Node added", "node", obj.(*corev1.Node).Name)
 	s.nodeNotify <- struct{}{}
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		klog.Errorf("unknown add object type")
+		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
 		return
 	}
+	klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
 	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
 	if !ok {
 		return
@@ -125,6 +130,7 @@ func (s *Scheduler) onDelPod(obj interface{}) {
 }
 
 func (s *Scheduler) Start() {
+	klog.InfoS("Starting HAMi scheduler components")
 	kubeClient, err := k8sutil.NewClient()
 	check(err)
 	s.kubeClient = kubeClient
@@ -395,7 +401,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		}
 		return res, nil
 	}
-
 	tmppatch := make(map[string]string)
 	for _, val := range device.GetDevices() {
 		err = val.LockNode(node, current)
@@ -419,7 +424,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		res = &extenderv1.ExtenderBindingResult{
 			Error: "",
 		}
-		klog.Infoln("After Binding Process")
+		klog.InfoS("bind success", "pod", args.PodName, "namespace", args.PodNamespace, "podUID", args.PodUID, "node", args.Node)
 		return res, nil
 	}
 ReleaseNodeLocks:
@@ -434,7 +439,7 @@ ReleaseNodeLocks:
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
-	klog.InfoS("begin schedule filter", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespaces", args.Pod.Namespace)
+	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	nums := k8sutil.Resourcereqs(args.Pod)
 	total := 0
 	for _, n := range nums {
@@ -443,7 +448,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}
 	}
 	if total == 0 {
-		klog.V(1).Infof("pod %v not find resource", args.Pod.Name)
+		klog.V(1).InfoS("Pod does not request any resources",
+			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("does not request any resource"))
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
@@ -459,7 +465,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
-		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
+		klog.V(5).InfoS("Nodes failed during usage retrieval",
+			"nodes", failedNodes)
 	}
 	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod)
 	if err != nil {
@@ -468,7 +475,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).Infof("All node scores do not meet for pod %v", args.Pod.Name)
+		klog.V(4).InfoS("No available nodes meet the required scores",
+			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("no available node, all node scores do not meet"))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
@@ -477,7 +485,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
 	sort.Sort(nodeScores)
 	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
-	klog.Infof("schedule %v/%v to %v %v", args.Pod.Namespace, args.Pod.Name, m.NodeID, m.Devices)
+	klog.InfoS("Scheduling pod to node",
+		"podNamespace", args.Pod.Namespace,
+		"podName", args.Pod.Name,
+		"nodeID", m.NodeID,
+		"devices", m.Devices)
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)

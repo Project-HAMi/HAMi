@@ -39,9 +39,9 @@ func checkBody(w http.ResponseWriter, r *http.Request) {
 }
 
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
-	klog.Infoln("Into Predicate Route outer func")
+	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infoln("Into Predicate Route inner func")
+		klog.Infoln("Entering Predicate Route handler")
 		checkBody(w, r)
 
 		var buf bytes.Buffer
@@ -51,14 +51,14 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		var extenderFilterResult *extenderv1.ExtenderFilterResult
 
 		if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
-			klog.Errorln("decode error", err.Error())
+			klog.ErrorS(err, "Failed to decode extender arguments")
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
 			}
 		} else {
 			extenderFilterResult, err = s.Filter(extenderArgs)
 			if err != nil {
-				klog.Errorf("pod %v filter error, %v", extenderArgs.Pod.Name, err)
+				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 				extenderFilterResult = &extenderv1.ExtenderFilterResult{
 					Error: err.Error(),
 				}
@@ -66,8 +66,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		}
 
 		if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
-			klog.Errorf("Failed to marshal extenderFilterResult: %+v, %+v",
-				err, extenderFilterResult)
+			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			w.Write([]byte(err.Error()))
@@ -81,28 +80,35 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
+		klog.Infoln("Entering Bind handler")
 		var buf bytes.Buffer
 		body := io.TeeReader(r.Body, &buf)
 		var extenderBindingArgs extenderv1.ExtenderBindingArgs
 		var extenderBindingResult *extenderv1.ExtenderBindingResult
 
 		if err := json.NewDecoder(body).Decode(&extenderBindingArgs); err != nil {
-			klog.ErrorS(err, "Decode extender binding args")
+			klog.ErrorS(err, "Failed to decode extender binding arguments")
 			extenderBindingResult = &extenderv1.ExtenderBindingResult{
 				Error: err.Error(),
 			}
 		} else {
 			extenderBindingResult, err = s.Bind(extenderBindingArgs)
+			if err != nil {
+				klog.ErrorS(err, "Bind error for pod", "pod", extenderBindingArgs.PodName)
+				extenderBindingResult = &extenderv1.ExtenderBindingResult{
+					Error: err.Error(),
+				}
+			}
 		}
 
 		if response, err := json.Marshal(extenderBindingResult); err != nil {
-			klog.ErrorS(err, "Marshal binding result", "result", extenderBindingResult)
+			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
 			errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
 			w.Write([]byte(errMsg))
 		} else {
-			klog.V(5).InfoS("Return bind response", "result", extenderBindingResult)
+			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
 			w.Write(response)
@@ -114,7 +120,7 @@ func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, typ
 	err := bindFunc(args.PodName, args.PodNamespace, args.PodUID, args.Node)
 	errMsg := ""
 	if err != nil {
-		klog.ErrorS(err, "Bind", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node, "uid", args.PodUID)
+		klog.ErrorS(err, "Bind error", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node, "uid", args.PodUID)
 		errMsg = err.Error()
 	}
 	return &extenderv1.ExtenderBindingResult{
@@ -125,16 +131,17 @@ func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, typ
 func WebHookRoute() httprouter.Handle {
 	h, err := scheduler.NewWebHook()
 	if err != nil {
-		klog.Errorf("failed to create new web hook, %v", err)
+		klog.ErrorS(err, "Failed to create new webhook")
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infof("Start to handle webhook request on %s", r.URL.Path)
+		klog.Infof("Handling webhook request on %s", r.URL.Path)
 		h.ServeHTTP(w, r)
 	}
 }
 
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.Infoln("Health check endpoint hit")
 		w.WriteHeader(http.StatusOK)
 	}
 }

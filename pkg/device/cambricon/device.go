@@ -251,7 +251,7 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting mlu devices")
+	klog.Info("Start to count mlu devices for container ", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
 	mluResourceCores := corev1.ResourceName(MLUResourceCores)
