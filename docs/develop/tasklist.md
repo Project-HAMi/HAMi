@@ -2,7 +2,7 @@
 
 ## Support Moore threads MTT S4000
 
-```
+```yaml
 resources:
 requests:
   mthreads.com/gpu: ${num}
@@ -16,7 +16,7 @@ limits:
 
 ## Support Birentech Model 110
 
-```
+```yaml
 resources:
 requests:
   birentech.com/gpu: ${num}
@@ -30,7 +30,7 @@ limits:
 
 ## Support iluvatar MR-V100
 
-```
+```yaml
 resources:
 requests:
   iluvatar.ai/gpu: ${num}
@@ -44,7 +44,7 @@ limits:
 
 ## Support HuaWei Ascend 910B device
 
-```
+```yaml
 resources:
   requests:
     ascend.com/npu: ${num}
@@ -61,7 +61,8 @@ resources:
 Description: ResourceQuota is frequently used in kubernetes namespace. Since the number of virtual devices doesn't mean anything, we need to support the limitation in deviceMemory.
 
 For example, the following resourceQuota
-```
+
+```yaml
 cat <<EOF > compute-resources.yaml
 apiVersion: v1
 kind: ResourceQuota
@@ -78,8 +79,9 @@ EOF
 ```
 
 with the following command
-```
-kubectl create -f ./compute-resources.yaml--namespace=myspace
+
+```bash
+kubectl create -f ./compute-resources.yaml --namespace=myspace
 ```
 
 will limit the maxinum device memory allocated to namespace 'myspace' to 30G
@@ -96,10 +98,9 @@ The effect of each schedule policy is shown in the table below
 | idle-first | idle GPU has higher score     |
 | numa-first    | for multiple GPU allocations, GPUs on the same numa have higher score    |
 
-
 For example, if a pod want to select a 'best-fit' schedule policy, it can specify .metadata.annotations as the code below:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -113,6 +114,5 @@ spec:
       command:["bash"，"-c"，"sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # requesting 2 VGPUs
+          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
 ```
-

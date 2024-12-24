@@ -155,6 +155,7 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.V(5).Infoln("Scheduler into RegisterFromNodeAnnotations")
 	ticker := time.NewTicker(time.Second * 15)
+	printedLog := map[string]bool{}
 	for {
 		select {
 		case <-s.nodeNotify:
@@ -186,7 +187,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					}
 					info, ok := s.nodes[val.Name]
 					if ok {
-						klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, info, err, s.nodes[val.Name].Devices)
+						klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, info.ID, err, s.nodes[val.Name].Devices)
 						s.rmNodeDevice(val.Name, info, devhandsk)
 						continue
 					}
@@ -198,7 +199,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
-					klog.V(4).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
+					klog.V(5).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
@@ -207,44 +208,25 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					util.PatchNodeAnnotations(n, tmppat)
 				}
 
+				nodeInfo := &util.NodeInfo{}
+				nodeInfo.ID = val.Name
+				nodeInfo.Node = val
 				nodedevices, err := devInstance.GetNodeDevices(*val)
 				if err != nil {
 					continue
 				}
-				nodeInfo := &util.NodeInfo{}
-				nodeInfo.ID = val.Name
-				nodeInfo.Node = val
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
-					found := false
-					_, ok := s.nodes[val.Name]
-					if ok {
-						for i1, val1 := range s.nodes[val.Name].Devices {
-							if strings.Compare(val1.ID, deviceinfo.ID) == 0 {
-								found = true
-								s.nodes[val.Name].Devices[i1].Devmem = deviceinfo.Devmem
-								s.nodes[val.Name].Devices[i1].Devcore = deviceinfo.Devcore
-								break
-							}
-						}
-					}
-					if !found {
-						nodeInfo.Devices = append(nodeInfo.Devices, util.DeviceInfo{
-							ID:           deviceinfo.ID,
-							Index:        uint(deviceinfo.Index),
-							Count:        deviceinfo.Count,
-							Devmem:       deviceinfo.Devmem,
-							Devcore:      deviceinfo.Devcore,
-							Type:         deviceinfo.Type,
-							Numa:         deviceinfo.Numa,
-							Health:       deviceinfo.Health,
-							DeviceVendor: devhandsk,
-						})
-					}
+					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
 				}
 				s.addNode(val.Name, nodeInfo)
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					klog.Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+					if printedLog[val.Name] {
+						klog.Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+						printedLog[val.Name] = true
+					} else {
+						klog.V(5).Infof("node %v device %s come node info=%s,%v total=%v", val.Name, devhandsk, nodeInfo.ID, nodeInfo.Devices, s.nodes[val.Name].Devices)
+					}
 				}
 			}
 		}
@@ -297,9 +279,15 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Totalmem:  d.Devmem,
 					Totalcore: d.Devcore,
 					Usedcores: 0,
-					Type:      d.Type,
-					Numa:      d.Numa,
-					Health:    d.Health,
+					MigUsage: util.MigInUse{
+						Index:     0,
+						UsageList: make(util.MIGS, 0),
+					},
+					MigTemplate: d.MIGTemplate,
+					Mode:        d.Mode,
+					Type:        d.Type,
+					Numa:        d.Numa,
+					Health:      d.Health,
 				},
 			})
 		}
@@ -316,10 +304,22 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
 					for _, d := range node.Devices.DeviceLists {
-						if d.Device.ID == udevice.UUID {
+						deviceID := udevice.UUID
+						if strings.Contains(deviceID, "[") {
+							deviceID = strings.Split(deviceID, "[")[0]
+						}
+						if d.Device.ID == deviceID {
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
+							if strings.Contains(udevice.UUID, "[") {
+								tmpIdx, Instance := util.ExtractMigTemplatesFromUUID(udevice.UUID)
+								if len(d.Device.MigUsage.UsageList) == 0 {
+									util.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
+								}
+								d.Device.MigUsage.UsageList[Instance].InUse = true
+								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
+							}
 						}
 					}
 				}

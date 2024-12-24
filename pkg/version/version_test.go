@@ -14,15 +14,39 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package api
+package version
 
-type DeviceInfo struct {
-	Index   int    `json:"index,omitempty"`
-	ID      string `json:"id,omitempty"`
-	Count   int32  `json:"count,omitempty"`
-	Devmem  int32  `json:"devmem,omitempty"`
-	Devcore int32  `json:"devcore,omitempty"`
-	Type    string `json:"type,omitempty"`
-	Numa    int    `json:"numa,omitempty"`
-	Health  bool   `json:"health,omitempty"`
+import (
+	"bytes"
+	"io"
+	"os"
+	"testing"
+
+	"gotest.tools/v3/assert"
+)
+
+func TestVersion(t *testing.T) {
+	version = "v1.0.0.1234567890"
+	versionWant := "v1.0.0.1234567890\n"
+
+	var out bytes.Buffer
+	r, w, err := os.Pipe()
+	if err != nil {
+		t.Fatalf("os.Pipe() failed: %v", err)
+	}
+	defer r.Close()
+	originalStdout := os.Stdout
+	defer func() {
+		os.Stdout = originalStdout
+		w.Close()
+	}()
+	os.Stdout = w
+
+	VersionCmd.Run(nil, nil)
+	w.Close()
+
+	io.Copy(&out, r)
+
+	versionGet := out.String()
+	assert.Equal(t, versionWant, versionGet)
 }

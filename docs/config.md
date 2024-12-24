@@ -45,7 +45,34 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 * `resourcePriority:`
   String type, vgpu task priority name, default: "nvidia.com/priority"
 
-# Container config envs
+# Pod configs: annotations
+
+* `nvidia.com/use-gpuuuid:` 
+  String type, ie: "GPU-AAA,GPU-BBB"
+  If set, devices allocated by this pod must be one of UUIDs defined in this string.
+* `nvidia.com/nouse-gpuuuid`
+  String type, ie: "GPU-AAA,GPU-BBB"
+  If set, devices allocated by this pod will NOT in UUIDs defined in this string.
+* `nvidia.com/nouse-gputype:`
+  String type, ie: "Tesla V100-PCIE-32GB, NVIDIA A10"
+  If set, devices allocated by this pod will NOT in types defined in this string.
+* `nvidia.com/use-gputype`
+  String type, ie: "Tesla V100-PCIE-32GB, NVIDIA A10"
+  If set, devices allocated by this pod MUST be one of types defined in this string.
+* `hami.io/node-scheduler-policy`
+  String type, "binpack" or "spread"
+  binpack: the scheduler will try to allocate the pod to used GPU nodes for execution. 
+  spread: the scheduler will try to allocate the pod to different GPU nodes for execution.
+* `hami.io/gpu-scheduler-policy`
+  String type, "binpack" or "spread"
+  binpack: the scheduler will try to allocate the pod to the same GPU card for execution.
+  spread:the scheduler will try to allocate the pod to different GPU card for execution. 
+* `nvidia.com/vgpu-mode`
+  String type, "hami-core" or "mig"
+  Which type of vgpu instance this pod wish to use
+
+
+# Container configs: env
 
 * `GPU_CORE_UTILIZATION_POLICY:`
   String type, "default", "force", "disable"
@@ -53,12 +80,6 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
   "default" means the dafault utilization policy
   "force" means the container will always limit the core utilization below "nvidia.com/gpucores"
   "disable" means the container will ignore the utilization limitation set by "nvidia.com/gpucores" during task execution
-
-* `ACTIVE_OOM_KILLER:`
-  Bool type, "true","false"
-  default: false
-  "true" means there will be a daemon process which monitors all running tasks inside this container, and instantly kill any process which exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
-
 * `CUDA_DISABLE_CONTROL`
   Bool type, "true","false"
   default: false

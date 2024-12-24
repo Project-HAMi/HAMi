@@ -17,12 +17,11 @@ limitations under the License.
 package util
 
 import (
+	"errors"
 	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
-
-	"github.com/Project-HAMi/HAMi/pkg/api"
 )
 
 var inRequestDevices map[string]string
@@ -30,6 +29,17 @@ var inRequestDevices map[string]string
 func init() {
 	inRequestDevices = make(map[string]string)
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
+}
+
+func TestExtractMigTemplatesFromUUID(t *testing.T) {
+	originuuid := "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]"
+	expectedTmpID := 7
+	expectedPosition := 9
+	tempid, pos := ExtractMigTemplatesFromUUID(originuuid)
+
+	if tempid != expectedTmpID || pos != expectedPosition {
+		t.Errorf("Expected %d:%d, got %d:%d", expectedTmpID, expectedPosition, tempid, pos)
+	}
 }
 
 func TestEmptyContainerDevicesCoding(t *testing.T) {
@@ -176,7 +186,7 @@ func Test_DecodePodDevices(t *testing.T) {
 
 func TestMarshalNodeDevices(t *testing.T) {
 	type args struct {
-		dlist []*api.DeviceInfo
+		dlist []*DeviceInfo
 	}
 	tests := []struct {
 		name string
@@ -187,7 +197,7 @@ func TestMarshalNodeDevices(t *testing.T) {
 		{
 			name: "test one",
 			args: args{
-				dlist: []*api.DeviceInfo{
+				dlist: []*DeviceInfo{
 					{
 						Index:   1,
 						ID:      "id-1",
@@ -218,7 +228,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 	tests := []struct {
 		name    string
 		args    args
-		want    []*api.DeviceInfo
+		want    []*DeviceInfo
 		wantErr bool
 	}{
 		{
@@ -226,7 +236,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 			args: args{
 				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}]\n",
 			},
-			want: []*api.DeviceInfo{
+			want: []*DeviceInfo{
 				{
 					Index:   1,
 					ID:      "id-1",
@@ -246,7 +256,7 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 				str: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"health\":true}," +
 					"{\"index\":2,\"id\":\"id-2\",\"count\":2,\"devmem\":4096,\"devcore\":20,\"type\":\"type2\",\"health\":false}]",
 			},
-			want: []*api.DeviceInfo{
+			want: []*DeviceInfo{
 				{
 					Index:   1,
 					ID:      "id-1",
@@ -279,6 +289,135 @@ func TestUnMarshalNodeDevices(t *testing.T) {
 				return
 			}
 			assert.DeepEqual(t, got, tt.want)
+		})
+	}
+}
+
+func Test_DecodeNodeDevices(t *testing.T) {
+	tests := []struct {
+		name string
+		args string
+		want struct {
+			di  []*DeviceInfo
+			err error
+		}
+	}{
+		{
+			name: "args is invalid",
+			args: "a",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  []*DeviceInfo{},
+				err: errors.New("node annotations not decode successfully"),
+			},
+		},
+		{
+			name: "str is old format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di: []*DeviceInfo{
+					{
+						ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+						Index:   0,
+						Count:   10,
+						Devmem:  7680,
+						Devcore: 100,
+						Type:    "NVIDIA-Tesla P4",
+						Mode:    "hami-core",
+						Numa:    0,
+						Health:  true,
+					},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "str is new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,1,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di: []*DeviceInfo{
+					{
+						ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+						Index:   1,
+						Count:   10,
+						Devmem:  7680,
+						Devcore: 100,
+						Type:    "NVIDIA-Tesla P4",
+						Mode:    "hami-core",
+						Numa:    0,
+						Health:  true,
+					},
+				},
+				err: nil,
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := DecodeNodeDevices(test.args)
+			assert.DeepEqual(t, test.want.di, got)
+			if err != nil {
+				assert.DeepEqual(t, test.want.err.Error(), err.Error())
+			}
+		})
+	}
+}
+
+func Test_EncodeNodeDevices(t *testing.T) {
+	tests := []struct {
+		name string
+		args []*DeviceInfo
+		want string
+	}{
+		{
+			name: "old format",
+			args: []*DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   0,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla P4",
+					Numa:    0,
+					Mode:    "hami-core",
+					Health:  true,
+				},
+			},
+			want: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,0,hami-core:",
+		},
+		{
+			name: "test two",
+			args: []*DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   1,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Mode:    "hami-core",
+					Type:    "NVIDIA-Tesla P4",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+			want: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,1,hami-core:",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := EncodeNodeDevices(test.args)
+			assert.DeepEqual(t, test.want, got)
 		})
 	}
 }

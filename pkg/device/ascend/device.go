@@ -26,12 +26,16 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
+)
+
+const (
+	NodeLockAscend = "hami.io/mutex.lock"
 )
 
 type Devices struct {
@@ -46,11 +50,6 @@ type RuntimeInfo struct {
 	UUID string `json:"UUID,omitempty"`
 	Temp string `json:"temp,omitempty"`
 }
-
-//const (
-//	useUUIDAnno   = "huawei.com/use-ascend-uuid"
-//	noUseUUIDAnno = "huawei.com/no-use-ascend-uuid"
-//)
 
 var (
 	enableAscend bool
@@ -126,19 +125,19 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	return true, nil
 }
 
-func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	anno, ok := n.Annotations[dev.nodeRegisterAnno]
 	if !ok {
-		return []*api.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
+		return []*util.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
 	}
 	nodeDevices, err := util.UnMarshalNodeDevices(anno)
 	if err != nil {
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
-		return []*api.DeviceInfo{}, err
+		return []*util.DeviceInfo{}, err
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
-		return []*api.DeviceInfo{}, errors.New("no device found on node")
+		return []*util.DeviceInfo{}, errors.New("no device found on node")
 	}
 	return nodeDevices, nil
 }
@@ -171,11 +170,33 @@ func (dev *Devices) PatchAnnotations(annoInput *map[string]string, pd util.PodDe
 }
 
 func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.LockNode(n.Name, NodeLockAscend, p)
 }
 
 func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockAscend, p, false)
 }
 
 func (dev *Devices) NodeCleanUp(nn string) error {
@@ -264,10 +285,17 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *Devices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+func (dev *Devices) CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
 	return true
 }
 
 func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
 	return 0
+}
+
+func (dev *Devices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+	n.Used++
+	n.Usedcores += ctr.Usedcores
+	n.Usedmem += ctr.Usedmem
+	return nil
 }

@@ -23,15 +23,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func Test_InitDevices(t *testing.T) {
@@ -169,7 +167,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Node
-		want []*api.DeviceInfo
+		want []*util.DeviceInfo
 		err  error
 	}{
 		{
@@ -182,7 +180,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{
+			want: []*util.DeviceInfo{
 				{
 					ID:      "GPU-0",
 					Count:   int32(4),
@@ -205,7 +203,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  errors.New("no device found on node"),
 		},
 		{
@@ -215,7 +213,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Name: "node-03",
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  fmt.Errorf("annos not found"),
 		},
 		{
@@ -228,7 +226,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*api.DeviceInfo{},
+			want: []*util.DeviceInfo{},
 			err:  fmt.Errorf("failed to unmarshal node devices"),
 		},
 	}
@@ -797,6 +795,86 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			result := dev.GenerateResourceRequests(&test.args)
 
 			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func TestDevices_LockNode(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend310P",
+					ResourceName:       "huawei.com/Ascend310P",
+					ResourceMemoryName: "huawei.com/Ascend310P-memory",
+				},
+			}
+			err := dev.LockNode(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestDevices_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend310P",
+					ResourceName:       "huawei.com/Ascend310P",
+					ResourceMemoryName: "huawei.com/Ascend310P-memory",
+				},
+			}
+			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
 		})
 	}
 }

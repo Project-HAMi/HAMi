@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
@@ -46,6 +45,11 @@ const (
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
 	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
+	AllocateMode = "nvidia.com/vgpu-mode"
+
+	MigMode      = "mig"
+	HamiCoreMode = "hami-core"
+	MpsMode      = "mps"
 )
 
 var (
@@ -57,20 +61,37 @@ var (
 	DevicePluginFilterDevice *FilterDevice
 )
 
+type MigPartedSpec struct {
+	Version    string                        `json:"version"               yaml:"version"`
+	MigConfigs map[string]MigConfigSpecSlice `json:"mig-configs,omitempty" yaml:"mig-configs,omitempty"`
+}
+
+// MigConfigSpec defines the spec to declare the desired MIG configuration for a set of GPUs.
+type MigConfigSpec struct {
+	DeviceFilter interface{}      `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
+	Devices      []int32          `json:"devices"                 yaml:"devices,flow"`
+	MigEnabled   bool             `json:"mig-enabled"             yaml:"mig-enabled"`
+	MigDevices   map[string]int32 `json:"mig-devices"             yaml:"mig-devices"`
+}
+
+// MigConfigSpecSlice represents a slice of 'MigConfigSpec'.
+type MigConfigSpecSlice []MigConfigSpec
+
 type NvidiaConfig struct {
-	ResourceCountName            string  `yaml:"resourceCountName"`
-	ResourceMemoryName           string  `yaml:"resourceMemoryName"`
-	ResourceCoreName             string  `yaml:"resourceCoreName"`
-	ResourceMemoryPercentageName string  `yaml:"resourceMemoryPercentageName"`
-	ResourcePriority             string  `yaml:"resourcePriorityName"`
-	OverwriteEnv                 bool    `yaml:"overwriteEnv"`
-	DefaultMemory                int32   `yaml:"defaultMemory"`
-	DefaultCores                 int32   `yaml:"defaultCores"`
-	DefaultGPUNum                int32   `yaml:"defaultGPUNum"`
-	DeviceSplitCount             uint    `yaml:"deviceSplitCount"`
-	DeviceMemoryScaling          float64 `yaml:"deviceMemoryScaling"`
-	DeviceCoreScaling            float64 `yaml:"deviceCoreScaling"`
-	DisableCoreLimit             bool    `yaml:"disableCoreLimit"`
+	ResourceCountName            string                      `yaml:"resourceCountName"`
+	ResourceMemoryName           string                      `yaml:"resourceMemoryName"`
+	ResourceCoreName             string                      `yaml:"resourceCoreName"`
+	ResourceMemoryPercentageName string                      `yaml:"resourceMemoryPercentageName"`
+	ResourcePriority             string                      `yaml:"resourcePriorityName"`
+	OverwriteEnv                 bool                        `yaml:"overwriteEnv"`
+	DefaultMemory                int32                       `yaml:"defaultMemory"`
+	DefaultCores                 int32                       `yaml:"defaultCores"`
+	DefaultGPUNum                int32                       `yaml:"defaultGPUNum"`
+	DeviceSplitCount             uint                        `yaml:"deviceSplitCount"`
+	DeviceMemoryScaling          float64                     `yaml:"deviceMemoryScaling"`
+	DeviceCoreScaling            float64                     `yaml:"deviceCoreScaling"`
+	DisableCoreLimit             bool                        `yaml:"disableCoreLimit"`
+	MigGeometriesList            []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
 }
 
 type FilterDevice struct {
@@ -83,6 +104,7 @@ type FilterDevice struct {
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
 		Name                string        `json:"name"`
+		OperatingMode       string        `json:"operatingmode"`
 		Devicememoryscaling float64       `json:"devicememoryscaling"`
 		Devicecorescaling   float64       `json:"devicecorescaling"`
 		Devicesplitcount    uint          `json:"devicesplitcount"`
@@ -181,22 +203,40 @@ func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia)
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, false)
 }
 
-func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*api.DeviceInfo, error) {
+func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {
-		return []*api.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+		return []*util.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
 	nodedevices, err := util.DecodeNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
-		return []*api.DeviceInfo{}, err
+		return []*util.DeviceInfo{}, err
 	}
 	if len(nodedevices) == 0 {
-		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
-		return []*api.DeviceInfo{}, errors.New("no gpu found on node")
+		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
+		return []*util.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	for _, val := range nodedevices {
+		if val.Mode == "mig" {
+			val.MIGTemplate = make([]util.Geometry, 0)
+			for _, migTemplates := range dev.config.MigGeometriesList {
+				found := false
+				for _, migDevices := range migTemplates.Models {
+					if strings.Contains(val.Type, migDevices) {
+						found = true
+						break
+					}
+				}
+				if found {
+					val.MIGTemplate = append(val.MIGTemplate, migTemplates.Geometries...)
+					break
+				}
+			}
+		}
 	}
 	devDecoded := util.EncodeNodeDevices(nodedevices)
 	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
@@ -208,7 +248,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  api.TaskPriority,
+			Name:  util.TaskPriority,
 			Value: fmt.Sprint(priority.Value()),
 		})
 	}
@@ -280,8 +320,13 @@ func assertNuma(annos map[string]string) bool {
 }
 
 func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+	Typecheck := checkGPUtype(annos, d.Type)
+	mode, ok := annos[AllocateMode]
+	if ok && !strings.Contains(mode, d.Mode) {
+		Typecheck = false
+	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, checkGPUtype(annos, d.Type), assertNuma(annos)
+		return true, Typecheck, assertNuma(annos)
 	}
 	return false, false, false
 }
@@ -391,10 +436,110 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+	//memreq := request.Memreq
+	deviceUsageSnapshot := device.MigUsage
+	deviceUsageCurrent := util.MigInUse{
+		UsageList: make(util.MIGS, 0),
+	}
+	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
+	if device.Mode == "mig" {
+		if len(deviceUsageCurrent.UsageList) == 0 {
+			tmpfound := false
+			for tidx, templates := range device.MigTemplate {
+				if templates[0].Memory < request.Memreq {
+					continue
+				} else {
+					util.PlatternMIG(&deviceUsageCurrent, device.MigTemplate, tidx)
+					tmpfound = true
+					break
+				}
+			}
+			if !tmpfound {
+				klog.Infoln("MIG entry no template fit", deviceUsageCurrent.UsageList, "request=", request)
+			}
+		}
+		for _, val := range toAllocate {
+			found := false
+			for idx := range deviceUsageCurrent.UsageList {
+				if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory > val.Usedmem {
+					deviceUsageCurrent.UsageList[idx].InUse = true
+					found = true
+					break
+				}
+			}
+			if !found {
+				klog.Infoln("MIG entry not found", deviceUsageCurrent.UsageList)
+				return false
+			}
+		}
+		for idx := range deviceUsageCurrent.UsageList {
+			if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory > request.Memreq {
+				deviceUsageCurrent.UsageList[idx].InUse = true
+				klog.Infoln("MIG entry device usage true=", deviceUsageCurrent.UsageList, "request", request, "toAllocate", toAllocate)
+				return true
+			}
+		}
+		klog.Infoln("MIG entry device usage false=", deviceUsageCurrent.UsageList)
+		return false
+	}
 	return true
 }
 
 func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
 	return 0
+}
+
+func (dev *NvidiaGPUDevices) migNeedsReset(n *util.DeviceUsage) bool {
+	if len(n.MigUsage.UsageList) == 0 {
+		return true
+	}
+	for _, val := range n.MigUsage.UsageList {
+		if val.InUse {
+			return false
+		}
+	}
+	n.MigUsage.UsageList = make(util.MIGS, 0)
+	return true
+}
+
+func (dev *NvidiaGPUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+	n.Used++
+	if n.Mode == "mig" {
+		if dev.migNeedsReset(n) {
+			for tidx, templates := range n.MigTemplate {
+				if templates[0].Memory < ctr.Usedmem {
+					continue
+				} else {
+					util.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
+					ctr.Usedmem = n.MigUsage.UsageList[0].Memory
+					if !strings.Contains(ctr.UUID, "[") {
+						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-0]"
+					}
+					n.MigUsage.Index = int32(tidx)
+					n.MigUsage.UsageList[0].InUse = true
+					break
+				}
+			}
+		} else {
+			found := false
+			for idx, val := range n.MigUsage.UsageList {
+				if !val.InUse && val.Memory > ctr.Usedmem {
+					n.MigUsage.UsageList[idx].InUse = true
+					ctr.Usedmem = n.MigUsage.UsageList[idx].Memory
+					if !strings.Contains(ctr.UUID, "[") {
+						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(n.MigUsage.Index) + "-" + fmt.Sprint(idx) + "]"
+					}
+					found = true
+					break
+				}
+			}
+			if !found {
+				return errors.New("mig template allocate resource fail")
+			}
+		}
+	}
+	n.Usedcores += ctr.Usedcores
+	n.Usedmem += ctr.Usedmem
+	return nil
 }

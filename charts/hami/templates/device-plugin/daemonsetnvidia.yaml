@@ -68,7 +68,8 @@ spec:
               value: {{ .Values.devicePlugin.compatWithCPUManager | quote }}
             {{- end }}
           securityContext:
-            allowPrivilegeEscalation: false
+            privileged: true
+            allowPrivilegeEscalation: true
             capabilities:
               drop: ["ALL"]
               add: ["SYS_ADMIN"]
@@ -96,6 +97,10 @@ spec:
               drop: ["ALL"]
               add: ["SYS_ADMIN"]
           env:
+            - name: NODE_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
             - name: NVIDIA_MIG_MONITOR_DEVICES
@@ -113,6 +118,8 @@ spec:
               mountPath: /sysinfo
             - name: hostvar
               mountPath: /hostvar
+            - name: hosttmp
+              mountPath: /tmp
       volumes:
         - name: ctrs
           hostPath:

@@ -3,7 +3,10 @@ kind: Pod
 metadata:
   name: gpu-pod
   annotations:
-    nvidia.com/nouse-gpuuuid: "GPU-123456"
+    # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get gpu-type
+    # UUID is like GPU-03f69c50-207a-2038-9b45-23cac89cb67d
+    nvidia.com/nouse-gpuuuid: "GPU-03f69c50-207a-2038-9b45-23cac89cb67d" # Specify the blacklist card UUIDs for this job, use comma to seperate, will not launch job on specified cards
+    # In this job, we don't want our job to run on GPU-03f69c50-207a-2038-9b45-23cac89cb67d.
 spec:
   containers:
     - name: ubuntu-container
@@ -11,4 +14,4 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          nvidia.com/gpu: 2 # requesting 2 vGPUs
+          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
