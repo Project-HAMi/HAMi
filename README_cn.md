@@ -37,6 +37,7 @@ HAMi 可为多种异构设备提供虚拟化功能，支持设备共享和资源
 - 通过设置显存（单位：MB），进行设备的部分分配
 - 对流式多处理器进行硬限制
 - 无需对现有程序进行任何修改
+- 支持[动态MIG切片](docs/dynamic-mig-support_cn.md)能力，[样例](examples/nvidia/dynamic_mig_example.yaml)
 
 <img src="./imgs/example.png" width = "500" /> 
 
