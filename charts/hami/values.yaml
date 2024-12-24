@@ -118,6 +118,7 @@ devicePlugin:
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
+  passDeviceSpecsEnabled: true
   extraArgs:
     - -v=false
   
