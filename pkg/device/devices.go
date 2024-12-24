@@ -46,7 +46,6 @@ type Devices interface {
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error)
 	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
-	// CheckUUID is check current device id whether in GPUUseUUID or GPUNoUseUUID set, return true is check success.
 	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
@@ -72,47 +71,74 @@ type Config struct {
 var (
 	HandshakeAnnos  = map[string]string{}
 	RegisterAnnos   = map[string]string{}
-	devices         map[string]Devices
+	devicesMap      map[string]Devices
 	DevicesToHandle []string
 	configFile      string
 	DebugMode       bool
 )
 
 func GetDevices() map[string]Devices {
-	return devices
+	return devicesMap
 }
 
 func InitDevicesWithConfig(config *Config) {
-	devices = make(map[string]Devices)
-	DevicesToHandle = []string{}
-	devices[nvidia.NvidiaGPUDevice] = nvidia.InitNvidiaDevice(config.NvidiaConfig)
-	devices[cambricon.CambriconMLUDevice] = cambricon.InitMLUDevice(config.CambriconConfig)
-	devices[hygon.HygonDCUDevice] = hygon.InitDCUDevice(config.HygonConfig)
-	devices[iluvatar.IluvatarGPUDevice] = iluvatar.InitIluvatarDevice(config.IluvatarConfig)
-	devices[mthreads.MthreadsGPUDevice] = mthreads.InitMthreadsDevice(config.MthreadsConfig)
-	devices[metax.MetaxGPUDevice] = metax.InitMetaxDevice(config.MetaxConfig)
+	klog.Info("Initializing devices with configuration")
 
-	DevicesToHandle = append(DevicesToHandle, nvidia.NvidiaGPUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, cambricon.CambriconMLUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, hygon.HygonDCUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, iluvatar.IluvatarGPUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, mthreads.MthreadsGPUCommonWord)
-	DevicesToHandle = append(DevicesToHandle, metax.MetaxGPUCommonWord)
-	for _, dev := range ascend.InitDevices(config.VNPUs) {
-		devices[dev.CommonWord()] = dev
-		DevicesToHandle = append(DevicesToHandle, dev.CommonWord())
+	devicesMap = make(map[string]Devices)
+	DevicesToHandle = []string{}
+
+	initializeDevice := func(deviceType string, commonWord string, initFunc func(interface{}) Devices, config interface{}) {
+		klog.Infof("Initializing %s device", commonWord)
+		devicesMap[deviceType] = initFunc(config)
+		DevicesToHandle = append(DevicesToHandle, commonWord)
+		klog.Infof("%s device initialized", commonWord)
 	}
+
+	initializeDevice(nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg interface{}) Devices {
+		return nvidia.InitNvidiaDevice(cfg.(nvidia.NvidiaConfig))
+	}, config.NvidiaConfig)
+
+	initializeDevice(cambricon.CambriconMLUDevice, cambricon.CambriconMLUCommonWord, func(cfg interface{}) Devices {
+		return cambricon.InitMLUDevice(cfg.(cambricon.CambriconConfig))
+	}, config.CambriconConfig)
+
+	initializeDevice(hygon.HygonDCUDevice, hygon.HygonDCUCommonWord, func(cfg interface{}) Devices {
+		return hygon.InitDCUDevice(cfg.(hygon.HygonConfig))
+	}, config.HygonConfig)
+
+	initializeDevice(iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg interface{}) Devices {
+		return iluvatar.InitIluvatarDevice(cfg.(iluvatar.IluvatarConfig))
+	}, config.IluvatarConfig)
+
+	initializeDevice(mthreads.MthreadsGPUDevice, mthreads.MthreadsGPUCommonWord, func(cfg interface{}) Devices {
+		return mthreads.InitMthreadsDevice(cfg.(mthreads.MthreadsConfig))
+	}, config.MthreadsConfig)
+
+	initializeDevice(metax.MetaxGPUDevice, metax.MetaxGPUCommonWord, func(cfg interface{}) Devices {
+		return metax.InitMetaxDevice(cfg.(metax.MetaxConfig))
+	}, config.MetaxConfig)
+
+	for _, dev := range ascend.InitDevices(config.VNPUs) {
+		commonWord := dev.CommonWord()
+		devicesMap[commonWord] = dev
+		DevicesToHandle = append(DevicesToHandle, commonWord)
+		klog.Infof("Ascend device %s initialized", commonWord)
+	}
+
+	klog.Info("All devices initialized successfully")
 }
 
 func InitDevices() {
-	if len(devices) > 0 {
+	if len(devicesMap) > 0 {
+		klog.Info("Devices are already initialized, skipping initialization")
 		return
 	}
+	klog.Infof("Loading device configuration from file: %s", configFile)
 	config, err := LoadConfig(configFile)
-	klog.Infoln("reading config=", config, "configfile=", configFile)
 	if err != nil {
-		klog.Fatalf("failed to load device config file %s: %v", configFile, err)
+		klog.Fatalf("Failed to load device config file %s: %v", configFile, err)
 	}
+	klog.Infof("Loaded config: %v", config)
 	InitDevicesWithConfig(config)
 }
 
@@ -215,26 +241,24 @@ func InitDefaultDevices() {
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
 	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("get pods %s/%s error: %+v", pod.Namespace, pod.Name, err)
+		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
 	}
 	annos := refreshed.Annotations[util.InRequestDevices[devName]]
-	klog.Infoln("TrySuccess:", annos)
+	klog.Infof("Trying allocation success: %s", annos)
 	for _, val := range DevicesToHandle {
 		if strings.Contains(annos, val) {
 			return
 		}
 	}
-	klog.Infoln("AllDevicesAllocateSuccess releasing lock")
+	klog.Infof("All devices allocate success, releasing lock")
 	PodAllocationSuccess(nodeName, pod, lockName)
 }
 
-func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockname string) {
-	newannos := make(map[string]string)
-	newannos[util.DeviceBindPhase] = util.DeviceBindSuccess
-	err := util.PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
+func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
+	newAnnos := map[string]string{util.DeviceBindPhase: util.DeviceBindSuccess}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		klog.Errorf("Failed to patch pod annotations: %v", err)
 	}
 	err = nodelock.ReleaseNodeLock(nodeName, lockname, pod, false)
 	if err != nil {
@@ -242,12 +266,10 @@ func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockname string) {
 	}
 }
 
-func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockname string) {
-	newannos := make(map[string]string)
-	newannos[util.DeviceBindPhase] = util.DeviceBindFailed
-	err := util.PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
+func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
+	newAnnos := map[string]string{util.DeviceBindPhase: util.DeviceBindFailed}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		klog.Errorf("Failed to patch pod annotations: %v", err)
 	}
 	err = nodelock.ReleaseNodeLock(nodeName, lockname, pod, false)
 	if err != nil {
@@ -264,21 +286,23 @@ func GlobalFlagSet() *flag.FlagSet {
 	nvidia.ParseConfig(fs)
 	mthreads.ParseConfig(fs)
 	metax.ParseConfig(fs)
-	fs.BoolVar(&DebugMode, "debug", false, "debug mode")
-	fs.StringVar(&configFile, "device-config-file", "", "device config file")
+	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
+	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")
 	klog.InitFlags(fs)
 	return fs
 }
 
 func LoadConfig(path string) (*Config, error) {
+	klog.Infof("Reading config file from path: %s", path)
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
+
 	var yamlData Config
-	err = yaml.Unmarshal(data, &yamlData)
-	if err != nil {
+	if err := yaml.Unmarshal(data, &yamlData); err != nil {
 		return nil, err
 	}
+	klog.Info("Successfully read and parsed config file")
 	return &yamlData, nil
 }
