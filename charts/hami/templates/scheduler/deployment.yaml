@@ -50,6 +50,8 @@ spec:
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ .Release.Namespace }}
+          resources:
+          {{- toYaml .Values.scheduler.kubeScheduler.resources | nindent 12 }}
           volumeMounts:
             - name: scheduler-config
               mountPath: /config
@@ -104,6 +106,8 @@ spec:
             - name: http
               containerPort: 443
               protocol: TCP
+          resources:
+          {{- toYaml .Values.scheduler.extender.resources | nindent 12 }}
           volumeMounts:
             - name: tls-config
               mountPath: /tls
