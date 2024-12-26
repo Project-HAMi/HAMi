@@ -371,7 +371,7 @@ func InitKlogFlags() *flag.FlagSet {
 func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	handshake := n.Annotations[HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
@@ -382,7 +382,7 @@ func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 
 func MarkAnnotationsToDelete(devType string, nn string) error {
 	tmppat := make(map[string]string)
-	tmppat[devType] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+	tmppat[devType] = "Deleted_" + time.Now().Format(time.DateTime)
 	n, err := GetNode(nn)
 	if err != nil {
 		klog.Errorln("get node failed", err.Error())
