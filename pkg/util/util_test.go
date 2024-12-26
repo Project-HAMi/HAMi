@@ -17,12 +17,18 @@ limitations under the License.
 package util
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var inRequestDevices map[string]string
@@ -462,6 +468,138 @@ func Test_EncodeNodeDevices(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := EncodeNodeDevices(test.args)
 			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
+
+func Test_CheckHealth(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			devType string
+			n       corev1.Node
+		}
+		want1 bool
+		want2 bool
+	}{
+		{
+			name: "Requesting state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Deleted state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Unknown state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "Requesting state expired",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: false,
+			want2: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1, result2 := CheckHealth(test.args.devType, &test.args.n)
+			assert.Equal(t, result1, test.want1)
+			assert.Equal(t, result2, test.want2)
+		})
+	}
+}
+
+func TestMarkAnnotationsToDelete(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
+	}, metav1.CreateOptions{})
+	type args struct {
+		devType string
+		nn      string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "node not found",
+			args: args{
+				devType: "huawei.com/Ascend910",
+				nn:      "node-worker1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "mark annotations to delete",
+			args: args{
+				devType: "huawei.com/Ascend910",
+				nn:      "node-worker2",
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := MarkAnnotationsToDelete(tt.args.devType, tt.args.nn); (err != nil) != tt.wantErr {
+				t.Errorf("MarkAnnotationsToDelete() error = %v, wantErr %v", err, tt.wantErr)
+			}
 		})
 	}
 }
