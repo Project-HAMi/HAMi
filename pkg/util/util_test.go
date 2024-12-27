@@ -17,6 +17,7 @@ limitations under the License.
 package util
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
@@ -193,7 +194,6 @@ func TestMarshalNodeDevices(t *testing.T) {
 		args args
 		want string
 	}{
-		// TODO: Add test cases.
 		{
 			name: "test one",
 			args: args{
@@ -210,13 +210,57 @@ func TestMarshalNodeDevices(t *testing.T) {
 					},
 				},
 			},
+			want: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"numa\":0,\"health\":true}]",
+		},
+		{
+			name: "test multiple",
+			args: args{
+				dlist: []*DeviceInfo{
+					{
+						Index:   1,
+						ID:      "id-1",
+						Count:   1,
+						Devmem:  1024,
+						Devcore: 10,
+						Type:    "type",
+						Numa:    0,
+						Health:  true,
+					},
+					{
+						Index:   2,
+						ID:      "id-2",
+						Count:   2,
+						Devmem:  2048,
+						Devcore: 20,
+						Type:    "type2",
+						Numa:    1,
+						Health:  false,
+					},
+				},
+			},
+			want: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"numa\":0,\"health\":true},{\"index\":2,\"id\":\"id-2\",\"count\":2,\"devmem\":2048,\"devcore\":20,\"type\":\"type2\",\"numa\":1,\"health\":false}]",
+		},
+		{
+			name: "test empty",
+			args: args{
+				dlist: []*DeviceInfo{},
+			},
+			want: "[]",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := MarshalNodeDevices(tt.args.dlist)
-			//fmt.Println(got)
-			assert.Assert(t, got != "")
+
+			var gotDeviceInfo, wantDeviceInfo []*DeviceInfo
+			// Compare the JSON contents by unmarshalling both got and want
+			err := json.Unmarshal([]byte(got), &gotDeviceInfo)
+			assert.NilError(t, err)
+
+			err = json.Unmarshal([]byte(tt.want), &wantDeviceInfo)
+			assert.NilError(t, err)
+
+			assert.DeepEqual(t, gotDeviceInfo, wantDeviceInfo)
 		})
 	}
 }
