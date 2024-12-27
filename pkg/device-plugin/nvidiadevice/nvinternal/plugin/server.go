@@ -390,7 +390,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
-	klog.V(5).Infof("allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
