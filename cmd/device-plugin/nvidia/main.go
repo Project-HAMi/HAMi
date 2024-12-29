@@ -27,11 +27,11 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/flag"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
-
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -45,6 +45,7 @@ func main() {
 	c.Usage = "NVIDIA device plugin for Kubernetes"
 	c.Version = info.GetVersionString()
 	c.Action = func(ctx *cli.Context) error {
+		flag.PrintCliFlags(ctx)
 		return start(ctx, c.Flags)
 	}
 
