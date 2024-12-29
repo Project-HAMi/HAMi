@@ -71,12 +71,6 @@ func NewScheduler() *Scheduler {
 	return s
 }
 
-func check(err error) {
-	if err != nil {
-		klog.Fatal(err)
-	}
-}
-
 func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
 	s.nodeNotify <- struct{}{}
 }
@@ -124,9 +118,12 @@ func (s *Scheduler) onDelPod(obj interface{}) {
 	s.delPod(pod)
 }
 
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start() error {
 	kubeClient, err := k8sutil.NewClient()
-	check(err)
+	if err != nil {
+		return fmt.Errorf("failed to create kube client: %w", err)
+	}
+
 	s.kubeClient = kubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -146,6 +143,7 @@ func (s *Scheduler) Start() {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	s.addAllEventHandlers()
+	return nil
 }
 
 func (s *Scheduler) Stop() {

@@ -40,8 +40,8 @@ var (
 	rootCmd     = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
-		Run: func(cmd *cobra.Command, args []string) {
-			start()
+		RunE: func(cmd *cobra.Command, args []string) error {
+			return start()
 		},
 	}
 )
@@ -66,10 +66,13 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
-func start() {
+func start() error {
 	device.InitDevices()
 	sher = scheduler.NewScheduler()
-	sher.Start()
+	if err := sher.Start(); err != nil {
+		return err
+	}
+
 	defer sher.Stop()
 
 	// start monitor metrics
@@ -84,14 +87,9 @@ func start() {
 	router.GET("/healthz", routes.HealthzRoute())
 	klog.Info("listen on ", config.HTTPBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
-		}
-	} else {
-		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
-		}
+		return http.ListenAndServe(config.HTTPBind, router)
 	}
+	return http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router)
 }
 
 func main() {
