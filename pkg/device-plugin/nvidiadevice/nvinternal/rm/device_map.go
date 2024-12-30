@@ -34,6 +34,7 @@ package rm
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
@@ -252,7 +253,9 @@ func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]str
 		if r.Devices.Count > len(devices) {
 			return nil, fmt.Errorf("requested %d devices to be replicated, but only %d devices available", r.Devices.Count, len(devices))
 		}
-		return devices.GetIDs()[:r.Devices.Count], nil
+		ids := devices.GetIDs()
+		sort.Strings(ids)
+		return ids[:r.Devices.Count], nil
 	}
 
 	// If a specific set of devices for this resource type are to be replicated.
