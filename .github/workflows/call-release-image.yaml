@@ -20,6 +20,11 @@ on:
       tagoverride:
         required: false
         type: string
+  workflow_run:
+    workflows:
+      - CI Workflow
+    types:
+      - completed
 permissions: write-all
 
 jobs:
@@ -36,17 +41,38 @@ jobs:
           sudo rm -rf "$AGENT_TOOLSDIRECTORY"
           echo "=========after clean up, the left CI disk space"
           df -h
+
+      - name: Download artifact
+#        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: version
+          path: version.txt
+
+      - name: Print version
+        run: cat version.txt
+
       - name: Getting Image Ref
         id: ref
         run: |
-          if ${{ inputs.ref != '' }} ; then
-              echo "call by workflow_call"
-              image_ref=${{ inputs.ref }}
-              image_suffix=${{ inputs.suffix }}
+#          if ${{ inputs.ref != '' }} ; then
+#              echo "call by workflow_call"
+#              image_ref=${{ inputs.ref }}
+#              image_suffix=${{ inputs.suffix }}
+#              echo "ci_type=release" >> $GITHUB_ENV
+           if ${{ inputs.ref == 'fake' }} ; then
+               echo "call by fake"
+               image_ref=${{ github.event.inputs.ref }}
+               image_suffix=${{ github.event.inputs.suffix }}
           elif ${{ github.event_name == 'workflow_dispatch' }} ; then
               echo "call by workflow_dispatch"
               image_ref=${{ github.event.inputs.ref }}
               image_suffix=${{ github.event.inputs.suffix }}
+          elif ${{ github.event_name == 'workflow_run' }} ; then
+              echo "call by workflow_run"
+              VERSION=$(cat version.txt)
+              echo "image_ref=${VERSION}" >> $GITHUB_ENV
+              echo "ci_type=pullrequest" >> $GITHUB_ENV
           else
               echo "unexpected event: ${{ github.event_name }}"
               exit 1
@@ -111,6 +137,12 @@ jobs:
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ steps.meta.outputs.tags }}
-          push: true
+          push: false
           github-token: ${{ env.REGISTER_PASSWORD }}
 
+  e2e-test:
+    uses: ./.github/workflows/call-e2e.yaml
+    if: github.event_name == 'workflow_run'
+    with:
+      ref: ${{ env.ref }}
+      type: ${{ env.ci_type }}

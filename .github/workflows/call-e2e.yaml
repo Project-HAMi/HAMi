@@ -6,6 +6,11 @@ on:
       ref:
         required: true
         type: string
+      type:
+        description: 'E2E type'
+        required: true
+        type: string
+        default: pullrequest
 permissions: write-all
 
 jobs:
@@ -16,3 +21,5 @@ jobs:
         # https://github.com/actions/virtual-environments/issues/709
         run: |
           echo "Need to add e2e test"
+          echo "inputs.ref = ${{ inputs.ref }}"
+          echo "inputs.type = ${{ inputs.type }}"
