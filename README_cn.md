@@ -1,4 +1,4 @@
-[English version](README.md)|中文版
+[English version](README.md) | 中文版
 
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
 
@@ -153,7 +153,7 @@ Grafana 仪表板[示例](docs/dashboard.md)
 
 ## 社区治理
 
-本项目由一组[维护者和提交者](https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS)管理。他们的选择和管理方式在我们的[治理文档](https://github.com/Project-HAMi/community/blob/main/governance.md)中有详细说明。
+本项目由一组 [维护者](./MAINTAINERS.md) 和 [贡献者](./AUTHORS.md) 管理。他们的选择和管理方式在我们的[治理文档](https://github.com/Project-HAMi/community/blob/main/governance.md)中有详细说明。
 
 如果你有兴趣成为贡献者并希望参与 HAMi 代码开发，请查看 [CONTRIBUTING](CONTRIBUTING.md) 了解提交补丁和贡献工作流程的详细信息。
 
@@ -185,3 +185,7 @@ HAMi 社区致力于营造开放和友好的环境，提供多种方式与其他
 ## 许可证
 
 HAMi 采用 Apache 2.0 许可证。详情请参见 [LICENSE](LICENSE) 文件。
+
+## Star 趋势
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)
