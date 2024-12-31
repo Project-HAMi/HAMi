@@ -29,7 +29,7 @@ jobs:
       - name: install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version-file: go.mod
       - name: verify license
         run: hack/verify-license.sh
       - name: go tidy
@@ -53,7 +53,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version-file: go.mod
       - run: make tidy
       - run: make test
       - name: Upload coverage to Codecov
