@@ -6,7 +6,7 @@ metadata:
     app.kubernetes.io/component: hami-scheduler
     {{- include "hami-vgpu.labels" . | nindent 4 }}
     {{- if .Values.scheduler.service.labels }}
-    {{ toYaml .Values.scheduler.service.labels | indent 4 }}
+    {{ toYaml .Values.scheduler.service.labels }}
     {{- end }}
   {{- if .Values.scheduler.service.annotations }}
   annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
