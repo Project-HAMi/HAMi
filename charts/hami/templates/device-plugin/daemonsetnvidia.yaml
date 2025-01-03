@@ -40,7 +40,7 @@ spec:
       hostNetwork: true
       containers:
         - name: device-plugin
-          image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
+          image: {{ .Values.devicePlugin.image }}:{{ .Values.version | default .Chart.AppVersion }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           lifecycle:
             postStart:
@@ -90,7 +90,7 @@ spec:
               mountPath: /device-config.yaml
               subPath: device-config.yaml
         - name: vgpu-monitor
-          image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
+          image: {{ .Values.devicePlugin.image }}:{{ .Values.version | default .Chart.AppVersion }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
           command: ["vGPUmonitor"]
           securityContext:

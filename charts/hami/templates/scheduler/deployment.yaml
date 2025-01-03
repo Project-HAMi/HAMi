@@ -69,7 +69,7 @@ spec:
             timeoutSeconds: 15
           {{- end }}
         - name: vgpu-scheduler-extender
-          image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
+          image: {{ .Values.scheduler.extender.image }}:{{ .Values.version | default .Chart.AppVersion }}
           imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
           env:
           {{- if .Values.global.managedNodeSelectorEnable }}
