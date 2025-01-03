@@ -22,8 +22,9 @@ COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
 COPY --from=GOBUILD /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
+COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 COPY ./lib /k8s-vgpu/lib
-COPY ./libvgpu.so /k8s-vgpu/lib/nvidia/
+COPY ./libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
 COPY ./license /k8s-vgpu/lib/nvidia/
 COPY ./vgpuvalidator /k8s-vgpu/lib/nvidia
 

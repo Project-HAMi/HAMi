@@ -45,7 +45,7 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c", {{ printf "cp -f /k8s-vgpu/lib/nvidia/* %s/vgpu/" .Values.global.gpuHookPath | quote }}]
+                command: ["/bin/sh","-c", {{ printf "/k8s-vgpu/bin/vgpu-init.sh %s/vgpu/" .Values.global.gpuHookPath | quote }}]
           command:
             - nvidia-device-plugin
             - --config-file=/device-config.yaml
