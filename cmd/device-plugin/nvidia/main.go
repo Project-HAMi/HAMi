@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"flag"
 	"fmt"
 	"os"
 	"syscall"
@@ -27,7 +28,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/flag"
+	flagutil "github.com/Project-HAMi/HAMi/pkg/util/flag"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
@@ -43,10 +44,30 @@ func main() {
 	c := cli.NewApp()
 	c.Name = "NVIDIA Device Plugin"
 	c.Usage = "NVIDIA device plugin for Kubernetes"
-	c.Version = info.GetVersionString()
 	c.Action = func(ctx *cli.Context) error {
-		flag.PrintCliFlags(ctx)
+		flagutil.PrintCliFlags(ctx)
 		return start(ctx, c.Flags)
+	}
+	c.Commands = []*cli.Command{
+		{
+			Name:  "version",
+			Usage: "Show the version of NVIDIA Device Plugin",
+			Action: func(c *cli.Context) error {
+				fmt.Printf("%s version: %s\n", c.App.Name, info.GetVersionString())
+				return nil
+			},
+		},
+	}
+
+	flagset := flag.NewFlagSet("klog", flag.ExitOnError)
+	klog.InitFlags(flagset)
+
+	c.Before = func(ctx *cli.Context) error {
+		logLevel := ctx.Int("v")
+		if err := flagset.Set("v", fmt.Sprintf("%d", logLevel)); err != nil {
+			return err
+		}
+		return nil
 	}
 
 	c.Flags = []cli.Flag{
@@ -119,6 +140,11 @@ func main() {
 			Value:   spec.DefaultContainerDriverRoot,
 			Usage:   "the path where the NVIDIA driver root is mounted in the container; used for generating CDI specifications",
 			EnvVars: []string{"CONTAINER_DRIVER_ROOT"},
+		},
+		&cli.IntFlag{
+			Name:  "v",
+			Usage: "number for the log level verbosity",
+			Value: 0,
 		},
 	}
 	c.Flags = append(c.Flags, addFlags()...)

@@ -138,7 +138,7 @@ devicePlugin:
   disablecorelimit: "false"
   passDeviceSpecsEnabled: true
   extraArgs:
-    - -v=false
+    - -v=4
   
   service:
     httpPort: 31992
