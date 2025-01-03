@@ -1,4 +1,5 @@
 # get VERSION
+.DEFAULT_GOAL := all
 include  ../Makefile.defs
 
 VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
@@ -11,6 +12,7 @@ all: update-versions lint package
 #update version in chart
 update-versions:
 	$(ECHO_GEN) " Updating Chart version to $(VERSION)"
+	echo "VERSION=$(VERSION)"
 	echo "VERSION_MAJOR=$(VERSION_MAJOR)"
 	echo "GIT_VERSION=$(GIT_VERSION)"
 	echo "FULL_BUILD_VERSION=$(FULL_BUILD_VERSION)"
@@ -22,10 +24,11 @@ update-versions:
 	sed -i 's/version: "*'$(VERSION_REGEX)'"*/version: "'$$hami_version'"/g' $(VALUES_FILE)
 
 lint: update-versions
-	helm lint --with-subcharts --values ./hami/values.yaml ./hami
+	helm lint --with-subcharts --values ./hami/values.yaml ./hami --debug
 
 package: lint
-	helm package ./hami
+	helm package ./hami --debug
 
 clean:
 	rm -f *.tgz
+
