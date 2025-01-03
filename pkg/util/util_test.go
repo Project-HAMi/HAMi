@@ -44,7 +44,10 @@ func TestExtractMigTemplatesFromUUID(t *testing.T) {
 }
 
 func TestEmptyContainerDevicesCoding(t *testing.T) {
-	cd1 := ContainerDevices{}
+	cd1 := ContainerDevices{
+		ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+		ContainerDevice{1, "UUID2", "Type1", 1000, 30},
+	}
 	s := EncodeContainerDevices(cd1)
 	fmt.Println(s)
 	cd2, _ := DecodeContainerDevices(s)

@@ -504,8 +504,8 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.InRequestDevices[NvidiaGPUDevice]: "nvidia-device-0,NVIDIA,2000,1:;",
-				util.SupportDevices[NvidiaGPUDevice]:   "nvidia-device-0,NVIDIA,2000,1:;",
+				util.InRequestDevices[NvidiaGPUDevice]: "nvidia-device-0,NVIDIA,2000,1,0:;",
+				util.SupportDevices[NvidiaGPUDevice]:   "nvidia-device-0,NVIDIA,2000,1,0:;",
 			},
 		},
 		{

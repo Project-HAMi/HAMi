@@ -129,8 +129,8 @@ func TestPatchAnnotations(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				util.InRequestDevices[IluvatarGPUDevice]: "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
-				util.SupportDevices[IluvatarGPUDevice]:   "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
+				util.InRequestDevices[IluvatarGPUDevice]: "k8s-gpu-iluvatar-0,Iluvatar,0,0,0:;",
+				util.SupportDevices[IluvatarGPUDevice]:   "k8s-gpu-iluvatar-0,Iluvatar,0,0,0:;",
 				"iluvatar.ai/gpu-assigned":               "false",
 				"iluvatar.ai/predicate-time":             strconv.FormatInt(time.Now().UnixNano(), 10),
 				IluvatarDeviceSelection + "0":            "0",
