@@ -510,7 +510,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128.12.02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
 						},
 					},
 				},
@@ -564,7 +564,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024.01.02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
 						},
 					},
 				},

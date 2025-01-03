@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -601,6 +602,62 @@ func Test_Filter(t *testing.T) {
 			getPod, _ := client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Get(context.Background(), test.args.Pod.Name, metav1.GetOptions{})
 			podDevices, _ := util.DecodePodDevices(util.SupportDevices, getPod.Annotations)
 			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
+		})
+	}
+}
+
+func Test_RegisterFromNodeAnnotations(t *testing.T) {
+	tests := []struct {
+		name      string
+		Scheduler *Scheduler
+		want      func(node *corev1.Node) bool
+	}{
+		{
+			name: "test node hand shake annotations layout",
+			Scheduler: func() *Scheduler {
+				s := NewScheduler()
+				s.stopCh = make(chan struct{})
+				s.nodeNotify = make(chan struct{})
+				client.KubeClient = fake.NewSimpleClientset()
+				s.kubeClient = client.KubeClient
+				informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+				s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node",
+					},
+				}
+				client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+				err := informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+				if err != nil {
+					t.Errorf("failed to create node err; %v", err)
+					return nil
+				}
+				return s
+			}(),
+			want: func(node *corev1.Node) bool {
+				_, err := time.Parse(time.DateTime, strings.TrimPrefix(node.Annotations["hami.io/node-handshake"], "Requesting_"))
+				_, err2 := time.Parse(time.DateTime, strings.TrimPrefix(node.Annotations["hami.io/node-handshake-dcu"], "Requesting_"))
+				return err == nil && err2 == nil
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			time.AfterFunc(5*time.Second, func() {
+				close(test.Scheduler.stopCh)
+			})
+			go func() {
+				test.Scheduler.nodeNotify <- struct{}{}
+			}()
+			test.Scheduler.RegisterFromNodeAnnotations()
+			node, err := test.Scheduler.kubeClient.CoreV1().Nodes().Get(context.TODO(), "node", metav1.GetOptions{})
+			if err != nil {
+				t.Errorf("failed to get node err; %v", err)
+				return
+			}
+			assert.Equal(t, test.want(node), true)
 		})
 	}
 }

@@ -198,7 +198,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				_, ok := util.HandshakeAnnos[devhandsk]
 				if ok {
 					tmppat := make(map[string]string)
-					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format("2006.01.02 15:04:05")
+					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format(time.DateTime)
 					klog.V(5).InfoS("New timestamp", util.HandshakeAnnos[devhandsk], tmppat[util.HandshakeAnnos[devhandsk]], "nodeName", val.Name)
 					n, err := util.GetNode(val.Name)
 					if err != nil {
