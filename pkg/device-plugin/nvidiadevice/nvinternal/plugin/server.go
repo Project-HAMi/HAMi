@@ -150,7 +150,10 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
-	device.InitDevicesWithConfig(sConfig)
+	// Initialize devices with configuration
+	if err := device.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("failed to initialize devices: %v", err)
+	}
 	return &NvidiaDevicePlugin{
 		rm:                   resourceManager,
 		config:               config,
