@@ -36,6 +36,8 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/stretchr/testify/require"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -120,6 +122,118 @@ func TestDeviceMapInsert(t *testing.T) {
 			tc.deviceMap.insert(spec.ResourceName(tc.key), tc.value)
 
 			require.EqualValues(t, tc.expectedDeviceMap, tc.deviceMap)
+		})
+	}
+}
+
+func TestUpdateDeviceMapWithReplicas(t *testing.T) {
+	device0 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0"}, Index: "0"}
+	device1 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1"}}
+	device2 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2"}}
+	device3 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "3"}}
+
+	testCases := []struct {
+		description       string
+		config            *nvidia.DeviceConfig
+		devices           DeviceMap
+		expectedDeviceMap DeviceMap
+	}{
+		{
+			description: "Update device map with replicas",
+			config: &nvidia.DeviceConfig{
+				Config: &spec.Config{
+					Sharing: spec.Sharing{
+						TimeSlicing: spec.ReplicatedResources{
+							Resources: []spec.ReplicatedResource{
+								{
+									Name:     "resource1",
+									Replicas: 2,
+									Rename:   "replicated-resource1",
+									Devices: spec.ReplicatedDevices{
+										All: true,
+									},
+								},
+								{
+									Name:     "resource2",
+									Replicas: 1,
+									Devices: spec.ReplicatedDevices{
+										All: true,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			devices: DeviceMap{
+				"resource1": Devices{
+					"0": &device0,
+					"1": &device1,
+				},
+				"resource2": Devices{
+					"2": &device2,
+				},
+				"resource3": Devices{
+					"3": &device3,
+				},
+			},
+			expectedDeviceMap: DeviceMap{
+				"replicated-resource1": Devices{
+					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0"},
+					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0"},
+					"1::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::0"}},
+					"1::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::1"}},
+				},
+				"resource2": Devices{
+					"2::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2::0"}},
+				},
+				"resource3": Devices{
+					"3": &device3,
+				},
+			},
+		},
+		{
+			description: "Some devices are not replicated",
+			config: &nvidia.DeviceConfig{
+				Config: &spec.Config{
+					Sharing: spec.Sharing{
+						TimeSlicing: spec.ReplicatedResources{
+							Resources: []spec.ReplicatedResource{
+								{
+									Name:     "resource1",
+									Replicas: 2,
+									Rename:   "replicated-resource1",
+									Devices: spec.ReplicatedDevices{
+										List: []spec.ReplicatedDeviceRef{"0"}, // only replicate index 0
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			devices: DeviceMap{
+				"resource1": Devices{
+					"0": &device0,
+					"1": &device1,
+				},
+			},
+			expectedDeviceMap: DeviceMap{
+				"replicated-resource1": Devices{
+					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0"},
+					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0"},
+				},
+				"resource1": Devices{
+					"1": &device1,
+				},
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			devices, _ := updateDeviceMapWithReplicas(tc.config, tc.devices)
+			require.EqualValues(t, tc.expectedDeviceMap, devices)
 		})
 	}
 }
