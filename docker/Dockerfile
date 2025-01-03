@@ -30,7 +30,8 @@ COPY --from=gobuild /k8s-vgpu/bin /k8s-vgpu/bin
 COPY --from=gobuild /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
-COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/
+COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
+COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 
 ENV PATH="/k8s-vgpu/bin:${PATH}"
 ARG DEST_DIR

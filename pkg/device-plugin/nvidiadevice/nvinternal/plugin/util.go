@@ -25,12 +25,23 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
+
+// GetLibPath returns the path to the vGPU library.
+func GetLibPath() string {
+	libPath := hostHookPath + "/vgpu/libvgpu.so." + info.GetVersion()
+	if _, err := os.Stat(libPath); os.IsNotExist(err) {
+		libPath = hostHookPath + "/vgpu/libvgpu.so"
+	}
+	return libPath
+}
 
 func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, util.ContainerDevices, error) {
 	pdevices, err := util.DecodePodDevices(util.InRequestDevices, p.Annotations)

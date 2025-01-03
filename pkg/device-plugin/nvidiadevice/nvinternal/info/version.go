@@ -57,3 +57,8 @@ func GetVersionString(more ...string) string {
 	v := append(GetVersionParts(), more...)
 	return strings.Join(v, "\n")
 }
+
+// GetVersion returns the version of the binary.
+func GetVersion() string {
+	return version
+}
