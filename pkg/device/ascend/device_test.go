@@ -312,8 +312,8 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.InRequestDevices[dev.config.CommonWord]: "device-0,Ascend,8738,1:;",
-				util.SupportDevices[dev.config.CommonWord]:   "device-0,Ascend,8738,1:;",
+				util.InRequestDevices[dev.config.CommonWord]: "device-0,Ascend,8738,1,0:;",
+				util.SupportDevices[dev.config.CommonWord]:   "device-0,Ascend,8738,1,0:;",
 				"predicate-time":        strconv.FormatInt(time.Now().Unix(), 10),
 				"huawei.com/Ascend910A": "[{\"UUID\":\"device-0\",\"temp\":\"vir08\"}]",
 			},

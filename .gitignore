@@ -9,3 +9,5 @@ libvgpu.so
 vendor
 license
 vgpuvalidator
+_output/
+coverage.out
