@@ -5,8 +5,9 @@ FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS GOBUILD
 ADD . /k8s-vgpu
 ARG GOPROXY=https://goproxy.cn,direct
+ARG VERSION
 RUN go env -w GO111MODULE=on
-RUN cd /k8s-vgpu && make all
+RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@latest
 
 #FROM ubuntu:24.04
