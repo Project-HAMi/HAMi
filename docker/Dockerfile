@@ -4,10 +4,11 @@ ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
+ARG VERSION
 ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
-RUN cd /k8s-vgpu && make all
+RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@latest
 
 FROM $NVIDIA_IMAGE AS nvbuild
