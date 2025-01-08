@@ -52,7 +52,7 @@ scheduler:
   defaultSchedulerPolicy:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
-  metricsBindAddress: ":9395"
+  metricsBindPort: 9395
   livenessProbe: false
   leaderElect: true
   kubeScheduler:

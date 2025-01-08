@@ -84,7 +84,7 @@ spec:
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}
-            - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
+            - --metrics-bind-port={{ .Values.scheduler.metricsBindPort }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
             - --device-config-file=/device-config.yaml
