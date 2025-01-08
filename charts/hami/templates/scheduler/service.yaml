@@ -21,7 +21,7 @@ spec:
       protocol: TCP
     - name: monitor
       port: {{ .Values.scheduler.service.monitorPort }}
-      targetPort: 9395
+      targetPort: {{ (split ":" (printf "%s" .Values.scheduler.metricsBindAddress))._1 }}
       nodePort: {{ .Values.scheduler.service.monitorPort }}
       protocol: TCP
   selector:
