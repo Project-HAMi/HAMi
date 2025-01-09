@@ -75,3 +75,15 @@ lint_chart:
           aquasec/trivy:$(TRIVY_VERSION) config --exit-code 1  --severity $(LINT_TRIVY_SEVERITY_LEVEL) /tmp/src/charts  ; \
       (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
       echo "chart trivy check: pass"
+
+.PHONY: e2e-env-setup
+e2e-env-setup:
+	./hack/e2e-test-setup.sh
+
+.PHONY: helm-deploy
+helm-deploy:
+	./hack/deploy-helm.sh "${E2E_TYPE}" "${KUBE_CONF}" "${HAMI_VERSION}"
+
+.PHONY: e2e-test
+e2e-test:
+	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"

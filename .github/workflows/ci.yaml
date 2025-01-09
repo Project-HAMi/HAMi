@@ -9,7 +9,7 @@ on:
     branches-ignore:
       - 'dependabot/**'
 permissions:
-  contents: read  # for actions/checkout to fetch code  
+  contents: read  # for actions/checkout to fetch code
 
 env:
   REGISTRY: docker.io
@@ -38,10 +38,11 @@ jobs:
         run: make lint
       - name: import alias
         run: hack/verify-import-aliases.sh
+
   test:
     name: Unit test
     needs: lint # rely on lint successful completion
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -71,11 +72,29 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
+  get_version:
+    name: get_version
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.parse_version.outputs.version }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Parse the version
+        id: parse_version
+        run: |
+          value=$(make -f Makefile.defs print-version)
+          suffix="$(git rev-parse --short HEAD)"
+          tag="${value}-${suffix}"
+          echo "Generated tag: ${tag}"
+          echo "version=${tag}" >> $GITHUB_OUTPUT
 
   build:
-    name: compile
-    runs-on: ubuntu-latest
-    needs: test # rely on test successful completion
+    name: Compile
+    runs-on: ubuntu-22.04
+    environment: nvidia
+    needs: [ test, get_version ]
     steps:
       - uses: actions/checkout@master
       - name: Free disk space
@@ -88,22 +107,16 @@ jobs:
           echo "=========after clean up, the left CI disk space"
           df -h
 
-      - name: Get the version
-        id: get_version
-        run: |
-          tag="$(git rev-parse --short HEAD)"
-          echo ::set-output name=VERSION::${tag}
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
           basePath: # optional, default is .
-          submodulePath: libvgpu 
+          submodulePath: libvgpu
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -124,13 +137,88 @@ jobs:
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: ${{ env.BUILD_PLATFORM }}
+          labels: ${{ needs.get_version.outputs.version }}
           build-args: |
-            VERSION=${{ steps.get_version.outputs.VERSION }}
+            VERSION=${{ needs.get_version.outputs.version }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_version.outputs.version }}
           push: false
+          load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
+
+      - name: List images
+        run: |
+          docker images
+
+      - name: Save Docker image to image.tar
+        run: |
+          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_version.outputs.version }} -o image.tar
+
+      - name: Upload image.tar as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hami-image
+          path: image.tar
+          retention-days: 5
+          if-no-files-found: error
+
+  # packages tgz from /charts of original branch, deploy to /charts of target branch
+  package_chart:
+    runs-on: ubuntu-22.04
+    needs: [ test, get_version ]
+    env:
+      HELM_VERSION: v3.8.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.get_ref.outputs.ref }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint helm chart
+        run: |
+          make lint_chart
+
+      - name: Package Chart
+        continue-on-error: false
+        env:
+          VERSION: ${{ needs.get_version.outputs.version }}
+        run: |
+          cd charts
+          make clean
+          make
+          if ! ls *.tgz &>/dev/null ; then
+            echo "failed to generate chart"
+            exit 1
+          fi
+          cd ..
+          mkdir -p tmp
+          mv charts/*.tgz tmp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: chart_package_artifact
+          path: tmp/*
+          retention-days: 5
+          if-no-files-found: error
+
+  # execute a full e2e test when hami code merge
+  e2e_test:
+    uses: ./.github/workflows/call-e2e.yaml
+    needs: [ package_chart, get_version, build ]
+    with:
+      ref: ${{ needs.get_version.outputs.version }}
+      type: "pullrequest"
