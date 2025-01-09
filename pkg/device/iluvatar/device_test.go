@@ -17,15 +17,17 @@ limitations under the License.
 package iluvatar
 
 import (
+	"flag"
 	"strconv"
 	"testing"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -165,6 +167,272 @@ func TestPatchAnnotations(t *testing.T) {
 					t.Errorf("Expected %s %s, got %s", k, v, got[k])
 				}
 			}
+		})
+	}
+}
+
+func Test_MutateAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			ctr *corev1.Container
+			p   *corev1.Pod
+		}
+		want bool
+		err  error
+	}{
+		{
+			name: "IluvatarResourceCount and IluvatarResourceCores set to limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"iluvatar.ai/vgpu":       *resource.NewQuantity(2, resource.DecimalSI),
+							"iluvatar.ai/vcuda-core": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := IluvatarConfig{
+				ResourceCountName:  "iluvatar.ai/vgpu",
+				ResourceCoreName:   "iluvatar.ai/vcuda-core",
+				ResourceMemoryName: "iluvatar.ai/vcuda-memory",
+			}
+			InitIluvatarDevice(config)
+			dev := IluvatarDevices{}
+			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_CheckType(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+			n     util.ContainerDeviceRequest
+		}
+		want1 bool
+		want2 bool
+		want3 bool
+	}{
+		{
+			name: "the same type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n: util.ContainerDeviceRequest{
+					Type: IluvatarGPUDevice,
+				},
+			},
+			want1: true,
+			want2: true,
+			want3: false,
+		},
+		{
+			name: "the different type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n: util.ContainerDeviceRequest{
+					Type: "test123",
+				},
+			},
+			want1: false,
+			want2: false,
+			want3: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := IluvatarDevices{}
+			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
+			assert.Equal(t, result1, test.want1)
+			assert.Equal(t, result2, test.want2)
+			assert.Equal(t, result3, test.want3)
+		})
+	}
+}
+
+func Test_CheckUUID(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+		}
+		want bool
+	}{
+		{
+			name: "useid is same as the device id",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					"iluvatar.ai/use-gpuuuid": "test1",
+				},
+				d: util.DeviceUsage{
+					ID: "test1",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "useid is different from the device id",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					"iluvatar.ai/use-gpuuuid": "test2",
+				},
+				d: util.DeviceUsage{
+					ID: "test1",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "no annos",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{},
+				d: util.DeviceUsage{
+					ID: "test3",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "nouseid is same as the device id",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					"iluvatar.ai/nouse-gpuuuid": "test1",
+				},
+				d: util.DeviceUsage{
+					ID: "test1",
+				},
+			},
+			want: false,
+		},
+		{
+			name: "nouseid is different from the device id",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					"iluvatar.ai/nouse-gpuuuid": "test1",
+				},
+				d: util.DeviceUsage{
+					ID: "test2",
+				},
+			},
+			want: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := IluvatarDevices{}
+			result := dev.CheckUUID(test.args.annos, test.args.d)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Container
+		want util.ContainerDeviceRequest
+	}{
+		{
+			name: "all resources set to limits and requests",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/vgpu":         resource.MustParse("1"),
+						"iluvatar.ai/vcuda-memory": resource.MustParse("1000"),
+						"iluvatar.ai/vcuda-core":   resource.MustParse("100"),
+					},
+					Requests: corev1.ResourceList{
+						"iluvatar.ai/vgpu":         resource.MustParse("1"),
+						"iluvatar.ai/vcuda-memory": resource.MustParse("1000"),
+						"iluvatar.ai/vcuda-core":   resource.MustParse("100"),
+					},
+				},
+			},
+			want: util.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             IluvatarGPUDevice,
+				Memreq:           int32(256000),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(100),
+			},
+		},
+		{
+			name: "all resources don't set to limits and requests",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   corev1.ResourceList{},
+					Requests: corev1.ResourceList{},
+				},
+			},
+			want: util.ContainerDeviceRequest{},
+		},
+		{
+			name: "resourcemem don't set to limits and requests",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/vgpu": resource.MustParse("1"),
+					},
+					Requests: corev1.ResourceList{
+						"iluvatar.ai/vgpu": resource.MustParse("1"),
+					},
+				},
+			},
+			want: util.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             IluvatarGPUDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(100),
+				Coresreq:         int32(0),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := IluvatarDevices{}
+			fs := flag.FlagSet{}
+			ParseConfig(&fs)
+			result := dev.GenerateResourceRequests(test.args)
+			assert.DeepEqual(t, result, test.want)
 		})
 	}
 }
