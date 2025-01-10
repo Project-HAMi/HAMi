@@ -22,15 +22,14 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func Test_GetNodeDevices(t *testing.T) {
@@ -451,6 +450,7 @@ func Test_PatchAnnotations(t *testing.T) {
 }
 
 func Test_setNodeLock(t *testing.T) {
+	client.NewGlobalClient()
 	tests := []struct {
 		name string
 		args corev1.Node
