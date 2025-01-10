@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"strings"
 
@@ -246,7 +247,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
-func initMetrics(bindAddress string) {
+func initMetrics(bindPort string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	klog.Info("Initializing metrics for scheduler")
@@ -257,5 +258,7 @@ func initMetrics(bindAddress string) {
 	NewClusterManager("vGPU", reg)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(bindAddress, nil))
+	addr := net.JoinHostPort("0.0.0.0", bindPort)
+	klog.Infof("Starting metrics server on %s", addr)
+	log.Fatal(http.ListenAndServe(addr, nil))
 }

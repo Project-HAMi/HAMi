@@ -61,7 +61,7 @@ func init() {
 	rootCmd.Flags().Int32Var(&config.DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&config.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
-	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
+	rootCmd.Flags().StringVar(&config.MetricsBindPort, "metrics-bind-port", ":9395", "The port that the scheduler should bind to for serving prometheus metrics(e.g. 9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
@@ -76,7 +76,7 @@ func start() {
 
 	// start monitor metrics
 	go sher.RegisterFromNodeAnnotations()
-	go initMetrics(config.MetricsBindAddress)
+	go initMetrics(config.MetricsBindPort)
 
 	// start http server
 	router := httprouter.New()

@@ -19,9 +19,9 @@ package config
 import "github.com/Project-HAMi/HAMi/pkg/util"
 
 var (
-	HTTPBind           string
-	SchedulerName      string
-	MetricsBindAddress string
+	HTTPBind        string
+	SchedulerName   string
+	MetricsBindPort string
 
 	DefaultMem         int32
 	DefaultCores       int32
