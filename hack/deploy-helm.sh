@@ -63,3 +63,9 @@ util::exec_cmd helm --debug upgrade --install --create-namespace --cleanup-on-fa
              --set devicePlugin.passDeviceSpecsEnabled=false \
              --version "${HELM_VER}" --wait --timeout 20m   --kubeconfig "${KUBE_CONF}"
 
+# check pod running status
+kubectl  --kubeconfig "${KUBE_CONF}" get po  -n "${TARGET_NS}"
+
+if ! util:check_pods_status "${KUBE_CONF}" "${TARGET_NS}" ; then
+  return 1
+fi
