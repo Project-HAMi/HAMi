@@ -39,13 +39,74 @@ func init() {
 }
 
 func TestExtractMigTemplatesFromUUID(t *testing.T) {
-	originuuid := "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]"
-	expectedTmpID := 7
-	expectedPosition := 9
-	tempid, pos := ExtractMigTemplatesFromUUID(originuuid)
+	testCases := []struct {
+		name          string
+		uuid          string
+		expectedTmpID int
+		expectedPos   int
+		expectError   bool
+	}{
+		{
+			name:          "Valid UUID",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]",
+			expectedTmpID: 7,
+			expectedPos:   9,
+			expectError:   false,
+		},
+		{
+			name:          "Invalid UUID format - missing '[' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b32693137-9]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid UUID format - missing ']' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid UUID format - missing '-' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[79]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid template index",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[a-9]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid position",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-b]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+	}
 
-	if tempid != expectedTmpID || pos != expectedPosition {
-		t.Errorf("Expected %d:%d, got %d:%d", expectedTmpID, expectedPosition, tempid, pos)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tempid, pos, err := ExtractMigTemplatesFromUUID(tc.uuid)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected an error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Did not expect an error but got: %v", err)
+				}
+				if tempid != tc.expectedTmpID || pos != tc.expectedPos {
+					t.Errorf("Expected %d:%d, got %d:%d", tc.expectedTmpID, tc.expectedPos, tempid, pos)
+				}
+			}
+		})
 	}
 }
 
