@@ -184,7 +184,7 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 }
 
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting dcu devices")
+	klog.Info("Start to count dcu devices for container ", ctr.Name)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
 	dcuResourceMem := corev1.ResourceName(HygonResourceMemory)
 	dcuResourceCores := corev1.ResourceName(HygonResourceCores)

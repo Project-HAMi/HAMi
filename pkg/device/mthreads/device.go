@@ -209,7 +209,7 @@ func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, b
 }
 
 func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting mthreads devices")
+	klog.Info("Start to count mthreads devices for container ", ctr.Name)
 	mthreadsResourceCount := corev1.ResourceName(MthreadsResourceCount)
 	mthreadsResourceMem := corev1.ResourceName(MthreadsResourceMemory)
 	mthreadsResourceCores := corev1.ResourceName(MthreadsResourceCores)
@@ -219,7 +219,9 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) util
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			klog.Info("Found iluvatar devices")
+			klog.InfoS("Detected mthreads device request",
+				"container", ctr.Name,
+				"deviceCount", n)
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mthreadsResourceMem]
 			if !ok {
@@ -229,6 +231,10 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) util
 				memnums, ok := mem.AsInt64()
 				if ok {
 					memnum = int(memnums) * 512
+					klog.InfoS("Memory allocation calculated",
+						"container", ctr.Name,
+						"requestedMem", memnums,
+						"allocatedMem", memnum)
 				}
 			}
 			corenum := int32(0)

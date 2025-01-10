@@ -30,7 +30,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -205,68 +204,69 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 
 func (nv *NvidiaDevicePlugin) GenerateMigTemplate(devtype string, devindex int, val util.ContainerDevice) (int, bool) {
 	needsreset := false
-	position := 0
+	position := -1 // Initialize to an invalid position
+
 	for _, migTemplate := range nv.schedulerConfig.MigGeometriesList {
-		found := false
-		for _, templateDevices := range migTemplate.Models {
-			if strings.Contains(devtype, templateDevices) {
-				klog.InfoS("type found", "Type", devtype, "Template", templateDevices)
-				found = true
-				break
+		if containsModel(devtype, migTemplate.Models) {
+			klog.InfoS("type found", "Type", devtype, "Models", strings.Join(migTemplate.Models, ", "))
+
+			templateIdx, pos, err := util.ExtractMigTemplatesFromUUID(val.UUID)
+			if err != nil {
+				klog.ErrorS(err, "failed to extract template index from UUID", "UUID", val.UUID)
+				return -1, false
 			}
-		}
-		if found {
-			templateIdx, pos := util.ExtractMigTemplatesFromUUID(val.UUID)
 			position = pos
+
+			if templateIdx < 0 || templateIdx >= len(migTemplate.Geometries) {
+				klog.ErrorS(nil, "invalid template index extracted from UUID", "UUID", val.UUID, "Index", templateIdx)
+				return -1, false
+			}
+
 			v := migTemplate.Geometries[templateIdx]
+
 			for migidx, migpartedDev := range nv.migCurrent.MigConfigs["current"] {
-				devicetmpidx := -1
-				for didx, device := range migpartedDev.Devices {
-					if device == int32(devindex) {
-						devicetmpidx = didx
-						break
-					}
-				}
-				if devicetmpidx >= 0 {
-					migDevices := map[string]int32{}
+				if containsDevice(devindex, migpartedDev.Devices) {
 					for _, migTemplateEntry := range v {
-						num, ok := migpartedDev.MigDevices[migTemplateEntry.Name]
-						if !ok || num != migTemplateEntry.Count {
+						currentCount, ok := migpartedDev.MigDevices[migTemplateEntry.Name]
+						expectedCount := migTemplateEntry.Count
+
+						if !ok || currentCount != expectedCount {
 							needsreset = true
-							migDevices[migTemplateEntry.Name] = migTemplateEntry.Count
-						}
-					}
-					if needsreset {
-						if len(migpartedDev.Devices) == 1 {
-							nv.migCurrent.MigConfigs["current"][migidx].MigDevices = make(map[string]int32)
-							klog.Infoln("replacement for device", migDevices)
-							for idx, val := range migDevices {
-								nv.migCurrent.MigConfigs["current"][migidx].MigDevices[idx] = val
-							}
+							nv.migCurrent.MigConfigs["current"][migidx].MigDevices[migTemplateEntry.Name] = expectedCount
+							klog.InfoS("updated mig device count", "TemplateName", migTemplateEntry.Name, "Count", expectedCount)
 						} else {
-							tmpdevices := []int32{}
-							for _, val := range nv.migCurrent.MigConfigs["current"][migidx].Devices {
-								if val != int32(devindex) {
-									tmpdevices = append(tmpdevices, val)
-								}
-							}
-							nv.migCurrent.MigConfigs["current"][migidx].Devices = make([]int32, 0)
-							nv.migCurrent.MigConfigs["current"][migidx].Devices = append(nv.migCurrent.MigConfigs["current"][migidx].Devices, tmpdevices...)
-							//migDevices := map[string]int32{}
-							nv.migCurrent.MigConfigs["current"] = append(nv.migCurrent.MigConfigs["current"], nvidia.MigConfigSpec{
-								Devices:    []int32{int32(devindex)},
-								MigEnabled: true,
-								MigDevices: migDevices,
-							})
+							nv.migCurrent.MigConfigs["current"][migidx].MigDevices[migTemplateEntry.Name]++
+							klog.InfoS("incremented mig device count", "TemplateName", migTemplateEntry.Name, "Count", currentCount+1)
 						}
 					}
 					break
 				}
 			}
+			break
 		}
 	}
-	klog.V(3).InfoS("After Generated", nv.migCurrent.MigConfigs["current"])
+
 	return position, needsreset
+}
+
+// Helper function to check if a model is in the list of models.
+func containsModel(target string, models []string) bool {
+	for _, model := range models {
+		if strings.Contains(target, model) {
+			return true
+		}
+	}
+	return false
+}
+
+// Helper function to check if a device index is in the list of devices.
+func containsDevice(target int, devices []int32) bool {
+	for _, device := range devices {
+		if int(device) == target {
+			return true
+		}
+	}
+	return false
 }
 
 func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c util.ContainerDevices) []string {
