@@ -62,12 +62,13 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	klog.Infof(template, req.Namespace, req.Name, req.UID)
 	hasResource := false
+	privileged := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
 				klog.Warningf(template+" - Denying admission as container %s is privileged", req.Namespace, req.Name, req.UID, c.Name)
-				continue
+				privileged = true
 			}
 		}
 		for _, val := range device.GetDevices() {
@@ -79,11 +80,13 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			hasResource = hasResource || found
 		}
 	}
-
-	if !hasResource {
+	switch {
+	case !hasResource:
 		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
-		//return admission.Allowed("no resource found")
-	} else if len(config.SchedulerName) > 0 {
+	case privileged:
+		klog.Infof(template+" - Denying admission for pod: privileged container found", req.Namespace, req.Name, req.UID)
+		return admission.Denied("privileged container found")
+	case len(config.SchedulerName) > 0:
 		pod.Spec.SchedulerName = config.SchedulerName
 		if pod.Spec.NodeName != "" {
 			klog.Infof(template+" - Pod already has node assigned", req.Namespace, req.Name, req.UID)
