@@ -254,12 +254,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			if strings.Compare(string(pod.UID), podUID) != 0 {
 				continue
 			}
-			fmt.Println("Pod matched!", pod.Name, pod.Namespace, pod.Labels)
+			klog.Infof("Pod matched! Name: %s, Namespace: %s, Labels: %v", pod.Name, pod.Namespace, pod.Labels)
 			for _, ctr := range pod.Spec.Containers {
 				if strings.Compare(ctr.Name, ctrName) != 0 {
 					continue
 				}
-				fmt.Println("container matched", ctr.Name)
+				klog.Infof("Container matched: Name=%s", ctr.Name)
 				//err := setHostPid(pod, pod.Status.ContainerStatuses[ctridx], &srPodList[sridx])
 				//if err != nil {
 				//	fmt.Println("setHostPid filed", err.Error())

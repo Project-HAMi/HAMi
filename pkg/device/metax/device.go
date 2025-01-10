@@ -119,7 +119,7 @@ func (dev *MetaxDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool
 }
 
 func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
-	klog.Info("Counting metax devices")
+	klog.Info("Start to count metax devices for container ", ctr.Name)
 	metaxResourceCount := corev1.ResourceName(MetaxResourceCount)
 	v, ok := ctr.Resources.Limits[metaxResourceCount]
 	if !ok {

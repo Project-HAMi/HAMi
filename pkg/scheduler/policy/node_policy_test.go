@@ -17,15 +17,11 @@ limitations under the License.
 package policy
 
 import (
-	"fmt"
 	"testing"
 
+	"k8s.io/klog/v2"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
-	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
-	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
-	"github.com/Project-HAMi/HAMi/pkg/device/metax"
-	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -190,16 +186,29 @@ func TestLess(t *testing.T) {
 		})
 	}
 }
+
+// setup initializes the devices with a given configuration.
+func setup(t *testing.T, config *device.Config) {
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+}
+
+// TestOverrideScore tests the OverrideScore method for different scenarios.
 func TestOverrideScore(t *testing.T) {
 	config := &device.Config{
-		NvidiaConfig:    nvidia.NvidiaConfig{},
-		MetaxConfig:     metax.MetaxConfig{},
-		HygonConfig:     hygon.HygonConfig{},
-		CambriconConfig: cambricon.CambriconConfig{},
-		MthreadsConfig:  mthreads.MthreadsConfig{},
-		IluvatarConfig:  iluvatar.IluvatarConfig{},
-		VNPUs:           nil,
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
 	}
+	setup(t, config)
+
 	tests := []struct {
 		name      string
 		nodeScore *NodeScore
@@ -208,7 +217,7 @@ func TestOverrideScore(t *testing.T) {
 		wantScore float32
 	}{
 		{
-			name: "Test with devscore >0 ",
+			name: "Device score greater than zero",
 			nodeScore: &NodeScore{
 				Node: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -255,7 +264,7 @@ func TestOverrideScore(t *testing.T) {
 			wantScore: 1679,
 		},
 		{
-			name: "Test with Test with devscore =0 ",
+			name: "Device score equal to zero",
 			nodeScore: &NodeScore{
 				Node: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -301,14 +310,14 @@ func TestOverrideScore(t *testing.T) {
 			policy:    "binpack",
 			wantScore: 0,
 		},
+		// Add more test cases here to cover other scenarios and policies.
 	}
-	device.InitDevicesWithConfig(config)
+
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fmt.Println("🤮", device.GetDevices())
 			tt.nodeScore.OverrideScore(tt.devices, tt.policy)
-			if tt.nodeScore.Score != tt.wantScore {
-				t.Errorf("OverrideScore() gotScore = %v, want %v", tt.nodeScore.Score, tt.wantScore)
+			if gotScore := tt.nodeScore.Score; gotScore != tt.wantScore {
+				t.Errorf("OverrideScore() gotScore = %v, want %v", gotScore, tt.wantScore)
 			}
 		})
 	}
