@@ -63,7 +63,7 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
-	ginkgo.It("create single pod with configuration", func() {
+	ginkgo.It("create single pod with CUDA configuration", func() {
 		newPod = utils.Pod.DeepCopy()
 		newPod.Name = newPod.Name + utils.GetRandom()
 
@@ -92,7 +92,6 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 		newPod.Name = newPod.Name + utils.GetRandom()
 		newPod.Spec.Containers = append(newPod.Spec.Containers, newPod.Spec.Containers[0])
 		newPod.Spec.Containers = append(newPod.Spec.Containers, newPod.Spec.Containers[0])
-		//newPod.Spec.Containers[0].Name = newPod.Spec.Containers[0].Name + utils.GetRandom()
 		newPod.Spec.Containers[1].Name = newPod.Spec.Containers[0].Name + utils.GetRandom()
 		newPod.Spec.Containers[2].Name = newPod.Spec.Containers[0].Name + utils.GetRandom()
 
