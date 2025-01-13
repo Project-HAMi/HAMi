@@ -39,10 +39,52 @@ jobs:
       - name: import alias
         run: hack/verify-import-aliases.sh
 
+  get_info:
+    name: get_info
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.parse_version.outputs.version }}
+      e2e_run: ${{ steps.parse_code.outputs.e2e_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+
+      - name: Parse the version
+        id: parse_version
+        run: |
+          value=$(make -f Makefile.defs print-version)
+          suffix="$(git rev-parse --short HEAD)"
+          tag="${value}-${suffix}"
+          echo "Generated tag: ${tag}"
+          echo "version=${tag}" >> $GITHUB_OUTPUT
+
+      # Check the code diff, ignore the docs and examples change
+      - name: Parse the code diff
+        id: parse_code
+        run: |
+          pr_commit=${{ github.event.pull_request.base.sha }}
+          base_commit=${{ github.sha }}
+          echo "PR commit: ${pr_commit}"
+          echo "Git log: $(git log ${pr_commit})"
+          echo "Base commit: ${base_commit}"
+          echo "Git log: $(git log ${base_commit})"
+          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)docs/*' ':(exclude)examples/*' ':(exclude)*.md')
+          echo "Changed files: ${changed_files}"
+          if [ -n "$changed_files" ]; then
+            echo "Will run e2e-test"
+            echo "e2e_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Won't run e2e-test"
+            echo "e2e_run=false" >> $GITHUB_OUTPUT
+          fi
+
   test:
     name: Unit test
-    needs: lint # rely on lint successful completion
+    needs: [ lint, get_info ] # rely on lint & get_info successful completion
     runs-on: ubuntu-22.04
+    if: needs.get_info.outputs.e2e_run == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -72,29 +114,11 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-  get_version:
-    name: get_version
-    runs-on: ubuntu-22.04
-    outputs:
-      version: ${{ steps.parse_version.outputs.version }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Parse the version
-        id: parse_version
-        run: |
-          value=$(make -f Makefile.defs print-version)
-          suffix="$(git rev-parse --short HEAD)"
-          tag="${value}-${suffix}"
-          echo "Generated tag: ${tag}"
-          echo "version=${tag}" >> $GITHUB_OUTPUT
-
   build:
     name: Compile
+    needs: [ test, get_info ]
     runs-on: ubuntu-22.04
-    environment: nvidia
-    needs: [ test, get_version ]
+    if: needs.get_info.outputs.e2e_run == 'true'
     steps:
       - uses: actions/checkout@master
       - name: Free disk space
@@ -137,13 +161,13 @@ jobs:
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
-          labels: ${{ needs.get_version.outputs.version }}
+          labels: ${{ needs.get_info.outputs.version }}
           build-args: |
-            VERSION=${{ needs.get_version.outputs.version }}
+            VERSION=${{ needs.get_info.outputs.version }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_version.outputs.version }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
           load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
@@ -154,7 +178,7 @@ jobs:
 
       - name: Save Docker image to image.tar
         run: |
-          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_version.outputs.version }} -o image.tar
+          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
       - name: Upload image.tar as artifact
         uses: actions/upload-artifact@v4
@@ -167,7 +191,8 @@ jobs:
   # packages tgz from /charts of original branch, deploy to /charts of target branch
   package_chart:
     runs-on: ubuntu-22.04
-    needs: [ test, get_version ]
+    needs: [ test, get_info ]
+    if: needs.get_info.outputs.e2e_run == 'true'
     env:
       HELM_VERSION: v3.8.1
     steps:
@@ -194,7 +219,7 @@ jobs:
       - name: Package Chart
         continue-on-error: false
         env:
-          VERSION: ${{ needs.get_version.outputs.version }}
+          VERSION: ${{ needs.get_info.outputs.version }}
         run: |
           cd charts
           make clean
@@ -218,7 +243,8 @@ jobs:
   # execute a full e2e test when hami code merge
   e2e_test:
     uses: ./.github/workflows/call-e2e.yaml
-    needs: [ package_chart, get_version, build ]
+    needs: [ package_chart, get_info, build ]
+    if: needs.get_info.outputs.e2e_run == 'true'
     with:
-      ref: ${{ needs.get_version.outputs.version }}
+      ref: ${{ needs.get_info.outputs.version }}
       type: "pullrequest"
