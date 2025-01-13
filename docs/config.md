@@ -116,7 +116,7 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
   Bool type, "true", "false"
 
   - default: false
-  - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitaion in that container, only for debug. 
+  - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitation in that container, only for debug. 
 
 * `ACTIVE_OOM_KILLER`:
   
@@ -130,4 +130,4 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
   Bool type, "true", "false"
   
   - default: false
-  - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitaion in that container, only for debug.
+  - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitation in that container, only for debug.

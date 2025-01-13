@@ -93,7 +93,7 @@ function util::check_pods_status() {
   local namespace=${2:-"hami-system"}
 
   local unhealthy_pods
-  unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" | grep -Ev "^(NAME|.*Running.*|.*Succeeded.*)")
+  unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" | awk '!/Running|Succeeded/ {print $1}')
 
   if [[ -n "$unhealthy_pods" ]]; then
     echo "Found unhealthy_pods pods in namespace $namespace:"
