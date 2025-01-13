@@ -86,3 +86,32 @@ function util::wait_ip_reachable(){
       fi
     done
 }
+
+# checking pods in namespace works
+function util::check_pods_status() {
+  local kubeconfig=${1:-""}
+  local namespace=${2:-"hami-system"}
+
+  local unhealthy_pods
+  unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" | grep -Ev "^(NAME|.*Running.*|.*Succeeded.*)")
+
+  if [[ -n "$unhealthy_pods" ]]; then
+    echo "Found unhealthy_pods pods in namespace $namespace:"
+    echo "$unhealthy_pods"
+
+    for pod in $unhealthy_pods; do
+      echo "Describing pod: $pod"
+      kubectl describe po "$pod" -n "$namespace" --kubeconfig "$kubeconfig"
+
+      echo "Fetching logs for pod: $pod"
+      kubectl logs "$pod" -n "$namespace" --kubeconfig "$kubeconfig"
+      echo "---------------------------------------------------"
+    done
+
+    return 1
+  else
+
+    echo "PASS: All Pods are in Running state."
+    return 0
+  fi
+}

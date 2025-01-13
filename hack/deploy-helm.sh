@@ -50,7 +50,7 @@ elif [ "${E2E_TYPE}" == "release" ]; then
   HELM_SOURCE="${HELM_NAME}"/"${HAMI_ALIAS}"
 else
   echo "Invalid E2E Type: ${E2E_TYPE}"
-  return 1
+  exit 1
 fi
 
 # add repo locally
@@ -61,5 +61,11 @@ util::exec_cmd helm repo update --kubeconfig "${KUBE_CONF}"
 util::exec_cmd helm --debug upgrade --install --create-namespace --cleanup-on-fail \
              "${HAMI_ALIAS}"     "${HELM_SOURCE}" -n "${TARGET_NS}"   \
              --set devicePlugin.passDeviceSpecsEnabled=false \
-             --version "${HELM_VER}" --wait --timeout 20m   --kubeconfig "${KUBE_CONF}"
+             --version "${HELM_VER}" --wait --timeout 10m   --kubeconfig "${KUBE_CONF}"
 
+# check pod running status
+kubectl  --kubeconfig "${KUBE_CONF}" get po  -n "${TARGET_NS}"
+
+if ! util::check_pods_status "${KUBE_CONF}" "${TARGET_NS}" ; then
+  exit 1
+fi
