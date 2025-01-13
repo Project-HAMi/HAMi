@@ -85,23 +85,41 @@ func DeletePod(clientSet *kubernetes.Clientset, namespace, podName string) error
 
 func WaitForPodRunning(clientSet kubernetes.Interface, namespace, podName string) error {
 	const (
-		checkInterval = 5 * time.Second
-		timeout       = 3 * time.Minute
+		checkInterval = 5 * time.Second // Interval for checking Pod status
+		timeout       = 5 * time.Minute // Increased timeout for GPU Pods
 	)
 
 	return wait.PollImmediate(checkInterval, timeout, func() (bool, error) {
+		// Fetch the Pod object from the Kubernetes API
 		pod, err := clientSet.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
 			return false, fmt.Errorf("failed to get pod %s/%s: %v", namespace, podName, err)
 		}
 
+		// Print Pod status for debugging
+		fmt.Printf("Pod %s/%s status: %s\n", namespace, podName, pod.Status.Phase)
+
+		// Check if the Pod is in the Running state
 		if pod.Status.Phase == corev1.PodRunning {
 			return true, nil
 		}
 
+		// Check if the Pod is in a Failed or Unknown state
 		if pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodUnknown {
 			return false, fmt.Errorf("pod %s/%s is in failed or unknown state: %s", namespace, podName, pod.Status.Phase)
 		}
+
+		// Print Pod events for debugging
+		events, err := clientSet.CoreV1().Events(namespace).List(context.TODO(), metav1.ListOptions{
+			FieldSelector: fmt.Sprintf("involvedObject.name=%s", podName),
+		})
+		if err == nil {
+			for _, event := range events.Items {
+				fmt.Printf("Event: %s - %s\n", event.Reason, event.Message)
+			}
+		}
+
+		// If the Pod is not in Running, Failed, or Unknown state, continue waiting
 		return false, nil
 	})
 }

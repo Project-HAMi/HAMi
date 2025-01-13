@@ -18,6 +18,7 @@ package utils
 
 import (
 	"flag"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/exec"
@@ -77,12 +78,18 @@ func GetRandom() string {
 	return random
 }
 
-func KubectlExecInPod(namespace, podName, cmdshell string) ([]byte, error) {
+// KubectlExecInPod executes a shell command in a specified Pod using kubectl exec.
+func KubectlExecInPod(namespace, podName, command string) ([]byte, error) {
+	// Wait for the container to stabilize
 	time.Sleep(30 * time.Second)
-	cmd := exec.Command("kubectl", "exec", "-it", "-n", namespace, podName, "--", "/bin/bash", "-c", cmdshell)
-	output, err := cmd.Output()
+
+	// Build the kubectl exec command
+	cmd := exec.Command("kubectl", "exec", "-n", namespace, podName, "--", "/bin/bash", "-c", command)
+
+	// Capture the command output (both stdout and stderr)
+	output, err := cmd.CombinedOutput()
 	if err != nil {
-		return output, err
+		return output, fmt.Errorf("failed to execute kubectl command: %w. Output: %s", err, output)
 	}
 
 	return output, nil

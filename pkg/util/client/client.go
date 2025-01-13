@@ -31,11 +31,11 @@ var (
 )
 
 func init() {
-	// var err error
-	// KubeClient, err = NewClient()
-	// if err != nil {
-	// 	panic(err)
-	// }
+	var err error
+	KubeClient, err = NewClient()
+	if err != nil {
+		panic(err)
+	}
 }
 
 func GetClient() kubernetes.Interface {

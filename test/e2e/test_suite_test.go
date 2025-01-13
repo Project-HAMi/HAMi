@@ -34,5 +34,5 @@ func TestInit(t *testing.T) {
 	flag.Parse()
 	utils.DefaultKubeConfigPath()
 	gomega.RegisterFailHandler(ginkgo.Fail)
-	ginkgo.RunSpecs(t, "Test HAMi Suite")
+	ginkgo.RunSpecs(t, "HAMi E2E Test Suite")
 }
