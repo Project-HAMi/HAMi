@@ -123,7 +123,7 @@ helm install hami hami-charts/hami  -n kube-system
 kubectl get pods -n kube-system
 ```
 
-如果 `vgpu-device-plugin` 和 `vgpu-scheduler` pod 都处于 *Running* 状态，则安装成功。你可以在[这里](https://github.com/Project-HAMi/HAMi/blob/newprofile/examples/nvidia/default_use.yaml)尝试示例。
+如果 `vgpu-device-plugin` 和 `vgpu-scheduler` pod 都处于 *Running* 状态，则安装成功。你可以在[这里](examples/nvidia/default_use.yaml)尝试示例。
 
 ### Web 界面
 
