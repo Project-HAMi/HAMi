@@ -127,7 +127,7 @@ Verify your installation using the following command:
 kubectl get pods -n kube-system
 ```
 
-If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](https://github.com/Project-HAMi/HAMi/blob/newprofile/examples/nvidia/default_use.yaml) 
+If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](examples/nvidia/default_use.yaml) 
 
 ### WebUI
 
