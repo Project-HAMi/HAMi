@@ -31,9 +31,9 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-var _ plugin.Interface = (*NvidiaMemoryPlugin)(nil)
+var _ plugin.Interface = (*NvidiaCorePlugin)(nil)
 
-type NvidiaMemoryPlugin struct {
+type NvidiaCorePlugin struct {
 	common.BasePlugin
 
 	nvmllib nvml.Interface
@@ -41,36 +41,36 @@ type NvidiaMemoryPlugin struct {
 	devices []*pluginapi.Device
 }
 
-func NewNvidiaMemoryPlugin(nvmllib nvml.Interface) (plugin.Interface, error) {
+func NewNvidiaCorePlugin(nvmllib nvml.Interface) (plugin.Interface, error) {
 	config, err := device.LoadConfig(*plugin.ConfigFile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to load device config file %s: %w, using default name", *plugin.ConfigFile, err)
 	}
 
-	p := &NvidiaMemoryPlugin{
+	p := &NvidiaCorePlugin{
 		nvmllib: nvmllib,
 		config:  config.NvidiaConfig,
 	}
 	p.BasePlugin = common.BasePlugin{
-		ResourceName: config.NvidiaConfig.ResourceMemoryName,
-		SocketFile:   pluginapi.DevicePluginPath + nvidiaGPUMemorySocketName,
+		ResourceName: config.NvidiaConfig.ResourceCoreName,
+		SocketFile:   pluginapi.DevicePluginPath + nvidiaGPUCoreSocketName,
 		Server:       grpc.NewServer(),
 		Srv:          p,
 		StopCh:       make(chan struct{}),
 		ChangedCh:    make(chan struct{}),
 	}
 
-	if err := p.setDevices(); err != nil {
-		return nil, fmt.Errorf("failed to get nvidia memory: %w", err)
+	if err := p.setCores(); err != nil {
+		return nil, fmt.Errorf("failed to get nvidia core: %w", err)
 	}
 
 	return p, nil
 }
 
 // ListAndWatch lists devices and update that list according to the health status
-func (p *NvidiaMemoryPlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
+func (p *NvidiaCorePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
 	if err := s.Send(&pluginapi.ListAndWatchResponse{Devices: p.devices}); err != nil {
-		klog.Error(fmt.Sprintf("err sending nvidia memory allocate info, err %v", err))
+		klog.Error(fmt.Sprintf("err sending nvidia cores allocate info, err %v", err))
 	}
 	for {
 		select {
@@ -78,15 +78,15 @@ func (p *NvidiaMemoryPlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.Device
 			return nil
 
 		case <-p.ChangedCh:
-			klog.Info(fmt.Sprintf("change nvidia memory to %d", len(p.devices)))
+			klog.Info(fmt.Sprintf("change nvidia cores to %d", len(p.devices)))
 			if err := s.Send(&pluginapi.ListAndWatchResponse{Devices: p.devices}); err != nil {
-				klog.Error(fmt.Sprintf("err sending nvidia memory allocate info, err %v", err))
+				klog.Error(fmt.Sprintf("err sending nvidia cores allocate info, err %v", err))
 			}
 		}
 	}
 }
 
-func (p *NvidiaMemoryPlugin) setDevices() error {
+func (p *NvidiaCorePlugin) setCores() error {
 	var devices []*pluginapi.Device
 
 	ret := p.nvmllib.Init()
@@ -108,39 +108,26 @@ func (p *NvidiaMemoryPlugin) setDevices() error {
 		if ret != nvml.SUCCESS {
 			return fmt.Errorf("unable to get device at index %d: %v", i, p.nvmllib.ErrorString(ret))
 		}
-
-		memoryTotal := 0
-		memory, ret := dev.GetMemoryInfo()
-		if ret == nvml.SUCCESS {
-			memoryTotal = int(memory.Total)
-		} else {
-			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+		uuid, ret := dev.GetUUID()
+		if ret != nvml.SUCCESS {
+			return fmt.Errorf("unable to get device uuid %d: %v", i, p.nvmllib.ErrorString(ret))
 		}
 
-		factor := 1
-		if p.config.GPUMemoryFactor > 0 {
-			factor = int(p.config.GPUMemoryFactor)
-		}
-		registeredmem := int32(memoryTotal / 1024 / 1024 / factor)
-		if p.config.DeviceMemoryScaling != 1 {
-			registeredmem = int32(float64(registeredmem) * p.config.DeviceMemoryScaling)
-		}
-		for j := 0; j < int(registeredmem); j++ {
+		for j := 0; j < int(p.config.DeviceCoreScaling*100); j++ {
 			devices = append(devices, &pluginapi.Device{
-				ID:     fmt.Sprintf("%d-%d", i, j),
+				ID:     fmt.Sprintf("%s-core-%d", uuid, j),
 				Health: pluginapi.Healthy,
 			})
 		}
 		devices = append(devices)
-		klog.V(2).Infoln("MemoryScaling=", p.config.DeviceMemoryScaling, "registeredmem=", registeredmem, "factor=", factor)
+		klog.V(2).Infoln("DeviceCoreScaling=", p.config.DeviceCoreScaling)
 	}
 	p.devices = devices
 
 	return nil
 }
 
-func (p *NvidiaMemoryPlugin) Devices() rm.Devices {
+func (p *NvidiaCorePlugin) Devices() rm.Devices {
 	return map[string]*rm.Device{
 		"": &rm.Device{},
 	}

@@ -67,6 +67,10 @@ func (m *nvmlmanager) GetVirtualPlugins() ([]plugin.Interface, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to new nvidia memory plugin: %w", err)
 	}
-	plugins = append(plugins, memoryPlugin)
+	corePlugin, err := nvidiadevice.NewNvidiaCorePlugin(m.nvmllib)
+	if err != nil {
+		return nil, fmt.Errorf("failed to new nvidia core plugin: %w", err)
+	}
+	plugins = append(plugins, memoryPlugin, corePlugin)
 	return plugins, nil
 }

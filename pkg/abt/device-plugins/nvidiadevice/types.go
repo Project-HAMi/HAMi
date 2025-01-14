@@ -17,6 +17,6 @@ limitations under the License.
 package nvidiadevice
 
 const (
-	defaultResourceMemoryName = "nvidia.com/gpumem"
 	nvidiaGPUMemorySocketName = "nvidia-gpu-memory.sock"
+	nvidiaGPUCoreSocketName   = "nvidia-gpu-cores.sock"
 )
