@@ -89,6 +89,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 
 		memreq := int32(0)
 		if node.Devices.DeviceLists[i].Device.Count <= node.Devices.DeviceLists[i].Device.Used {
+			klog.InfoS("device split count all used", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID, "split count:", node.Devices.DeviceLists[i].Device.Count, "current used:", node.Devices.DeviceLists[i].Device.Used)
 			continue
 		}
 		if k.Coresreq > 100 {
@@ -122,6 +123,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			continue
 		}
 		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, request, tmpDevs[k.Type], node.Devices.DeviceLists[i].Device) {
+			klog.V(5).InfoS("device does not meet custom filter rule", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
 			continue
 		}
 		if k.Nums > 0 {
