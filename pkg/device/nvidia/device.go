@@ -92,6 +92,7 @@ type NvidiaConfig struct {
 	DeviceCoreScaling            float64                     `yaml:"deviceCoreScaling"`
 	DisableCoreLimit             bool                        `yaml:"disableCoreLimit"`
 	MigGeometriesList            []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
+	GPUMemoryFactor              uint                        `yaml:"gpuMemoryFactor"`
 }
 
 type FilterDevice struct {

@@ -32,7 +32,7 @@ import (
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
-	cli "github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v2"
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -304,6 +304,11 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
+	virtualPlugins, err := pluginManager.GetVirtualPlugins()
+	if err != nil {
+		return nil, false, fmt.Errorf("error getting virtual plugins: %v", err)
+	}
+	plugins = append(plugins, virtualPlugins...)
 
 	// Loop through all plugins, starting them if they have any devices
 	// to serve. If even one plugin fails to start properly, try

@@ -59,3 +59,5 @@ func (m *tegramanager) GetPlugins() ([]plugin.Interface, error) {
 func (m *tegramanager) CreateCDISpecFile() error {
 	return nil
 }
+
+func (m *tegramanager) GetVirtualPlugins() ([]plugin.Interface, error) { return nil, nil }

@@ -35,6 +35,7 @@ package manager
 import (
 	"fmt"
 
+	"github.com/Project-HAMi/HAMi/pkg/abt/device-plugins/nvidiadevice"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 )
@@ -58,4 +59,14 @@ func (m *nvmlmanager) GetPlugins() ([]plugin.Interface, error) {
 // CreateCDISpecFile creates forwards the request to the CDI handler
 func (m *nvmlmanager) CreateCDISpecFile() error {
 	return m.cdiHandler.CreateSpecFile()
+}
+
+func (m *nvmlmanager) GetVirtualPlugins() ([]plugin.Interface, error) {
+	var plugins []plugin.Interface
+	memoryPlugin, err := nvidiadevice.NewNvidiaMemoryPlugin(m.nvmllib)
+	if err != nil {
+		return nil, fmt.Errorf("failed to new nvidia memory plugin: %w", err)
+	}
+	plugins = append(plugins, memoryPlugin)
+	return plugins, nil
 }

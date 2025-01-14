@@ -37,5 +37,6 @@ import "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/p
 // Interface defines the API for the plugin manager package
 type Interface interface {
 	GetPlugins() ([]plugin.Interface, error)
+	GetVirtualPlugins() ([]plugin.Interface, error)
 	CreateCDISpecFile() error
 }

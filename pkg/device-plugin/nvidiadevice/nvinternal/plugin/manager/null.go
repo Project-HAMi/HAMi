@@ -47,3 +47,7 @@ func (m *null) GetPlugins() ([]plugin.Interface, error) {
 func (m *null) CreateCDISpecFile() error {
 	return nil
 }
+
+func (m *null) GetVirtualPlugins() ([]plugin.Interface, error) {
+	return nil, nil
+}
