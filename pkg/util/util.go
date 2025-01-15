@@ -30,6 +30,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -56,8 +57,29 @@ func init() {
 }
 
 func GetNode(nodename string) (*corev1.Node, error) {
+	if nodename == "" {
+		klog.ErrorS(nil, "Node name is empty")
+		return nil, fmt.Errorf("nodename is empty")
+	}
+
+	klog.InfoS("Fetching node", "nodeName", nodename)
 	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
-	return n, err
+	if err != nil {
+		switch {
+		case apierrors.IsNotFound(err):
+			klog.ErrorS(err, "Node not found", "nodeName", nodename)
+			return nil, fmt.Errorf("node %s not found", nodename)
+		case apierrors.IsUnauthorized(err):
+			klog.ErrorS(err, "Unauthorized to access node", "nodeName", nodename)
+			return nil, fmt.Errorf("unauthorized to access node %s", nodename)
+		default:
+			klog.ErrorS(err, "Failed to get node", "nodeName", nodename)
+			return nil, fmt.Errorf("failed to get node %s: %v", nodename, err)
+		}
+	}
+
+	klog.InfoS("Successfully fetched node", "nodeName", nodename)
+	return n, nil
 }
 
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
