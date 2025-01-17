@@ -2,10 +2,11 @@ ARG GOLANG_IMAGE
 ARG NVIDIA_IMAGE
 FROM $GOLANG_IMAGE AS build
 
-FROM $GOLANG_IMAGE AS GOBUILD
+FROM $GOLANG_IMAGE AS gobuild
+ARG VERSION
+
 ADD . /k8s-vgpu
 ARG GOPROXY=https://goproxy.cn,direct
-ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@latest
@@ -19,9 +20,10 @@ ENV NVIDIA_DRIVER_CAPABILITIES=utility
 ARG VERSION
 LABEL version="$VERSION"
 LABEL maintainer="opensource@4paradigm.com"
+
 COPY ./LICENSE /k8s-vgpu/LICENSE
-COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
-COPY --from=GOBUILD /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
+COPY --from=gobuild /k8s-vgpu/bin /k8s-vgpu/bin
+COPY --from=gobuild /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 COPY ./lib /k8s-vgpu/lib

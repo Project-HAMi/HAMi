@@ -1,10 +1,11 @@
-ARG GOLANG_IMAGE=golang:1.22.5-bullseye
-ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+ARG GOLANG_IMAGE
+ARG NVIDIA_IMAGE
 
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
-ARG GOPROXY
 ARG VERSION
+
+ARG GOPROXY=https://goproxy.cn,direct
 ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
