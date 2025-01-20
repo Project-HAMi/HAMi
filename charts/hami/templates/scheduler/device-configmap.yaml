@@ -94,7 +94,7 @@ data:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
-    iluvatar: 
+    iluvatar:
       resourceCountName: {{ .Values.iluvatarResourceName }}
       resourceMemoryName: {{ .Values.iluvatarResourceMem }}
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
