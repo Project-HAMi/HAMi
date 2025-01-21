@@ -1,13 +1,12 @@
-## Introduction
+# Introduction to huawei.com/Ascend910 support
 
-**We now support huawei.com/Ascend910 by implementing most device-sharing features as nvidia-GPU**, including:
+**HAMi now supports huawei.com/Ascend910 by implementing most device-sharing features as nvidia-GPU**, including:
 
-***NPU sharing***: Each task can allocate a portion of Ascend NPU instead of a whole NLU card, thus NPU can be shared among multiple tasks.
+* **_NPU sharing_**: Each task can allocate a portion of Ascend NPU instead of a whole NLU card, thus NPU can be shared among multiple tasks.
 
-***Device Memory Control***: Ascend NPUs can be allocated with certain device memory size and guarantee it that it does not exceed the boundary.
+* **_Device Memory Control_**: Ascend NPUs can be allocated with certain device memory size and guarantee it that it does not exceed the boundary.
 
-***Device Core Control***: Ascend NPUs can be allocated with certain compute cores and guarantee it that it does not exceed the boundary.
-
+* **_Device Core Control_**: Ascend NPUs can be allocated with certain compute cores and guarantee it that it does not exceed the boundary.
 
 ## Prerequisites
 
@@ -20,7 +19,8 @@
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
 * Tag Ascend-910B node with the following command
-```
+
+```bash
 kubectl label node {ascend-node} accelerator=huawei-Ascend910
 ```
 
@@ -28,12 +28,13 @@ kubectl label node {ascend-node} accelerator=huawei-Ascend910
 
 * Download yaml for Ascend-vgpu-device-plugin from HAMi Project [here](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml), and deploy
 
-```
+```bash
 wget https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/master/build/ascendplugin-910-hami.yaml
 kubectl apply -f ascendplugin-910-hami.yaml
 ```
 
 ## Custom ascend share configuration
+
 HAMi currently has a [built-in share configuration](https://github.com/Project-HAMi/HAMi/blob/master/charts/hami/templates/scheduler/device-configmap.yaml) for ascend.
 
 You can customize the ascend share configuration by following the steps below:
@@ -41,8 +42,10 @@ You can customize the ascend share configuration by following the steps below:
 <details>
   <summary>customize ascend config</summary>
 
-  ### Create a new directory files in hami charts, the directory structure is as follows
-  
+  ### Create a new directory in hami charts
+
+  The directory structure is as follows:
+
   ```bash
   tree -L 1
   .
@@ -52,11 +55,13 @@ You can customize the ascend share configuration by following the steps below:
   └── values.yaml
   ```
 
-  ### Create the device-config.yaml file, the content is as follows
+  ### Create device-config.yaml
+
+  The content is as follows:
 
   ```yaml
   vnpus:
-- chipName: 910B
+  - chipName: 910B
   commonWord: Ascend910A
   resourceName: huawei.com/Ascend910A
   resourceMemoryName: huawei.com/Ascend910A-memory
@@ -76,7 +81,7 @@ You can customize the ascend share configuration by following the steps below:
     - name: vir16
       memory: 17476
       aiCore: 16
-- chipName: 910B3
+  - chipName: 910B3
   commonWord: Ascend910B
   resourceName: huawei.com/Ascend910B
   resourceMemoryName: huawei.com/Ascend910B-memory
@@ -93,7 +98,7 @@ You can customize the ascend share configuration by following the steps below:
       memory: 32768
       aiCore: 10
       aiCPU: 3
-- chipName: 310P3
+  - chipName: 310P3
   commonWord: Ascend310P
   resourceName: huawei.com/Ascend310P
   resourceMemoryName: huawei.com/Ascend310P-memory
@@ -115,16 +120,19 @@ You can customize the ascend share configuration by following the steps below:
       aiCore: 4
       aiCPU: 4
   ```
-  ### Helm installation and updates will be based on the configuration in this file, overwriting the built-in configuration of Helm
-</details>
 
+  ### Install and update with Helm
+
+  Helm installation and updates will be based on the configuration in this file, overwriting the built-in configuration of Helm.
+
+</details>
 
 ## Running Ascend jobs
 
 Ascend 910Bs can now be requested by a container
 using the `huawei.com/ascend910` and `huawei.com/ascend910-memory` resource type:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -146,4 +154,4 @@ spec:
 
 1. Ascend-910B-sharing in init container is not supported.
 
-2. `huawei.com/Ascend910-memory` only work when `huawei.com/Ascend910=1`. 
+1. `huawei.com/Ascend910-memory` only work when `huawei.com/Ascend910=1`.
