@@ -20,7 +20,6 @@ import (
 	"os"
 	"sort"
 	"strings"
-	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 
@@ -233,43 +232,29 @@ func Observe(lister *nvidia.ContainerLister) {
 		utilizationSwitch := c.Info.GetUtilizationSwitch()
 		if CheckBlocking(utSwitchOn, priority, c) {
 			if recentKernel >= 0 {
-				klog.Infof("utSwitchon=%v", utSwitchOn)
-				klog.Infof("Setting Blocking to on %v", idx)
+				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
+				klog.V(5).Infof("Setting Blocking to on %v", idx)
 				c.Info.SetRecentKernel(-1)
 			}
 		} else {
 			if recentKernel < 0 {
-				klog.Infof("utSwitchon=%v", utSwitchOn)
-				klog.Infof("Setting Blocking to off %v", idx)
+				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
+				klog.V(5).Infof("Setting Blocking to off %v", idx)
 				c.Info.SetRecentKernel(0)
 			}
 		}
 		if CheckPriority(utSwitchOn, priority, c) {
 			if utilizationSwitch != 1 {
-				klog.Infof("utSwitchon=%v", utSwitchOn)
-				klog.Infof("Setting UtilizationSwitch to on %v", idx)
+				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
+				klog.V(5).Infof("Setting UtilizationSwitch to on %v", idx)
 				c.Info.SetUtilizationSwitch(1)
 			}
 		} else {
 			if utilizationSwitch != 0 {
-				klog.Infof("utSwitchon=%v", utSwitchOn)
-				klog.Infof("Setting UtilizationSwitch to off %v", idx)
+				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
+				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
 			}
 		}
-	}
-}
-
-func watchAndFeedback(lister *nvidia.ContainerLister) {
-	nvml.Init()
-	for {
-		time.Sleep(time.Second * 5)
-		err := lister.Update()
-		if err != nil {
-			klog.Errorf("Failed to update container list: %v", err)
-			continue
-		}
-		//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
-		Observe(lister)
 	}
 }
