@@ -189,9 +189,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		for _, podSingleDevice := range val.Devices {
 			for ctridx, ctrdevs := range podSingleDevice {
 				for _, ctrdevval := range ctrdevs {
-					klog.Infoln("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+					klog.V(4).InfoS("Collecting metrics",
+						"namespace", val.Namespace,
+						"podName", val.Name,
+						"deviceUUID", ctrdevval.UUID,
+						"usedCores", ctrdevval.Usedcores,
+						"usedMem", ctrdevval.Usedmem,
+						"nodeID", val.NodeID,
+					)
 					if len(ctrdevval.UUID) == 0 {
-						klog.Infof("UUID empty, omitted")
+						klog.Warningf("Device UUID is empty, omitting metric collection for namespace=%s, podName=%s, ctridx=%d, nodeID=%s",
+							val.Namespace, val.Name, ctridx, val.NodeID)
 						continue
 					}
 					ch <- prometheus.MustNewConstMetric(
@@ -214,6 +222,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							break
 						}
 					}
+					klog.V(4).InfoS("Total memory for device",
+						"deviceUUID", ctrdevval.UUID,
+						"totalMemory", totaldev,
+						"nodeID", val.NodeID,
+					)
 					if totaldev > 0 {
 						ch <- prometheus.MustNewConstMetric(
 							ctrvGPUdeviceAllocatedMemoryPercentageDesc,
