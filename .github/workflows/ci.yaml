@@ -9,7 +9,7 @@ on:
     branches-ignore:
       - 'dependabot/**'
 permissions:
-  contents: read  # for actions/checkout to fetch code  
+  contents: read  # for actions/checkout to fetch code
 
 env:
   REGISTRY: docker.io
@@ -29,7 +29,7 @@ jobs:
       - name: install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version-file: go.mod
       - name: verify license
         run: hack/verify-license.sh
       - name: go tidy
@@ -38,10 +38,53 @@ jobs:
         run: make lint
       - name: import alias
         run: hack/verify-import-aliases.sh
+
+  get_info:
+    name: get_info
+    runs-on: ubuntu-22.04
+    outputs:
+      version: ${{ steps.parse_version.outputs.version }}
+      e2e_run: ${{ steps.parse_code.outputs.e2e_run }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 3
+
+      - name: Parse the version
+        id: parse_version
+        run: |
+          value=$(make -f Makefile.defs print-version)
+          suffix="$(git rev-parse --short HEAD)"
+          tag="${value}-${suffix}"
+          echo "Generated tag: ${tag}"
+          echo "version=${tag}" >> $GITHUB_OUTPUT
+
+      # Check the code diff, ignore the docs and examples change
+      - name: Parse the code diff
+        id: parse_code
+        run: |
+          pr_commit=${{ github.event.pull_request.base.sha }}
+          base_commit=${{ github.sha }}
+          echo "PR commit: ${pr_commit}"
+          echo "Git log: $(git log ${pr_commit})"
+          echo "Base commit: ${base_commit}"
+          echo "Git log: $(git log ${base_commit})"
+          changed_files=$(git diff --name-only ${pr_commit} ${base_commit} -- . ':(exclude)docs/*' ':(exclude)examples/*' ':(exclude)*.md')
+          echo "Changed files: ${changed_files}"
+          if [ -n "$changed_files" ]; then
+            echo "Will run e2e-test"
+            echo "e2e_run=true" >> $GITHUB_OUTPUT
+          else
+            echo "Won't run e2e-test"
+            echo "e2e_run=false" >> $GITHUB_OUTPUT
+          fi
+
   test:
     name: Unit test
-    needs: lint # rely on lint successful completion
-    runs-on: ubuntu-latest
+    needs: [ lint, get_info ] # rely on lint & get_info successful completion
+    runs-on: ubuntu-22.04
+    if: needs.get_info.outputs.e2e_run == 'true'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -53,7 +96,7 @@ jobs:
       - name: Install Go
         uses: actions/setup-go@v5
         with:
-          go-version: "1.21"
+          go-version-file: go.mod
       - run: make tidy
       - run: make test
       - name: Upload coverage to Codecov
@@ -71,11 +114,11 @@ jobs:
           fail_ci_if_error: false
           verbose: true
 
-
   build:
-    name: compile
-    runs-on: ubuntu-latest
-    needs: test # rely on test successful completion
+    name: Compile
+    needs: [ test, get_info ]
+    runs-on: ubuntu-22.04
+    if: needs.get_info.outputs.e2e_run == 'true'
     steps:
       - uses: actions/checkout@master
       - name: Free disk space
@@ -88,22 +131,16 @@ jobs:
           echo "=========after clean up, the left CI disk space"
           df -h
 
-      - name: Get the version
-        id: get_version
-        run: |
-          tag="$(git rev-parse --short HEAD)"
-          echo ::set-output name=VERSION::${tag}
-
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      
+
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
           basePath: # optional, default is .
-          submodulePath: libvgpu 
+          submodulePath: libvgpu
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -120,17 +157,94 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@v6.10.0
+        uses: docker/build-push-action@v6.11.0
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: ${{ env.BUILD_PLATFORM }}
+          labels: ${{ needs.get_info.outputs.version }}
           build-args: |
-            VERSION=${{ steps.get_version.outputs.VERSION }}
+            VERSION=${{ needs.get_info.outputs.version }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
-          tags: ${{ steps.meta.outputs.tags }}
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
+          load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
+
+      - name: List images
+        run: |
+          docker images
+
+      - name: Save Docker image to image.tar
+        run: |
+          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
+
+      - name: Upload image.tar as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hami-image
+          path: image.tar
+          retention-days: 5
+          if-no-files-found: error
+
+  # packages tgz from /charts of original branch, deploy to /charts of target branch
+  package_chart:
+    runs-on: ubuntu-22.04
+    needs: [ test, get_info ]
+    if: needs.get_info.outputs.e2e_run == 'true'
+    env:
+      HELM_VERSION: v3.8.1
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ needs.get_ref.outputs.ref }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "$GITHUB_ACTOR"
+          git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
+
+      - name: Install Helm
+        uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+
+      - name: Lint helm chart
+        run: |
+          make lint_chart
+
+      - name: Package Chart
+        continue-on-error: false
+        env:
+          VERSION: ${{ needs.get_info.outputs.version }}
+        run: |
+          cd charts
+          make clean
+          make
+          if ! ls *.tgz &>/dev/null ; then
+            echo "failed to generate chart"
+            exit 1
+          fi
+          cd ..
+          mkdir -p tmp
+          mv charts/*.tgz tmp
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4.4.3
+        with:
+          name: chart_package_artifact
+          path: tmp/*
+          retention-days: 5
+          if-no-files-found: error
+
+  # execute a full e2e test when hami code merge
+  e2e_test:
+    uses: ./.github/workflows/call-e2e.yaml
+    needs: [ package_chart, get_info, build ]
+    if: needs.get_info.outputs.e2e_run == 'true'
+    with:
+      ref: ${{ needs.get_info.outputs.version }}
+      type: "pullrequest"

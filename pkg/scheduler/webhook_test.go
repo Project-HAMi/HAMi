@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/serializer"
+	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -94,14 +95,21 @@ func TestHandle(t *testing.T) {
 
 func TestPodHasNodeName(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
-	device.InitDevicesWithConfig(&device.Config{
+	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
 			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
 			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
 		},
-	})
+	}
+
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	// create a Pod object
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

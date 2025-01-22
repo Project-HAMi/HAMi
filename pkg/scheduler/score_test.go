@@ -19,26 +19,34 @@ package scheduler
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestMain(m *testing.M) {
-	device.InitDevicesWithConfig(&device.Config{
+	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
 			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
 			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
 		},
-	})
+	}
+
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	m.Run()
 }
 
@@ -75,8 +83,9 @@ func Test_calcScore(t *testing.T) {
 			task  *corev1.Pod
 		}
 		wants struct {
-			want *policy.NodeScoreList
-			err  error
+			want        *policy.NodeScoreList
+			failedNodes map[string]string
+			err         error
 		}
 	}{
 		{
@@ -146,8 +155,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -241,8 +251,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -352,8 +363,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -463,8 +475,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -574,8 +587,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -692,8 +706,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -817,8 +832,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -952,8 +968,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -1071,8 +1088,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -1190,8 +1208,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -1323,8 +1342,9 @@ func Test_calcScore(t *testing.T) {
 				},
 			},
 			wants: struct {
-				want *policy.NodeScoreList
-				err  error
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
 			}{
 				want: &policy.NodeScoreList{
 					Policy: util.NodeSchedulerPolicyBinpack.String(),
@@ -1360,18 +1380,104 @@ func Test_calcScore(t *testing.T) {
 				err: nil,
 			},
 		},
+		{
+			name: "one node one device one pod one container use one device and not enough resource,node should be failed.",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  util.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  50, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+				},
+				nums: util.PodDeviceRequests{
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test1",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy:   util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{},
+				},
+				failedNodes: map[string]string{
+					"node1": "node not fit pod",
+				},
+				err: nil,
+			},
+		},
 	}
 	s := NewScheduler()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task)
+			failedNodes := map[string]string{}
+			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task, failedNodes)
 			assert.DeepEqual(t, test.wants.err, gotErr)
 			wantMap := make(map[string]*policy.NodeScore)
 			for index, node := range (*(test.wants.want)).NodeList {
 				wantMap[node.NodeID] = (*(test.wants.want)).NodeList[index]
 			}
-			if gotErr == nil && len(got.NodeList) == 0 {
+			if gotErr == nil && len(got.NodeList) == 0 && len(failedNodes) == 0 {
 				t.Fatal("empty error and empty result")
+			}
+			if len(failedNodes) != 0 {
+				assert.DeepEqual(t, test.wants.failedNodes, failedNodes)
+				return
 			}
 			for i := 0; i < got.Len(); i++ {
 				gotI := (*(got)).NodeList[i]

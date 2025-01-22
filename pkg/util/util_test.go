@@ -17,11 +17,18 @@ limitations under the License.
 package util
 
 import (
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var inRequestDevices map[string]string
@@ -32,13 +39,74 @@ func init() {
 }
 
 func TestExtractMigTemplatesFromUUID(t *testing.T) {
-	originuuid := "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]"
-	expectedTmpID := 7
-	expectedPosition := 9
-	tempid, pos := ExtractMigTemplatesFromUUID(originuuid)
+	testCases := []struct {
+		name          string
+		uuid          string
+		expectedTmpID int
+		expectedPos   int
+		expectError   bool
+	}{
+		{
+			name:          "Valid UUID",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9]",
+			expectedTmpID: 7,
+			expectedPos:   9,
+			expectError:   false,
+		},
+		{
+			name:          "Invalid UUID format - missing '[' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b32693137-9]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid UUID format - missing ']' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-9",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid UUID format - missing '-' delimiter",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[79]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid template index",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[a-9]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+		{
+			name:          "Invalid position",
+			uuid:          "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313[7-b]",
+			expectedTmpID: -1,
+			expectedPos:   -1,
+			expectError:   true,
+		},
+	}
 
-	if tempid != expectedTmpID || pos != expectedPosition {
-		t.Errorf("Expected %d:%d, got %d:%d", expectedTmpID, expectedPosition, tempid, pos)
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			tempid, pos, err := ExtractMigTemplatesFromUUID(tc.uuid)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected an error but got none")
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Did not expect an error but got: %v", err)
+				}
+				if tempid != tc.expectedTmpID || pos != tc.expectedPos {
+					t.Errorf("Expected %d:%d, got %d:%d", tc.expectedTmpID, tc.expectedPos, tempid, pos)
+				}
+			}
+		})
 	}
 }
 
@@ -193,7 +261,6 @@ func TestMarshalNodeDevices(t *testing.T) {
 		args args
 		want string
 	}{
-		// TODO: Add test cases.
 		{
 			name: "test one",
 			args: args{
@@ -210,13 +277,57 @@ func TestMarshalNodeDevices(t *testing.T) {
 					},
 				},
 			},
+			want: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"numa\":0,\"health\":true}]",
+		},
+		{
+			name: "test multiple",
+			args: args{
+				dlist: []*DeviceInfo{
+					{
+						Index:   1,
+						ID:      "id-1",
+						Count:   1,
+						Devmem:  1024,
+						Devcore: 10,
+						Type:    "type",
+						Numa:    0,
+						Health:  true,
+					},
+					{
+						Index:   2,
+						ID:      "id-2",
+						Count:   2,
+						Devmem:  2048,
+						Devcore: 20,
+						Type:    "type2",
+						Numa:    1,
+						Health:  false,
+					},
+				},
+			},
+			want: "[{\"index\":1,\"id\":\"id-1\",\"count\":1,\"devmem\":1024,\"devcore\":10,\"type\":\"type\",\"numa\":0,\"health\":true},{\"index\":2,\"id\":\"id-2\",\"count\":2,\"devmem\":2048,\"devcore\":20,\"type\":\"type2\",\"numa\":1,\"health\":false}]",
+		},
+		{
+			name: "test empty",
+			args: args{
+				dlist: []*DeviceInfo{},
+			},
+			want: "[]",
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := MarshalNodeDevices(tt.args.dlist)
-			//fmt.Println(got)
-			assert.Assert(t, got != "")
+
+			var gotDeviceInfo, wantDeviceInfo []*DeviceInfo
+			// Compare the JSON contents by unmarshalling both got and want
+			err := json.Unmarshal([]byte(got), &gotDeviceInfo)
+			assert.NilError(t, err)
+
+			err = json.Unmarshal([]byte(tt.want), &wantDeviceInfo)
+			assert.NilError(t, err)
+
+			assert.DeepEqual(t, gotDeviceInfo, wantDeviceInfo)
 		})
 	}
 }
@@ -418,6 +529,138 @@ func Test_EncodeNodeDevices(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := EncodeNodeDevices(test.args)
 			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
+
+func Test_CheckHealth(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			devType string
+			n       corev1.Node
+		}
+		want1 bool
+		want2 bool
+	}{
+		{
+			name: "Requesting state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Deleted state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Unknown state",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "Requesting state expired",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: false,
+			want2: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1, result2 := CheckHealth(test.args.devType, &test.args.n)
+			assert.Equal(t, result1, test.want1)
+			assert.Equal(t, result2, test.want2)
+		})
+	}
+}
+
+func TestMarkAnnotationsToDelete(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
+	}, metav1.CreateOptions{})
+	type args struct {
+		devType string
+		nn      string
+	}
+	tests := []struct {
+		name    string
+		args    args
+		wantErr bool
+	}{
+		{
+			name: "node not found",
+			args: args{
+				devType: "huawei.com/Ascend910",
+				nn:      "node-worker1",
+			},
+			wantErr: true,
+		},
+		{
+			name: "mark annotations to delete",
+			args: args{
+				devType: "huawei.com/Ascend910",
+				nn:      "node-worker2",
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := MarkAnnotationsToDelete(tt.args.devType, tt.args.nn); (err != nil) != tt.wantErr {
+				t.Errorf("MarkAnnotationsToDelete() error = %v, wantErr %v", err, tt.wantErr)
+			}
 		})
 	}
 }

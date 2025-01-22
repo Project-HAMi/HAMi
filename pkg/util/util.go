@@ -30,6 +30,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -56,8 +57,29 @@ func init() {
 }
 
 func GetNode(nodename string) (*corev1.Node, error) {
+	if nodename == "" {
+		klog.ErrorS(nil, "Node name is empty")
+		return nil, fmt.Errorf("nodename is empty")
+	}
+
+	klog.InfoS("Fetching node", "nodeName", nodename)
 	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
-	return n, err
+	if err != nil {
+		switch {
+		case apierrors.IsNotFound(err):
+			klog.ErrorS(err, "Node not found", "nodeName", nodename)
+			return nil, fmt.Errorf("node %s not found", nodename)
+		case apierrors.IsUnauthorized(err):
+			klog.ErrorS(err, "Unauthorized to access node", "nodeName", nodename)
+			return nil, fmt.Errorf("unauthorized to access node %s", nodename)
+		default:
+			klog.ErrorS(err, "Failed to get node", "nodeName", nodename)
+			return nil, fmt.Errorf("failed to get node %s: %v", nodename, err)
+		}
+	}
+
+	klog.InfoS("Successfully fetched node", "nodeName", nodename)
+	return n, nil
 }
 
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
@@ -371,7 +393,7 @@ func InitKlogFlags() *flag.FlagSet {
 func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	handshake := n.Annotations[HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
+		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
@@ -382,7 +404,7 @@ func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 
 func MarkAnnotationsToDelete(devType string, nn string) error {
 	tmppat := make(map[string]string)
-	tmppat[devType] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+	tmppat[devType] = "Deleted_" + time.Now().Format(time.DateTime)
 	n, err := GetNode(nn)
 	if err != nil {
 		klog.Errorln("get node failed", err.Error())
@@ -391,12 +413,36 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 	return PatchNodeAnnotations(n, tmppat)
 }
 
-func ExtractMigTemplatesFromUUID(uuid string) (int, int) {
-	tmp := strings.Split(uuid, "[")[1]
-	tmp = strings.Split(tmp, "]")[0]
-	templateIdx, _ := strconv.Atoi(strings.Split(tmp, "-")[0])
-	pos, _ := strconv.Atoi(strings.Split(tmp, "-")[1])
-	return templateIdx, pos
+// Enhanced ExtractMigTemplatesFromUUID with error handling.
+func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
+	parts := strings.Split(uuid, "[")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '[' delimiter")
+	}
+
+	tmp := parts[1]
+	parts = strings.Split(tmp, "]")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing ']' delimiter")
+	}
+
+	tmp = parts[0]
+	parts = strings.Split(tmp, "-")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '-' delimiter")
+	}
+
+	templateIdx, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid template index: %v", err)
+	}
+
+	pos, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid position: %v", err)
+	}
+
+	return templateIdx, pos, nil
 }
 
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {

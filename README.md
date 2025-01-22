@@ -1,4 +1,4 @@
-English version|[中文版](README_cn.md)
+English version | [中文版](README_cn.md)
 
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
 
@@ -127,7 +127,7 @@ Verify your installation using the following command:
 kubectl get pods -n kube-system
 ```
 
-If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](https://github.com/Project-HAMi/HAMi/blob/newprofile/examples/nvidia/default_use.yaml) 
+If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](examples/nvidia/default_use.yaml) 
 
 ### WebUI
 
@@ -157,7 +157,7 @@ Grafana dashboard [example](docs/dashboard.md)
 
 ## RoadMap, Governance & Contributing
 
-The project is governed by a group of [Maintainers and Committers](https://github.com/Project-HAMi/HAMi/blob/master/AUTHORS). How they are selected and govern is outlined in our [Governance Document](https://github.com/Project-HAMi/community/blob/main/governance.md).
+The project is governed by a group of [Maintainers](./MAINTAINERS.md) and [Contributors](./AUTHORS.md). How they are selected and govern is outlined in our [Governance Document](https://github.com/Project-HAMi/community/blob/main/governance.md).
 
 If you're interested in being a contributor and want to get involved in developing the HAMi code, please see [CONTRIBUTING](CONTRIBUTING.md) for details on submitting patches and the contribution workflow.
 
@@ -189,3 +189,7 @@ If you have any questions, please feel free to reach out to us through the follo
 ## License
 
 HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
+
+## Star History
+
+[![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)
