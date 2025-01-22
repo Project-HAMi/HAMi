@@ -24,6 +24,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/flag"
 	"github.com/Project-HAMi/HAMi/pkg/version"
 
 	"github.com/julienschmidt/httprouter"
@@ -41,6 +42,7 @@ var (
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
 		Run: func(cmd *cobra.Command, args []string) {
+			flag.PrintPFlags(cmd.Flags())
 			start()
 		},
 	}

@@ -47,20 +47,19 @@ import (
 	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
+	"github.com/google/uuid"
+	"golang.org/x/net/context"
+	"google.golang.org/grpc"
+	"k8s.io/apimachinery/pkg/util/yaml"
+	"k8s.io/klog/v2"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
-
-	"github.com/google/uuid"
-	"golang.org/x/net/context"
-	"google.golang.org/grpc"
-
-	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/klog/v2"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
@@ -151,7 +150,10 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
-	device.InitDevicesWithConfig(sConfig)
+	// Initialize devices with configuration
+	if err := device.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("failed to initialize devices: %v", err)
+	}
 	return &NvidiaDevicePlugin{
 		rm:                   resourceManager,
 		config:               config,
@@ -390,7 +392,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
-	klog.V(5).Infof("allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
@@ -461,7 +463,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				os.Chmod("/tmp/vgpulock", 0777)
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
-						HostPath: hostHookPath + "/vgpu/libvgpu.so",
+						HostPath: GetLibPath(),
 						ReadOnly: true},
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
 						HostPath: cacheFileHostDirectory,

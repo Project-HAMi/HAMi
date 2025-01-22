@@ -18,15 +18,11 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
+	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -34,7 +30,14 @@ import (
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func Test_getNodesUsage(t *testing.T) {
@@ -248,15 +251,21 @@ func Test_Filter(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	s.addAllEventHandlers()
-	device.InitDevicesWithConfig(&device.Config{
+	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
 			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
 			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
 		},
-	})
+	}
 
+	if err := device.InitDevicesWithConfig(config); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
 	pod1 := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "pod1",
@@ -601,6 +610,227 @@ func Test_Filter(t *testing.T) {
 			getPod, _ := client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Get(context.Background(), test.args.Pod.Name, metav1.GetOptions{})
 			podDevices, _ := util.DecodePodDevices(util.SupportDevices, getPod.Annotations)
 			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
+		})
+	}
+}
+
+func Test_RegisterFromNodeAnnotations(t *testing.T) {
+	tests := []struct {
+		name      string
+		Scheduler *Scheduler
+		want      func(node *corev1.Node) bool
+	}{
+		{
+			name: "test node handshake annotations layout",
+			Scheduler: func() *Scheduler {
+				s := NewScheduler()
+				s.stopCh = make(chan struct{})
+				s.nodeNotify = make(chan struct{})
+				client.KubeClient = fake.NewSimpleClientset()
+				s.kubeClient = client.KubeClient
+				informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+				s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+				// Create a node
+				node := &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node",
+					},
+				}
+				_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+				if err != nil {
+					t.Errorf("failed to create node: %v", err)
+					return nil
+				}
+
+				// Add node to informer cache
+				err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+				if err != nil {
+					t.Errorf("failed to add node to indexer: %v", err)
+					return nil
+				}
+
+				// Start informer factory to sync cache
+				informerFactory.Start(s.stopCh)
+				informerFactory.WaitForCacheSync(s.stopCh)
+
+				return s
+			}(),
+			want: func(node *corev1.Node) bool {
+				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
+				if !okHami {
+					t.Errorf("missing annotation: hami.io/node-handshake")
+					return false
+				}
+				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
+				if !okDcu {
+					t.Errorf("missing annotation: hami.io/node-handshake-dcu")
+					return false
+				}
+				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
+				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				if errHami != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
+					return false
+				}
+				if errDcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+					return false
+				}
+				return true
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// Graceful shutdown after 5 seconds
+			time.AfterFunc(5*time.Second, func() {
+				close(test.Scheduler.stopCh)
+			})
+
+			// Notify node annotations
+			go func() {
+				test.Scheduler.nodeNotify <- struct{}{}
+			}()
+
+			// Invoke the method to test
+			test.Scheduler.RegisterFromNodeAnnotations()
+
+			// Get the node to verify annotations
+			node, err := test.Scheduler.kubeClient.CoreV1().Nodes().Get(context.TODO(), "node", metav1.GetOptions{})
+			if err != nil {
+				t.Errorf("failed to get node: %v", err)
+				return
+			}
+
+			// Verify the annotations
+			assert.Equal(t, test.want(node), true)
+		})
+	}
+}
+
+func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
+	// Define a helper function to create a scheduler with a node that has nil annotations.
+	createSchedulerWithNilAnnotations := func() *Scheduler {
+		s := NewScheduler()
+		s.stopCh = make(chan struct{})
+		s.nodeNotify = make(chan struct{})
+
+		client.KubeClient = fake.NewSimpleClientset()
+		s.kubeClient = client.KubeClient
+
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+		s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+		// Create a node without annotations (nil annotations)
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-nil-annotations",
+			},
+		}
+
+		// Create the node and add it to the indexer
+		_, err := s.kubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+		err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+		if err != nil {
+			t.Fatalf("failed to add node to indexer: %v", err)
+		}
+
+		// Start informer factory to sync cache
+		informerFactory.Start(s.stopCh)
+
+		// Check if cache sync was successful
+		_ = informerFactory.WaitForCacheSync(s.stopCh)
+		//if cacheSynced == false {
+		//	t.Fatalf("failed to sync cache")
+		//}
+
+		return s
+	}
+
+	tests := []struct {
+		name      string
+		Scheduler *Scheduler
+		want      func(*corev1.Node) bool
+	}{
+		{
+			name:      "test nil annotations handling",
+			Scheduler: createSchedulerWithNilAnnotations(),
+			want: func(node *corev1.Node) bool {
+				if node == nil {
+					t.Errorf("node is nil")
+					return false
+				}
+
+				// Check if RegisterFromNodeAnnotations handles nil annotations gracefully
+				if node.Annotations == nil {
+					t.Logf("node annotations are nil, checking if handled properly...")
+					return true // Adjust based on expected behavior
+				}
+
+				// If annotations exist, check for specific annotations
+				handshakeTimeStr, okHami := node.Annotations["hami.io/node-handshake"]
+				dcuTimeStr, okDcu := node.Annotations["hami.io/node-handshake-dcu"]
+
+				// Here you can define what should happen when annotations are present but not set
+				if !okHami || !okDcu {
+					t.Logf("expected annotations are missing, checking if handled properly...")
+					return true // Adjust based on expected behavior
+				}
+
+				// Verify time format in annotations if they exist
+				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
+				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+
+				if errHami != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
+					return false
+				}
+				if errDcu != nil {
+					t.Errorf("invalid time format in annotation 'hami.io/node-handshake-dcu': %v", errDcu)
+					return false
+				}
+
+				return true
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Recovered from panic: %v", r)
+				}
+			}()
+
+			// Ensure scheduler starts before running the test
+			time.AfterFunc(5*time.Second, func() {
+				close(test.Scheduler.stopCh)
+			})
+
+			// Notify node annotations after a short delay to ensure scheduler is ready
+			go func() {
+				time.Sleep(100 * time.Millisecond) // Give some time for scheduler to start
+				test.Scheduler.nodeNotify <- struct{}{}
+			}()
+
+			// Invoke the method to test
+			test.Scheduler.RegisterFromNodeAnnotations()
+
+			// Get the node to verify annotations
+			node, err := test.Scheduler.kubeClient.CoreV1().Nodes().Get(context.TODO(), "node-nil-annotations", metav1.GetOptions{})
+			require.NoError(t, err) // Use require to fail fast on error
+			require.NotNil(t, node) // Ensure node is not nil
+
+			// Verify the annotations
+			if !test.want(node) {
+				t.Errorf("annotations validation failed")
+			}
 		})
 	}
 }

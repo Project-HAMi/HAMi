@@ -9,6 +9,7 @@ docker:
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
+	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
 
@@ -19,6 +20,7 @@ dockerwithlib:
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
+	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile.withlib -t ${IMG_TAG}
 
@@ -35,7 +37,7 @@ $(CMDS):
 	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
 
 $(DEVICES):
-	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
+	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info.version=$(VERSION)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
 
 clean:
 	$(GO) clean -r -x ./cmd/...
@@ -73,3 +75,15 @@ lint_chart:
           aquasec/trivy:$(TRIVY_VERSION) config --exit-code 1  --severity $(LINT_TRIVY_SEVERITY_LEVEL) /tmp/src/charts  ; \
       (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
       echo "chart trivy check: pass"
+
+.PHONY: e2e-env-setup
+e2e-env-setup:
+	./hack/e2e-test-setup.sh
+
+.PHONY: helm-deploy
+helm-deploy:
+	./hack/deploy-helm.sh "${E2E_TYPE}" "${KUBE_CONF}" "${HAMI_VERSION}"
+
+.PHONY: e2e-test
+e2e-test:
+	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"

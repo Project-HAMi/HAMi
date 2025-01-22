@@ -19,13 +19,13 @@ import (
 	"sort"
 	"strings"
 
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-
-	corev1 "k8s.io/api/core/v1"
-	"k8s.io/klog/v2"
 )
 
 func viewStatus(usage NodeUsage) {
@@ -195,7 +195,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 	return true, 0
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if annos != nil {
 		if value, ok := annos[policy.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -236,6 +236,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 			ctrfit = fit
 			if !fit {
 				klog.InfoS("calcScore:node not fit pod", "pod", klog.KObj(task), "node", nodeID)
+				failedNodes[nodeID] = "node not fit pod"
 				break
 			}
 		}

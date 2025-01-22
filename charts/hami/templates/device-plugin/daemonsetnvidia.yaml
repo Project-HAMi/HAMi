@@ -45,7 +45,7 @@ spec:
           lifecycle:
             postStart:
               exec:
-                command: ["/bin/sh","-c", {{ printf "cp -f /k8s-vgpu/lib/nvidia/* %s/vgpu/" .Values.global.gpuHookPath | quote }}]
+                command: ["/bin/sh","-c", {{ printf "/k8s-vgpu/bin/vgpu-init.sh %s/vgpu/" .Values.global.gpuHookPath | quote }}]
           command:
             - nvidia-device-plugin
             - --config-file=/device-config.yaml
@@ -63,12 +63,18 @@ spec:
               value: all
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
+            {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}
+            - name: PASS_DEVICE_SPECS
+              value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
+            {{- end }}
           securityContext:
             privileged: true
             allowPrivilegeEscalation: true
             capabilities:
               drop: ["ALL"]
               add: ["SYS_ADMIN"]
+          resources:
+          {{- toYaml .Values.devicePlugin.resources | nindent 12 }}
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
@@ -102,7 +108,9 @@ spec:
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
             - name: HOOK_PATH
-              value: {{ .Values.global.gpuHookPath }}/vgpu              
+              value: {{ .Values.global.gpuHookPath }}/vgpu
+          resources:
+          {{- toYaml .Values.devicePlugin.vgpuMonitor.resources | nindent 12 }}
           volumeMounts:
             - name: ctrs
               mountPath: {{ .Values.devicePlugin.monitorctrPath }}

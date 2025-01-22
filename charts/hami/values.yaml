@@ -61,6 +61,15 @@ scheduler:
     image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
     imageTag: ""
     imagePullPolicy: IfNotPresent
+    resources: {}
+      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
+      # and remove the curly braces after 'resources:'.
+#      limits:
+#        cpu: 1000m
+#        memory: 1000Mi
+#      requests:
+#        cpu: 100m
+#        memory: 100Mi
     extraNewArgs:
       - --config=/config/config.yaml
       - -v=4
@@ -70,6 +79,15 @@ scheduler:
   extender:
     image: "projecthami/hami"
     imagePullPolicy: IfNotPresent
+    resources: {}
+      # If you do want to specify resources, uncomment the following lines, adjust them as necessary,
+      # and remove the curly braces after 'resources:'.
+#      limits:
+#        cpu: 1000m
+#        memory: 1000Mi
+#      requests:
+#        cpu: 100m
+#        memory: 100Mi
     extraArgs:
       - --debug
       - -v=4
@@ -118,8 +136,9 @@ devicePlugin:
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
+  passDeviceSpecsEnabled: true
   extraArgs:
-    - -v=false
+    - -v=4
   
   service:
     httpPort: 31992
@@ -139,6 +158,27 @@ devicePlugin:
     type: RollingUpdate
     rollingUpdate:
       maxUnavailable: 1
+
+  resources: {}
+    # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
+    # and remove the curly braces after 'resources:'.
+#    limits:
+#       cpu: 1000m
+#       memory: 1000Mi
+#    requests:
+#      cpu: 100m
+#      memory: 100Mi
+
+  vgpuMonitor:
+    resources: {}
+      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
+      # and remove the curly braces after 'resources:'.
+#      limits:
+#        cpu: 1000m
+#        memory: 1000Mi
+#      requests:
+#        cpu: 100m
+#        memory: 100Mi
 
 devices:
   mthreads:
