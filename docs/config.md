@@ -16,31 +16,6 @@ You can update these configurations using one of the following methods:
 
 2. Modify Helm Chart: Update the corresponding values in the [ConfigMap](../charts/hami/templates/scheduler/device-configmap.yaml), then reapply the Helm Chart to regenerate the ConfigMap.
 
-* `nvidia.deviceMemoryScaling:` 
-  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `nvidia.deviceMemoryScaling` argument to *S*, vGPUs splitted by this GPU will totally get `S * M` memory in Kubernetes with our device plugin.
-* `nvidia.deviceSplitCount:` 
-  Integer type, by default: equals 10. Maximum tasks assigned to a simple GPU device.
-* `nvidia.migstrategy:`
-  String type, "none" for ignoring MIG features or "mixed" for allocating MIG device by seperate resources. Default "none"
-* `nvidia.disablecorelimit:`
-  String type, "true" for disable core limit, "false" for enable core limit, default: false
-* `nvidia.defaultMem:` 
-  Integer type, by default: 0. The default device memory of the current task, in MB.'0' means use 100% device memory
-* `nvidia.defaultCores:` 
-  Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
-* `nvidia.defaultGPUNum:`
-  Integer type, by default: equals 1, if configuration value is 0, then the configuration value will not take effect and will be filtered. when a user does not set nvidia.com/gpu this key in pod resource, webhook should check nvidia.com/gpumem、resource-mem-percentage、nvidia.com/gpucores this three key, anyone a key having value, webhook should add nvidia.com/gpu key and this default value to resources limits map.
-* `nvidia.resourceCountName:`
-  String type, vgpu number resource name, default: "nvidia.com/gpu"
-* `nvidia.resourceMemoryName:`
-  String type, vgpu memory size resource name, default: "nvidia.com/gpumem"
-* `nvidia.resourceMemoryPercentageName:`
-  String type, vgpu memory fraction resource name, default: "nvidia.com/gpumem-percentage" 
-* `nvidia.resourceCoreName:`
-  String type, vgpu cores resource name, default: "nvidia.com/cores"
-* `nvidia.resourcePriorityName:`
-  String type, vgpu task priority name, default: "nvidia.com/priority"
-
 ## Chart Configs: parameters
 
 * `nvidia.deviceMemoryScaling`: 
