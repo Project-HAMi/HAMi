@@ -189,6 +189,7 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 	if err != nil {
 		klog.Error("marshal failed", err.Error())
 	}
+	klog.Infoln("Applying data=", string(data))
 	os.WriteFile("/tmp/migconfig.yaml", data, os.ModePerm)
 	cmd := exec.Command("nvidia-mig-parted", "apply", "-f", "/tmp/migconfig.yaml")
 	var stdout, stderr bytes.Buffer
@@ -232,11 +233,20 @@ func (nv *NvidiaDevicePlugin) GenerateMigTemplate(devtype string, devindex int, 
 
 						if !ok || currentCount != expectedCount {
 							needsreset = true
-							nv.migCurrent.MigConfigs["current"][migidx].MigDevices[migTemplateEntry.Name] = expectedCount
-							klog.InfoS("updated mig device count", "TemplateName", migTemplateEntry.Name, "Count", expectedCount)
+							klog.InfoS("updated mig device count", "Template", v)
 						} else {
-							nv.migCurrent.MigConfigs["current"][migidx].MigDevices[migTemplateEntry.Name]++
 							klog.InfoS("incremented mig device count", "TemplateName", migTemplateEntry.Name, "Count", currentCount+1)
+						}
+					}
+
+					if needsreset {
+						for k := range nv.migCurrent.MigConfigs["current"][migidx].MigDevices {
+							delete(nv.migCurrent.MigConfigs["current"][migidx].MigDevices, k)
+						}
+
+						for _, migTemplateEntry := range v {
+							nv.migCurrent.MigConfigs["current"][migidx].MigDevices[migTemplateEntry.Name] = migTemplateEntry.Count
+							nv.migCurrent.MigConfigs["current"][migidx].MigEnabled = true
 						}
 					}
 					break
