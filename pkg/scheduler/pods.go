@@ -139,7 +139,7 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 			"devices", pi.Devices,
 		)
 	}
-	klog.InfoS("Listed pod infos",
+	klog.V(5).InfoS("Listed pod infos",
 		"podCount", len(pods),
 	)
 	return pods
