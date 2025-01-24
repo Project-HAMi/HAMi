@@ -95,7 +95,7 @@ The list of prerequisites for running the NVIDIA device plugin is described belo
 - nvidia-docker version > 2.0
 - default runtime configured as nvidia for containerd/docker/cri-o container runtime
 - Kubernetes version >= 1.16
-- glibc >= 2.17 & glibc < 2.3.0
+- glibc >= 2.17 & glibc < 2.30
 - kernel version >= 3.10
 - helm > 3.0
 
