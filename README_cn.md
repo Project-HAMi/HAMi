@@ -91,7 +91,7 @@ HAMi 由多个组件组成，包括统一的 mutatingwebhook、统一的调度�
 - nvidia-docker 版本 > 2.0
 - containerd/docker/cri-o 容器运行时的默认运行时配置为 nvidia
 - Kubernetes 版本 >= 1.16
-- glibc >= 2.17 & glibc < 2.3.0
+- glibc >= 2.17 & glibc < 2.30
 - 内核版本 >= 3.10
 - helm > 3.0
 
