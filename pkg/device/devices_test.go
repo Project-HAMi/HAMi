@@ -106,6 +106,23 @@ vnpus:
       memory: 32768
       aiCore: 10
       aiCPU: 3
+- chipName: 910B4
+  commonWord: Ascend910B4
+  resourceName: huawei.com/Ascend910B4
+  resourceMemoryName: huawei.com/Ascend910B4-memory
+  memoryAllocatable: 32768
+  memoryCapacity: 32768
+  aiCore: 20
+  aiCPU: 7
+  templates:
+    - name: vir05_1c_8g
+      memory: 8192
+      aiCore: 5
+      aiCPU: 1
+    - name: vir10_3c_16g
+      memory: 16384
+      aiCore: 10
+      aiCPU: 3
 - chipName: 310P3
   commonWord: Ascend310P
   resourceName: huawei.com/Ascend310P
@@ -238,6 +255,20 @@ func createVNPUConfigs() []ascend.VNPUConfig {
 			Templates: []ascend.Template{
 				{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
 				{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
+			},
+		},
+		{
+			ChipName:           "910B4",
+			CommonWord:         "Ascend910B4",
+			ResourceName:       "huawei.com/Ascend910B4",
+			ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+			MemoryAllocatable:  32768,
+			MemoryCapacity:     32768,
+			AICore:             20,
+			AICPU:              7,
+			Templates: []ascend.Template{
+				{Name: "vir05_1c_8g", Memory: 8192, AICore: 5, AICPU: 1},
+				{Name: "vir10_3c_16g", Memory: 16384, AICore: 10, AICPU: 3},
 			},
 		},
 		{
