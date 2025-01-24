@@ -164,7 +164,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 	for {
 		select {
 		case <-s.nodeNotify:
-			klog.InfoS("Received node notification")
+			klog.V(5).InfoS("Received node notification")
 		case <-ticker.C:
 			klog.InfoS("Ticker triggered")
 		case <-s.stopCh:
@@ -181,17 +181,17 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
 			continue
 		}
-		klog.InfoS("Listed nodes", "nodeCount", len(rawNodes))
+		klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
 		var nodeNames []string
 		for _, val := range rawNodes {
 			nodeNames = append(nodeNames, val.Name)
-			klog.InfoS("Processing node", "nodeName", val.Name)
+			klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
 			for devhandsk, devInstance := range device.GetDevices() {
-				klog.InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
+				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
 
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
-				klog.InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
+				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
 				if !health {
 					klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -208,7 +208,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					continue
 				}
 				if !needUpdate {
-					klog.InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
+					klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
 				_, ok := util.HandshakeAnnos[devhandsk]
@@ -221,7 +221,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 						klog.ErrorS(err, "Failed to get node", "nodeName", val.Name)
 						continue
 					}
-					klog.InfoS("Patching node annotations", "nodeName", val.Name, "annotations", tmppat)
+					klog.V(5).InfoS("Patching node annotations", "nodeName", val.Name, "annotations", tmppat)
 					if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
 						klog.ErrorS(err, "Failed to patch node annotations", "nodeName", val.Name)
 					}
@@ -229,7 +229,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				nodeInfo := &util.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
-				klog.InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
 				nodedevices, err := devInstance.GetNodeDevices(*val)
 				if err != nil {
 					klog.ErrorS(err, "Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -242,7 +242,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				s.addNode(val.Name, nodeInfo)
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
 					if printedLog[val.Name] {
-						klog.InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
+						klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
 					} else {
 						klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
 						printedLog[val.Name] = true
