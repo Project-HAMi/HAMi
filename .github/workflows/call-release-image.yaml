@@ -135,21 +135,21 @@ jobs:
         id: meta1
         uses: docker/metadata-action@v5
         with:
-            images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO_HAMICORE }}
+            images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
         uses: docker/build-push-action@v6.11.0
         with:
             context: .
             file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile.hamimaster
-            labels: ${{ steps.meta.outputs.labels }}
+            labels: ${{ steps.meta1.outputs.labels }}
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
               GOLANG_IMAGE=golang:1.22.5-bullseye
-              HAMICORE_IMAGE=projecthami/hamicore: ${{ env.ref }}
+              HAMICORE_IMAGE=${{ steps.meta.outputs.tags }}
               DEST_DIR=/usr/local
-            tags: ${{ steps.meta.outputs.tags }}
+            tags: ${{ steps.meta1.outputs.tags }}
             push: true
             github-token: ${{ env.REGISTER_PASSWORD }}
 
