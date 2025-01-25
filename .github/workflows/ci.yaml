@@ -163,7 +163,7 @@ jobs:
           username: projecthami
           password: Zxcvbnexm2ft
 
-      - name: Build & Pushing hami image
+      - name: Build & Pushing hami-core image
         uses: docker/build-push-action@v6.11.0
         with:
           context: .
@@ -179,6 +179,23 @@ jobs:
           push: true
           #load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
+          
+      - name: Build & Pushing hami image
+        uses: docker/build-push-action@v6.11.0
+        with:
+            context: .
+            file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile.hamimaster
+            labels: ${{ needs.get_info.outputs.version }}
+            platforms: ${{ env.BUILD_PLATFORM }}
+            build-args: |
+              VERSION=${{ needs.get_info.outputs.version }}
+              GOLANG_IMAGE=golang:1.22.5-bullseye
+              HAMICORE_IMAGE=projecthami/hamicore:${{ needs.get_info.outputs.version }}
+              DEST_DIR=/usr/local
+            tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
+            push: true
+            #load: true
+            github-token: ${{ env.REGISTER_PASSWORD }}
 
       - name: List images
         run: |
