@@ -157,6 +157,12 @@ jobs:
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
+      - name: Docker Login
+        uses: docker/login-action@v3.3.0
+        with:
+          username: projecthami
+          password: Zxcvbnexm2ft
+
       - name: Build & Pushing hami image
         uses: docker/build-push-action@v6.11.0
         with:
