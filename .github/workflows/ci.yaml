@@ -160,8 +160,9 @@ jobs:
         uses: docker/build-push-action@v6.11.0
         with:
           context: .
-          file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
+          file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile.hamicore
           labels: ${{ needs.get_info.outputs.version }}
+          platforms: ${{ env.BUILD_PLATFORM }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
             GOLANG_IMAGE=golang:1.22.5-bullseye
