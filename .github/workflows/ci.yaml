@@ -170,7 +170,7 @@ jobs:
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
-          load: true
+          #load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
 
       - name: List images
