@@ -101,8 +101,15 @@ jobs:
           sha: '${{ github.sha }}'
 
 
-  release-image:
+  release-image-hamicore:
     needs: ensure-tag
+    uses: ./.github/workflows/call-release-image-hamicore.yaml
+    with:
+      ref: ${{ needs.ensure-tag.outputs.tag }}
+    secrets: inherit
+
+  release-image:
+    needs: [ensure-tag,release-image-hamicore]
     uses: ./.github/workflows/call-release-image.yaml
     with:
       ref: ${{ needs.ensure-tag.outputs.tag }}
