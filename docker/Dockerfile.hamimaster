@@ -1,0 +1,32 @@
+ARG GOLANG_IMAGE
+ARG HAMICORE_IMAGE
+FROM $GOLANG_IMAGE AS build
+FROM $HAMICORE_IMAGE AS corebuild
+
+FROM $GOLANG_IMAGE AS GOBUILD
+ADD . /k8s-vgpu
+ARG VERSION
+RUN go env -w GO111MODULE=on
+RUN cd /k8s-vgpu && make all VERSION=$VERSION
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@latest
+
+#FROM ubuntu:24.04
+FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+ENV NVIDIA_DISABLE_REQUIRE="true"
+ENV NVIDIA_VISIBLE_DEVICES=all
+ENV NVIDIA_DRIVER_CAPABILITIES=utility
+
+ARG VERSION
+LABEL version="$VERSION"
+LABEL maintainer="opensource@4paradigm.com"
+COPY ./LICENSE /k8s-vgpu/LICENSE
+COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
+COPY --from=GOBUILD /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
+COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
+COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
+COPY ./lib /k8s-vgpu/lib
+COPY --from=corebuild  /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION" /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
+
+ENV PATH="/k8s-vgpu/bin:${PATH}"
+ARG DEST_DIR
+ENTRYPOINT ["/bin/bash", "-c", "entrypoint.sh  $DEST_DIR"]
