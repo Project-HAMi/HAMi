@@ -14,6 +14,7 @@ permissions:
 env:
   REGISTRY: docker.io
   IMAGE_REPO: ${{ secrets.IMAGE_REPO || 'projecthami/hami' }}
+  IMAGE_REPO_HAMICORE: ${{ secrets.IMAGE_REPO || 'projecthami/hamicore' }}
   IMAGE_ROOT_PATH: docker
   BUILD_PLATFORM: linux/arm64,linux/amd64
   REGISTER_USER: ${{ github.actor }}
@@ -168,8 +169,8 @@ jobs:
             GOLANG_IMAGE=golang:1.22.5-bullseye
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
-          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
-          push: false
+          tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO_HAMICORE }}:${{ needs.get_info.outputs.version }}
+          push: true
           #load: true
           github-token: ${{ env.REGISTER_PASSWORD }}
 
@@ -177,17 +178,17 @@ jobs:
         run: |
           docker images
 
-      - name: Save Docker image to image.tar
-        run: |
-          docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
+      #- name: Save Docker image to image.tar
+      #  run: |
+      #    docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
-      - name: Upload image.tar as artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hami-image
-          path: image.tar
-          retention-days: 5
-          if-no-files-found: error
+      #- name: Upload image.tar as artifact
+      #  uses: actions/upload-artifact@v4
+      #  with:
+      #    name: hami-image
+      #    path: image.tar
+      #    retention-days: 5
+      #    if-no-files-found: error
 
   # packages tgz from /charts of original branch, deploy to /charts of target branch
   package_chart:
