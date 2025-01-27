@@ -124,6 +124,8 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            - name: cgroup
+              mountPath: /sys/fs/cgroup
       volumes:
         - name: ctrs
           hostPath:
@@ -152,6 +154,9 @@ spec:
         - name: hostvar
           hostPath:
             path: /var
+        - name: cgroup
+          hostPath:
+            path: /sys/fs/cgroup
         - name: deviceconfig
           configMap:
             name: {{ template "hami-vgpu.device-plugin" . }}

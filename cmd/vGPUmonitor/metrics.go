@@ -25,7 +25,6 @@ import (
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
@@ -34,6 +33,8 @@ import (
 	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -97,6 +98,10 @@ var (
 		"vGPU device usage",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
+	ctrvGpuCoreUtilDesc = prometheus.NewDesc(
+		"vGPU_core_util_of_container",
+		"vGPU core util",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil)
 
 	ctrvGPUlimitdesc = prometheus.NewDesc(
 		"vGPU_device_memory_limit_in_bytes",
@@ -188,6 +193,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	if nvret != nvml.SUCCESS {
 		klog.Error("nvml Init err=", nvml.ErrorString(nvret))
 	}
+	maDevToContainer := make(map[string]map[int]int)
 	devnum, nvret := nvml.DeviceGetCount()
 	if nvret != nvml.SUCCESS {
 		klog.Error("nvml GetDeviceCount err=", nvml.ErrorString(nvret))
@@ -216,18 +222,29 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					fmt.Sprint(ii), uuid,
 				)
 			}
-			util, nvret := hdev.GetUtilizationRates()
+			utilization, nvret := hdev.GetUtilizationRates()
 			if nvret != nvml.SUCCESS {
 				klog.Error(nvml.ErrorString(nvret))
 			} else {
 				ch <- prometheus.MustNewConstMetric(
 					hostGPUUtilizationdesc,
 					prometheus.GaugeValue,
-					float64(util.Gpu),
+					float64(utilization.Gpu),
 					fmt.Sprint(ii), uuid,
 				)
 			}
 
+			mapUtil := make(map[int]int)
+			processUtil, err := hdev.GetProcessUtilization(uint64(time.Now().Add(-1*time.Second).UnixNano() / 1000))
+			if err != nvml.SUCCESS {
+				klog.Errorf("Failed to get process utilization for device %v: %v", uuid, err)
+				continue
+			}
+			for _, v := range processUtil {
+				klog.Infof("util:%v", v)
+				mapUtil[int(v.Pid)] += int(v.SmUtil)
+			}
+			maDevToContainer[uuid] = mapUtil
 		}
 	}
 	nodeName := os.Getenv(util.NodeNameEnvName)
@@ -236,7 +253,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		klog.Error("failed to list pods with err=", err.Error())
 	}
 	nowSec := time.Now().Unix()
-
 	containers := containerLister.ListContainers()
 	for _, pod := range pods {
 		for _, c := range containers {
@@ -260,6 +276,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					continue
 				}
 				klog.Infof("Container matched: Name=%s", ctr.Name)
+				gpuUtil := getContainerUtilizationByUUID(ctrName, pod, maDevToContainer)
 				//err := setHostPid(pod, pod.Status.ContainerStatuses[ctridx], &srPodList[sridx])
 				//if err != nil {
 				//	fmt.Println("setHostPid filed", err.Error())
@@ -281,7 +298,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					memoryOffset := c.Info.DeviceMemoryOffset(i)
 					smUtil := c.Info.DeviceSmUtil(i)
 					lastKernelTime := c.Info.LastKernelTime()
-
 					//fmt.Println("uuid=", uuid, "length=", len(uuid))
 					ch <- prometheus.MustNewConstMetric(
 						ctrvGPUdesc,
@@ -293,6 +309,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 						ctrvGPUlimitdesc,
 						prometheus.GaugeValue,
 						float64(memoryLimit),
+						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+					)
+					ch <- prometheus.MustNewConstMetric(
+						ctrvGpuCoreUtilDesc,
+						prometheus.GaugeValue,
+						gpuUtil,
 						pod.Namespace, pod.Name, ctrName, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
 					)
 					ch <- prometheus.MustNewConstMetric(
