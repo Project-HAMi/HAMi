@@ -42,8 +42,9 @@ else
 fi
 
 # Set Helm Chart source based on E2E_TYPE.
+echo "E2E Type is: ${E2E_TYPE}"
+
 if [ "${E2E_TYPE}" == "pullrequest" ]; then
-  echo "E2E Type is: ${E2E_TYPE}"
   # Ensure the charts directory exists and contains a .tgz file
   if [ -d "charts" ] && [ -n "$(ls charts/*.tgz 2>/dev/null)" ]; then
     HELM_SOURCE=$(ls charts/*.tgz | head -n 1)  # Use the first .tgz file found
@@ -96,7 +97,7 @@ fi
 echo "Checking Pod status..."
 kubectl --kubeconfig "${KUBE_CONF}" get po -n "${TARGET_NS}"
 
-if ! util::check_pods_status "${KUBE_CONF}" "${TARGET_NS}"; then
+if ! util::check_pods_status "${KUBE_CONF}" ; then
   echo "Error: Pods are not running correctly."
   exit 1
 fi
