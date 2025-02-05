@@ -28,6 +28,7 @@ jobs:
     environment: ${{ matrix.device }}
     env:
       E2E_TYPE: ${{ inputs.type }}
+      HAMI_VERSION: ${{ inputs.ref }}
     steps:
       - name: checkout code
         uses: actions/checkout@v4
@@ -68,8 +69,6 @@ jobs:
           ssh root@$VSPHERE_GPU_VM_IP "nerdctl image ls | grep hami"
 
       - name: deploy hami helm
-        env:
-          HAMI_VERSION: ${{ inputs.ref }}
         run: |
           make helm-deploy
 
