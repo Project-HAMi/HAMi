@@ -116,9 +116,38 @@ function util::wait_ip_reachable {
 # Check Pod status in a namespace.
 function util::check_pods_status {
   local kubeconfig=${1:-""}
-  local namespace=${2:-"hami-system"}
+  local namespace=${2:-""}
+  local retries=${3:-10}
+  local interval=${4:-30}
+
+  local attempt=0
   local unhealthy_pods
-  unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" --no-headers | awk '!/Running|Succeeded/ {print $1}')
+
+  while (( attempt < retries )); do
+    echo "Checking Pod status (Attempt $(( attempt + 1 ))/$retries)..."
+
+    # Checking unhealthy pods in namespaces，ignore the  Running & Succeeded status
+    if [[ -z "$namespace" ]]; then
+      unhealthy_pods=$(kubectl get po -A --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk '!/Running|Succeeded|Completed/ {print $2}')
+    else
+      unhealthy_pods=$(kubectl get po -n "$namespace" --kubeconfig "$kubeconfig" --no-headers --ignore-not-found | awk '!/Running|Succeeded|Completed/ {print $1}')
+    fi
+
+    if [[ -z "$unhealthy_pods" ]]; then
+      echo "PASS: All Pods are in Running or Succeeded state."
+      return 0
+    fi
+
+    echo "Found unhealthy pods:"
+    echo "$unhealthy_pods"
+
+    if (( attempt < retries - 1 )); then
+      echo "Retrying pod check in ${interval}s..."
+      sleep "$interval"
+    fi
+
+    (( attempt++ ))
+  done
 
   if [[ -n "$unhealthy_pods" ]]; then
     echo "Found unhealthy pods in namespace $namespace:"
@@ -134,8 +163,5 @@ function util::check_pods_status {
     done
 
     return 1
-  else
-    echo "PASS: All Pods are in Running state."
-    return 0
   fi
 }
