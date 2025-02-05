@@ -333,6 +333,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							if strings.Contains(udevice.UUID, "[") {
+								if strings.Compare(d.Device.Mode, "hami-core") == 0 {
+									klog.Errorf("found a mig task running on a hami-core GPU\n")
+									d.Device.Health = false
+									continue
+								}
 								tmpIdx, Instance, _ := util.ExtractMigTemplatesFromUUID(udevice.UUID)
 								if len(d.Device.MigUsage.UsageList) == 0 {
 									util.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
