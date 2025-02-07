@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -1486,6 +1487,776 @@ func Test_calcScore(t *testing.T) {
 				assert.DeepEqual(t, wantI.Devices, gotI.Devices)
 				assert.DeepEqual(t, wantI.Score, gotI.Score)
 			}
+		})
+	}
+}
+
+func Test_checkType(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+			n     util.ContainerDeviceRequest
+		}
+		want1 bool
+	}{
+		{
+			name: "device type the same as node type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: util.DeviceUsage{
+					Type: nvidia.NvidiaGPUDevice,
+				},
+				n: util.ContainerDeviceRequest{
+					Type: nvidia.NvidiaGPUDevice,
+				},
+			},
+			want1: true,
+		},
+		{
+			name: "device type the different from node type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: util.DeviceUsage{
+					Type: nvidia.NvidiaGPUDevice,
+				},
+				n: util.ContainerDeviceRequest{
+					Type: metax.MetaxGPUDevice,
+				},
+			},
+			want1: false,
+		},
+		{
+			name: "don't set to device type and node type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n:     util.ContainerDeviceRequest{},
+			},
+			want1: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1, _ := checkType(test.args.annos, test.args.d, test.args.n)
+			assert.DeepEqual(t, result1, test.want1)
+		})
+	}
+}
+
+func Test_checkUUID(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+			n     util.ContainerDeviceRequest
+		}
+		want bool
+	}{
+		{
+			name: "device the same as node",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d: util.DeviceUsage{
+					Type: nvidia.NvidiaGPUDevice,
+				},
+				n: util.ContainerDeviceRequest{
+					Type: nvidia.NvidiaGPUDevice,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "don't set to type",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n:     util.ContainerDeviceRequest{},
+			},
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := checkUUID(test.args.annos, test.args.d, test.args.n)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+func Test_fitInCertainDevice(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node      *NodeUsage
+			request   util.ContainerDeviceRequest
+			annos     map[string]string
+			pod       *corev1.Pod
+			allocated *util.PodDevices
+		}
+		want1 bool
+		want2 map[string]util.ContainerDevices
+	}{
+		{
+			name: "allocated device",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: true,
+			want2: map[string]util.ContainerDevices{
+				"NVIDIA": {
+					{
+						Usedcores: int32(1),
+						Usedmem:   int32(1024),
+						Type:      nvidia.NvidiaGPUDevice,
+						UUID:      "test-0",
+					},
+				},
+			},
+		},
+		{
+			name: "card type don't match",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             "test",
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "device count less than device used",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(5),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "core limit exceed 100",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(200),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "card insufficient remaining memory",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8000),
+									Usedmem:   int32(8000),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(0),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(100),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "the container wants exclusive access to an entire card, but the card is already in use",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(0),
+									Totalcore: int32(100),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(100),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(100),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "can't allocate core=0 job to an already full GPU",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(1),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(0),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "mode is mig",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+									Mode:      "mig",
+									MigUsage: util.MigInUse{
+										Index: int32(1),
+										UsageList: util.MIGS{
+											{
+												Name:   "test6",
+												Memory: int32(2048),
+												InUse:  false,
+											},
+										},
+									},
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(2),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos:     map[string]string{},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{
+				"NVIDIA": {
+					{
+						UUID:      "test-0",
+						Type:      nvidia.NvidiaGPUDevice,
+						Usedcores: int32(1),
+						Usedmem:   int32(1024),
+					},
+				},
+			},
+		},
+		{
+			name: "card uuid don't match",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos: map[string]string{
+					nvidia.GPUUseUUID: "abc",
+				},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+		},
+		{
+			name: "numa not fit",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-0",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(1),
+				},
+				annos: map[string]string{
+					nvidia.GPUInUse: "NVIDIA",
+					nvidia.NumaBind: "true",
+				},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: true,
+			want2: map[string]util.ContainerDevices{
+				"NVIDIA": {
+					{
+						UUID:      "test-0",
+						Type:      nvidia.NvidiaGPUDevice,
+						Usedcores: int32(1),
+						Usedmem:   int32(1024),
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1, result2 := fitInCertainDevice(test.args.node, test.args.request, test.args.annos, test.args.pod, test.args.allocated)
+			assert.DeepEqual(t, result1, test.want1)
+			assert.DeepEqual(t, result2, test.want2)
+		})
+	}
+}
+
+func Test_fitInDevices(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node     NodeUsage
+			requests util.ContainerDeviceRequests
+			annos    map[string]string
+			pod      *corev1.Pod
+			devinput *util.PodDevices
+		}
+		want1 bool
+		want2 float32
+	}{
+		{
+			name: "all device score for one node",
+			args: struct {
+				node     NodeUsage
+				requests util.ContainerDeviceRequests
+				annos    map[string]string
+				pod      *corev1.Pod
+				devinput *util.PodDevices
+			}{
+				node: NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-1",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-2",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				requests: util.ContainerDeviceRequests{
+					"test-2": {
+						Nums:             int32(1),
+						Type:             nvidia.NvidiaGPUDevice,
+						Memreq:           int32(1024),
+						MemPercentagereq: int32(100),
+						Coresreq:         int32(1),
+					},
+				},
+				annos:    map[string]string{},
+				pod:      &corev1.Pod{},
+				devinput: &util.PodDevices{},
+			},
+			want1: true,
+			want2: float32(0),
+		},
+		{
+			name: "request devices nums cannot exceed the total number of devices on the node",
+			args: struct {
+				node     NodeUsage
+				requests util.ContainerDeviceRequests
+				annos    map[string]string
+				pod      *corev1.Pod
+				devinput *util.PodDevices
+			}{
+				node: NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-1",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				requests: util.ContainerDeviceRequests{
+					"test-1": {
+						Nums:             int32(2),
+						Type:             nvidia.NvidiaGPUDevice,
+						Memreq:           int32(1024),
+						MemPercentagereq: int32(100),
+						Coresreq:         int32(1),
+					},
+				},
+				annos:    map[string]string{},
+				pod:      &corev1.Pod{},
+				devinput: &util.PodDevices{},
+			},
+			want1: false,
+			want2: float32(0),
+		},
+		{
+			name: "device type the different from request type",
+			args: struct {
+				node     NodeUsage
+				requests util.ContainerDeviceRequests
+				annos    map[string]string
+				pod      *corev1.Pod
+				devinput *util.PodDevices
+			}{
+				node: NodeUsage{
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{
+								Device: &util.DeviceUsage{
+									ID:        "test-2",
+									Numa:      int(1),
+									Type:      nvidia.NvidiaGPUDevice,
+									Used:      int32(1),
+									Count:     int32(4),
+									Totalmem:  int32(8192),
+									Usedmem:   int32(2048),
+									Usedcores: int32(1),
+									Totalcore: int32(4),
+								},
+							},
+						},
+					},
+				},
+				requests: util.ContainerDeviceRequests{
+					"test-1": {
+						Nums:             int32(1),
+						Type:             "test",
+						Memreq:           int32(1024),
+						MemPercentagereq: int32(100),
+						Coresreq:         int32(1),
+					},
+				},
+				annos:    map[string]string{},
+				pod:      &corev1.Pod{},
+				devinput: &util.PodDevices{},
+			},
+			want1: false,
+			want2: float32(0),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			viewStatus(test.args.node)
+			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.annos, test.args.pod, test.args.devinput)
+			assert.DeepEqual(t, result1, test.want1)
+			assert.DeepEqual(t, result2, test.want2)
 		})
 	}
 }
