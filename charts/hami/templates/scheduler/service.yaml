@@ -12,19 +12,22 @@ metadata:
   annotations: {{ toYaml .Values.scheduler.service.annotations | nindent 4 }}
   {{- end }}
 spec:
-  type: NodePort
+  type: {{ .Values.scheduler.service.type | default "NodePort" }}  # Default type is NodePort
   ports:
     - name: http
-      port: {{ .Values.scheduler.service.httpPort }}
-      targetPort: 443
-      nodePort: {{ .Values.scheduler.service.schedulerPort }}
+      port: {{ .Values.scheduler.service.httpPort | default 443 }}  # Default HTTP port is 443
+      targetPort: {{ .Values.scheduler.service.httpTargetPort | default 443 }}
+      {{- if eq (.Values.scheduler.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
+      nodePort: {{ .Values.scheduler.service.schedulerPort | default 31998 }}
+      {{- end }}
       protocol: TCP
     - name: monitor
-      port: {{ .Values.scheduler.service.monitorPort }}
-      targetPort: {{ (split ":" (printf "%s" .Values.scheduler.metricsBindAddress))._1 }}
-      nodePort: {{ .Values.scheduler.service.monitorPort }}
+      port: {{ .Values.scheduler.service.monitorPort | default 31993 }}  # Default monitoring port is 31993
+      targetPort: {{ .Values.scheduler.service.monitorTargetPort | default 31993 }}
+      {{- if eq (.Values.scheduler.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
+      nodePort: {{ .Values.scheduler.service.monitorPort | default 31993 }}
+      {{- end }}
       protocol: TCP
   selector:
     app.kubernetes.io/component: hami-scheduler
     {{- include "hami-vgpu.selectorLabels" . | nindent 4 }}
-
