@@ -68,8 +68,6 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 		m.pods[pod.UID] = pi
 		klog.InfoS("Pod added",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"namespace", pod.Namespace,
-			"name", pod.Name,
 			"nodeID", nodeID,
 			"devices", devices,
 		)
@@ -77,8 +75,6 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevi
 		m.pods[pod.UID].Devices = devices
 		klog.InfoS("Pod devices updated",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"namespace", pod.Namespace,
-			"name", pod.Name,
 			"devices", devices,
 		)
 	}
@@ -92,16 +88,12 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	if exists {
 		klog.InfoS("Pod deleted",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"namespace", pod.Namespace,
-			"name", pod.Name,
 			"nodeID", pi.NodeID,
 		)
 		delete(m.pods, pod.UID)
 	} else {
 		klog.InfoS("Pod not found for deletion",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"namespace", pod.Namespace,
-			"name", pod.Name,
 		)
 	}
 }
@@ -129,14 +121,12 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 	defer m.mutex.RUnlock()
 
 	pods := make([]*podInfo, 0, len(m.pods))
-	for _, pi := range m.pods {
-		pods = append(pods, pi)
+	for _, pod := range m.pods {
+		pods = append(pods, pod)
 		klog.InfoS("Pod info",
-			"pod", klog.KRef(pi.Namespace, pi.Name),
-			"namespace", pi.Namespace,
-			"name", pi.Name,
-			"nodeID", pi.NodeID,
-			"devices", pi.Devices,
+			"pod", klog.KRef(pod.Namespace, pod.Name),
+			"nodeID", pod.NodeID,
+			"devices", pod.Devices,
 		)
 	}
 	klog.V(5).InfoS("Listed pod infos",
