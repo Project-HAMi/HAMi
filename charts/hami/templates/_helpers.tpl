@@ -98,11 +98,11 @@ imagePullSecrets: {{ toYaml .Values.imagePullSecrets | nindent 2 }}
 
 
 {{/*
-    Remove the part after the `+` in the Kubernetes version string.
+    Return the stripped Kubernetes version string by removing extra parts after semantic version number.
     v1.31.1+k3s1 -> v1.31.1
+    v1.30.8-eks-2d5f260 -> v1.30.8
     v1.31.1 -> v1.31.1
 */}}
 {{- define "strippedKubeVersion" -}}
-{{- $parts := split "+" .Capabilities.KubeVersion.Version -}}
-{{- print $parts._0 -}}
+{{ regexReplaceAll "^(v[0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" .Capabilities.KubeVersion.Version "$1" }}
 {{- end -}}
