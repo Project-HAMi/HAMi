@@ -10,7 +10,7 @@ data:
     {
         "nodeconfig": [
             {
-                "name": "m5-cloudinfra-online02",
+                "name": "<your-node-name>",
                 "operatingmode": "hami-core",
                 "devicememoryscaling": 1.8,
                 "devicesplitcount": 10,
