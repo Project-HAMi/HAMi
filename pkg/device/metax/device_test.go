@@ -17,8 +17,10 @@ limitations under the License.
 package metax
 
 import (
+	"flag"
 	"testing"
 
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -148,6 +150,333 @@ func TestParseMetaxAnnos(t *testing.T) {
 			if value != tt.value {
 				t.Errorf("Expected index %f, got %f", tt.value, value)
 			}
+		})
+	}
+}
+
+func Test_MutateAdmission(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			ctr *corev1.Container
+			p   *corev1.Pod
+		}
+		want bool
+	}{
+		{
+			name: "set to resources limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"metax-tech.com/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+		},
+		{
+			name: "don't set to resources limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			config := MetaxConfig{
+				ResourceCountName: "metax-tech.com/gpu",
+			}
+			InitMetaxDevice(config)
+			dev := MetaxDevices{}
+			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_CheckType(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+			n     util.ContainerDeviceRequest
+		}
+		want1 bool
+		want2 bool
+		want3 bool
+	}{
+		{
+			name: "node type the same as device",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n: util.ContainerDeviceRequest{
+					Type: MetaxGPUDevice,
+				},
+			},
+			want1: true,
+			want2: true,
+			want3: false,
+		},
+		{
+			name: "node type the different from device",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+				n     util.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     util.DeviceUsage{},
+				n: util.ContainerDeviceRequest{
+					Type: "test",
+				},
+			},
+			want1: false,
+			want2: false,
+			want3: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := MetaxDevices{}
+			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
+			assert.DeepEqual(t, result1, test.want1)
+			assert.DeepEqual(t, result2, test.want2)
+			assert.DeepEqual(t, result3, test.want3)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Container
+		want util.ContainerDeviceRequest
+	}{
+		{
+			name: "resource set to limit and request",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("1"),
+					},
+					Requests: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("1"),
+					},
+				},
+			},
+			want: util.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             MetaxGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "resource don't set to limit and request",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   corev1.ResourceList{},
+					Requests: corev1.ResourceList{},
+				},
+			},
+			want: util.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fs := flag.FlagSet{}
+			ParseConfig(&fs)
+			dev := MetaxDevices{}
+			result := dev.GenerateResourceRequests(test.args)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+func Test_CustomFilterRule(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			allocated  *util.PodDevices
+			request    util.ContainerDeviceRequest
+			toAllocate util.ContainerDevices
+			device     *util.DeviceUsage
+		}
+		want bool
+	}{
+		{
+			name: "allocated id is same as device id",
+			args: struct {
+				allocated  *util.PodDevices
+				request    util.ContainerDeviceRequest
+				toAllocate util.ContainerDevices
+				device     *util.DeviceUsage
+			}{
+				allocated: &util.PodDevices{
+					MetaxGPUDevice: util.PodSingleDevice{
+						util.ContainerDevices{
+							{
+								Idx:       int(0),
+								Type:      MetaxGPUDevice,
+								UUID:      "test-0000",
+								Usedcores: int32(1),
+								Usedmem:   int32(1000),
+							},
+						},
+					},
+				},
+				request:    util.ContainerDeviceRequest{},
+				toAllocate: util.ContainerDevices{},
+				device: &util.DeviceUsage{
+					Type: MetaxGPUDevice,
+					ID:   "test-0000",
+				},
+			},
+			want: true,
+		},
+		{
+			name: "allocated id is different from device id",
+			args: struct {
+				allocated  *util.PodDevices
+				request    util.ContainerDeviceRequest
+				toAllocate util.ContainerDevices
+				device     *util.DeviceUsage
+			}{
+				allocated: &util.PodDevices{
+					MetaxGPUDevice: util.PodSingleDevice{
+						util.ContainerDevices{
+							{
+								Idx:       int(0),
+								Type:      MetaxGPUDevice,
+								UUID:      "test-0000",
+								Usedcores: int32(1),
+								Usedmem:   int32(1000),
+							},
+						},
+					},
+				},
+				request:    util.ContainerDeviceRequest{},
+				toAllocate: util.ContainerDevices{},
+				device: &util.DeviceUsage{
+					Type: MetaxGPUDevice,
+					ID:   "test-1111",
+				},
+			},
+			want: false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := MetaxDevices{}
+			result := dev.CustomFilterRule(test.args.allocated, test.args.request, test.args.toAllocate, test.args.device)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+func Test_ScoreNode(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node       *corev1.Node
+			podDevices util.PodSingleDevice
+			policy     string
+		}
+		want float32
+	}{
+		{
+			name: "policy is binpack",
+			args: struct {
+				node       *corev1.Node
+				podDevices util.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"metax-tech.com/gpu.topology.losses": "{\"1\":100,\"2\":200}",
+						},
+					},
+				},
+				podDevices: util.PodSingleDevice{
+					util.ContainerDevices{
+						{
+							Idx:       int(0),
+							UUID:      "test-0",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+						{
+							Idx:       int(1),
+							UUID:      "test-1",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "binpack",
+			},
+			want: float32(1800),
+		},
+		{
+			name: "policy is spread",
+			args: struct {
+				node       *corev1.Node
+				podDevices util.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"metax-tech.com/gpu.topology.losses": "{\"1\":100,\"2\":200}",
+						},
+					},
+				},
+				podDevices: util.PodSingleDevice{
+					util.ContainerDevices{
+						{
+							Idx:       int(0),
+							UUID:      "test-0",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "spread",
+			},
+			want: float32(100),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := MetaxDevices{}
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.policy)
+			assert.DeepEqual(t, result, test.want)
 		})
 	}
 }

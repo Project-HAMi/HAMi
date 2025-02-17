@@ -119,9 +119,10 @@ scheduler:
     tolerations: []
     runAsUser: 2000
   service:
-    httpPort: 443
-    schedulerPort: 31998
-    monitorPort: 31993
+    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
+    httpPort: 443   # HTTP port
+    schedulerPort: 31998  # NodePort for HTTP
+    monitorPort: 31993    # Monitoring port
     labels: {}
     annotations: {}
 
@@ -141,7 +142,10 @@ devicePlugin:
     - -v=4
   
   service:
+    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
+    labels: {}
+    annotations: {}
     
   pluginPath: /var/lib/kubelet/device-plugins
   libPath: /usr/local/vgpu

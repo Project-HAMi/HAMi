@@ -37,7 +37,7 @@ You can update these configurations using one of the following methods:
 * `nvidia.resourceMemoryPercentageName`: 
   String type, vgpu memory fraction resource name, default: "nvidia.com/gpumem-percentage" 
 * `nvidia.resourceCoreName`: 
-  String type, vgpu cores resource name, default: "nvidia.com/cores"
+  String type, vgpu cores resource name, default: "nvidia.com/gpucores"
 * `nvidia.resourcePriorityName`: 
   String type, vgpu task priority name, default: "nvidia.com/priority"
 

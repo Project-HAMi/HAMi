@@ -38,7 +38,7 @@
 * `nvidia.resourceMemoryPercentageName`：
   字符串类型，申请 vgpu 显存比例资源名，默认："nvidia.com/gpumem-percentage"
 * `nvidia.resourceCoreName`：
-  字符串类型，申请 vgpu 算力资源名，默认："nvidia.com/cores"
+  字符串类型，申请 vgpu 算力资源名，默认："nvidia.com/gpucores"
 * `nvidia.resourcePriorityName`：
   字符串类型，表示申请任务的任务优先级，默认："nvidia.com/priority"
 
