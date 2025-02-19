@@ -200,6 +200,8 @@ devices:
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910B2
+      - huawei.com/Ascend910B2-memory
       - huawei.com/Ascend910B
       - huawei.com/Ascend910B-memory
       - huawei.com/Ascend910B4
