@@ -21,14 +21,14 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	cli "github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	spec "github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/plugin"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func addFlags() []cli.Flag {
@@ -97,8 +97,8 @@ func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 	}
 }
 
-func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cli.Flag) (nvidia.DeviceConfig, error) {
-	devcfg := nvidia.DeviceConfig{}
+func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cli.Flag) (*nvidia.DeviceConfig, error) {
+	devcfg := &nvidia.DeviceConfig{}
 	devcfg.Config = cfg
 
 	klog.Infoln("flags=", flags)

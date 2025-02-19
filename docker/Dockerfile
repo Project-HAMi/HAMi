@@ -1,5 +1,6 @@
-ARG GOLANG_IMAGE=golang:1.22.5-bullseye
-ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+ARG GOLANG_IMAGE
+ARG NVIDIA_IMAGE
+ARG NVIDIA_DEVEL_IMAGE
 
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
@@ -11,14 +12,14 @@ ADD . /k8s-vgpu
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
 
-FROM $NVIDIA_IMAGE AS nvbuild
+FROM $NVIDIA_DEVEL_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+FROM $NVIDIA_IMAGE
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility

@@ -1,0 +1,79 @@
+# Base image upgrade to UBI 9 with CUDA 12.6.3
+ARG GOLANG_VERSION=1.22.6
+FROM nvcr.io/nvidia/cuda:12.6.3-base-ubi9 AS build
+
+# Install essential build tools
+RUN yum install -y \
+    wget make git gcc \
+     && \
+    rm -rf /var/cache/yum/*
+
+# Install Go manually for better version control
+RUN set -eux; \
+    arch="$(uname -m)"; \
+    case "${arch##*-}" in \
+        x86_64 | amd64) ARCH='amd64' ;; \
+        aarch64) ARCH='arm64' ;; \
+        *) echo "unsupported architecture" ; exit 1 ;; \
+    esac; \
+    wget -nv -O - https://storage.googleapis.com/golang/go${GOLANG_VERSION}.linux-${ARCH}.tar.gz \
+    | tar -C /usr/local -xz
+
+ENV GOPATH /go
+ENV PATH $GOPATH/bin:/usr/local/go/bin:$PATH
+
+# Main build process
+WORKDIR /build
+COPY . .
+RUN mkdir /artifacts
+ARG VERSION="N/A"
+ARG GIT_COMMIT="unknown"
+
+# Core components build
+RUN cd /k8s-vgpu && make all VERSION=$VERSION PREFIX=/artifacts
+
+# Install NVIDIA MIG tool
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
+
+# GPU library build stage
+FROM nvidia/cuda:12.2.0-devel-ubuntu20.04 AS nvbuild
+COPY ./libvgpu /libvgpu
+WORKDIR /libvgpu
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get -y update && apt-get -y install cmake
+RUN bash ./build.sh
+
+# Image cleanup stage
+FROM redhat/ubi9-minimal:latest AS minimal
+RUN rpm -qa --queryformat='^%{NAME}-\[0-9\].*\.%{ARCH}$\n' | sort -u > /tmp/package-names.minimal
+
+FROM nvcr.io/nvidia/cuda:12.6.3-base-ubi9 AS base
+WORKDIR /cleanup
+COPY --from=minimal /tmp/package-names.minimal .
+COPY deployments/container/cleanup/* .
+RUN ./cleanup.sh
+
+# Final image composition
+FROM base
+ENV NVIDIA_DISABLE_REQUIRE="true" \
+    NVIDIA_VISIBLE_DEVICES=all \
+    NVIDIA_DRIVER_CAPABILITIES=compute,utility
+
+# Metadata labels
+LABEL version="$VERSION" \
+    maintainer="opensource@4paradigm.com" \
+    io.k8s.display-name="HAMi vGPU Plugin" \
+    vendor="4paradigm" \
+    com.nvidia.git-commit=${GIT_COMMIT}
+
+# File system organization
+COPY ./LICENSE /k8s-vgpu/LICENSE
+COPY --from=build /artifacts/ /k8s-vgpu/bin/
+COPY --from=build /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
+COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
+COPY ./docker/*.sh /k8s-vgpu/bin/
+COPY ./lib /k8s-vgpu/lib
+
+# Runtime configuration
+ENV PATH="/k8s-vgpu/bin:${PATH}"
+ENTRYPOINT ["entrypoint.sh"]

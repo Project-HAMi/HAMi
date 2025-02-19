@@ -1,73 +1,61 @@
 /*
-Copyright 2024 The HAMi Authors.
-
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
+ * Copyright (c) 2019-2021, NVIDIA CORPORATION.  All rights reserved.
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package main
 
 import (
 	"encoding/json"
-	"flag"
+	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	flagutil "github.com/Project-HAMi/HAMi/pkg/util/flag"
-
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
+	nvinfo "github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/fsnotify/fsnotify"
-	cli "github.com/urfave/cli/v2"
-	errorsutil "k8s.io/apimachinery/pkg/util/errors"
+	"github.com/urfave/cli/v2"
 	"k8s.io/klog/v2"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
+	spec "github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/info"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/logger"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/plugin"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/rm"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/watch"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-func main() {
-	var configFile string
+type options struct {
+	flags         []cli.Flag
+	configFile    string
+	kubeletSocket string
+}
 
+func main() {
 	c := cli.NewApp()
+	o := &options{}
 	c.Name = "NVIDIA Device Plugin"
 	c.Usage = "NVIDIA device plugin for Kubernetes"
+	c.Version = info.GetVersionString()
 	c.Action = func(ctx *cli.Context) error {
-		flagutil.PrintCliFlags(ctx)
-		return start(ctx, c.Flags)
-	}
-	c.Commands = []*cli.Command{
-		{
-			Name:  "version",
-			Usage: "Show the version of NVIDIA Device Plugin",
-			Action: func(c *cli.Context) error {
-				fmt.Printf("%s version: %s\n", c.App.Name, info.GetVersionString())
-				return nil
-			},
-		},
-	}
-
-	flagset := flag.NewFlagSet("klog", flag.ExitOnError)
-	klog.InitFlags(flagset)
-
-	c.Before = func(ctx *cli.Context) error {
-		logLevel := ctx.Int("v")
-		if err := flagset.Set("v", fmt.Sprintf("%d", logLevel)); err != nil {
-			return err
-		}
-		return nil
+		return start(ctx, o)
 	}
 
 	c.Flags = []cli.Flag{
@@ -84,10 +72,17 @@ func main() {
 			EnvVars: []string{"FAIL_ON_INIT_ERROR"},
 		},
 		&cli.StringFlag{
-			Name:    "nvidia-driver-root",
+			Name:    "driver-root",
+			Aliases: []string{"nvidia-driver-root"},
 			Value:   "/",
-			Usage:   "the root path for the NVIDIA driver installation (typical values are '/' or '/run/nvidia/driver')",
+			Usage:   "the root path for the NVIDIA driver installation on the host (typical values are '/' or '/run/nvidia/driver')",
 			EnvVars: []string{"NVIDIA_DRIVER_ROOT"},
+		},
+		&cli.StringFlag{
+			Name:    "dev-root",
+			Aliases: []string{"nvidia-dev-root"},
+			Usage:   "the root path for the NVIDIA device nodes on the host (typical values are '/' or '/run/nvidia/driver')",
+			EnvVars: []string{"NVIDIA_DEV_ROOT"},
 		},
 		&cli.BoolFlag{
 			Name:    "pass-device-specs",
@@ -97,7 +92,7 @@ func main() {
 		},
 		&cli.StringSliceFlag{
 			Name:    "device-list-strategy",
-			Value:   cli.NewStringSlice(string(spec.DeviceListStrategyEnvvar)),
+			Value:   cli.NewStringSlice(string(spec.DeviceListStrategyEnvVar)),
 			Usage:   "the desired strategy for passing the device list to the underlying runtime:\n\t\t[envvar | volume-mounts | cdi-annotations]",
 			EnvVars: []string{"DEVICE_LIST_STRATEGY"},
 		},
@@ -118,9 +113,16 @@ func main() {
 			EnvVars: []string{"MOFED_ENABLED"},
 		},
 		&cli.StringFlag{
+			Name:        "kubelet-socket",
+			Value:       pluginapi.KubeletSocket,
+			Usage:       "specify the socket for communicating with the kubelet; if this is empty, no connection with the kubelet is attempted",
+			Destination: &o.kubeletSocket,
+			EnvVars:     []string{"KUBELET_SOCKET"},
+		},
+		&cli.StringFlag{
 			Name:        "config-file",
 			Usage:       "the path to a config file as an alternative to command line options or environment variables",
-			Destination: &configFile,
+			Destination: &o.configFile,
 			EnvVars:     []string{"CONFIG_FILE"},
 		},
 		&cli.StringFlag{
@@ -130,24 +132,45 @@ func main() {
 			EnvVars: []string{"CDI_ANNOTATION_PREFIX"},
 		},
 		&cli.StringFlag{
-			Name:    "nvidia-ctk-path",
+			Name:    "nvidia-cdi-hook-path",
+			Aliases: []string{"nvidia-ctk-path"},
 			Value:   spec.DefaultNvidiaCTKPath,
-			Usage:   "the path to use for the nvidia-ctk in the generated CDI specification",
-			EnvVars: []string{"NVIDIA_CTK_PATH"},
+			Usage:   "the path to use for NVIDIA CDI hooks in the generated CDI specification",
+			EnvVars: []string{"NVIDIA_CDI_HOOK_PATH", "NVIDIA_CTK_PATH"},
 		},
 		&cli.StringFlag{
-			Name:    "container-driver-root",
+			Name:    "driver-root-ctr-path",
+			Aliases: []string{"container-driver-root"},
 			Value:   spec.DefaultContainerDriverRoot,
 			Usage:   "the path where the NVIDIA driver root is mounted in the container; used for generating CDI specifications",
-			EnvVars: []string{"CONTAINER_DRIVER_ROOT"},
+			EnvVars: []string{"DRIVER_ROOT_CTR_PATH", "CONTAINER_DRIVER_ROOT"},
 		},
-		&cli.IntFlag{
-			Name:  "v",
-			Usage: "number for the log level verbosity",
-			Value: 0,
+		&cli.StringFlag{
+			Name:    "mps-root",
+			Usage:   "the path on the host where MPS-specific mounts and files are created by the MPS control daemon manager",
+			EnvVars: []string{"MPS_ROOT"},
+		},
+		&cli.StringFlag{
+			Name:    "device-discovery-strategy",
+			Value:   "auto",
+			Usage:   "the strategy to use to discover devices: 'auto', 'nvml', or 'tegra'",
+			EnvVars: []string{"DEVICE_DISCOVERY_STRATEGY"},
+		},
+		&cli.IntSliceFlag{
+			Name:    "imex-channel-ids",
+			Usage:   "A list of IMEX channels to inject.",
+			EnvVars: []string{"IMEX_CHANNEL_IDS"},
+		},
+		&cli.BoolFlag{
+			Name:    "imex-required",
+			Usage:   "The specified IMEX channels are required",
+			EnvVars: []string{"IMEX_REQUIRED"},
 		},
 	}
+	// add extra flags for HAMi
 	c.Flags = append(c.Flags, addFlags()...)
+	o.flags = c.Flags
+
 	err := c.Run(os.Args)
 	if err != nil {
 		klog.Error(err)
@@ -155,15 +178,50 @@ func main() {
 	}
 }
 
-func validateFlags(config *spec.Config) error {
-	_, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+func validateFlags(infolib nvinfo.Interface, config *spec.Config) error {
+	deviceListStrategies, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
 	if err != nil {
 		return fmt.Errorf("invalid --device-list-strategy option: %v", err)
+	}
+
+	hasNvml, _ := infolib.HasNvml()
+	if deviceListStrategies.AnyCDIEnabled() && !hasNvml {
+		return fmt.Errorf("CDI --device-list-strategy options are only supported on NVML-based systems")
 	}
 
 	if *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyUUID && *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyIndex {
 		return fmt.Errorf("invalid --device-id-strategy option: %v", *config.Flags.Plugin.DeviceIDStrategy)
 	}
+
+	if config.Sharing.SharingStrategy() == spec.SharingStrategyMPS {
+		if *config.Flags.MigStrategy == spec.MigStrategyMixed {
+			return fmt.Errorf("using --mig-strategy=mixed is not supported with MPS")
+		}
+		if config.Flags.MpsRoot == nil || *config.Flags.MpsRoot == "" {
+			return fmt.Errorf("using MPS requires --mps-root to be specified")
+		}
+	}
+
+	switch *config.Flags.DeviceDiscoveryStrategy {
+	case "auto":
+	case "nvml":
+	case "tegra":
+	default:
+		return fmt.Errorf("invalid --device-discovery-strategy option %v", *config.Flags.DeviceDiscoveryStrategy)
+	}
+
+	switch *config.Flags.MigStrategy {
+	case spec.MigStrategyNone:
+	case spec.MigStrategySingle:
+	case spec.MigStrategyMixed:
+	default:
+		return fmt.Errorf("unknown MIG strategy: %v", *config.Flags.MigStrategy)
+	}
+
+	if err := spec.AssertChannelIDsValid(config.Imex.ChannelIDs); err != nil {
+		return fmt.Errorf("invalid IMEX channel IDs: %w", err)
+	}
+
 	return nil
 }
 
@@ -172,35 +230,38 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to finalize config: %v", err)
 	}
-	err = validateFlags(config)
-	if err != nil {
-		return nil, fmt.Errorf("unable to validate flags: %v", err)
-	}
 	config.Flags.GFD = nil
 	return config, nil
 }
 
-func start(c *cli.Context, flags []cli.Flag) error {
-	klog.Info("Starting FS watcher.")
+func start(c *cli.Context, o *options) error {
+	klog.InfoS(fmt.Sprintf("Starting %s", c.App.Name), "version", c.App.Version)
+
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
-	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
+	// watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
+	// if err != nil {
+	// 	return fmt.Errorf("failed to create FS watcher: %v", err)
+	// }
+	// defer watcher.Close()
+
+	kubeletSocketDir := filepath.Dir(o.kubeletSocket)
+	klog.Infof("Starting FS watcher for %v", kubeletSocketDir)
+	watcher, err := watch.Files(kubeletSocketDir)
 	if err != nil {
-		return fmt.Errorf("failed to create FS watcher: %v", err)
+		return fmt.Errorf("failed to create FS watcher for %s: %v", pluginapi.DevicePluginPath, err)
 	}
 	defer watcher.Close()
-	//device.InitDevices()
 
-	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
 	klog.Info("Starting OS watcher.")
-	sigs := newOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sigs := watch.Signals(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	var restarting bool
+	var started bool
 	var restartTimeout <-chan time.Time
 	var plugins []plugin.Interface
 restart:
 	// If we are restarting, stop plugins from previous run.
-	if restarting {
+	if started {
 		err := stopPlugins(plugins)
 		if err != nil {
 			return fmt.Errorf("error stopping plugins from previous run: %v", err)
@@ -208,17 +269,16 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(c, flags, restarting)
+	plugins, restartPlugins, err := startPlugins(c, o)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
+	started = true
 
 	if restartPlugins {
-		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
+		klog.Infof("Failed to start one or more plugins. Retrying in 30s...")
 		restartTimeout = time.After(30 * time.Second)
 	}
-
-	restarting = true
 
 	// Start an infinite loop, waiting for several indicators to either log
 	// some messages, trigger a restart of the plugins, or exit the program.
@@ -229,17 +289,17 @@ restart:
 			goto restart
 
 		// Detect a kubelet restart by watching for a newly created
-		// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
+		// 'pluginapi.KubeletSocket' file. When this occurs, restart this loop,
 		// restarting all of the plugins in the process.
 		case event := <-watcher.Events:
-			if event.Name == kubeletdevicepluginv1beta1.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				klog.Infof("inotify: %s created, restarting.", kubeletdevicepluginv1beta1.KubeletSocket)
+			if o.kubeletSocket != "" && event.Name == o.kubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+				klog.Infof("inotify: %s created, restarting.", o.kubeletSocket)
 				goto restart
 			}
 
 		// Watch for any other fs errors and log them.
 		case err := <-watcher.Errors:
-			klog.Errorf("inotify: %s", err)
+			klog.Infof("inotify: %s", err)
 
 		// Watch for any signals from the OS. On SIGHUP, restart this loop,
 		// restarting all of the plugins in the process. On all other
@@ -263,32 +323,47 @@ exit:
 	return nil
 }
 
-func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.Interface, bool, error) {
+func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
 	klog.Info("Loading configuration.")
-	config, err := loadConfig(c, flags)
+	config, err := loadConfig(c, o.flags)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to load config: %v", err)
 	}
-	disableResourceRenamingInConfig(config)
+	spec.DisableResourceNamingInConfig(logger.ToKlog, config)
 
-	/*Loading config files*/
-	//fmt.Println("NodeName=", config.NodeName)
-	devConfig, err := generateDeviceConfigFromNvidia(config, c, flags)
+	devConfig, err := generateDeviceConfigFromNvidia(config, c, o.flags)
 	if err != nil {
 		klog.Errorf("failed to load config file %s", err.Error())
 		return nil, false, err
 	}
 
+	driverRoot := root(*devConfig.Config.Flags.Plugin.ContainerDriverRoot)
+	// We construct an NVML library specifying the path to libnvidia-ml.so.1
+	// explicitly so that we don't have to rely on the library path.
+	nvmllib := nvml.New(
+		nvml.WithLibraryPath(driverRoot.tryResolveLibrary("libnvidia-ml.so.1")),
+	)
+	devicelib := device.New(nvmllib)
+	infolib := nvinfo.New(
+		nvinfo.WithNvmlLib(nvmllib),
+		nvinfo.WithDeviceLib(devicelib),
+	)
+
+	err = validateFlags(infolib, devConfig.Config)
+	if err != nil {
+		return nil, false, fmt.Errorf("unable to validate flags: %v", err)
+	}
+
 	// Update the configuration file with default resources.
 	klog.Info("Updating config with default resource matching patterns.")
-	err = rm.AddDefaultResourcesToConfig(&devConfig)
+	err = rm.AddDefaultResourcesToConfig(infolib, nvmllib, devicelib, devConfig.Config)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to add default resources to config: %v", err)
 	}
 
 	// Print the config to the output.
-	configJSON, err := json.MarshalIndent(devConfig, "", "  ")
+	configJSON, err := json.MarshalIndent(devConfig.Config, "", "  ")
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to marshal config to JSON: %v", err)
 	}
@@ -296,11 +371,7 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 
 	// Get the set of plugins.
 	klog.Info("Retrieving plugins.")
-	pluginManager, err := NewPluginManager(&devConfig)
-	if err != nil {
-		return nil, false, fmt.Errorf("error creating plugin manager: %v", err)
-	}
-	plugins, err := pluginManager.GetPlugins()
+	plugins, err := GetPlugins(infolib, nvmllib, devicelib, devConfig)
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
@@ -316,10 +387,8 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 		}
 
 		// Start the gRPC server for plugin p and connect it with the kubelet.
-		if err := p.Start(); err != nil {
-			klog.Error("Could not contact Kubelet. Did you enable the device plugin feature gate?")
-			klog.Error("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
-			klog.Error("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
+		if err := p.Start(o.kubeletSocket); err != nil {
+			klog.Errorf("Failed to start plugin: %v", err)
 			return plugins, true, nil
 		}
 		started++
@@ -334,48 +403,9 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 
 func stopPlugins(plugins []plugin.Interface) error {
 	klog.Info("Stopping plugins.")
-	errs := []error{}
+	var errs error
 	for _, p := range plugins {
-		err := p.Stop()
-		errs = append(errs, err)
+		errs = errors.Join(errs, p.Stop())
 	}
-	return errorsutil.NewAggregate(errs)
-}
-
-// disableResourceRenamingInConfig temporarily disable the resource renaming feature of the plugin.
-// We plan to reeenable this feature in a future release.
-func disableResourceRenamingInConfig(config *spec.Config) {
-	// Disable resource renaming through config.Resource
-	if len(config.Resources.GPUs) > 0 || len(config.Resources.MIGs) > 0 {
-		klog.Infof("Customizing the 'resources' field is not yet supported in the config. Ignoring...")
-	}
-	config.Resources.GPUs = nil
-	config.Resources.MIGs = nil
-
-	// Disable renaming / device selection in Sharing.TimeSlicing.Resources
-	renameByDefault := config.Sharing.TimeSlicing.RenameByDefault
-	setsNonDefaultRename := false
-	setsDevices := false
-	for i, r := range config.Sharing.TimeSlicing.Resources {
-		if !renameByDefault && r.Rename != "" {
-			setsNonDefaultRename = true
-			config.Sharing.TimeSlicing.Resources[i].Rename = ""
-		}
-		if renameByDefault && r.Rename != r.Name.DefaultSharedRename() {
-			setsNonDefaultRename = true
-			config.Sharing.TimeSlicing.Resources[i].Rename = r.Name.DefaultSharedRename()
-		}
-		if !r.Devices.All {
-			setsDevices = true
-			config.Sharing.TimeSlicing.Resources[i].Devices.All = true
-			config.Sharing.TimeSlicing.Resources[i].Devices.Count = 0
-			config.Sharing.TimeSlicing.Resources[i].Devices.List = nil
-		}
-	}
-	if setsNonDefaultRename {
-		klog.Warning("Setting the 'rename' field in sharing.timeSlicing.resources is not yet supported in the config. Ignoring...")
-	}
-	if setsDevices {
-		klog.Warning("Customizing the 'devices' field in sharing.timeSlicing.resources is not yet supported in the config. Ignoring...")
-	}
+	return errs
 }
