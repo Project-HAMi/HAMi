@@ -17,7 +17,7 @@
 package mps
 
 import (
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	spec "github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/api/config/v1"
 )
 
 // Option defines a functional option for configuring an MPS manager.

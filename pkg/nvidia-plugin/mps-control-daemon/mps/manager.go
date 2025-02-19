@@ -24,8 +24,8 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	"github.com/NVIDIA/k8s-device-plugin/internal/rm"
+	spec "github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/rm"
 )
 
 type Manager interface {

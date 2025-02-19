@@ -31,14 +31,14 @@ import (
 	nvinfo "github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
-	"github.com/NVIDIA/k8s-device-plugin/cmd/mps-control-daemon/mount"
-	"github.com/NVIDIA/k8s-device-plugin/cmd/mps-control-daemon/mps"
-	"github.com/NVIDIA/k8s-device-plugin/internal/info"
-	"github.com/NVIDIA/k8s-device-plugin/internal/logger"
-	"github.com/NVIDIA/k8s-device-plugin/internal/rm"
-	"github.com/NVIDIA/k8s-device-plugin/internal/watch"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/mps-control-daemon/mount"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/mps-control-daemon/mps"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/info"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/logger"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/rm"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/watch"
 
-	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	spec "github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/api/config/v1"
 )
 
 // Config represents a collection of config options for the device plugin.

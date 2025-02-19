@@ -23,7 +23,7 @@ import (
 
 	"golang.org/x/mod/semver"
 
-	"github.com/NVIDIA/k8s-device-plugin/internal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/nvidia-plugin/pkg/rm"
 )
 
 var errInvalidDevice = errors.New("invalid device")
