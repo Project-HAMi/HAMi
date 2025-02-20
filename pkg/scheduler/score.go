@@ -18,8 +18,10 @@ package scheduler
 import (
 	"sort"
 	"strings"
+	"sync"
 
 	corev1 "k8s.io/api/core/v1"
+	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -207,44 +209,59 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 		NodeList: make([]*policy.NodeScore, 0),
 	}
 
-	//func calcScore(nodes *map[string]*NodeUsage, errMap *map[string]string, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod) (*NodeScoreList, error) {
-	//	res := make(NodeScoreList, 0, len(*nodes))
+	wg := sync.WaitGroup{}
+	mutex := sync.Mutex{}
+	errCh := make(chan error, len(*nodes))
 	for nodeID, node := range *nodes {
-		viewStatus(*node)
-		score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(util.PodDevices), Score: 0}
-		score.ComputeDefaultScore(node.Devices)
+		wg.Add(1)
+		go func(nodeID string, node *NodeUsage) {
+			defer wg.Done()
 
-		//This loop is for different container request
-		ctrfit := false
-		for ctrid, n := range nums {
-			sums := 0
-			for _, k := range n {
-				sums += int(k.Nums)
-			}
+			viewStatus(*node)
+			score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(util.PodDevices), Score: 0}
+			score.ComputeDefaultScore(node.Devices)
 
-			if sums == 0 {
-				for idx := range score.Devices {
-					for len(score.Devices[idx]) <= ctrid {
-						score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
+			//This loop is for different container request
+			ctrfit := false
+			for ctrid, n := range nums {
+				sums := 0
+				for _, k := range n {
+					sums += int(k.Nums)
+				}
+
+				if sums == 0 {
+					for idx := range score.Devices {
+						for len(score.Devices[idx]) <= ctrid {
+							score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
+						}
+						score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
+						continue
 					}
-					score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
-					continue
+				}
+				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
+				fit, _ := fitInDevices(node, n, annos, task, &score.Devices)
+				ctrfit = fit
+				if !fit {
+					klog.InfoS("calcScore:node not fit pod", "pod", klog.KObj(task), "node", nodeID)
+					failedNodes[nodeID] = "node not fit pod"
+					break
 				}
 			}
-			klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-			fit, _ := fitInDevices(node, n, annos, task, &score.Devices)
-			ctrfit = fit
-			if !fit {
-				klog.InfoS("calcScore:node not fit pod", "pod", klog.KObj(task), "node", nodeID)
-				failedNodes[nodeID] = "node not fit pod"
-				break
-			}
-		}
 
-		if ctrfit {
-			res.NodeList = append(res.NodeList, &score)
-			score.OverrideScore(node.Devices, userNodePolicy)
-		}
+			if ctrfit {
+				mutex.Lock()
+				res.NodeList = append(res.NodeList, &score)
+				mutex.Unlock()
+				score.OverrideScore(node.Devices, userNodePolicy)
+			}
+		}(nodeID, node)
 	}
-	return &res, nil
+	wg.Wait()
+	close(errCh)
+
+	var errorsSlice []error
+	for e := range errCh {
+		errorsSlice = append(errorsSlice, e)
+	}
+	return &res, utilerrors.NewAggregate(errorsSlice)
 }
