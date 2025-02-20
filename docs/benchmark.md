@@ -1,6 +1,6 @@
 ## Benchmarks
 
-Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows
+Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows:
 
 | Test Environment | description                                              |
 | ---------------- | :------------------------------------------------------: |
@@ -36,7 +36,7 @@ Test Result: ![img](../imgs/benchmark_inf.png)
 
 To reproduce:
 
-1. install k8s-vGPU-scheduler，and configure properly
+1. install k8s-vGPU-scheduler, and configure properly
 2. run benchmark job
 
 ```
