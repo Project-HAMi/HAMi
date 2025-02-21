@@ -67,6 +67,14 @@ func Test_parseNvidiaNumaInfo(t *testing.T) {
 			want:    0,
 			wantErr: false,
 		},
+		{
+			name: "NUMA Affinity is empty",
+			idx:  0,
+			nvidiaTopoStr: `GPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID
+GPU0	X`,
+			want:    0,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
