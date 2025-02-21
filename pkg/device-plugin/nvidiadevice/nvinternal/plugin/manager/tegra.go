@@ -43,6 +43,11 @@ type tegramanager manager
 
 // GetPlugins returns the plugins associated with the NVML resources available on the node
 func (m *tegramanager) GetPlugins() ([]plugin.Interface, error) {
+	sConfig, mode, err := plugin.LoadNvidiaDevicePluginConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
+	}
+
 	rms, err := rm.NewTegraResourceManagers(m.config)
 	if err != nil {
 		return nil, fmt.Errorf("failed to construct NVML resource managers: %v", err)
@@ -50,7 +55,7 @@ func (m *tegramanager) GetPlugins() ([]plugin.Interface, error) {
 
 	var plugins []plugin.Interface
 	for _, r := range rms {
-		plugins = append(plugins, plugin.NewNvidiaDevicePlugin(m.config, r, m.cdiHandler, m.cdiEnabled))
+		plugins = append(plugins, plugin.NewNvidiaDevicePlugin(m.config, r, m.cdiHandler, m.cdiEnabled, sConfig, mode))
 	}
 	return plugins, nil
 }
