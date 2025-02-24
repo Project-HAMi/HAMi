@@ -158,6 +158,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return metax.InitMetaxDevice(metaxConfig), nil
 		}, config.MetaxConfig},
+		{metax.MetaxSGPUDevice, metax.MetaxSGPUCommonWord, func(cfg interface{}) (Devices, error) {
+			metaxConfig, ok := cfg.(metax.MetaxConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
+			}
+			return metax.InitMetaxSDevice(metaxConfig), nil
+		}, config.MetaxConfig},
 	}
 
 	// Initialize all devices using the wrapped functions

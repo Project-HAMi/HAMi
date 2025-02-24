@@ -49,6 +49,12 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.iluvatarResourceName }}
         ignoredByScheduler: true
+      - name: {{ .Values.metaxResourceName }}
+        ignoredByScheduler: true
+      - name: {{ .Values.metaxResourceCore }}
+        ignoredByScheduler: true
+      - name: {{ .Values.metaxResourceMem }}
+        ignoredByScheduler: true
       {{- if .Values.devices.ascend.enabled }}
       {{- range .Values.devices.ascend.customresources }}
       - name: {{ . }}

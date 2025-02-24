@@ -17,7 +17,6 @@ limitations under the License.
 package metax
 
 import (
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -43,10 +42,6 @@ var (
 	MetaxResourceCount string
 )
 
-type MetaxConfig struct {
-	ResourceCountName string `yaml:"resourceCountName"`
-}
-
 func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 	MetaxResourceCount = config.ResourceCountName
 	util.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
@@ -56,10 +51,6 @@ func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 
 func (dev *MetaxDevices) CommonWord() string {
 	return MetaxGPUCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&MetaxResourceCount, "metax-name", "metax-tech.com/gpu", "metax resource count")
 }
 
 func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
