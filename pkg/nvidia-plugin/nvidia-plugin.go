@@ -30,7 +30,7 @@
  * GitHub history for details.
  */
 
-package nvidia_plugin
+package main
 
 //
 //import (
