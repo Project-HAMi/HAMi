@@ -3,7 +3,13 @@ include version.mk Makefile.defs
 
 all: build
 
-docker:
+.PHONY: help
+help: ## Display this help.
+	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
+
+##@ Build
+.PHONY: docker-build
+docker-build: ## Build docker image with the vgpu.
 	docker build \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
@@ -13,7 +19,8 @@ docker:
 	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
 
-dockerwithlib:
+.PHONY: docker-buildwithlib
+docker-buildwithlib: ## Build docker image without the enterprise vgpu and vgpuvalidator.
 	docker build \
 	--no-cache \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
@@ -27,11 +34,16 @@ dockerwithlib:
 tidy:
 	$(GO) mod tidy
 
+.PHONY: lint
+lint:
+	bash hack/verify-staticcheck.sh
+
 proto:
 	$(GO) get github.com/gogo/protobuf/protoc-gen-gofast@v1.3.2
 	protoc --gofast_out=plugins=grpc:. ./pkg/api/*.proto
 
-build: $(CMDS) $(DEVICES)
+.PHONY: build
+build: tidy lint $(CMDS) $(DEVICES) ## Build hami-scheduler,hami-device-plugin,vGPUmonitor binary
 
 $(CMDS):
 	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
@@ -43,21 +55,26 @@ clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build docker clean $(CMDS)
+.PHONY: all build docker-build clean $(CMDS)
 
-test:
+##@ Test
+.PHONY: test
+test:	## Unit test
 	mkdir -p ./_output/coverage/
 	bash hack/unit-test.sh
 
-lint:
-	bash hack/verify-staticcheck.sh
+.PHONY: e2e-test 
+e2e-test:	## e2-test
+	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
 
-.PHONY: verify
-verify:
-	hack/verify-all.sh
+.PHONY: e2e-env-setup
+e2e-env-setup:
+	./hack/e2e-test-setup.sh
 
-.PHONY: lint_dockerfile
-lint_dockerfile:
+
+##@ Security
+.PHONY: dockerfile-security
+dockerfile-security:	##Scan Dockerfile security
 	@ docker run --rm \
           -v $(ROOT_DIR)/.trivyignore:/.trivyignore \
           -v /tmp/trivy:/root/trivy.cache/  \
@@ -66,8 +83,8 @@ lint_dockerfile:
       (($$?==0)) || { echo "error, failed to check dockerfile trivy" && exit 1 ; } ; \
       echo "dockerfile trivy check: pass"
 
-.PHONY: lint_chart
-lint_chart:
+.PHONY: chart-security
+chart-security:	##Scan Charts security
 	@ docker run --rm \
           -v $(ROOT_DIR)/.trivyignore:/.trivyignore \
           -v /tmp/trivy:/root/trivy.cache/  \
@@ -76,14 +93,15 @@ lint_chart:
       (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
       echo "chart trivy check: pass"
 
-.PHONY: e2e-env-setup
-e2e-env-setup:
-	./hack/e2e-test-setup.sh
 
+
+##@ Deploy
 .PHONY: helm-deploy
-helm-deploy:
+helm-deploy: 		##Deploy hami to the K8s cluster specified in ~/.kube/config.
 	./hack/deploy-helm.sh "${E2E_TYPE}" "${KUBE_CONF}" "${HAMI_VERSION}"
 
-.PHONY: e2e-test
-e2e-test:
-	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
+
+.PHONY: verify
+verify:
+	hack/verify-all.sh
+

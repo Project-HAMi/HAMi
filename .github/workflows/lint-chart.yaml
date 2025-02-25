@@ -5,7 +5,7 @@ on:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
     branches-ignore:
-      - 'dependabot/**'
+      - "dependabot/**"
   pull_request:
     paths:
       - "charts/**"
@@ -23,9 +23,8 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: v3.7.1
-      - name: Lint Chart
+      - name: Chart Security
         run: |
-          make lint_chart
+          make chart-security
       - name: Check chart version
         run: bash ./hack/verify-chart-version.sh
-
