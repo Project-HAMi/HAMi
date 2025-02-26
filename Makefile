@@ -7,10 +7,10 @@ docker:
 	docker build \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
+	--build-arg NVIDIA_DEVEL_IMAGE=${NVIDIA_DEVEL_IMAGE} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
-	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
 
 dockerwithlib:
