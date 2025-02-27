@@ -1,6 +1,56 @@
 ## 简介
 
-**我们支持基于拓扑结构，对沐曦设备进行优化调度**:
+我们对沐曦设备做如下支持：
+
+- 复用沐曦GPU设备，提供与vGPU类似的复用功能
+- 基于拓扑结构，对沐曦设备进行优化调度
+
+## 复用沐曦GPU设备，提供与vGPU类似的复用功能
+
+复用功能包括以下：
+
+***GPU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
+
+***可限制分配的显存大小***: 你现在可以用显存值（例如4G）来分配GPU，本组件会确保任务使用的显存不会超过分配数值
+
+***可限制计算单元数量***: 你现在可以指定任务使用的算力比例（例如60即代表使用60%算力）来分配GPU，本组件会确保任务使用的算力不会超过分配数值
+
+### 需求
+
+* Metax Driver >= 2.31.0
+* Metax GPU Operator >= 0.10.1
+* Kubernetes >= 1.23
+
+### 开启复用沐曦设备
+
+* 部署Metax GPU Operator (请联系您的设备提供方获取)
+* 根据readme.md部署HAMi
+
+### 运行沐曦任务
+
+一个典型的沐曦任务如下所示：
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod1
+spec:
+  containers:
+    - name: ubuntu-container
+      image: cr.metax-tech.com/public-ai-release/c500/colossalai:2.24.0.5-py38-ubuntu20.04-amd64 
+      imagePullPolicy: IfNotPresent
+      command: ["sleep","infinity"]
+      resources:
+        limits:
+          metax-tech.com/sgpu: 1 # requesting 1 GPU 
+          metax-tech.com/vcore: 60 # each GPU use 60% of total compute cores
+          metax-tech.com/vmemory: 4 # each GPU require 4 GiB device memory
+```
+
+> **NOTICE1:** *你可以在这里找到更多样例 [examples/metax folder](../examples/metax/sgpu)*
+
+## 基于拓扑结构，对沐曦设备进行优化调度
 
 在单台服务器上配置多张 GPU 时，GPU 卡间根据双方是否连接在相同的 PCIe Switch 或 MetaXLink
 下，存在近远（带宽高低）关系。服务器上所有卡间据此形成一张拓扑，如下图所示。
@@ -23,28 +73,28 @@
 
 ![img](../imgs/metax_binpack.png)
 
-## 注意：
+### 注意：
 
 1. 暂时不支持沐曦设备的切片，只能申请整卡
 
 2. 本功能基于MXC500进行测试
 
-## 需求
+### 需求
 
 * Metax GPU extensions >= 0.8.0
 * Kubernetes >= 1.23
 
-## 开启针对沐曦设备的拓扑调度优化
+### 开启针对沐曦设备的拓扑调度优化
 
 * 部署Metax GPU extensions (请联系您的设备提供方获取)
 
 * 根据readme.md部署HAMi
 
-## 运行沐曦任务
+### 运行沐曦任务
 
 一个典型的沐曦任务如下所示：
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -61,6 +111,4 @@ spec:
           metax-tech.com/gpu: 1 # requesting 1 vGPUs
 ```
 
-> **NOTICE2:** *你可以在这里找到更多样例 [examples/metax folder](../examples/metax/)*
-
-   
+> **NOTICE2:** *你可以在这里找到更多样例 [examples/metax folder](../examples/metax/gpu)*

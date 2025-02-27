@@ -90,6 +90,10 @@ data:
       resourceCoreName: {{ .Values.dcuResourceCores }}
     metax:
       resourceCountName: "metax-tech.com/gpu"
+
+      resourceVCountName: {{ .Values.metaxResourceName }}
+      resourceVMemoryName: {{ .Values.metaxResourceMem }}
+      resourceVCoreName: {{ .Values.metaxResourceCore }}
     mthreads:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"

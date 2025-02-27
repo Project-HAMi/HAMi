@@ -79,6 +79,18 @@ data:
                     {
                         "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.metaxResourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.metaxResourceCore }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.metaxResourceMem }}",
+                        "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false
