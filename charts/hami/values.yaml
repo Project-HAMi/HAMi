@@ -194,6 +194,8 @@ devices:
     enabled: false
     customresources:
       - mthreads.com/vgpu
+  nvidia:
+    gpuCorePolicy: default
   ascend:
     enabled: false
     image: ""
