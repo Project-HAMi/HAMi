@@ -44,8 +44,8 @@ import (
 )
 
 type Scheduler struct {
-	nodeManager
-	podManager
+	*nodeManager
+	*podManager
 
 	stopCh     chan struct{}
 	kubeClient kubernetes.Interface
@@ -67,8 +67,8 @@ func NewScheduler() *Scheduler {
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
 	}
-	s.nodeManager.init()
-	s.podManager.init()
+	s.nodeManager = newNodeManager()
+	s.podManager = newPodManager()
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }

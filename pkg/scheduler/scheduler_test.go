@@ -41,8 +41,7 @@ import (
 )
 
 func Test_getNodesUsage(t *testing.T) {
-	nodeMage := nodeManager{}
-	nodeMage.init()
+	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &util.NodeInfo{
 		ID: "node1",
 		Devices: []util.DeviceInfo{
@@ -80,8 +79,7 @@ func Test_getNodesUsage(t *testing.T) {
 			},
 		},
 	}
-	podMap := podManager{}
-	podMap.init()
+	podMap := newPodManager()
 	podMap.addPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "1111",
