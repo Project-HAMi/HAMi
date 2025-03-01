@@ -23,6 +23,7 @@ data:
       deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
+      gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       knownMigGeometries:
       - models: [ "A30" ]
         allowedGeometries:

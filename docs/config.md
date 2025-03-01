@@ -103,6 +103,7 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 ## Container configs: env
 
 * `GPU_CORE_UTILIZATION_POLICY`:
+> Currently this parameter can be specified during `helm install` and then automatically injected into the container environment variables, through `--set devices.nvidia.gpuCorePolicy=force`
 
   String type, "default", "force", "disable"
 

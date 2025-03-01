@@ -116,7 +116,8 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 
 ## 容器配置（在容器的环境变量中指定）
 
-* `GPU_CORE_UTILIZATION_POLICY`：
+* `GPU_CORE_UTILIZATION_POLICY` 
+  > 当前这个参数可以在 `helm install` 的时候指定，然后自动注入到容器环境变量中, 通过 `--set devices.nvidia.gpuCorePolicy=force`
 
   字符串类型，"default"，"force"，"disable"
 

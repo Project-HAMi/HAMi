@@ -77,21 +77,33 @@ type MigConfigSpec struct {
 // MigConfigSpecSlice represents a slice of 'MigConfigSpec'.
 type MigConfigSpecSlice []MigConfigSpec
 
+// GPUCoreUtilizationPolicy is set nvidia gpu core isolation policy.
+type GPUCoreUtilizationPolicy string
+
+const (
+	DefaultCorePolicy GPUCoreUtilizationPolicy = "default"
+	ForceCorePolicy   GPUCoreUtilizationPolicy = "force"
+	DisableCorePolicy GPUCoreUtilizationPolicy = "disable"
+)
+
 type NvidiaConfig struct {
-	ResourceCountName            string                      `yaml:"resourceCountName"`
-	ResourceMemoryName           string                      `yaml:"resourceMemoryName"`
-	ResourceCoreName             string                      `yaml:"resourceCoreName"`
-	ResourceMemoryPercentageName string                      `yaml:"resourceMemoryPercentageName"`
-	ResourcePriority             string                      `yaml:"resourcePriorityName"`
-	OverwriteEnv                 bool                        `yaml:"overwriteEnv"`
-	DefaultMemory                int32                       `yaml:"defaultMemory"`
-	DefaultCores                 int32                       `yaml:"defaultCores"`
-	DefaultGPUNum                int32                       `yaml:"defaultGPUNum"`
-	DeviceSplitCount             uint                        `yaml:"deviceSplitCount"`
-	DeviceMemoryScaling          float64                     `yaml:"deviceMemoryScaling"`
-	DeviceCoreScaling            float64                     `yaml:"deviceCoreScaling"`
-	DisableCoreLimit             bool                        `yaml:"disableCoreLimit"`
-	MigGeometriesList            []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
+	ResourceCountName            string  `yaml:"resourceCountName"`
+	ResourceMemoryName           string  `yaml:"resourceMemoryName"`
+	ResourceCoreName             string  `yaml:"resourceCoreName"`
+	ResourceMemoryPercentageName string  `yaml:"resourceMemoryPercentageName"`
+	ResourcePriority             string  `yaml:"resourcePriorityName"`
+	OverwriteEnv                 bool    `yaml:"overwriteEnv"`
+	DefaultMemory                int32   `yaml:"defaultMemory"`
+	DefaultCores                 int32   `yaml:"defaultCores"`
+	DefaultGPUNum                int32   `yaml:"defaultGPUNum"`
+	DeviceSplitCount             uint    `yaml:"deviceSplitCount"`
+	DeviceMemoryScaling          float64 `yaml:"deviceMemoryScaling"`
+	DeviceCoreScaling            float64 `yaml:"deviceCoreScaling"`
+	// TODO 这个参数是否应该直接移除
+	DisableCoreLimit  bool                        `yaml:"disableCoreLimit"`
+	MigGeometriesList []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
+	// GPUCorePolicy through webhook automatic injected to container env
+	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 }
 
 type FilterDevice struct {
@@ -250,6 +262,14 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
 			Name:  util.TaskPriority,
 			Value: fmt.Sprint(priority.Value()),
+		})
+	}
+
+	if dev.config.GPUCorePolicy != "" &&
+		dev.config.GPUCorePolicy != DefaultCorePolicy {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{
+			Name:  util.CoreLimitSwitch,
+			Value: string(dev.config.GPUCorePolicy),
 		})
 	}
 
