@@ -34,7 +34,7 @@ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your 
 Iluvatar GPUs can now be requested by a container
 using the `iluvatar.ai/vgpu`, `iluvatar.ai/vcuda-memory` and `iluvatar.ai/vcuda-core`  resource type:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -44,7 +44,7 @@ spec:
   containers:
   - name: poddemo
     image: harbor.4pd.io/vgpu/corex_transformers@sha256:36a01ec452e6ee63c7aa08bfa1fa16d469ad19cc1e6000cf120ada83e4ceec1e
-    command: 
+    command:
     - bash
     args:
     - -c
@@ -73,14 +73,12 @@ spec:
 ## Notes
 
 1. You need to set the following prestart command in order for the device-share to work properly
-```
+```sh
       set -ex
       echo "export LD_LIBRARY_PATH=/usr/local/corex/lib64:$LD_LIBRARY_PATH">> /root/.bashrc
       cp -f /usr/local/iluvatar/lib64/libcuda.* /usr/local/corex/lib64/
       cp -f /usr/local/iluvatar/lib64/libixml.* /usr/local/corex/lib64/
-      source /root/.bashrc 
+      source /root/.bashrc
 ```
 
 2. Virtualization takes effect only for containers that apply for one GPU(i.e iluvatar.ai/vgpu=1 )
-
-   

@@ -25,7 +25,7 @@
 Hygon DCUs can now be requested by a container
 using the `hygon.com/dcunum` , `hygon.com/dcumem` and `hygon.com/dcucores` resource type:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -75,5 +75,3 @@ Launch your DCU tasks like you usually do
 1. DCU-sharing in init container is not supported, pods with "hygon.com/dcumem" in init container will never be scheduled.
 
 2. Only one vdcu can be aquired per container. If you want to mount multiple dcu devices, then you shouldn't set `hygon.com/dcumem` or `hygon.com/dcucores`
-
-   

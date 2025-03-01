@@ -21,7 +21,7 @@
 
 ## 运行DCU任务
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
