@@ -40,7 +40,7 @@ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your 
 Mthreads GPUs can now be requested by a container
 using the `mthreads.com/vgpu`, `mthreads.com/sgpu-memory` and `mthreads.com/sgpu-core`  resource type:
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -48,7 +48,7 @@ metadata:
 spec:
   restartPolicy: OnFailure
   containers:
-    - image: core.harbor.zlidc.mthreads.com:30003/mt-ai/lm-qy2:v17-mpc 
+    - image: core.harbor.zlidc.mthreads.com:30003/mt-ai/lm-qy2:v17-mpc
       imagePullPolicy: IfNotPresent
       name: gpushare-pod-1
       command: ["sleep"]
@@ -63,5 +63,3 @@ spec:
 > **NOTICE1:** *Each unit of sgpu-memory indicates 512M device memory*
 
 > **NOTICE2:** *You can find more examples in [examples/mthreads folder](../examples/mthreads/)*
-
-   

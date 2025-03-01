@@ -49,7 +49,7 @@ HAMi provides device virtualization for several heterogeneous devices including 
 A simple demonstration of device isolation:
 A task with the following resources:
 
-```
+```yaml
       resources:
         limits:
           nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
