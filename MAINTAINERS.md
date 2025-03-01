@@ -1,6 +1,6 @@
 # Maintainers
 
-- Please check [HAMi Community Membership](https://github.com/Project-HAMi/community/blob/main/CONTRIBUTOR-LADDER.md) to find how to level up through the project.
+- Please check [HAMi Community Membership](https://github.com/Project-HAMi/community/blob/main/community-membership.md) to find how to level up through the project.
 - Please see [Contributors](./AUTHORS.md) for the full list of contributors to the project.
 
 ## HAMi Committers
