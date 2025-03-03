@@ -23,12 +23,10 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes/fake"
-
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var inRequestDevices map[string]string
@@ -626,8 +624,7 @@ func Test_CheckHealth(t *testing.T) {
 }
 
 func TestMarkAnnotationsToDelete(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
-	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+	client.GetFactory().SetMock().GetClient().CreateNode(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
 	}, metav1.CreateOptions{})
 	type args struct {
