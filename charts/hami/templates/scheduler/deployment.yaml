@@ -12,7 +12,11 @@ metadata:
   annotations: {{ toYaml .Values.global.annotations | nindent 4}}
   {{- end }}
 spec:
+  {{- if .Values.scheduler.leaderElect }}
+  replicas: {{ .Values.scheduler.replicas }}
+  {{- else }}
   replicas: 1
+  {{- end }}
   selector:
     matchLabels:
       app.kubernetes.io/component: hami-scheduler
