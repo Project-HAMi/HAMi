@@ -36,7 +36,7 @@ func init() {
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 
-func TestExtractMigTemplatesFromUUID(t *testing.T) {
+func Test_ExtractMigTemplatesFromUUID(t *testing.T) {
 	testCases := []struct {
 		name          string
 		uuid          string
@@ -108,7 +108,7 @@ func TestExtractMigTemplatesFromUUID(t *testing.T) {
 	}
 }
 
-func TestEmptyContainerDevicesCoding(t *testing.T) {
+func Test_EmptyContainerDevicesCoding(t *testing.T) {
 	cd1 := ContainerDevices{}
 	s := EncodeContainerDevices(cd1)
 	fmt.Println(s)
@@ -116,7 +116,7 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 	assert.DeepEqual(t, cd1, cd2)
 }
 
-func TestEmptyPodDeviceCoding(t *testing.T) {
+func Test_EmptyPodDeviceCoding(t *testing.T) {
 	pd1 := PodDevices{}
 	s := EncodePodDevices(inRequestDevices, pd1)
 	fmt.Println(s)
@@ -124,7 +124,7 @@ func TestEmptyPodDeviceCoding(t *testing.T) {
 	assert.DeepEqual(t, pd1, pd2)
 }
 
-func TestPodDevicesCoding(t *testing.T) {
+func Test_PodDevicesCoding(t *testing.T) {
 	tests := []struct {
 		name string
 		args PodDevices
@@ -250,7 +250,7 @@ func Test_DecodePodDevices(t *testing.T) {
 	}
 }
 
-func TestMarshalNodeDevices(t *testing.T) {
+func Test_MarshalNodeDevices(t *testing.T) {
 	type args struct {
 		dlist []*DeviceInfo
 	}
@@ -330,7 +330,7 @@ func TestMarshalNodeDevices(t *testing.T) {
 	}
 }
 
-func TestUnMarshalNodeDevices(t *testing.T) {
+func Test_UnMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		str string
 	}
@@ -623,7 +623,7 @@ func Test_CheckHealth(t *testing.T) {
 	}
 }
 
-func TestMarkAnnotationsToDelete(t *testing.T) {
+func Test_MarkAnnotationsToDelete(t *testing.T) {
 	client.GetFactory().SetMock().GetClient().CreateNode(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
 	}, metav1.CreateOptions{})
