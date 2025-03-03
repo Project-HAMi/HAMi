@@ -39,7 +39,7 @@ helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your 
 
 通过指定`mthreads.com/vgpu`, `mthreads.com/sgpu-memory` and `mthreads.com/sgpu-core`这3个参数，可以确定容器申请的切片个数，对应的显存和算力核组
 
-```
+```yaml
 apiVersion: v1
 kind: Pod
 metadata:
@@ -47,7 +47,7 @@ metadata:
 spec:
   restartPolicy: OnFailure
   containers:
-    - image: core.harbor.zlidc.mthreads.com:30003/mt-ai/lm-qy2:v17-mpc 
+    - image: core.harbor.zlidc.mthreads.com:30003/mt-ai/lm-qy2:v17-mpc
       imagePullPolicy: IfNotPresent
       name: gpushare-pod-1
       command: ["sleep"]
@@ -62,7 +62,3 @@ spec:
 > **注意1:** *每一单位的sgpu-memory代表512M的显存.*
 
 > **注意2:** *查看更多的[用例](../examples/mthreads/).*
-
-
-
-   
