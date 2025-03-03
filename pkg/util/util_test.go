@@ -23,10 +23,11 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 var inRequestDevices map[string]string
