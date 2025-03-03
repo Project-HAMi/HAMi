@@ -18,7 +18,6 @@ package client
 
 import (
 	"context"
-	"flag"
 	"fmt"
 	"sync"
 
@@ -45,13 +44,6 @@ var (
 // NewFakeClient 创建测试用的 Kubernetes 客户端（单例模式）.
 func NewFakeClient() *FakeClient {
 	fakeClientOnce.Do(func() {
-		// 设置日志级别但不使用 flag
-		klog.InitFlags(nil)
-		flag.Set("v", "4")
-		// 注意：如果程序其他地方已经调用了 flag.Parse()，这里就不需要再次调用
-		// 如果没有，取消下行注释
-		// flag.Parse()
-
 		fakeClient = &FakeClient{
 			client: fake.NewSimpleClientset(),
 		}
@@ -99,6 +91,6 @@ func (f *FakeClient) PatchPod(ctx context.Context, namespace string, name string
 
 // 创建 Node.
 func (f *FakeClient) CreateNode(ctx context.Context, node *corev1.Node, opts metav1.CreateOptions) (*corev1.Node, error) {
-	klog.V(3/4).InfoS("Fake: Creating node", "node", node.Name)
+	klog.V(4).InfoS("Fake: Creating node", "node", node.Name)
 	return f.client.CoreV1().Nodes().Create(ctx, node, opts)
 }
