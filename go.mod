@@ -19,6 +19,7 @@ require (
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.10.0
+	github.com/unrolled/render v1.7.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/net v0.35.0
 	golang.org/x/term v0.29.0
