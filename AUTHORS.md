@@ -1,6 +1,6 @@
 # Contributors
 
-- Please check [HAMi Community Membership](https://github.com/Project-HAMi/community/blob/main/CONTRIBUTOR-LADDER.md#contributor) to find how to be a contributor.
+- Please check [HAMi Community Membership](https://github.com/Project-HAMi/community/blob/main/community-membership.md) to find how to be a contributor.
 - Here is the full list of the [MAINTAINERS](./MAINTAINERS.md).
 
 The following people, in alphabetical order, have either authored or signed off on commits in the HAMi repository:
