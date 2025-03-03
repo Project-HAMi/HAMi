@@ -33,12 +33,18 @@ var (
 	once       sync.Once
 )
 
+func init() {
+	KubeClient = nil
+}
+
 func GetClient() kubernetes.Interface {
 	once.Do(func() {
 		var err error
-		KubeClient, err = newClient()
-		if err != nil {
-			klog.Fatalf("Failed to create Kubernetes client: %v", err)
+		if KubeClient == nil {
+			KubeClient, err = newClient()
+			if err != nil {
+				klog.Fatalf("Failed to create Kubernetes client: %v", err)
+			}
 		}
 	})
 	return KubeClient

@@ -28,6 +28,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
@@ -673,6 +674,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 }
 
 func Test_NodeCleanUp(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
 	tests := []struct {
 		name string
 		args string
