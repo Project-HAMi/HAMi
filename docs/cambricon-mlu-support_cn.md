@@ -39,7 +39,7 @@ kubectl apply -f cambricon-device-plugin-daemonset.yaml
 
 ## 运行MLU任务
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
