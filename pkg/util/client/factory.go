@@ -50,9 +50,9 @@ func (f *KubeClientFactory) GetClient() KubeInterface {
 	return f.client
 }
 
-// SetMock 将工厂客户端设置为MockClient.
-func (f *KubeClientFactory) SetMock() *KubeClientFactory {
-	f.client = NewMockClient()
+// SetFake 将工厂客户端设置为FakeClient.
+func (f *KubeClientFactory) SetFake() *KubeClientFactory {
+	f.client = NewFakeClient()
 	return f
 }
 
