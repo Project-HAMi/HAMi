@@ -43,7 +43,7 @@ clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build docker clean $(CMDS)
+.PHONY: all build docker clean test $(CMDS)
 
 test:
 	mkdir -p ./_output/coverage/
