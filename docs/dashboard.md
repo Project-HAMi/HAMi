@@ -1,10 +1,10 @@
 # Abstract
 
-​	For the sake of simplicity, this article provides only one possible way to ultimately use prometheus to capture monitoring metrics as a data source and grafana to present monitoring information.
+For the sake of simplicity, this article provides only one possible way to ultimately use prometheus to capture monitoring metrics as a data source and grafana to present monitoring information.
 
-​	Many users feedback from creating issues that they do not know how to install and configure related components, resulting in failure to use related dashboard normally. The installation and configuration steps are described as follows, Hope you use it smoothly! Any feedback is welcome.
+Many users feedback from creating issues that they do not know how to install and configure related components, resulting in failure to use related dashboard normally. The installation and configuration steps are described as follows, Hope you use it smoothly! Any feedback is welcome.
 
-​	This article assumes that Kubernetes cluster and HAMi has been deployed successfully. The following components are installed in a kubernetes cluster. The components or software versions are as follows:
+This article assumes that Kubernetes cluster and HAMi has been deployed successfully. The following components are installed in a kubernetes cluster. The components or software versions are as follows:
 
 | components or software name | version             | remark           |
 | --------------------------- | ------------------- | ---------------- |
@@ -16,7 +16,7 @@
 
 ## Deploy kube-prometheus stack
 
-**Note:**See the version compatibility matrix for kubernetes and kube-prometheus stack in：https://github.com/prometheus-operator/kube-prometheus?tab=readme-ov-file#compatibility 
+**Note:** See the version compatibility matrix for kubernetes and kube-prometheus stack in：https://github.com/prometheus-operator/kube-prometheus?tab=readme-ov-file#compatibility 
 
 ```shell
 #Clone kube-prometheus code repository(using release-0.11 here)
@@ -48,19 +48,19 @@ grafana                 NodePort    10.233.56.112   <none>        3000:30300/TCP
 prometheus-k8s          NodePort    10.233.38.113   <none>        9090:30090/TCP,8080:31273/TCP   19h
 ```
 
-​	If ip address of controller node is 10.0.0.21, then grafana, prometheus, and alertmanager can be accessed using the following urls: http://10.0.0.21:30300 , http://10.0.0.21:30090 , and http://10.0.0.21:30093 , and the default user name and password for accessing grafana are admin
+If ip address of controller node is 10.0.0.21, then grafana, prometheus, and alertmanager can be accessed using the following urls: http://10.0.0.21:30300 , http://10.0.0.21:30090 , and http://10.0.0.21:30093 , and the default user name and password for accessing grafana are admin
 
 ## Configure grafana
 
 ### Create Datasource ALL
 
-​	Go to the "Configuration" -> "Data soutces" page in grafana and create a datasource named "ALL", and keep the value of HTTP.URL be same with the counterpart in default "prometheus" datasource.
+Go to the "Configuration" -> "Data soutces" page in grafana and create a datasource named "ALL", and keep the value of HTTP.URL be same with the counterpart in default "prometheus" datasource.
 
 ### Import dashboard
 
-​	Go to the "Configuration" -> "Data soutces" page in grafana and import the dashboard from https://grafana.com/grafana/dashboards/22043-hami-vgpu-metrics-dashboard/ , and a dashboard page named "hami-vgpu-metrics-dashboard" will be created. 22043-hami-vgpu-metrics-dashboard is valid in grafana8.5.5 and grafana9.1.0, and it's grealty possible that this dashboard is vaild in grafana version later than 9.1.0. Now data of some panels in this dashboard page are missing, which requires you read the rest of the document.
+Go to the "Configuration" -> "Data soutces" page in grafana and import the dashboard from https://grafana.com/grafana/dashboards/22043-hami-vgpu-metrics-dashboard/ , and a dashboard page named "hami-vgpu-metrics-dashboard" will be created. 22043-hami-vgpu-metrics-dashboard is valid in grafana8.5.5 and grafana9.1.0, and it's grealty possible that this dashboard is vaild in grafana version later than 9.1.0. Now data of some panels in this dashboard page are missing, which requires you read the rest of the document.
 
-​	For versions earlier than grafana8.5.5, such as grafana7.5.17, please refer to：https://grafana.com/grafana/dashboards/21833-hami-vgpu-dashboard/ 
+For versions earlier than grafana8.5.5, such as grafana7.5.17, please refer to：https://grafana.com/grafana/dashboards/21833-hami-vgpu-dashboard/ 
 
 # Deploy dcgm-exporter
 
@@ -231,6 +231,6 @@ NAME           READY   STATUS        RESTARTS   AGE   IP               NODE     
 gpu-pod-01     0/1     Completed     0          52s   10.233.81.70     controller01   <none>           <none>
 ```
 
-​	You can see the monitoring details in the dashboard. The contents are as follows:
+You can see the monitoring details in the dashboard. The contents are as follows:
 
 ![hami-vgpu-metrics-dashboard](../imgs/hami-vgpu-metrics-dashboard.png)

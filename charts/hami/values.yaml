@@ -27,6 +27,11 @@ iluvatarResourceName: "iluvatar.ai/vgpu"
 iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
 iluvatarResourceCore: "iluvatar.ai/vcuda-core"
 
+#Metax SGPU Parameters
+metaxResourceName: "metax-tech.com/sgpu"
+metaxResourceCore: "metax-tech.com/vcore"
+metaxResourceMem: "metax-tech.com/vmemory"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -55,6 +60,8 @@ scheduler:
   metricsBindAddress: ":9395"
   livenessProbe: false
   leaderElect: true
+  # when leaderElect is true, replicas is available, otherwise replicas is 1.
+  replicas: 1
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
@@ -137,7 +144,7 @@ devicePlugin:
   runtimeClassName: ""
   migStrategy: "none"
   disablecorelimit: "false"
-  passDeviceSpecsEnabled: true
+  passDeviceSpecsEnabled: false
   extraArgs:
     - -v=4
   
@@ -189,6 +196,8 @@ devices:
     enabled: false
     customresources:
       - mthreads.com/vgpu
+  nvidia:
+    gpuCorePolicy: default
   ascend:
     enabled: false
     image: ""
@@ -200,6 +209,8 @@ devices:
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910B2
+      - huawei.com/Ascend910B2-memory
       - huawei.com/Ascend910B
       - huawei.com/Ascend910B-memory
       - huawei.com/Ascend910B4

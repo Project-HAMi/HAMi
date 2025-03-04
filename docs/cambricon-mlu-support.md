@@ -22,10 +22,10 @@
 
 * Activate the smlu mode for each MLUs on that node
 
-```
+```sh
 cnmon set -c 0 -smlu on
 cnmon set -c 1 -smlu on
-...
+# ...
 ```
 
 * Get cambricon-device-plugin from your device provider and specify the following parameters during deployment:
@@ -45,7 +45,7 @@ kubectl apply -f cambricon-device-plugin-daemonset.yaml
 Cambricon MLUs can now be requested by a container
 using the `cambricon.com/vmlu` ,`cambricon.com/mlu.smlu.vmemory` and `cambricon.com/mlu.smlu.vcore` resource type:
 
-```
+```yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:

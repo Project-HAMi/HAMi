@@ -158,6 +158,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return metax.InitMetaxDevice(metaxConfig), nil
 		}, config.MetaxConfig},
+		{metax.MetaxSGPUDevice, metax.MetaxSGPUCommonWord, func(cfg interface{}) (Devices, error) {
+			metaxConfig, ok := cfg.(metax.MetaxConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
+			}
+			return metax.InitMetaxSDevice(metaxConfig), nil
+		}, config.MetaxConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -249,6 +256,27 @@ vnpus:
       - name: "vir16"
         memory: 17476
         aiCore: 16
+  - chipName: 910B2
+    commonWord: Ascend910B2
+    resourceName: huawei.com/Ascend910B2
+    resourceMemoryName: huawei.com/Ascend910B2-memory
+    memoryAllocatable: 65536
+    memoryCapacity: 65536
+    aiCore: 24
+    aiCPU: 6
+    templates:
+      - name: vir03_1c_8g
+        memory: 8192
+        aiCore: 3
+        aiCPU: 1
+      - name: vir06_1c_16g
+        memory: 16384
+        aiCore: 6
+        aiCPU: 1
+      - name: vir12_3c_32g
+        memory: 32768
+        aiCore: 12
+        aiCPU: 3
   - chipName: "910B3"
     commonWord: "Ascend910B"
     resourceName: "huawei.com/Ascend910B"
