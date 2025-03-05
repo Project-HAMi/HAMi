@@ -19,6 +19,8 @@ package config
 import "github.com/Project-HAMi/HAMi/pkg/util"
 
 var (
+	QPS                float32
+	Burst              int
 	HTTPBind           string
 	SchedulerName      string
 	MetricsBindAddress string
