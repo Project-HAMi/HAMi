@@ -64,7 +64,7 @@ func GetNode(nodename string) (*corev1.Node, error) {
 
 	klog.InfoS("Fetching node", "nodeName", nodename)
 
-	n, err := client.NewInstance().GetNode(context.Background(), nodename, metav1.GetOptions{})
+	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	if err != nil {
 		switch {
 		case apierrors.IsNotFound(err):
@@ -96,7 +96,7 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	podListOptions := metav1.ListOptions{
 		FieldSelector: selector,
 	}
-	podlist, err := client.NewInstance().ListPods(ctx, "", podListOptions)
+	podlist, err := client.GetClient().CoreV1().Pods("").List(ctx, podListOptions)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
-	node, err := client.NewInstance().GetNode(ctx, nodeName, metav1.GetOptions{})
+	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return nil, err
 	}
@@ -139,7 +139,7 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 		if ns == "" || name == "" {
 			return nil, nil
 		}
-		return client.NewInstance().GetPod(ctx, ns, name, metav1.GetOptions{})
+		return client.GetClient().CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 	}
 	return nil, nil
 }
@@ -343,7 +343,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	if err != nil {
 		return err
 	}
-	_, err = client.NewInstance().PatchNode(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = client.GetClient().CoreV1().Nodes().Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch pod %v failed, %v", node.Name, err)
@@ -374,7 +374,7 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 		return err
 	}
 	klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
-	_, err = client.NewInstance().PatchPod(context.Background(), pod.Namespace, pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)
 	}

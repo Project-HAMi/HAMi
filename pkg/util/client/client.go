@@ -29,6 +29,9 @@ import (
 )
 
 var (
+	// KubeClient is the global Kubernetes client instance.
+	// Note: It is recommended to use the GetClient() method instead of directly accessing this variable.
+	// KubeClient will be deprecated in the future.
 	KubeClient kubernetes.Interface
 	once       sync.Once
 )
@@ -37,6 +40,8 @@ func init() {
 	KubeClient = nil
 }
 
+// GetClient returns the singleton Kubernetes client instance.
+// It initializes the client on first call if not already set.
 func GetClient() kubernetes.Interface {
 	once.Do(func() {
 		var err error
@@ -48,6 +53,15 @@ func GetClient() kubernetes.Interface {
 		}
 	})
 	return KubeClient
+}
+
+// SetClient sets the Kubernetes client instance.
+// This is primarily used for testing purposes to inject a fake client.
+// Example: client.SetClient(fake.NewSimpleClientset())
+func SetClient(client kubernetes.Interface) {
+	KubeClient = client
+	// Reset once so that GetClient will use the new client
+	once = sync.Once{}
 }
 
 // newClient initializes a new Kubernetes client.
