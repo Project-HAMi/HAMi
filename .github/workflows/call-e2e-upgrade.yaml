@@ -6,13 +6,77 @@ on:
       ref:
         required: true
         type: string
-permissions: write-all
+      type:
+        description: 'E2E type'
+        type: string
+        default: pullrequest
 
 jobs:
-  upgrade-e2e:
-    runs-on: ubuntu-latest
+  e2e-upgrade-test:
+    strategy:
+      matrix:
+        include:
+          - device: nvidia
+            type: tesla-p4
+    #          - device: nvidia
+    #            type: rtx-4090
+    #          - device: huawei
+    #            type: ascend-910b
+    runs-on: [ "${{ matrix.device }}", "${{ matrix.type }}" ]
+    environment: ${{ matrix.device }}
+    env:
+      HAMI_VERSION: ${{ inputs.ref }}
+      E2E_TYPE: ${{ inputs.type }}
     steps:
-      - name: e2e upgrade test
-        # https://github.com/actions/virtual-environments/issues/709
+      - name: checkout code
+        uses: actions/checkout@v4
+
+      - name: install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.21"
+
+      - name: setup e2e env
         run: |
-          echo "Need to add e2e upgrade test"
+          make e2e-env-setup
+
+      - name: download hami helm
+        if: inputs.type == 'pullrequest'
+        uses: actions/download-artifact@v4
+        with:
+          name: chart_package_artifact
+          path: charts/
+
+      - name: download hami image
+        if: inputs.type == 'pullrequest'
+        uses: actions/download-artifact@v4
+        with:
+          name: hami-image
+          path: ./image
+
+      - name: load e2e image
+        if: inputs.type == 'pullrequest'
+        run: |
+          echo "Loading Docker image from image.tar..."
+          if [ -z "${VSPHERE_GPU_VM_IP}" ]; then
+            echo "Error: VSPHERE_GPU_VM_IP is not defined!"
+            exit 1
+          fi
+          scp ./image/image.tar root@$VSPHERE_GPU_VM_IP:/home/
+          ssh root@$VSPHERE_GPU_VM_IP "nerdctl load -i /home/image.tar"
+          ssh root@$VSPHERE_GPU_VM_IP "nerdctl image ls | grep hami"
+
+      - name: deploy previous release hami helm
+        run: |
+          HAMI_VERSION=$(git tag -l --sort=-v:refname | grep -v ${{ env.HAMI_VERSION }}  | head -n3 )
+          E2E_TYPE="upgrade"
+          echo "Previous release tag is: ${HAMI_VERSION}"
+          make helm-deploy
+
+      - name: deploy release hami helm
+        run: |
+          make helm-deploy
+
+      - name: e2e test
+        run: |
+          make e2e-test
