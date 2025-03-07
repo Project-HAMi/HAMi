@@ -23,14 +23,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func Test_GetNodeDevices(t *testing.T) {
@@ -451,6 +451,7 @@ func Test_PatchAnnotations(t *testing.T) {
 }
 
 func Test_setNodeLock(t *testing.T) {
+	client.InitGlobalClient(client.WithBurst(10), client.WithQPS(5.0))
 	tests := []struct {
 		name      string
 		node      corev1.Node

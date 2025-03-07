@@ -22,15 +22,14 @@ import (
 	"flag"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func Test_MutateAdmission(t *testing.T) {
@@ -673,6 +672,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 }
 
 func Test_NodeCleanUp(t *testing.T) {
+	client.InitGlobalClient()
 	tests := []struct {
 		name string
 		args string
