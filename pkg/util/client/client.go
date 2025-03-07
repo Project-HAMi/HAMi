@@ -33,24 +33,55 @@ var (
 	once       sync.Once
 )
 
+func init() {
+	KubeClient = nil
+}
+
 func GetClient() kubernetes.Interface {
-	once.Do(func() {
-		var err error
-		KubeClient, err = newClient()
-		if err != nil {
-			klog.Fatalf("Failed to create Kubernetes client: %v", err)
-		}
-	})
 	return KubeClient
 }
 
-// newClient initializes a new Kubernetes client.
-func newClient() (kubernetes.Interface, error) {
+// Client is a kubernetes client.
+type Client struct {
+	Client kubernetes.Interface
+	QPS    float32
+	Burst  int
+}
+
+// WithQPS sets the QPS of the client.
+func WithQPS(qps float32) func(*Client) {
+	return func(c *Client) {
+		c.QPS = qps
+	}
+}
+
+func WithBurst(burst int) func(*Client) {
+	return func(c *Client) {
+		c.Burst = burst
+	}
+}
+
+// NewClientWithConfig creates a new client with a given config.
+func NewClientWithConfig(config *rest.Config, opts ...func(*Client)) (*Client, error) {
+	client, err := kubernetes.NewForConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	c := &Client{
+		Client: client,
+	}
+	for _, opt := range opts {
+		opt(c)
+	}
+	return c, nil
+}
+
+// NewClient creates a new client.
+func NewClient(ops ...func(*Client)) (*Client, error) {
 	kubeConfigPath := os.Getenv("KUBECONFIG")
 	if kubeConfigPath == "" {
 		kubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
-
 	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		klog.Infof("BuildConfigFromFlags failed for file %s: %v. Using in-cluster config.", kubeConfigPath, err)
@@ -59,11 +90,18 @@ func newClient() (kubernetes.Interface, error) {
 			return nil, fmt.Errorf("failed to get in-cluster config: %w", err)
 		}
 	}
-
-	clientset, err := kubernetes.NewForConfig(config)
+	c, err := NewClientWithConfig(config, ops...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create kubernetes client: %w", err)
 	}
+	return c, err
+}
 
-	return clientset, nil
+// InitGlobalClient creates a new global client.
+func InitGlobalClient(ops ...func(*Client)) {
+	c, err := NewClient(ops...)
+	if err != nil {
+		klog.Fatalf("new client error %s", err.Error())
+	}
+	KubeClient = c.Client
 }

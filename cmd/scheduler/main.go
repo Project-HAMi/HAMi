@@ -19,17 +19,18 @@ package main
 import (
 	"net/http"
 
+	"github.com/julienschmidt/httprouter"
+	"github.com/spf13/cobra"
+	klog "k8s.io/klog/v2"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
 	"github.com/Project-HAMi/HAMi/pkg/version"
-
-	"github.com/julienschmidt/httprouter"
-	"github.com/spf13/cobra"
-	klog "k8s.io/klog/v2"
 )
 
 //var version string
@@ -63,12 +64,17 @@ func init() {
 	rootCmd.Flags().StringVar(&config.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
+	// add QPS and Burst to the global flagset
+	// qps and burst settings for the client-go client
+	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", 5.0, "QPS to use while talking with kube-apiserver.")
+	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", 10, "Burst to use while talking with kube-apiserver.")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
 func start() {
+	client.InitGlobalClient(client.WithBurst(config.Burst), client.WithQPS(config.QPS))
 	device.InitDevices()
 	sher = scheduler.NewScheduler()
 	sher.Start()

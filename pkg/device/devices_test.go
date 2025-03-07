@@ -265,6 +265,21 @@ func createVNPUConfigs() []ascend.VNPUConfig {
 			},
 		},
 		{
+			ChipName:           "910B2",
+			CommonWord:         "Ascend910B2",
+			ResourceName:       "huawei.com/Ascend910B2",
+			ResourceMemoryName: "huawei.com/Ascend910B2-memory",
+			MemoryAllocatable:  65536,
+			MemoryCapacity:     65536,
+			AICore:             24,
+			AICPU:              6,
+			Templates: []ascend.Template{
+				{Name: "vir03_1c_8g", Memory: 8192, AICore: 3, AICPU: 1},
+				{Name: "vir06_1c_16g", Memory: 16384, AICore: 6, AICPU: 1},
+				{Name: "vir12_3c_32g", Memory: 32768, AICore: 12, AICPU: 3},
+			},
+		},
+		{
 			ChipName:           "910B3",
 			CommonWord:         "Ascend910B",
 			ResourceName:       "huawei.com/Ascend910B",
@@ -329,6 +344,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 		iluvatar.IluvatarGPUDevice:   iluvatar.IluvatarGPUCommonWord,
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
+		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
 	}
 
 	return expectedDevices, devicesMap

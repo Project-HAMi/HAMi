@@ -155,22 +155,18 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 		return nil
 	}
 
-	patchData := []byte(`[
-				{
-					"op": "remove",
-					"path": "/metadata/annotations/cambricon.com~1dsmlu.lock"
-				}
-			]`)
-
-	_, err := client.GetClient().CoreV1().Nodes().Patch(context.TODO(), n.Name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+	newNode := n.DeepCopy()
+	delete(newNode.ObjectMeta.Annotations, DsmluLockTime)
+	_, err := client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Patch(context.TODO(), n.Name, types.JSONPatchType, patchData, metav1.PatchOptions{})
+		_, err = client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
 	}
+	delete(n.ObjectMeta.Annotations, DsmluLockTime)
 	klog.InfoS("Node lock released", "node", n.Name)
 	return nil
 }
