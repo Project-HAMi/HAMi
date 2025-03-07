@@ -51,6 +51,7 @@ func (m *MockClientConfig) ConfigAccess() clientcmd.ConfigAccess {
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
+	InitGlobalClient()
 	tests := []struct {
 		name           string
 		kubeConfig     string
