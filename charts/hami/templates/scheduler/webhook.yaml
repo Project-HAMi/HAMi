@@ -11,7 +11,7 @@ webhooks:
       {{- else }}
       service:
         name: {{ include "hami-vgpu.scheduler" . }}
-        namespace: {{ .Release.Namespace }}
+        namespace: {{ include "hami-vgpu.namespace" . }}
         path: /webhook
         port: {{ .Values.scheduler.service.httpPort }}
       {{- end }}

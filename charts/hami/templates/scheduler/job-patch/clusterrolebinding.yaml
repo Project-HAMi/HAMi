@@ -15,4 +15,4 @@ roleRef:
 subjects:
   - kind: ServiceAccount
     name: {{ include "hami-vgpu.fullname" . }}-admission
-    namespace: {{ .Release.Namespace | quote }}
+    namespace: {{ include "hami-vgpu.namespace" . }}

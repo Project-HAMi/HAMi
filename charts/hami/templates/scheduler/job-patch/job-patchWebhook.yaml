@@ -2,6 +2,7 @@ apiVersion: batch/v1
 kind: Job
 metadata:
   name: {{ include "hami-vgpu.fullname" . }}-admission-patch
+  namespace: {{ include "hami-vgpu.namespace" . }}
   annotations:
     "helm.sh/hook": post-install,post-upgrade
     "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
@@ -39,7 +40,7 @@ spec:
           args:
             - patch
             - --webhook-name={{ include "hami-vgpu.scheduler.webhook" . }}
-            - --namespace={{ .Release.Namespace }}
+            - --namespace={{ include "hami-vgpu.namespace" . }}
             - --patch-validating=false
             - --secret-name={{ include "hami-vgpu.scheduler.tls" . }}
       restartPolicy: OnFailure
