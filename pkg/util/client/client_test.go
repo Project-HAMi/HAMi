@@ -20,34 +20,20 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
+	"gotest.tools/v3/assert"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// MockClientConfig is a mock implementation of clientcmd.ClientConfig.
-type MockClientConfig struct {
-	config *rest.Config
-	err    error
-}
-
-func (m *MockClientConfig) RawConfig() (clientcmdapi.Config, error) {
-	return clientcmdapi.Config{}, nil
-}
-
-func (m *MockClientConfig) ClientConfig() (*rest.Config, error) {
-	return m.config, m.err
-}
-
-func (m *MockClientConfig) Namespace() (string, bool, error) {
-	return "", false, nil
-}
-
-func (m *MockClientConfig) ConfigAccess() clientcmd.ConfigAccess {
-	return nil
-}
+// Mock functions for testing.
+var (
+	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
+	inClusterConfig      = rest.InClusterConfig
+)
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
@@ -117,8 +103,45 @@ func TestGetClient(t *testing.T) {
 	}
 }
 
-// Mock functions for testing.
-var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
-)
+// TestClientWithOptions tests client initialization with options.
+func TestClientWithOptions(t *testing.T) {
+	KubeClient = nil
+	once = sync.Once{}
+
+	timeout := 1
+	client, _ := NewClient(WithTimeout(timeout))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(timeout)*time.Second)
+	assert.Equal(t, client.config.QPS, DefaultQPS)
+	assert.Equal(t, client.config.Burst, DefaultBurst)
+
+	KubeClient = nil
+	once = sync.Once{}
+
+	qps := float32(50.0)
+	client, _ = NewClient(WithQPS(qps))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(DefaultTimeout)*time.Second)
+	assert.Equal(t, client.config.QPS, qps)
+	assert.Equal(t, client.config.Burst, DefaultBurst)
+
+	KubeClient = nil
+	once = sync.Once{}
+	burst := 100
+	client, _ = NewClient(WithBurst(burst))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(DefaultTimeout)*time.Second)
+	assert.Equal(t, client.config.QPS, DefaultQPS)
+	assert.Equal(t, client.config.Burst, burst)
+
+	KubeClient = nil
+	once = sync.Once{}
+	timeout = 2
+	qps = 0.5
+	burst = 100
+	client, _ = NewClient(WithTimeout(timeout), WithQPS(qps), WithBurst(burst))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(timeout)*time.Second)
+	assert.Equal(t, client.config.QPS, qps)
+	assert.Equal(t, client.config.Burst, burst)
+}
