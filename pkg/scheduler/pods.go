@@ -123,7 +123,7 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 	pods := make([]*podInfo, 0, len(m.pods))
 	for _, pod := range m.pods {
 		pods = append(pods, pod)
-		klog.InfoS("Pod info",
+		klog.V(5).InfoS("Pod info",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
 			"nodeID", pod.NodeID,
 			"devices", pod.Devices,

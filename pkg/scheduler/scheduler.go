@@ -225,7 +225,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
 				nodedevices, err := devInstance.GetNodeDevices(*val)
 				if err != nil {
-					klog.ErrorS(err, "Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
