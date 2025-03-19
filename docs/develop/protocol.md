@@ -8,7 +8,7 @@ HAMi needs to know the spec of each AI devices in the cluster in order to schedu
 
 ```
 hami.io/node-handshake-{device-type}: Reported_{device_node_current_timestamp}
-hami.io/node-register-{deivce-type}: {Device 1}:{Device2}:...:{Device N}
+hami.io/node-{deivce-type}-register: {Device 1}:{Device2}:...:{Device N}
 ```
 
 The definiation of each device is in the following format:
