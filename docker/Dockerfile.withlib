@@ -10,8 +10,8 @@ RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@latest
 
-#FROM ubuntu:24.04
-FROM harbor.4pd.io/sagegpt-aio/pk_platform/ubuntu:22.04
+FROM ubuntu:24.04
+#FROM harbor.4pd.io/sagegpt-aio/pk_platform/ubuntu:22.04
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
 ENV NVIDIA_DRIVER_CAPABILITIES=utility
