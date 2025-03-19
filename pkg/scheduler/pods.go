@@ -129,14 +129,12 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 	defer m.mutex.RUnlock()
 
 	pods := make([]*podInfo, 0, len(m.pods))
-	for _, pi := range m.pods {
-		pods = append(pods, pi)
-		klog.InfoS("Pod info",
-			"pod", klog.KRef(pi.Namespace, pi.Name),
-			"namespace", pi.Namespace,
-			"name", pi.Name,
-			"nodeID", pi.NodeID,
-			"devices", pi.Devices,
+	for _, pod := range m.pods {
+		pods = append(pods, pod)
+		klog.V(5).InfoS("Pod info",
+			"pod", klog.KRef(pod.Namespace, pod.Name),
+			"nodeID", pod.NodeID,
+			"devices", pod.Devices,
 		)
 	}
 	klog.V(5).InfoS("Listed pod infos",
