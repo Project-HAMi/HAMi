@@ -47,9 +47,12 @@ type podManager struct {
 	mutex sync.RWMutex
 }
 
-func (m *podManager) init() {
-	m.pods = make(map[k8stypes.UID]*podInfo)
-	klog.InfoS("Pod manager initialized", "podCount", len(m.pods))
+func newPodManager() *podManager {
+	pm := &podManager{
+		pods: make(map[k8stypes.UID]*podInfo),
+	}
+	klog.InfoS("Pod manager initialized", "podCount", len(pm.pods))
+	return pm
 }
 
 func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevices) {
