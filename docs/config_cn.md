@@ -68,6 +68,16 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`：字符串类型，预设值为 "spread" 表示 GPU 调度策略，
   "binpack"表示尽量将任务分配到同一个 GPU 上，"spread"表示尽量将任务分配到不同 GPU 上。
 
+**Webhook TLS 证书配置**
+
+在 Kubernetes 中，为了让 API server 能够与 webhook 组件通信，webhook 需要一个 API server 信任的 TLS 证书。HAMi scheduler 提供了两种生成/配置所需 TLS 证书的方法。
+
+* `scheduler.patch.enabled`：
+  布尔类型，默认值为 true。如果设置为 true，helm 将使用 kube-webhook-certgen ([job-patch](../charts/hami/templates/scheduler/job-patch/job-createSecret.yaml)) 生成自签名证书并创建 secret。
+* `scheduler.certManager.enabled`：
+  布尔类型，默认值为 false。如果设置为 true，cert-manager 将生成自签名证书。**注意：此选项需要先在集群中安装 cert-manager。** _更多详情请参见 [cert-manager 安装说明](https://cert-manager.io/docs/installation/kubernetes/)。_
+
+
 # Pod 配置（在注解中指定）
 
 * `nvidia.com/use-gpuuuid`：

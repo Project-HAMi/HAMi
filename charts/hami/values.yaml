@@ -117,7 +117,7 @@ scheduler:
       # - istio-system
     reinvocationPolicy: Never
     failurePolicy: Ignore
-  ## TLS Certificate Option 1: Use certManager to generate self-signed certificate.
+  ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
   ## If enabled, always takes precedence over options 2.
   certManager:
     enabled: false
