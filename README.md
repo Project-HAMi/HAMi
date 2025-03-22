@@ -116,7 +116,7 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 Use the following command for deployment:
 
 ```
-helm install hami hami-charts/hami  -n kube-system
+helm install hami hami-charts/hami -n kube-system
 ```
 
 Customize your installation by adjusting the [configs](docs/config.md).
