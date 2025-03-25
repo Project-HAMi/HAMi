@@ -18,7 +18,9 @@ package nodelock
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -231,6 +233,54 @@ func TestReleaseNodeLock(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := ReleaseNodeLock(tt.args.nodeName(), tt.args.lockname, tt.args.pod, tt.args.timeout); (err != nil) != tt.wantErr {
 				t.Errorf("ReleaseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
+			}
+		})
+	}
+}
+func TestGenerateNodeLockKeyByPod(t *testing.T) {
+	tests := []struct {
+		name string
+		pods *corev1.Pod
+	}{
+		{
+			name: "nil pod",
+			pods: nil,
+		},
+		{
+			name: "valid pod",
+			pods: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					UID:       "12345",
+					Name:      "hami",
+					Namespace: "hami-ns",
+				},
+			},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GenerateNodeLockKeyByPod(tt.pods)
+			if tt.pods == nil {
+				if _, err := time.Parse(time.RFC3339, got); err != nil {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want valid RFC3339 time", got)
+				}
+			} else {
+				parts := strings.Split(got, "|")
+				if len(parts) != 4 {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want 4 parts", got)
+				}
+				if _, err := time.Parse(time.RFC3339Nano, parts[0]); err != nil {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want valid RFC3339Nano time", got)
+				}
+				if parts[1] != string(tt.pods.UID) {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want UID %v", got, tt.pods.UID)
+				}
+				if parts[2] != tt.pods.Namespace {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want Namespace %v", got, tt.pods.Namespace)
+				}
+				if parts[3] != tt.pods.Name {
+					t.Errorf("GenerateNodeLockKeyByPod() = %v, want Name %v", got, tt.pods.Name)
+				}
 			}
 		})
 	}

@@ -19,6 +19,7 @@ package nvidia
 import (
 	"errors"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func Test_DefaultResourceNum(t *testing.T) {
@@ -610,6 +612,87 @@ func Test_GetNodeDevices(t *testing.T) {
 					assert.Equal(t, v.Type, result[k].Type)
 					assert.Equal(t, v.Count, result[k].Count)
 				}
+			}
+		})
+	}
+}
+func Test_checkStaleLock(t *testing.T) {
+	tests := []struct {
+		name      string
+		node      corev1.Node
+		wantStale bool
+		wantErr   bool
+	}{
+		{
+			name: "no lock annotation",
+			node: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{},
+				},
+			},
+			wantStale: false,
+			wantErr:   false,
+		},
+		{
+			name: "stale lock with insufficient parts",
+			node: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: "2023-10-10T10:10:10Z|part2|part3",
+					},
+				},
+			},
+			wantStale: true,
+			wantErr:   false,
+		},
+		{
+			name: "stale lock with invalid time format",
+			node: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: "invalid-time|part2|part3|part4",
+					},
+				},
+			},
+			wantStale: true,
+			wantErr:   false,
+		},
+		{
+			name: "stale lock with expired time",
+			node: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: time.Now().Add(-2*nodelock.LockTTL).Format(time.RFC3339Nano) + "|part2|part3|part4",
+					},
+				},
+			},
+			wantStale: true,
+			wantErr:   false,
+		},
+		{
+			name: "valid lock",
+			node: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: time.Now().Format(time.RFC3339Nano) + "|part2|part3|part4",
+					},
+				},
+			},
+			wantStale: false,
+			wantErr:   false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gpuDevices := &NvidiaGPUDevices{}
+			gotStale, err := gpuDevices.checkStaleLock(&test.node)
+			if (err != nil) != test.wantErr {
+				t.Errorf("checkStaleLock() error = %v, wantErr %v", err, test.wantErr)
+				return
+			}
+			if gotStale != test.wantStale {
+				t.Errorf("checkStaleLock() gotStale = %v, want %v", gotStale, test.wantStale)
 			}
 		})
 	}

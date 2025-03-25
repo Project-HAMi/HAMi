@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -189,10 +190,39 @@ func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
+
+	if stale, err := dev.checkStaleLock(n); err == nil && stale {
+		klog.Warningf("Detected stale lock on node %s, forcing release", n.Name)
+		_ = nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, true)
+	}
+
 	return nodelock.LockNode(n.Name, NodeLockNvidia, p)
 }
 
+func (dev *NvidiaGPUDevices) checkStaleLock(n *corev1.Node) (bool, error) {
+	lockStr := n.Annotations[nodelock.NodeLockKey]
+	if lockStr == "" {
+		return false, nil
+	}
+
+	parts := strings.Split(lockStr, "|")
+	if len(parts) < 4 {
+		return true, nil // stale lock
+	}
+
+	createTime, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return true, nil
+	}
+
+	return time.Since(createTime) > nodelock.LockTTL, nil
+}
+
 func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	defer func() {
+		klog.Errorf("Final fallback release for node %s", n.Name)
+		_ = nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, true)
+	}()
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {

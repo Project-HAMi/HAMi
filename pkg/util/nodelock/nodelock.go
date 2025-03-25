@@ -19,21 +19,25 @@ package nodelock
 import (
 	"context"
 	"fmt"
+	"math"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 const (
-	NodeLockKey  = "hami.io/mutex.lock"
-	MaxLockRetry = 5
-	NodeLockSep  = ","
+	NodeLockKey       = "hami.io/mutex.lock"
+	MaxLockRetry      = 8
+	NodeLockSep       = ","
+	LockTTL           = 1 * time.Minute
+	RetryBaseInterval = 50 * time.Millisecond
 )
 
 var lock sync.Mutex
@@ -53,9 +57,14 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	newNode.ObjectMeta.Annotations[NodeLockKey] = GenerateNodeLockKeyByPod(pods)
 	_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	for i := 0; i < MaxLockRetry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
-		time.Sleep(100 * time.Millisecond)
+		sleepDuration := time.Duration(math.Pow(2, float64(i))) * RetryBaseInterval
+		time.Sleep(sleepDuration)
+
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if apierrors.IsConflict(err) {
+			klog.Warningf("Version conflict on node %s, retrying...", nodeName)
+			continue
+		}
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
 			continue
@@ -152,6 +161,9 @@ func GenerateNodeLockKeyByPod(pods *corev1.Pod) string {
 	if pods == nil {
 		return time.Now().Format(time.RFC3339)
 	}
-	ns, name := pods.Namespace, pods.Name
-	return fmt.Sprintf("%s%s%s%s%s", time.Now().Format(time.RFC3339), NodeLockSep, ns, NodeLockSep, name)
+	return fmt.Sprintf("%s|%s|%s|%s",
+		time.Now().Format(time.RFC3339Nano), // use nano second as lock time
+		string(pods.UID),                    // use pod UID as lock namespace
+		pods.Namespace,
+		pods.Name)
 }
