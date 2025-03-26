@@ -42,7 +42,7 @@ const (
 
 var lock sync.Mutex
 
-func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
+func SetNodeLock(nodeName string, lockName string, pods *corev1.Pod) error {
 	lock.Lock()
 	defer lock.Unlock()
 	ctx := context.Background()
@@ -80,7 +80,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	return nil
 }
 
-func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout bool) error {
+func ReleaseNodeLock(nodeName string, lockName string, pod *corev1.Pod, timeout bool) error {
 	lock.Lock()
 	defer lock.Unlock()
 	ctx := context.Background()
@@ -118,27 +118,37 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 	return nil
 }
 
-func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
+func LockNode(nodeName string, lockName string, pods *corev1.Pod) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	if _, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
-		return SetNodeLock(nodeName, lockname, pods)
+		return SetNodeLock(nodeName, lockName, pods)
 	}
 	lockTime, _, _, err := ParseNodeLock(node.ObjectMeta.Annotations[NodeLockKey])
 	if err != nil {
 		return err
 	}
+	klog.InfoS("Attempting to lock node", "node", nodeName, "pod", pods.Name)
+	if _, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
+		klog.InfoS("No existing lock found", "node", nodeName)
+	} else {
+		klog.InfoS("Existing lock details",
+			"node", nodeName,
+			"lockTime", lockTime,
+			"currentTime", time.Now(),
+			"timeSinceLock", time.Since(lockTime))
+	}
 	if time.Since(lockTime) > time.Minute*5 {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
-		err = ReleaseNodeLock(nodeName, lockname, pods, true)
+		err = ReleaseNodeLock(nodeName, lockName, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
 		}
-		return SetNodeLock(nodeName, lockname, pods)
+		return SetNodeLock(nodeName, lockName, pods)
 	}
 	return fmt.Errorf("node %s has been locked within 5 minutes", nodeName)
 }

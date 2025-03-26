@@ -420,7 +420,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return res, nil
 	}
 
-	tmppatch := map[string]string{
+	deviceBindAnnotations := map[string]string{
 		util.DeviceBindPhase:     "allocating",
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
@@ -433,7 +433,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		}
 	}
 
-	err = util.PatchPodAnnotations(current, tmppatch)
+	err = util.PatchPodAnnotations(current, deviceBindAnnotations)
 	if err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err

@@ -137,11 +137,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 			panic(0)
 		}
 
-		registeredmem := int32(memoryTotal / 1024 / 1024)
+		registeredMem := int32(memoryTotal / 1024 / 1024)
 		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
-			registeredmem = int32(float64(registeredmem) * plugin.schedulerConfig.DeviceMemoryScaling)
+			registeredMem = int32(float64(registeredMem) * plugin.schedulerConfig.DeviceMemoryScaling)
 		}
-		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
+		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredMem=", registeredMem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -163,14 +163,14 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
-			Devmem:  registeredmem,
+			Devmem:  registeredMem,
 			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
 			Health:  health,
 		})
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
+		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredMem, Model, numa)
 	}
 	return &res
 }
@@ -184,9 +184,9 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := util.EncodeNodeDevices(*devices)
+	encodedDevices := util.EncodeNodeDevices(*devices)
 	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
-	annos[nvidia.RegisterAnnos] = encodeddevices
+	annos[nvidia.RegisterAnnos] = encodedDevices
 	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
 	err = util.PatchNodeAnnotations(node, annos)
 
