@@ -189,9 +189,7 @@ func Test_GetNode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			m := nodeManager{}
-			m.init()
-			m = nodeManager{
+			m := nodeManager{
 				nodes: map[string]*util.NodeInfo{
 					"node-04": {
 						ID:   "node-04",

@@ -39,8 +39,10 @@ type nodeManager struct {
 	mutex sync.RWMutex
 }
 
-func (m *nodeManager) init() {
-	m.nodes = make(map[string]*util.NodeInfo)
+func newNodeManager() *nodeManager {
+	return &nodeManager{
+		nodes: make(map[string]*util.NodeInfo),
+	}
 }
 
 func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
