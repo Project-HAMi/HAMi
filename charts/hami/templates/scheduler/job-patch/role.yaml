@@ -1,3 +1,4 @@
+{{- if and (.Values.scheduler.patch.enabled) (not .Values.scheduler.certManager.enabled) }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -17,3 +18,4 @@ rules:
     verbs:
       - get
       - create
+{{- end }}
