@@ -410,8 +410,8 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	klog.InfoS("Allocate", "request", reqs)
 	responses := pluginapi.AllocateResponse{}
-
 	nodeName := os.Getenv(util.NodeNameEnvName)
 	current, err := util.GetPendingPod(ctx, nodeName)
 	if err != nil {
@@ -423,7 +423,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			return nil, fmt.Errorf("invalid allocation request for %q: %w", plugin.rm.Resource(), err)
 		}
 		currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
-		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
+		klog.Infof("allocate req:%v, current:%v, devreq:%v", req, current, devreq)
 		if err != nil {
 			device.PodAllocationFailed(nodeName, current, NodeLockNvidia)
 			return &responses, err
@@ -659,7 +659,7 @@ func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) 
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
-	return plugin.rm.Devices().GetPluginDevices()
+	return plugin.rm.Devices().GetPluginDevices(plugin.schedulerConfig.DeviceSplitCount)
 }
 
 // updateResponseForDeviceListEnvVar sets the environment variable for the requested devices.

@@ -141,7 +141,10 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
 			registeredMem = int32(float64(registeredMem) * plugin.schedulerConfig.DeviceMemoryScaling)
 		}
-		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredMem=", registeredMem)
+		klog.V(3).InfoS("Applied memory scaling",
+			"scalingFactor", plugin.schedulerConfig.DeviceMemoryScaling,
+			"originalMemoryMB", memoryTotal/1024/1024,
+			"registeredMemoryMB", registeredMem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -170,7 +173,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 			Mode:    plugin.operatingMode,
 			Health:  health,
 		})
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredMem, Model, numa)
+		klog.V(4).InfoS("Registered NVIDIA device",
+			"uuid", UUID,
+			"deviceIndex", idx,
+			"memoryMB", registeredMem,
+			"model", Model,
+			"numaNode", numa)
 	}
 	return &res
 }
