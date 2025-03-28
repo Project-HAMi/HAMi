@@ -18,6 +18,7 @@ package main
 
 import (
 	"net/http"
+	_ "net/http/pprof"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
@@ -36,10 +37,12 @@ import (
 //var version string
 
 var (
-	sher        *scheduler.Scheduler
-	tlsKeyFile  string
-	tlsCertFile string
-	rootCmd     = &cobra.Command{
+	sher              *scheduler.Scheduler
+	tlsKeyFile        string
+	tlsCertFile       string
+	enableProfiling   bool
+	profilingBindAddr string
+	rootCmd           = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
 		Run: func(cmd *cobra.Command, args []string) {
@@ -68,9 +71,23 @@ func init() {
 	// qps and burst settings for the client-go client
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", 5.0, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", 10, "Burst to use while talking with kube-apiserver.")
+	// Add profiling related flags
+	rootCmd.Flags().BoolVar(&enableProfiling, "enable-profiling", false, "Enable pprof profiling via HTTP server")
+	rootCmd.Flags().StringVar(&profilingBindAddr, "profiling-bind-address", "127.0.0.1:6060", "The TCP address for the pprof profiling server to listen on (e.g., 127.0.0.1:6060)")
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+
+}
+
+// startProfilingServer starts a http server for pprof.
+func startProfilingServer(bindAddr string) {
+	klog.Infof("Starting profiling server on %s", bindAddr)
+	go func() {
+		if err := http.ListenAndServe(bindAddr, nil); err != nil {
+			klog.Errorf("Failed to start profiling server: %v", err)
+		}
+	}()
 }
 
 func start() {
@@ -79,6 +96,12 @@ func start() {
 	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()
+
+	// Start pprof server if enabled
+	if enableProfiling {
+		startProfilingServer(profilingBindAddr)
+		klog.Infof("Profiling enabled, visit http://%s/debug/pprof/ to view profiles", profilingBindAddr)
+	}
 
 	// start monitor metrics
 	go sher.RegisterFromNodeAnnotations()
