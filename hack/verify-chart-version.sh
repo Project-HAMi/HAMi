@@ -31,7 +31,7 @@ else
   util::install_helm
 fi
 
-APP_VERSION=$(helm show chart ./charts/hami | grep '^appVersion' |grep -E '[0-9].*.[0-9]' | awk -F ':' '{print $2}' | tr -d ' ')
+APP_VERSION=$(helm show chart ./charts/hami | grep '^appVersion' |grep -E '[0-9].*.[0-9]' | awk -F ':' '{print $2}' | tr -d ' ' | cut -c2-)
 VERSION=$(helm show chart ./charts/hami | grep '^version' |grep -E '[0-9].*.[0-9]' | awk -F ':' '{print $2}' | tr -d ' ')
 
 if [[ ${APP_VERSION} != ${VERSION} ]]; then
