@@ -145,6 +145,10 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.InfoS("Entering RegisterFromNodeAnnotations")
 	defer klog.InfoS("Exiting RegisterFromNodeAnnotations")
+
+	labelSelector := labels.Set(config.NodeLabelSelector).AsSelector()
+	klog.InfoS("Using label selector for list nodes", "selector", labelSelector.String())
+
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	printedLog := map[string]bool{}
@@ -157,11 +161,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
-		}
-		labelSelector := labels.Everything()
-		if len(config.NodeLabelSelector) > 0 {
-			labelSelector = (labels.Set)(config.NodeLabelSelector).AsSelector()
-			klog.InfoS("Using label selector", "selector", labelSelector.String())
 		}
 		rawNodes, err := s.nodeLister.List(labelSelector)
 		if err != nil {
