@@ -193,11 +193,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 						klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
 					}
 
-					info, ok := s.nodes[val.Name]
-					if ok {
-						klog.InfoS("Removing device from node", "nodeName", val.Name, "deviceVendor", devhandsk, "remainingDevices", s.nodes[val.Name].Devices)
-						s.rmNodeDevice(val.Name, info, devhandsk)
-					}
+					s.rmNodeDevices(val.Name, devhandsk)
 					continue
 				}
 				if !needUpdate {
