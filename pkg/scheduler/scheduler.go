@@ -73,16 +73,11 @@ func NewScheduler() *Scheduler {
 	return s
 }
 
-func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onDelNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onAddNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
+func (s *Scheduler) doNodeNotify() {
+	select {
+	case s.nodeNotify <- struct{}{}:
+	default:
+	}
 }
 
 func (s *Scheduler) onAddPod(obj interface{}) {
@@ -128,16 +123,15 @@ func (s *Scheduler) Start() {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 
-	informer := informerFactory.Core().V1().Pods().Informer()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    s.onAddNode,
-		UpdateFunc: s.onUpdateNode,
-		DeleteFunc: s.onDelNode,
+		AddFunc:    func(_ interface{}) { s.doNodeNotify() },
+		UpdateFunc: func(_, _ interface{}) { s.doNodeNotify() },
+		DeleteFunc: func(_ interface{}) { s.doNodeNotify() },
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
