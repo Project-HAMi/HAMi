@@ -135,18 +135,19 @@ jobs:
     uses: ./.github/workflows/call-release-website.yaml
     with:
       ref: ${{ needs.ensure-tag.outputs.tag }}
-  # excute a full e2e test when hami release
+  # execute a full e2e test when hami release
   release-e2e:
-    needs: [release-notes]
+    needs: [ensure-tag, release-notes]
     uses: ./.github/workflows/call-e2e.yaml
     with:
       ref: ${{ needs.ensure-tag.outputs.tag }}
       type: "release"
 
-  # excute a compatibility test when hami release
+  # execute a compatibility test when hami release
   release-e2e-upgrade:
-      needs: [release-notes]
+      needs: [ensure-tag, release-notes]
       uses: ./.github/workflows/call-e2e-upgrade.yaml
       with:
         ref: ${{ needs.ensure-tag.outputs.tag }}
+        type: "release"
   

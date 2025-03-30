@@ -249,3 +249,12 @@ jobs:
     with:
       ref: ${{ needs.get_info.outputs.version }}
       type: "pullrequest"
+
+  # execute a full e2e test when hami code merge
+  e2e_upgrade_test:
+    uses: ./.github/workflows/call-e2e-upgrade.yaml
+    needs: [ package_chart, get_info, build ]
+    if: needs.get_info.outputs.e2e_run == 'true'
+    with:
+      ref: ${{ needs.get_info.outputs.version }}
+      type: 'pullrequest'
