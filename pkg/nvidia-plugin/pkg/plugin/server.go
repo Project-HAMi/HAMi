@@ -659,7 +659,7 @@ func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) 
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*pluginapi.Device {
-	return plugin.rm.Devices().GetPluginDevices()
+	return plugin.rm.Devices().GetPluginDevices(plugin.schedulerConfig.DeviceSplitCount)
 }
 
 // updateResponseForDeviceListEnvVar sets the environment variable for the requested devices.

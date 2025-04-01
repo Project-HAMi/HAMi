@@ -175,11 +175,24 @@ func (ds Devices) GetUUIDs() []string {
 }
 
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
-func (ds Devices) GetPluginDevices() []*pluginapi.Device {
+func (ds Devices) GetPluginDevices(count uint) []*pluginapi.Device {
 	var res []*pluginapi.Device
-	for _, device := range ds {
-		d := device
-		res = append(res, &d.Device)
+	if !strings.Contains(ds.GetIDs()[0], "MIG") {
+		for _, dev := range ds {
+			for i := uint(0); i < count; i++ {
+				id := fmt.Sprintf("%v-%v", dev.ID, i)
+				res = append(res, &pluginapi.Device{
+					ID:       id,
+					Health:   dev.Health,
+					Topology: nil,
+				})
+			}
+		}
+	} else {
+		for _, device := range ds {
+			d := device
+			res = append(res, &d.Device)
+		}
 	}
 	return res
 }
