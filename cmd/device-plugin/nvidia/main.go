@@ -357,7 +357,7 @@ func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) 
 
 	// Update the configuration file with default resources.
 	klog.Info("Updating config with default resource matching patterns.")
-	err = rm.AddDefaultResourcesToConfig(infolib, nvmllib, devicelib, devConfig.Config)
+	err = rm.AddDefaultResourcesToConfig(infolib, nvmllib, devicelib, devConfig)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to add default resources to config: %v", err)
 	}

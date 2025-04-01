@@ -80,8 +80,6 @@ type NvidiaDevicePlugin struct {
 
 	imexChannels imex.Channels
 
-	mps mpsOptions
-
 	operatingMode   string
 	migCurrent      nvidia.MigPartedSpec
 	schedulerConfig nvidia.NvidiaConfig
@@ -89,10 +87,6 @@ type NvidiaDevicePlugin struct {
 
 // devicePluginForResource creates a device plugin for the specified resource.
 func (o *options) devicePluginForResource(resourceManager rm.ResourceManager) (Interface, error) {
-	mpsOptions, err := o.getMPSOptions(resourceManager)
-	if err != nil {
-		return nil, err
-	}
 	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
@@ -112,8 +106,6 @@ func (o *options) devicePluginForResource(resourceManager rm.ResourceManager) (I
 		cdiAnnotationPrefix: *o.config.Flags.Plugin.CDIAnnotationPrefix,
 
 		imexChannels: o.imexChannels,
-
-		mps: mpsOptions,
 
 		socket: getPluginSocketPath(resourceManager.Resource()),
 		// These will be reinitialized every
@@ -208,10 +200,6 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
 
-	if err := plugin.mps.waitForDaemon(); err != nil {
-		return fmt.Errorf("error waiting for MPS daemon: %w", err)
-	}
-
 	err := plugin.Serve()
 	if err != nil {
 		klog.Errorf("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
@@ -251,7 +239,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 
 	go func() {
-		// TODO: add MPS health check
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health)
 		if err != nil {
 			klog.Errorf("Failed to start health check: %v; continuing with health checks disabled", err)
@@ -410,14 +397,16 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	responses := pluginapi.AllocateResponse{}
 
+	klog.InfoS("Allocate", "request", reqs)
+	responses := pluginapi.AllocateResponse{}
 	nodeName := os.Getenv(util.NodeNameEnvName)
+	klog.Infof("Allocate request on node %s", nodeName)
 	current, err := util.GetPendingPod(ctx, nodeName)
 	if err != nil {
 		return &responses, err
 	}
-
+	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 	for idx, req := range reqs.ContainerRequests {
 		if err := plugin.rm.ValidateRequest(req.DevicesIDs); err != nil {
 			return nil, fmt.Errorf("invalid allocation request for %q: %w", plugin.rm.Resource(), err)
@@ -509,7 +498,8 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 		}
 		responses.ContainerResponses = append(responses.ContainerResponses, response)
 	}
-
+	klog.Infof("Final allocate response: %v", responses)
+	device.PodAllocationTrySuccess(nodeName, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 
@@ -526,23 +516,19 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*plu
 			return nil, fmt.Errorf("failed to get allocate response for CDI: %v", err)
 		}
 	}
-	if plugin.mps.enabled {
-		plugin.updateResponseForMPS(response)
-	}
-
 	// The following modifications are only made if at least one non-CDI device
 	// list strategy is selected.
 	if plugin.deviceListStrategies.AllCDIEnabled() {
 		return response, nil
 	}
 
-	if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyEnvVar) {
-		plugin.updateResponseForDeviceListEnvVar(response, deviceIDs...)
-		plugin.updateResponseForImexChannelsEnvVar(response)
-	}
-	if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyVolumeMounts) {
-		plugin.updateResponseForDeviceMounts(response, deviceIDs...)
-	}
+	// if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyEnvVar) {
+	// 	plugin.updateResponseForDeviceListEnvVar(response, deviceIDs...)
+	// 	plugin.updateResponseForImexChannelsEnvVar(response)
+	// }
+	// if plugin.deviceListStrategies.Includes(spec.DeviceListStrategyVolumeMounts) {
+	// 	plugin.updateResponseForDeviceMounts(response, deviceIDs...)
+	// }
 	if *plugin.config.Flags.Plugin.PassDeviceSpecs {
 		response.Devices = append(response.Devices, plugin.apiDeviceSpecs(*plugin.config.Flags.NvidiaDevRoot, requestIds)...)
 	}
@@ -553,13 +539,6 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*plu
 		response.Envs["NVIDIA_MOFED"] = "enabled"
 	}
 	return response, nil
-}
-
-// updateResponseForMPS ensures that the ContainerAllocate response contains the information required to use MPS.
-// This includes per-resource pipe and log directories as well as a global daemon-specific shm
-// and assumes that an MPS control daemon has already been started.
-func (plugin NvidiaDevicePlugin) updateResponseForMPS(response *pluginapi.ContainerAllocateResponse) {
-	plugin.mps.updateReponse(response)
 }
 
 // updateResponseForCDI updates the specified response for the given device IDs.

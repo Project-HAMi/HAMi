@@ -95,11 +95,15 @@ func (r *resourceManager) ValidateRequest(ids AnnotatedIDs) error {
 }
 
 // AddDefaultResourcesToConfig adds default resource matching rules to config.Resources
-func AddDefaultResourcesToConfig(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *spec.Config) error {
-	_ = config.Resources.AddGPUResource("*", "gpu")
-	if config.Flags.MigStrategy == nil {
-		return nil
-	}
+func AddDefaultResourcesToConfig(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *nvidia.DeviceConfig) error {
+	// _ = config.Resources.AddGPUResource("*", "gpu")
+	// if config.Flags.MigStrategy == nil {
+	// 	return nil
+	// }
+	config.Resources.GPUs = append(config.Resources.GPUs, spec.Resource{
+		Pattern: "*",
+		Name:    spec.ResourceName(*config.ResourceName),
+	})
 	switch *config.Flags.MigStrategy {
 	case spec.MigStrategySingle:
 		return config.Resources.AddMIGResource("*", "gpu")
