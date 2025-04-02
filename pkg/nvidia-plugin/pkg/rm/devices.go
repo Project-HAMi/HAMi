@@ -21,6 +21,7 @@ import (
 	"strconv"
 	"strings"
 
+	"k8s.io/klog/v2"
 	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -177,10 +178,21 @@ func (ds Devices) GetUUIDs() []string {
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
 func (ds Devices) GetPluginDevices(count uint) []*pluginapi.Device {
 	var res []*pluginapi.Device
-	if !strings.Contains(ds.GetIDs()[0], "MIG") {
+
+	// Log the IDs of all devices
+	ids := ds.GetIDs()
+	if len(ids) == 0 {
+		klog.Warning("No devices found in Devices map")
+		return res
+	}
+	klog.InfoS("Processing devices", "deviceIDs", ids, "count", count)
+
+	if !strings.Contains(ids[0], "MIG") {
+		klog.Info("Devices are not MIG-enabled, generating plugin devices with replicas")
 		for _, dev := range ds {
 			for i := uint(0); i < count; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
+				klog.InfoS("Adding device", "deviceID", id, "health", dev.Health)
 				res = append(res, &pluginapi.Device{
 					ID:       id,
 					Health:   dev.Health,
@@ -189,11 +201,15 @@ func (ds Devices) GetPluginDevices(count uint) []*pluginapi.Device {
 			}
 		}
 	} else {
+		klog.Info("Devices are MIG-enabled, adding directly")
 		for _, device := range ds {
 			d := device
+			klog.InfoS("Adding MIG device", "deviceID", d.ID, "health", d.Health)
 			res = append(res, &d.Device)
 		}
 	}
+
+	klog.InfoS("Finished processing devices", "totalDevices", len(res))
 	return res
 }
 

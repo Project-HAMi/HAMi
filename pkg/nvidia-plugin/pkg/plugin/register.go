@@ -141,7 +141,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
 			registeredmem = int32(float64(registeredmem) * plugin.schedulerConfig.DeviceMemoryScaling)
 		}
-		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -170,7 +169,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 			Mode:    plugin.operatingMode,
 			Health:  health,
 		})
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
 	}
 	return &res
 }
@@ -187,7 +185,6 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	encodeddevices := util.EncodeNodeDevices(*devices)
 	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
 	annos[nvidia.RegisterAnnos] = encodeddevices
-	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
 	err = util.PatchNodeAnnotations(node, annos)
 
 	if err != nil {
@@ -203,11 +200,9 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister() {
 	for {
 		err := plugin.RegistrInAnnotation()
 		if err != nil {
-			klog.Errorf("Failed to register annotation: %v", err)
-			klog.Infof("Retrying in %v seconds...", errorSleepInterval)
+			klog.Errorf("Failed to register annotation: %v. Retrying in %v...", err, errorSleepInterval)
 			time.Sleep(errorSleepInterval)
 		} else {
-			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval)
 			time.Sleep(successSleepInterval)
 		}
 	}

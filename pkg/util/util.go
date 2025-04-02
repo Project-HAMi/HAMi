@@ -231,7 +231,6 @@ func EncodeContainerDevices(cd ContainerDevices) string {
 	for _, val := range cd {
 		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + OneContainerMultiDeviceSplitSymbol
 	}
-	klog.Infof("Encoded container Devices: %s", tmp)
 	return tmp
 	//return strings.Join(cd, ",")
 }
@@ -254,7 +253,6 @@ func EncodePodSingleDevice(pd PodSingleDevice) string {
 		res = res + EncodeContainerDevices(ctrdevs)
 		res = res + OnePodMultiContainerSplitSymbol
 	}
-	klog.Infof("Encoded pod single devices %s", res)
 	return res
 }
 

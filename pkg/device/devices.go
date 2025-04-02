@@ -319,19 +319,34 @@ vnpus:
 }
 
 func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
+	// 日志：开始尝试分配成功逻辑
+	klog.InfoS("Starting PodAllocationTrySuccess", "nodeName", nodeName, "deviceName", devName, "lockName", lockName, "namespace", pod.Namespace, "podName", pod.Name)
+
+	// 获取最新的 Pod 信息
 	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
-		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		klog.ErrorS(err, "Failed to get refreshed pod", "nodeName", nodeName, "namespace", pod.Namespace, "podName", pod.Name)
 		return
 	}
-	annos := refreshed.Annotations[util.InRequestDevices[devName]]
-	klog.Infof("Trying allocation success: %s", annos)
+
+	// 获取设备相关的注释信息
+	annos, exists := refreshed.Annotations[util.InRequestDevices[devName]]
+	if !exists {
+		klog.Warningf("Annotation for device %s not found in pod %s/%s", devName, pod.Namespace, pod.Name)
+		return
+	}
+	klog.InfoS("Processing allocation success", "annotations", annos, "namespace", pod.Namespace, "podName", pod.Name)
+
+	// 检查是否还有未处理的设备
 	for _, val := range DevicesToHandle {
 		if strings.Contains(annos, val) {
+			klog.Infof("Device %s still pending allocation for pod %s/%s", val, pod.Namespace, pod.Name)
 			return
 		}
 	}
-	klog.Infof("All devices allocate success, releasing lock")
+
+	// 如果所有设备都已成功分配，释放锁
+	klog.InfoS("All devices allocated successfully, releasing lock", "namespace", pod.Namespace, "podName", pod.Name)
 	PodAllocationSuccess(nodeName, pod, lockName)
 }
 

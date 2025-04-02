@@ -337,7 +337,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 		Endpoint:     path.Base(plugin.socket),
 		ResourceName: string(plugin.rm.Resource()),
 		Options: &pluginapi.DevicePluginOptions{
-			GetPreferredAllocationAvailable: true,
+			GetPreferredAllocationAvailable: false,
 		},
 	}
 
@@ -351,7 +351,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *pluginapi.Empty) (*pluginapi.DevicePluginOptions, error) {
 	options := &pluginapi.DevicePluginOptions{
-		GetPreferredAllocationAvailable: true,
+		GetPreferredAllocationAvailable: false,
 	}
 	return options, nil
 }
@@ -397,42 +397,60 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
+	// 日志：函数开始
+	klog.InfoS("Allocate function started", "request", reqs)
 
-	klog.InfoS("Allocate", "request", reqs)
 	responses := pluginapi.AllocateResponse{}
 	nodeName := os.Getenv(util.NodeNameEnvName)
-	klog.Infof("Allocate request on node %s", nodeName)
+	klog.InfoS("Processing allocate request on node", "nodeName", nodeName)
+
+	// 获取当前待处理的 Pod 信息
 	current, err := util.GetPendingPod(ctx, nodeName)
 	if err != nil {
+		klog.ErrorS(err, "Failed to get pending pod", "nodeName", nodeName)
 		return &responses, err
 	}
-	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
-	for idx, req := range reqs.ContainerRequests {
-		if err := plugin.rm.ValidateRequest(req.DevicesIDs); err != nil {
-			return nil, fmt.Errorf("invalid allocation request for %q: %w", plugin.rm.Resource(), err)
-		}
+	klog.InfoS("Processing allocate request for pod", "namespace", current.Namespace, "name", current.Name, "annotations", current.Annotations)
+
+	for idx, _ := range reqs.ContainerRequests {
+		containerIndex := idx + 1
+		klog.InfoS("Processing container request", "containerIndex", containerIndex, "totalContainers", len(reqs.ContainerRequests), "namespace", current.Namespace, "podName", current.Name)
+
+		//if err := plugin.rm.ValidateRequest(req.DevicesIDs); err != nil {
+		//	klog.ErrorS(err, "Invalid allocation request", "resource", plugin.rm.Resource(), "devicesIDs", req.DevicesIDs, "namespace", current.Namespace, "podName", current.Name)
+		//	return nil, fmt.Errorf("invalid allocation request for %q: %w", plugin.rm.Resource(), err)
+		//}
+
 		currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
-		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
+			klog.ErrorS(err, "Failed to get next device request", "nodeName", nodeName, "namespace", current.Namespace, "podName", current.Name)
 			device.PodAllocationFailed(nodeName, current, NodeLockNvidia)
 			return &responses, err
 		}
+
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
+			err := errors.New("device number not matched")
+			klog.ErrorS(err, "Device number mismatch", "expected", len(reqs.ContainerRequests[idx].DevicesIDs), "got", len(devreq), "namespace", current.Namespace, "podName", current.Name)
 			device.PodAllocationFailed(nodeName, current, NodeLockNvidia)
-			return &responses, errors.New("device number not matched")
+			return &responses, err
 		}
+
 		response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
 		if err != nil {
+			klog.ErrorS(err, "Failed to get allocate response", "namespace", current.Namespace, "podName", current.Name)
 			return nil, fmt.Errorf("failed to get allocate response: %v", err)
 		}
 
-		err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
-		if err != nil {
+		if err := EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current); err != nil {
+			klog.ErrorS(err, "Failed to erase next device type from annotation", "namespace", current.Namespace, "podName", current.Name)
 			device.PodAllocationFailed(nodeName, current, NodeLockNvidia)
 			return &responses, err
 		}
 
 		if plugin.operatingMode != "mig" {
+			klog.InfoS("Starting to allocate devices for pod", "namespace", current.Namespace, "podName", current.Name)
+
+			response.Envs["NVIDIA_VISIBLE_DEVICES"] = strings.Join(reqs.ContainerRequests[idx].DevicesIDs, ",")
 			for i, dev := range devreq {
 				limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 				response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
@@ -445,43 +463,53 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			if plugin.schedulerConfig.DisableCoreLimit {
 				response.Envs[util.CoreLimitSwitch] = "disable"
 			}
+
 			cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
 			os.RemoveAll(cacheFileHostDirectory)
-
+			klog.InfoS("Creating cache file host directory for pod", "namespace", current.Namespace, "podName", current.Name)
 			os.MkdirAll(cacheFileHostDirectory, 0777)
 			os.Chmod(cacheFileHostDirectory, 0777)
 			os.MkdirAll("/tmp/vgpulock", 0777)
 			os.Chmod("/tmp/vgpulock", 0777)
+
 			response.Mounts = append(response.Mounts,
-				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
-					HostPath: GetLibPath(),
-					ReadOnly: true},
-				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
-					HostPath: cacheFileHostDirectory,
-					ReadOnly: false},
-				&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",
-					HostPath: "/tmp/vgpulock",
-					ReadOnly: false},
+				&pluginapi.Mount{
+					ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
+					HostPath:      GetLibPath(),
+					ReadOnly:      true,
+				},
+				&pluginapi.Mount{
+					ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
+					HostPath:      cacheFileHostDirectory,
+					ReadOnly:      false,
+				},
+				&pluginapi.Mount{
+					ContainerPath: "/tmp/vgpulock",
+					HostPath:      "/tmp/vgpulock",
+					ReadOnly:      false,
+				},
 			)
+
+			// 检查 CUDA_DISABLE_CONTROL 环境变量是否存在
 			found := false
 			for _, val := range currentCtr.Env {
 				if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
-					// if env existed but is set to false or can not be parsed, ignore
 					t, _ := strconv.ParseBool(val.Value)
-					if !t {
-						continue
+					if t {
+						found = true
+						break
 					}
-					// only env existed and set to true, we mark it "found"
-					found = true
-					break
 				}
 			}
 			if !found {
-				response.Mounts = append(response.Mounts, &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
-					HostPath: hostHookPath + "/vgpu/ld.so.preload",
-					ReadOnly: true},
-				)
+				response.Mounts = append(response.Mounts, &pluginapi.Mount{
+					ContainerPath: "/etc/ld.so.preload",
+					HostPath:      hostHookPath + "/vgpu/ld.so.preload",
+					ReadOnly:      true,
+				})
 			}
+
+			// 检查许可证文件是否存在
 			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 			if err == nil {
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
@@ -496,10 +524,19 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				})
 			}
 		}
+
+		// 将容器响应追加到最终响应中
+		klog.InfoS("Appending container response", "containerIndex", containerIndex, "totalContainers", len(reqs.ContainerRequests), "namespace", current.Namespace, "podName", current.Name)
 		responses.ContainerResponses = append(responses.ContainerResponses, response)
 	}
-	klog.Infof("Final allocate response: %v", responses)
+
+	// 日志：最终分配响应
+	klog.InfoS("Final allocate response generated", "response", responses)
+
+	// 标记 Pod 分配成功
 	device.PodAllocationTrySuccess(nodeName, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	klog.InfoS("Allocate function completed successfully", "response", responses)
+
 	return &responses, nil
 }
 

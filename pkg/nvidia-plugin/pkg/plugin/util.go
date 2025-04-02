@@ -85,7 +85,6 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
 			}
 		}
 	}
-	klog.Infoln("After erase res=", res)
 	newannos := make(map[string]string)
 	newannos[util.InRequestDevices[dtype]] = util.EncodePodSingleDevice(res)
 	return util.PatchPodAnnotations(&p, newannos)
