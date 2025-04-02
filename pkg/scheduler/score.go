@@ -235,7 +235,6 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 							score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
 						}
 						score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
-						continue
 					}
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)

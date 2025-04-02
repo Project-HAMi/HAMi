@@ -34,6 +34,7 @@ package rm
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -214,13 +215,7 @@ func (d Device) AlignedAllocationSupported() bool {
 		return false
 	}
 
-	for _, p := range d.Paths {
-		if p == "/dev/dxg" {
-			return false
-		}
-	}
-
-	return true
+	return !slices.Contains(d.Paths, "/dev/dxg")
 }
 
 // IsMigDevice returns checks whether d is a MIG device or not.

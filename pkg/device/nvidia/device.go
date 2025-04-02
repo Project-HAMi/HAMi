@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -302,7 +303,7 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	cardtype = strings.ToUpper(cardtype)
 	if inuse, ok := annos[GPUInUse]; ok {
 		useTypes := strings.Split(inuse, ",")
-		if !ContainsSliceFunc(useTypes, func(useType string) bool {
+		if !slices.ContainsFunc(useTypes, func(useType string) bool {
 			return strings.Contains(cardtype, strings.ToUpper(useType))
 		}) {
 			return false
@@ -310,22 +311,13 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	}
 	if unuse, ok := annos[GPUNoUse]; ok {
 		unuseTypes := strings.Split(unuse, ",")
-		if ContainsSliceFunc(unuseTypes, func(unuseType string) bool {
+		if slices.ContainsFunc(unuseTypes, func(unuseType string) bool {
 			return strings.Contains(cardtype, strings.ToUpper(unuseType))
 		}) {
 			return false
 		}
 	}
 	return true
-}
-
-func ContainsSliceFunc[S ~[]E, E any](s S, match func(E) bool) bool {
-	for _, e := range s {
-		if match(e) {
-			return true
-		}
-	}
-	return false
 }
 
 func assertNuma(annos map[string]string) bool {
@@ -357,12 +349,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[GPUNoUseUUID]
@@ -370,12 +357,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 
 	return true
