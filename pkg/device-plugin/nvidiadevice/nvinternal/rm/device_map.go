@@ -321,7 +321,7 @@ func updateDeviceMapWithReplicas(config *nvidia.DeviceConfig, oDevices DeviceMap
 			name = r.Rename
 		}
 		for _, id := range ids {
-			for i := 0; i < r.Replicas; i++ {
+			for i := range r.Replicas {
 				annotatedID := string(NewAnnotatedID(id, i))
 				replicatedDevice := *(oDevices[r.Name][id])
 				replicatedDevice.ID = annotatedID

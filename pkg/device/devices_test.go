@@ -19,6 +19,7 @@ package device
 import (
 	"context"
 	"fmt"
+	"slices"
 	"testing"
 
 	"gopkg.in/yaml.v2"
@@ -174,8 +175,8 @@ func Test_LoadConfig(t *testing.T) {
 
 	dataDrivenTests := []struct {
 		name           string
-		expectedConfig interface{}
-		actualConfig   interface{}
+		expectedConfig any
+		actualConfig   any
 	}{
 		{"NVIDIA Config", createNvidiaConfig(), configData.NvidiaConfig},
 		{"Cambricon Config", createCambriconConfig(), configData.CambriconConfig},
@@ -351,12 +352,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 }
 
 func containsString(slice []string, str string) bool {
-	for _, v := range slice {
-		if v == str {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(slice, str)
 }
 
 // Test_InitDevicesWithConfig_Success tests the initialization of devices with the provided config.

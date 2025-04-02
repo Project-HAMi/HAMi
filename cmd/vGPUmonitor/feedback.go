@@ -62,7 +62,7 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	if err != nvml.SUCCESS {
 		return []uint{}, err
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		device, err := nvml.DeviceGetHandleByIndex(i)
 		if err != nvml.SUCCESS {
 			return []uint{}, err
@@ -167,11 +167,11 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 //}
 
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
-	for i := 0; i < c.Info.DeviceMax(); i++ {
+	for i := range c.Info.DeviceMax() {
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
-			for i := 0; i < p; i++ {
+			for i := range p {
 				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
@@ -184,11 +184,11 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 
 // Check whether task with higher priority use GPU or there are other tasks with the same priority.
 func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
-	for i := 0; i < c.Info.DeviceMax(); i++ {
+	for i := range c.Info.DeviceMax() {
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
-			for i := 0; i < p; i++ {
+			for i := range p {
 				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
@@ -210,7 +210,7 @@ func Observe(lister *nvidia.ContainerLister) {
 		if recentKernel > 0 {
 			recentKernel--
 			if recentKernel > 0 {
-				for i := 0; i < c.Info.DeviceMax(); i++ {
+				for i := range c.Info.DeviceMax() {
 					//for _, devuuid := range val.sr.uuids {
 					// Null device condition
 					if !c.Info.IsValidUUID(i) {

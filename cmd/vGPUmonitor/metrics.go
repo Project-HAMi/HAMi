@@ -203,7 +203,7 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 		return err
 	}
 
-	for ii := 0; ii < devnum; ii++ {
+	for ii := range devnum {
 		if err := cc.collectGPUDeviceMetrics(ch, ii); err != nil {
 			klog.Error("Failed to collect metrics for GPU device ", ii, ": ", err)
 		}
@@ -353,7 +353,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 	}
 
 	// Iterate through each device
-	for i := 0; i < c.Info.DeviceNum(); i++ {
+	for i := range c.Info.DeviceNum() {
 		uuid := c.Info.DeviceUUID(i)
 		if len(uuid) < 40 {
 			klog.Errorf("Invalid UUID length for device %d in Pod %s/%s, Container %s", i, pod.Namespace, pod.Name, ctr.Name)
@@ -398,10 +398,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 
 		// Send last kernel time metric if valid
 		if lastKernelTime > 0 {
-			lastSec := nowSec - lastKernelTime
-			if lastSec < 0 {
-				lastSec = 0
-			}
+			lastSec := max(nowSec-lastKernelTime, 0)
 			if err := sendMetric(ch, ctrDeviceLastKernelDesc, prometheus.GaugeValue, float64(lastSec), labels...); err != nil {
 				klog.Errorf("Failed to send last kernel time metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
 				return err
