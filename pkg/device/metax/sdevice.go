@@ -19,6 +19,7 @@ package metax
 import (
 	"encoding/json"
 	"errors"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -167,11 +168,9 @@ func (sdev *MetaxSDevices) CheckUUID(annos map[string]string, d util.DeviceUsage
 		klog.V(5).Infof("check UUID for metax, useUUID[%s], deviceID[%s]", useUUIDAnno, d.ID)
 
 		useUUIDs := strings.Split(useUUIDAnno, ",")
-		for _, uuid := range useUUIDs {
-			if d.ID == uuid {
-				klog.V(5).Infof("check UUID pass, the deviceID[%s]", d.ID)
-				return true
-			}
+		if slices.Contains(useUUIDs, d.ID) {
+			klog.V(5).Infof("check UUID pass, the deviceID[%s]", d.ID)
+			return true
 		}
 		return false
 	}
@@ -181,11 +180,9 @@ func (sdev *MetaxSDevices) CheckUUID(annos map[string]string, d util.DeviceUsage
 		klog.V(5).Infof("check UUID for metax, nouseUUID[%s], deviceID[%s]", noUseUUIDAnno, d.ID)
 
 		noUseUUIDs := strings.Split(noUseUUIDAnno, ",")
-		for _, uuid := range noUseUUIDs {
-			if d.ID == uuid {
-				klog.V(5).Infof("check UUID failed to pass, the deviceID[%s]", d.ID)
-				return false
-			}
+		if slices.Contains(noUseUUIDs, d.ID) {
+			klog.V(5).Infof("check UUID failed to pass, the deviceID[%s]", d.ID)
+			return false
 		}
 		return true
 	}

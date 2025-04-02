@@ -92,7 +92,7 @@ func TestRecordScheduleBindingResultEvent(t *testing.T) {
 			var err error
 
 			if test.pod != nil {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					events, err = fakeClient.CoreV1().Events(test.pod.Namespace).List(context.Background(), metav1.ListOptions{})
 					if err != nil {
 						if len(events.Items) > 0 {
@@ -179,7 +179,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 			var err error
 
 			if test.pod != nil {
-				for i := 0; i < 5; i++ {
+				for range 5 {
 					events, err = fakeClient.CoreV1().Events(test.pod.Namespace).List(context.Background(), metav1.ListOptions{})
 					if err != nil {
 						if len(events.Items) > 0 {
