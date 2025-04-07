@@ -140,6 +140,8 @@ scheduler:
     monitorPort: 31993    # Monitoring port
     labels: {}
     annotations: {}
+  preExtenders:
+  postExtenders:
 
 devicePlugin:
   image: "projecthami/hami"
