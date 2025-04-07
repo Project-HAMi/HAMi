@@ -174,7 +174,7 @@ HAMi 目前有一个 NPU 内置[虚拟化配置文件](https://github.com/Projec
 apiVersion: v1
 kind: Pod
 metadata:
-  name: gpu-pod
+  name: ascend910A-pod
 spec:
   containers:
     - name: ubuntu-container
@@ -182,8 +182,64 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          huawei.com/Ascend910: 1 # 请求 1 个 vGPU
-          huawei.com/Ascend910-memory: 2000 # 请求 2000m 设备内容
+          huawei.com/Ascend910A: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910A-memory: 2000 # requesting 2000m device memory
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend910B2-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend910B2: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910B2-memory: 2000 # requesting 2000m device memory
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend910B-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend910B: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910B-memory: 2000 # requesting 2000m device memory
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend910B4-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend910B4: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910B4-memory: 2000 # requesting 2000m device memory
+---
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend310P-pod
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend310P: 1 # requesting 1 vGPUs
+          huawei.com/Ascend310P-memory: 2000 # requesting 2000m device memory
 ```
 
 ## 注意事项
