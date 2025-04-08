@@ -203,7 +203,12 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 func (plugin *NvidiaDevicePlugin) Start() error {
 	plugin.initialize()
 
-	err := plugin.Serve()
+	deviceNumbers, err := GetDeviceNums()
+	if err != nil {
+		return err
+	}
+
+	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
 		plugin.cleanup()
@@ -234,7 +239,7 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		if len(plugin.migCurrent.MigConfigs["current"]) == 1 && len(plugin.migCurrent.MigConfigs["current"][0].Devices) == 0 {
 			idx := 0
 			plugin.migCurrent.MigConfigs["current"][0].Devices = make([]int32, 0)
-			for idx < GetDeviceNums() {
+			for idx < deviceNumbers {
 				plugin.migCurrent.MigConfigs["current"][0].Devices = append(plugin.migCurrent.MigConfigs["current"][0].Devices, int32(idx))
 				idx++
 			}
