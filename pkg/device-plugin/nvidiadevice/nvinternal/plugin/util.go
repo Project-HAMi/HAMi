@@ -19,6 +19,7 @@ package plugin
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"os"
 	"os/exec"
 	"strconv"
@@ -92,7 +93,10 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
-	nvml.Init()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		panic(0)
+	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
@@ -145,7 +149,10 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 }
 
 func GetMigUUIDFromIndex(uuid string, idx int) string {
-	nvml.Init()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		panic(0)
+	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
@@ -175,13 +182,17 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 	return res
 }
 
-func GetDeviceNums() int {
-	nvml.Init()
+func GetDeviceNums() (int, error) {
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	}
 	count, ret := nvml.DeviceGetCount()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get count error ret=`, ret)
+		return 0, fmt.Errorf("nvml get count error ret: %s", nvml.ErrorString(ret))
 	}
-	return count
+	return count, nil
 }
 
 func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
