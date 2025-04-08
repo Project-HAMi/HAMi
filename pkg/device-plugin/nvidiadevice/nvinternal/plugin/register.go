@@ -110,7 +110,10 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
-	nvml.Init()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		panic(0)
+	}
 	res := make([]*util.DeviceInfo, 0, len(devs))
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
