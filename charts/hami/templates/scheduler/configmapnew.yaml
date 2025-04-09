@@ -20,6 +20,9 @@ data:
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
+    {{- if .Values.scheduler.preExtenders }}
+    {{- toYaml .Values.scheduler.preExtenders | nindent 4 }}
+    {{- end }}
     - urlPrefix: "https://127.0.0.1:443"
       filterVerb: filter
       bindVerb: bind
@@ -68,4 +71,7 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+    {{- if .Values.scheduler.postExtenders }}
+    {{- toYaml .Values.scheduler.postExtenders | nindent 4 }}
+    {{- end }}
 {{- end }}
