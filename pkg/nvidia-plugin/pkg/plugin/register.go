@@ -108,56 +108,106 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 }
 
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
+	// Initialize NVML and get device list
 	devs := plugin.Devices()
-	klog.V(5).InfoS("getAPIDevices", "devices", devs)
-	nvml.Init()
+	klog.InfoS("Starting to collect GPU device information", "deviceCount", len(devs))
+
+	// Initialize NVML library
+	if ret := nvml.Init(); ret != nvml.SUCCESS {
+		errMsg := nvml.ErrorString(ret)
+		klog.ErrorS(fmt.Errorf(errMsg), "Failed to initialize NVML")
+		return &[]*util.DeviceInfo{}
+	}
+	defer nvml.Shutdown()
+
 	res := make([]*util.DeviceInfo, 0, len(devs))
+	var errorCount int
+
+	// Process each GPU device
 	for UUID := range devs {
+		// Get device handle by UUID
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
-			panic(0)
-		}
-		idx, ret := ndev.GetIndex()
-		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml get index error ret=", ret)
-			panic(0)
-		}
-		memoryTotal := 0
-		memory, ret := ndev.GetMemoryInfo()
-		if ret == nvml.SUCCESS {
-			memoryTotal = int(memory.Total)
-		} else {
-			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
-		}
-		Model, ret := ndev.GetName()
-		if ret != nvml.SUCCESS {
-			klog.Error("nvml get name error ret=", ret)
-			panic(0)
+			errMsg := nvml.ErrorString(ret)
+			klog.ErrorS(fmt.Errorf(errMsg), "Failed to get device handle",
+				"uuid", UUID, "errorCode", ret)
+			errorCount++
+			continue
 		}
 
+		// Get device index
+		idx, ret := ndev.GetIndex()
+		if ret != nvml.SUCCESS {
+			errMsg := nvml.ErrorString(ret)
+			klog.ErrorS(fmt.Errorf(errMsg), "Failed to get device index",
+				"uuid", UUID, "errorCode", ret)
+			errorCount++
+			continue
+		}
+
+		// Get memory information
+		memory, ret := ndev.GetMemoryInfo()
+		if ret != nvml.SUCCESS {
+			errMsg := nvml.ErrorString(ret)
+			klog.ErrorS(fmt.Errorf(errMsg), "Failed to get memory info",
+				"uuid", UUID, "index", idx)
+			errorCount++
+			continue
+		}
+		memoryTotal := int(memory.Total)
+
+		// Calculate registered memory with scaling factor
 		registeredmem := int32(memoryTotal / 1024 / 1024)
 		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+			original := registeredmem
 			registeredmem = int32(float64(registeredmem) * plugin.schedulerConfig.DeviceMemoryScaling)
+			klog.V(4).InfoS("Applied memory scaling",
+				"originalMB", original,
+				"scaledMB", registeredmem,
+				"scalingFactor", plugin.schedulerConfig.DeviceMemoryScaling)
 		}
+
+		// Get device model name
+		Model, ret := ndev.GetName()
+		if ret != nvml.SUCCESS {
+			errMsg := nvml.ErrorString(ret)
+			klog.ErrorS(fmt.Errorf(errMsg), "Failed to get device name",
+				"uuid", UUID, "index", idx)
+			errorCount++
+			continue
+		}
+
+		// Check device health status
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
-				// when NVIDIA-Tesla P4, the device info is : ID:GPU-e290caca-2f0c-9582-acab-67a142b61ffa,Health:Healthy,Topology:nil,
-				// it is more reasonable to think of healthy as case-insensitive
-				if strings.EqualFold(val.Health, "healthy") {
-					health = true
-				} else {
-					health = false
+				health = strings.EqualFold(val.Health, "healthy")
+				if !health {
+					klog.Warning("Device is not healthy",
+						"uuid", UUID, "index", idx,
+						"healthStatus", val.Health)
 				}
 				break
 			}
 		}
+
+		// Get NUMA affinity information
 		numa, err := plugin.getNumaInformation(idx)
 		if err != nil {
-			klog.ErrorS(err, "failed to get numa information", "idx", idx)
+			klog.ErrorS(err, "Failed to get NUMA information",
+				"uuid", UUID, "index", idx)
 		}
+
+		// Log successful device collection
+		klog.InfoS("Successfully collected GPU device info",
+			"uuid", UUID,
+			"index", idx,
+			"model", Model,
+			"memoryMB", registeredmem,
+			"numaNode", numa,
+			"healthStatus", health)
+
+		// Add device info to result
 		res = append(res, &util.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
@@ -170,26 +220,54 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 			Health:  health,
 		})
 	}
+
+	// Log summary of device collection
+	if errorCount > 0 {
+		klog.Warning("Failed to collect some GPU device information",
+			"errorCount", errorCount,
+			"totalDevices", len(devs),
+			"successfulDevices", len(res))
+	} else {
+		klog.InfoS("Successfully collected all GPU device information",
+			"deviceCount", len(res))
+	}
+
 	return &res
 }
 
 func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	devices := plugin.getAPIDevices()
-	klog.InfoS("start working on the devices", "devices", devices)
+	klog.Infof("Starting to register %d devices in node annotation", len(*devices))
+
+	if len(*devices) == 0 {
+		klog.Warning("No GPU devices found to register")
+		return nil
+	}
+	for i, dev := range *devices {
+		klog.InfoS("Device details",
+			"index", i,
+			"uuid", dev.ID,
+			"type", dev.Type,
+			"memoryMB", dev.Devmem,
+			"numaNode", dev.Numa,
+			"health", dev.Health)
+	}
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := util.EncodeNodeDevices(*devices)
+	encodedDevices := util.EncodeNodeDevices(*devices)
 	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
-	annos[nvidia.RegisterAnnos] = encodeddevices
+	annos[nvidia.RegisterAnnos] = encodedDevices
 	err = util.PatchNodeAnnotations(node, annos)
-
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
 	}
+	klog.InfoS("Successfully registered devices in node annotation",
+		"deviceCount", len(*devices),
+		"nodeName", util.NodeName)
 	return err
 }
 

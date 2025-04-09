@@ -227,5 +227,13 @@ func (cdi *cdiHandler) getRootTransformer() transform.Transformer {
 // QualifiedName constructs a CDI qualified device name for the specified resources.
 // Note: This assumes that the specified id matches the device name returned by the naming strategy.
 func (cdi *cdiHandler) QualifiedName(class string, id string) string {
-	return cdiparser.QualifiedName(cdi.vendor, class, id)
+	if id == "" {
+		klog.Error("Empty device ID received")
+		return ""
+	}
+
+	name := cdiparser.QualifiedName(cdi.vendor, class, id)
+	klog.Infof("CDI name generated - Vendor: %s, Class: %s, ID: %s -> %s",
+		cdi.vendor, class, id, name)
+	return name
 }

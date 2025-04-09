@@ -358,7 +358,13 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *plugi
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *pluginapi.Empty, s pluginapi.DevicePlugin_ListAndWatchServer) error {
-	if err := s.Send(&pluginapi.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+	devices := plugin.apiDevices()
+	klog.Infof("Listing devices for resource %s, count: %d", plugin.rm.Resource(), len(devices))
+
+	for _, dev := range devices {
+		klog.V(5).Infof("Device ID: %s, Health: %s", dev.ID, dev.Health)
+	}
+	if err := s.Send(&pluginapi.ListAndWatchResponse{Devices: devices}); err != nil {
 		return err
 	}
 
@@ -397,14 +403,12 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-	// 日志：函数开始
 	klog.InfoS("Allocate function started", "request", reqs)
 
 	responses := pluginapi.AllocateResponse{}
 	nodeName := os.Getenv(util.NodeNameEnvName)
 	klog.InfoS("Processing allocate request on node", "nodeName", nodeName)
 
-	// 获取当前待处理的 Pod 信息
 	current, err := util.GetPendingPod(ctx, nodeName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get pending pod", "nodeName", nodeName)
@@ -415,11 +419,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 	for idx, _ := range reqs.ContainerRequests {
 		containerIndex := idx + 1
 		klog.InfoS("Processing container request", "containerIndex", containerIndex, "totalContainers", len(reqs.ContainerRequests), "namespace", current.Namespace, "podName", current.Name)
-
-		//if err := plugin.rm.ValidateRequest(req.DevicesIDs); err != nil {
-		//	klog.ErrorS(err, "Invalid allocation request", "resource", plugin.rm.Resource(), "devicesIDs", req.DevicesIDs, "namespace", current.Namespace, "podName", current.Name)
-		//	return nil, fmt.Errorf("invalid allocation request for %q: %w", plugin.rm.Resource(), err)
-		//}
 
 		currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 		if err != nil {
@@ -490,7 +489,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				},
 			)
 
-			// 检查 CUDA_DISABLE_CONTROL 环境变量是否存在
 			found := false
 			for _, val := range currentCtr.Env {
 				if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
@@ -509,7 +507,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				})
 			}
 
-			// 检查许可证文件是否存在
 			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 			if err == nil {
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
@@ -525,15 +522,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 			}
 		}
 
-		// 将容器响应追加到最终响应中
 		klog.InfoS("Appending container response", "containerIndex", containerIndex, "totalContainers", len(reqs.ContainerRequests), "namespace", current.Namespace, "podName", current.Name)
 		responses.ContainerResponses = append(responses.ContainerResponses, response)
 	}
 
-	// 日志：最终分配响应
 	klog.InfoS("Final allocate response generated", "response", responses)
 
-	// 标记 Pod 分配成功
 	device.PodAllocationTrySuccess(nodeName, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	klog.InfoS("Allocate function completed successfully", "response", responses)
 
@@ -541,7 +535,15 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 }
 
 func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*pluginapi.ContainerAllocateResponse, error) {
+	klog.InfoS("Start processing allocation response", "requestIds", requestIds)
+	if plugin.cdiHandler == nil {
+		return nil, fmt.Errorf("CDI handler not initialized")
+	}
 	deviceIDs := plugin.deviceIDsFromAnnotatedDeviceIDs(requestIds)
+	klog.InfoS("Request ID conversion result",
+		"requestIds", requestIds,
+		"deviceIDs", deviceIDs,
+		"strategy", *plugin.config.Flags.Plugin.DeviceIDStrategy)
 
 	// Create an empty response that will be updated as required below.
 	response := &pluginapi.ContainerAllocateResponse{
@@ -549,10 +551,17 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*plu
 	}
 	if plugin.deviceListStrategies.AnyCDIEnabled() {
 		responseID := uuid.New().String()
+		klog.InfoS("Processing CDI devices",
+			"responseID", responseID,
+			"deviceCount", len(deviceIDs))
 		if err := plugin.updateResponseForCDI(response, responseID, deviceIDs...); err != nil {
 			return nil, fmt.Errorf("failed to get allocate response for CDI: %v", err)
 		}
+		klog.InfoS("CDI response updated successfully",
+			"annotations", response.Annotations,
+			"cdiDevices", response.CDIDevices)
 	}
+
 	// The following modifications are only made if at least one non-CDI device
 	// list strategy is selected.
 	if plugin.deviceListStrategies.AllCDIEnabled() {
@@ -575,6 +584,10 @@ func (plugin *NvidiaDevicePlugin) getAllocateResponse(requestIds []string) (*plu
 	if *plugin.config.Flags.MOFEDEnabled {
 		response.Envs["NVIDIA_MOFED"] = "enabled"
 	}
+	klog.InfoS("Successfully generated allocation response",
+		"envs", response.Envs,
+		"devices", response.Devices,
+		"mounts", response.Mounts)
 	return response, nil
 }
 

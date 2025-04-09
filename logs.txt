@@ -1,0 +1,1 @@
+Error: failed to create containerd task: failed to create shim task: OCI runtime create failed: runc create failed: unable to start container process: error during container init: error running hook #0: error running hook: exit status 1, stdout: , stderr: nvidia-container-cli.real: device error: GPU-3c955d4d-eea8-345a-5477-85f2c1d1ae7b-4: unknown device: unknown
