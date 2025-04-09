@@ -351,8 +351,7 @@ func Test_Filter(t *testing.T) {
 	initNode := func() {
 		nodes, _ := s.ListNodes()
 		for index := range nodes {
-			node := nodes[index]
-			s.rmNodeDevice(node.ID, node, nvidia.NvidiaGPUDevice)
+			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
 		}
 		pods, _ := s.ListPodsUID()
 		for index := range pods {
