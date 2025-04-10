@@ -19,11 +19,11 @@ package routes
 import (
 	"bytes"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
+	"github.com/unrolled/render"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
@@ -65,15 +65,12 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			}
 		}
 
-		if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
-			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
-		} else {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(resultBody)
+		klog.V(5).InfoS("Returning predicate response", "result", extenderFilterResult)
+
+		err := render.New(render.Options{IndentJSON: true}).JSON(w, http.StatusOK, extenderFilterResult)
+		if err != nil {
+			klog.ErrorS(err, "Failed to write JSON response")
+			return
 		}
 	}
 }
@@ -101,17 +98,12 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 			}
 		}
 
-		if response, err := json.Marshal(extenderBindingResult); err != nil {
-			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
-			errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
-			w.Write([]byte(errMsg))
-		} else {
-			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+		klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
+
+		err := render.New(render.Options{IndentJSON: true}).JSON(w, http.StatusOK, extenderBindingResult)
+		if err != nil {
+			klog.ErrorS(err, "Failed to write JSON response")
+			return
 		}
 	}
 }
