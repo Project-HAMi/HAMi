@@ -30,7 +30,7 @@ func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 		"pod", klog.KObj(pod),
 		"containerCount", len(pod.Spec.Containers))
 	//Count Nvidia GPU
-	for i := 0; i < len(pod.Spec.Containers); i++ {
+	for i := range pod.Spec.Containers {
 		devices := device.GetDevices()
 		counts[i] = make(util.ContainerDeviceRequests)
 		klog.V(5).InfoS("Processing container resources",

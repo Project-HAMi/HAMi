@@ -1480,7 +1480,7 @@ func Test_calcScore(t *testing.T) {
 				assert.DeepEqual(t, test.wants.failedNodes, failedNodes)
 				return
 			}
-			for i := 0; i < got.Len(); i++ {
+			for i := range got.Len() {
 				gotI := (*(got)).NodeList[i]
 				wantI := wantMap[gotI.NodeID]
 				assert.DeepEqual(t, wantI.NodeID, gotI.NodeID)

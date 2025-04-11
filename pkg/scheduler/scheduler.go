@@ -80,7 +80,7 @@ func (s *Scheduler) doNodeNotify() {
 	}
 }
 
-func (s *Scheduler) onAddPod(obj interface{}) {
+func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
@@ -99,11 +99,11 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 	s.addPod(pod, nodeID, podDev)
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
+func (s *Scheduler) onUpdatePod(_, newObj any) {
 	s.onAddPod(newObj)
 }
 
-func (s *Scheduler) onDelPod(obj interface{}) {
+func (s *Scheduler) onDelPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
@@ -129,9 +129,9 @@ func (s *Scheduler) Start() {
 		DeleteFunc: s.onDelPod,
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    func(_ interface{}) { s.doNodeNotify() },
-		UpdateFunc: func(_, _ interface{}) { s.doNodeNotify() },
-		DeleteFunc: func(_ interface{}) { s.doNodeNotify() },
+		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
+		DeleteFunc: func(_ any) { s.doNodeNotify() },
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)

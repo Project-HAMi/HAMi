@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -57,7 +58,7 @@ var (
 )
 
 func (dev *Devices) trimMemory(m int64) (int64, string) {
-	for i := 0; i < len(dev.config.Templates); i++ {
+	for i := range dev.config.Templates {
 		if m <= dev.config.Templates[i].Memory {
 			return dev.config.Templates[i].Memory, dev.config.Templates[i].Name
 		}
@@ -216,12 +217,7 @@ func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool 
 		klog.V(5).Infof("check uuid for ascend user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[dev.noUseUUIDAnno]
@@ -229,12 +225,7 @@ func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool 
 		klog.V(5).Infof("check uuid for ascend not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }

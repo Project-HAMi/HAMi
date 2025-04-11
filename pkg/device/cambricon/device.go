@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -94,7 +95,7 @@ func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	}
 
 	patchedAnnotation, err := json.Marshal(
-		map[string]interface{}{
+		map[string]any{
 			"metadata": map[string]map[string]string{"annotations": {
 				DsmluLockTime: time.Now().Format(time.RFC3339),
 			}}})
@@ -222,12 +223,7 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[MLUNoUseUUID]
@@ -235,12 +231,7 @@ func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }

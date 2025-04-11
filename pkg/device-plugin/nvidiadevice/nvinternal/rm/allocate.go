@@ -116,7 +116,7 @@ func (r *resourceManager) distributedAlloc(available, required []string, size in
 	// to the list of devices to allocate, remove it from the candidate list,
 	// down its available count in the replicas map, and repeat.
 	var devices []string
-	for i := 0; i < needed; i++ {
+	for range needed {
 		sort.Slice(candidates, func(i, j int) bool {
 			iid := AnnotatedID(candidates[i]).GetID()
 			jid := AnnotatedID(candidates[j]).GetID()
