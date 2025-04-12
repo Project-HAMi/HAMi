@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
@@ -42,9 +43,9 @@ var (
 	rootCmd     = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			start()
+			return start()
 		},
 	}
 )
@@ -73,7 +74,7 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
-func start() {
+func start() error {
 	client.InitGlobalClient(client.WithBurst(config.Burst), client.WithQPS(config.QPS))
 	device.InitDevices()
 	sher = scheduler.NewScheduler()
@@ -93,13 +94,14 @@ func start() {
 	klog.Info("listen on ", config.HTTPBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
+			return fmt.Errorf("Listen and Serve error, %v", err)
 		}
 	} else {
 		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
+			return fmt.Errorf("Listen and Serve error, %v", err)
 		}
 	}
+	return nil
 }
 
 func main() {
