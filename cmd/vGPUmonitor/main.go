@@ -57,12 +57,12 @@ func init() {
 
 func start() error {
 	if err := ValidateEnvVars(); err != nil {
-		return fmt.Errorf("Failed to validate environment variables: %v", err)
+		return fmt.Errorf("failed to validate environment variables: %v", err)
 	}
 
 	containerLister, err := nvidia.NewContainerLister()
 	if err != nil {
-		return fmt.Errorf("Failed to create container lister: %v", err)
+		return fmt.Errorf("failed to create container lister: %v", err)
 	}
 
 	cgroupDriver = 0 // Explicitly initialize
