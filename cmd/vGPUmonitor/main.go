@@ -42,9 +42,9 @@ var (
 	rootCmd = &cobra.Command{
 		Use:   "vGPUmonitor",
 		Short: "Hami vgpu vGPUmonitor",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			start()
+			return start()
 		},
 	}
 )
@@ -55,14 +55,14 @@ func init() {
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }
 
-func start() {
+func start() error {
 	if err := ValidateEnvVars(); err != nil {
-		klog.Fatalf("Failed to validate environment variables: %v", err)
+		return fmt.Errorf("Failed to validate environment variables: %v", err)
 	}
 
 	containerLister, err := nvidia.NewContainerLister()
 	if err != nil {
-		klog.Fatalf("Failed to create container lister: %v", err)
+		return fmt.Errorf("Failed to create container lister: %v", err)
 	}
 
 	cgroupDriver = 0 // Explicitly initialize
@@ -107,6 +107,7 @@ func start() {
 	// Wait for all goroutines to complete
 	wg.Wait()
 	close(errCh)
+	return nil
 }
 
 func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) error {
