@@ -68,7 +68,7 @@ type MigPartedSpec struct {
 
 // MigConfigSpec defines the spec to declare the desired MIG configuration for a set of GPUs.
 type MigConfigSpec struct {
-	DeviceFilter interface{}      `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
+	DeviceFilter any              `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
 	Devices      []int32          `json:"devices"                 yaml:"devices,flow"`
 	MigEnabled   bool             `json:"mig-enabled"             yaml:"mig-enabled"`
 	MigDevices   map[string]int32 `json:"mig-devices"             yaml:"mig-devices"`

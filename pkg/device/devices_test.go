@@ -174,8 +174,8 @@ func Test_LoadConfig(t *testing.T) {
 
 	dataDrivenTests := []struct {
 		name           string
-		expectedConfig interface{}
-		actualConfig   interface{}
+		expectedConfig any
+		actualConfig   any
 	}{
 		{"NVIDIA Config", createNvidiaConfig(), configData.NvidiaConfig},
 		{"Cambricon Config", createCambriconConfig(), configData.CambriconConfig},
