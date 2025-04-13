@@ -96,7 +96,7 @@ type NvidiaDevicePlugin struct {
 
 	server *grpc.Server
 	health chan *rm.Device
-	stop   chan interface{}
+	stop   chan any
 }
 
 func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
@@ -183,7 +183,7 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 func (plugin *NvidiaDevicePlugin) initialize() {
 	plugin.server = grpc.NewServer([]grpc.ServerOption{}...)
 	plugin.health = make(chan *rm.Device)
-	plugin.stop = make(chan interface{})
+	plugin.stop = make(chan any)
 }
 
 func (plugin *NvidiaDevicePlugin) cleanup() {

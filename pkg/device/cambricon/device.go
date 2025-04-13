@@ -94,7 +94,7 @@ func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	}
 
 	patchedAnnotation, err := json.Marshal(
-		map[string]interface{}{
+		map[string]any{
 			"metadata": map[string]map[string]string{"annotations": {
 				DsmluLockTime: time.Now().Format(time.RFC3339),
 			}}})
