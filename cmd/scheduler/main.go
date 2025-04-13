@@ -94,11 +94,11 @@ func start() error {
 	klog.Info("listen on ", config.HTTPBind)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			return fmt.Errorf("Listen and Serve error, %v", err)
+			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	} else {
 		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("Listen and Serve error, %v", err)
+			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	}
 	return nil
