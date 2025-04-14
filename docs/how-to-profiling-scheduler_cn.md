@@ -2,8 +2,7 @@
 
 ## 前提条件
 ### 启用性能分析
-- 在 Helm Chart 的 `scheduler.extender` 的 `extraArgs` 字段中添加 `--enable-profiling` 标志，使 pprof 通过其 HTTP 服务器在 `127.0.0.1:6060` 上可用。
-- 可选：设置 `--profiling-bind-address` 标志为 `0.0.0.0:6060` 以将 HTTP 服务器暴露到外部，允许您通过访问 `<POD_IP>:6060` 获取性能分析数据。
+- 在 Helm Chart 的 `scheduler.extender` 的 `extraArgs` 字段中添加 `--profiling` 标志，使 pprof 在 <POD_IP> 上的 HTTP(s) 服务器可用可以被访问到
 ```yaml
 scheduler:
   ...
@@ -11,8 +10,7 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
-      - --enable-profiling
-      - --profiling-bind-address=0.0.0.0:6060
+      - --profiling
 ```
 
 ### 准备性能分析环境
@@ -43,12 +41,12 @@ RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
 ### CPU 性能分析
 运行以下命令捕获 120 秒的 CPU 性能分析：
 ```bash
-go tool pprof --seconds 120 http://<POD_IP>:6060/debug/pprof/profile`
+go tool pprof --seconds 120 https+insecure://<POD_IP>/debug/pprof/profile`
 ```
 示例输出：
 ```bash
-root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof --seconds 120 http://10.42.0.24:6060/debug/pprof/profile
-Fetching profile over HTTP from http://10.42.0.24:6060/debug/pprof/profile?seconds=120
+root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof --seconds 120 https+insecure://10.42.0.24/debug/pprof/profile
+Fetching profile over HTTP from https+insecure://10.42.0.24/debug/pprof/profile?seconds=120
 Please wait... (2m0s)
 Saved profile in /root/pprof/pprof.scheduler.samples.cpu.002.pb.gz
 File: scheduler
@@ -76,17 +74,17 @@ Showing top 10 nodes out of 12
 要分析内存使用情况，您有两个选项：
 - 当前活动对象
 ```
-go tool pprof http://<POD_IP>:6060/debug/pprof/heap
+go tool pprof https+insecure://<POD_IP>/debug/pprof/heap
 ```
 - 累计分配历史
 ```
-go tool pprof http://<POD_IP>:6060/debug/pprof/allocs
+go tool pprof https+insecure://<POD_IP>/debug/pprof/allocs
 ```
 分配配置文件的示例输出：
 
 ```bash
-root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof http://10.42.0.24:6060/debug/pprof/allocs
-Fetching profile over HTTP from http://10.42.0.24:6060/debug/pprof/allocs
+root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof https+insecure://10.42.0.24/debug/pprof/allocs
+Fetching profile over HTTP from https+insecure://10.42.0.24/debug/pprof/allocs
 Saved profile in /root/pprof/pprof.scheduler.alloc_objects.alloc_space.inuse_objects.inuse_space.041.pb.gz
 File: scheduler
 Type: alloc_space

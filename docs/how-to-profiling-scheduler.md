@@ -2,8 +2,7 @@
 
 ## Prerequisite
 ### Enable profiling
-- Add the `--enable-profiling` flag to the `extraArgso` field of `scheduler.extender` in the Helm Chart to make pprof available via its HTTP server on `127.0.0.1:6060`.
-- Optional: Set the `--profiling-bind-address` flag to `0.0.0.0:6060` to expose the HTTP server externally, allowing you to fetch profiling data by visiting `<POD_IP>:6060`.
+- Add the `--profiling` flag to the `extraArgs` field of `scheduler.extender` in the Helm Chart to make pprof available via HTTP(s) server on `<POD_IP>`.
 ``` yaml
 scheduler:
   ...
@@ -11,8 +10,7 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
-      - --enable-profiling
-      - --profiling-bind-address=0.0.0.0:6060
+      - --profiling
 ```
 
 ### Prepare profiling environment
@@ -43,12 +41,12 @@ For detailed information about pprof, refer to the [official documentation](http
 ### CPU Profiling
 Run the following command to capture a 120-second CPU profile:
 ```bash
-go tool pprof --seconds 120 http://<POD_IP>:6060/debug/pprof/profile`
+go tool pprof --seconds 120 https+insecure://<POD_IP>/debug/pprof/profile`
 ```
 Example output:
 ```bash
-root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof --seconds 120 http://10.42.0.24:6060/debug/pprof/profile
-Fetching profile over HTTP from http://10.42.0.24:6060/debug/pprof/profile?seconds=120
+root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof --seconds 120 https+insecure:://10.42.0.24/debug/pprof/profile
+Fetching profile over HTTP from https+insecure://10.42.0.24/debug/pprof/profile?seconds=120
 Please wait... (2m0s)
 Saved profile in /root/pprof/pprof.scheduler.samples.cpu.002.pb.gz
 File: scheduler
@@ -76,17 +74,17 @@ Showing top 10 nodes out of 12
 To analyze memory usage, you have two options:
 - Current live objects
 ```
-go tool pprof http://<POD_IP>:6060/debug/pprof/heap
+go tool pprof https+insecure://<POD_IP>/debug/pprof/heap
 ```
 - Cumulative allocation history
 ```
-go tool pprof http://<POD_IP>:6060/debug/pprof/allocs
+go tool pprof https+insecure://<POD_IP>/debug/pprof/allocs
 ```
 Example output from the allocation profile:
 
 ```bash 
-root@hami-pprof-76cfcb66f6-jpjnm:/# go tool pprof http://10.42.0.24:6060/debug/pprof/allocs
-Fetching profile over HTTP from http://10.42.0.24:6060/debug/pprof/allocs
+root@hami-scheduler-ffd687cb7-7gqm2:/# /usr/local/go/bin/go tool pprof --seconds 120 https+insecure://10.42.0.24/debug/pprof/allocs
+Fetching profile over HTTP from https+insecure://10.42.0.24/debug/pprof/allocs?seconds=120
 Saved profile in /root/pprof/pprof.scheduler.alloc_objects.alloc_space.inuse_objects.inuse_space.041.pb.gz
 File: scheduler
 Type: alloc_space
