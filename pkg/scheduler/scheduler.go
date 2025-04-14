@@ -44,8 +44,8 @@ import (
 )
 
 type Scheduler struct {
-	nodeManager
-	podManager
+	*nodeManager
+	*podManager
 
 	stopCh     chan struct{}
 	kubeClient kubernetes.Interface
@@ -67,25 +67,20 @@ func NewScheduler() *Scheduler {
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
 	}
-	s.nodeManager.init()
-	s.podManager.init()
+	s.nodeManager = newNodeManager()
+	s.podManager = newPodManager()
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }
 
-func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
-	s.nodeNotify <- struct{}{}
+func (s *Scheduler) doNodeNotify() {
+	select {
+	case s.nodeNotify <- struct{}{}:
+	default:
+	}
 }
 
-func (s *Scheduler) onDelNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onAddNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onAddPod(obj interface{}) {
+func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
@@ -104,11 +99,11 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 	s.addPod(pod, nodeID, podDev)
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
+func (s *Scheduler) onUpdatePod(_, newObj any) {
 	s.onAddPod(newObj)
 }
 
-func (s *Scheduler) onDelPod(obj interface{}) {
+func (s *Scheduler) onDelPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
@@ -128,16 +123,15 @@ func (s *Scheduler) Start() {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 
-	informer := informerFactory.Core().V1().Pods().Informer()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    s.onAddNode,
-		UpdateFunc: s.onUpdateNode,
-		DeleteFunc: s.onDelNode,
+		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
+		DeleteFunc: func(_ any) { s.doNodeNotify() },
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
@@ -151,6 +145,10 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.InfoS("Entering RegisterFromNodeAnnotations")
 	defer klog.InfoS("Exiting RegisterFromNodeAnnotations")
+
+	labelSelector := labels.Set(config.NodeLabelSelector).AsSelector()
+	klog.InfoS("Using label selector for list nodes", "selector", labelSelector.String())
+
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	printedLog := map[string]bool{}
@@ -163,11 +161,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
-		}
-		labelSelector := labels.Everything()
-		if len(config.NodeLabelSelector) > 0 {
-			labelSelector = (labels.Set)(config.NodeLabelSelector).AsSelector()
-			klog.InfoS("Using label selector", "selector", labelSelector.String())
 		}
 		rawNodes, err := s.nodeLister.List(labelSelector)
 		if err != nil {

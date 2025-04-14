@@ -25,7 +25,7 @@ type specTest struct {
 	name     string
 	spec     *Spec
 	input    int
-	expected interface{}
+	expected any
 }
 
 func TestSpec_DeviceMax(t *testing.T) {
