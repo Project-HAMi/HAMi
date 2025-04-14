@@ -623,7 +623,7 @@ func Test_LockNode(t *testing.T) {
 			defer teardown()
 
 			// Set up the node with the specified annotations.
-			node.ObjectMeta.Annotations = tt.annotations
+			node.Annotations = tt.annotations
 
 			dev := InitMLUDevice(CambriconConfig{
 				ResourceCountName:  MLUResourceCount,

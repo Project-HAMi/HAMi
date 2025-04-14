@@ -35,8 +35,10 @@ jobs:
         run: hack/verify-license.sh
       - name: go tidy
         run: make tidy
-      - name: lint
-        run: make lint
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v7
+        with:
+          version: v2.0
       - name: import alias
         run: hack/verify-import-aliases.sh
 
