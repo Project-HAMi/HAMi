@@ -461,7 +461,7 @@ func Test_InitNvidiaDevice(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			devices := InitNvidiaDevice(test.args)
 			if devices == nil {
-				t.Error("Expected NvidiaGPUDevices to be initialized")
+				t.Fatalf("Expected devices to be initialized")
 			}
 			assert.DeepEqual(t, test.want.config, devices.config)
 			assert.Equal(t, "hami.io/vgpu-devices-to-allocate", util.InRequestDevices[NvidiaGPUDevice], "Expected InRequestDevices to be set")

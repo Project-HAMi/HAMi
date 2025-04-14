@@ -89,7 +89,7 @@ func (dev *CambriconDevices) CommonWord() string {
 
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	ctx := context.Background()
-	if _, ok := node.ObjectMeta.Annotations[DsmluLockTime]; ok {
+	if _, ok := node.Annotations[DsmluLockTime]; ok {
 		return fmt.Errorf("node %s is locked", node.Name)
 	}
 
@@ -127,10 +127,10 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
-	if _, ok := n.ObjectMeta.Annotations[DsmluLockTime]; !ok {
+	if _, ok := n.Annotations[DsmluLockTime]; !ok {
 		return dev.setNodeLock(n)
 	}
-	lockTime, err := time.Parse(time.RFC3339, n.ObjectMeta.Annotations[DsmluLockTime])
+	lockTime, err := time.Parse(time.RFC3339, n.Annotations[DsmluLockTime])
 	if err != nil {
 		return err
 	}
@@ -156,7 +156,7 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	}
 
 	newNode := n.DeepCopy()
-	delete(newNode.ObjectMeta.Annotations, DsmluLockTime)
+	delete(newNode.Annotations, DsmluLockTime)
 	_, err := client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
@@ -166,7 +166,7 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
 	}
-	delete(n.ObjectMeta.Annotations, DsmluLockTime)
+	delete(n.Annotations, DsmluLockTime)
 	klog.InfoS("Node lock released", "node", n.Name)
 	return nil
 }

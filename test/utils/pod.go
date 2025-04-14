@@ -89,7 +89,7 @@ func WaitForPodRunning(clientSet kubernetes.Interface, namespace, podName string
 		timeout       = 5 * time.Minute // Increased timeout for GPU Pods
 	)
 
-	return wait.PollImmediate(checkInterval, timeout, func() (bool, error) {
+	return wait.PollUntilContextTimeout(context.TODO(), checkInterval, timeout, true, func(context.Context) (bool, error) {
 		// Fetch the Pod object from the Kubernetes API
 		pod, err := clientSet.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
