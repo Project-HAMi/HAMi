@@ -1109,15 +1109,7 @@ func Test_calcScore(t *testing.T) {
 											Usedmem:   1000,
 										},
 									},
-									{
-										{
-											Idx:       0,
-											UUID:      "",
-											Type:      "",
-											Usedcores: 0,
-											Usedmem:   0,
-										},
-									},
+									{},
 								},
 							},
 							Score: 0,
@@ -1220,6 +1212,7 @@ func Test_calcScore(t *testing.T) {
 							NodeID: "node1",
 							Devices: util.PodDevices{
 								"NVIDIA": util.PodSingleDevice{
+									{},
 									{
 										{
 											Idx:       0,
@@ -1230,7 +1223,6 @@ func Test_calcScore(t *testing.T) {
 										},
 									},
 									{},
-									{{}},
 								},
 							},
 							Score: 0,
