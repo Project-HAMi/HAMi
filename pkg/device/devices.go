@@ -26,6 +26,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
@@ -67,6 +68,7 @@ type Config struct {
 	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
 	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -144,6 +146,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
 		}, config.IluvatarConfig},
+		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (Devices, error) {
+			enflameConfig, ok := cfg.(enflame.EnflameConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGPUCommonWord)
+			}
+			return enflame.InitEnflameDevice(enflameConfig), nil
+		}, config.EnflameConfig},
 		{mthreads.MthreadsGPUDevice, mthreads.MthreadsGPUCommonWord, func(cfg any) (Devices, error) {
 			mthreadsConfig, ok := cfg.(mthreads.MthreadsConfig)
 			if !ok {
@@ -392,6 +401,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	iluvatar.ParseConfig(fs)
 	nvidia.ParseConfig(fs)
 	mthreads.ParseConfig(fs)
+	enflame.ParseConfig(fs)
 	metax.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
 	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")
