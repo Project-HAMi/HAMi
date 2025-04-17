@@ -200,6 +200,11 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  enflame:
+    enabled: false
+    customresources:
+      - enflame.com/vgcu
+      - enflame.com/vgcu-percentage
   mthreads:
     enabled: false
     customresources:
