@@ -22,12 +22,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/util"
+
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGetNodeDevices(t *testing.T) {
