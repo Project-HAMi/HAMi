@@ -102,6 +102,8 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 					percentage = int64(slice * float64(i+1))
 					ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
 					ctr.Resources.Limits[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
+					ctr.Resources.Requests[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
+					ctr.Resources.Requests[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
 					break
 				}
 			}
@@ -114,7 +116,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
 	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
-	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
+	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
