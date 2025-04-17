@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The HAMi Authors.
+Copyright 2025 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -190,6 +190,7 @@ func Test_MutateAdmission(t *testing.T) {
 							"enflame.com/vgcu":            *resource.NewQuantity(1, resource.DecimalSI),
 							"enflame.com/vgcu-percentage": *resource.NewQuantity(15, resource.DecimalSI),
 						},
+						Requests: corev1.ResourceList{},
 					},
 				},
 				p: &corev1.Pod{},

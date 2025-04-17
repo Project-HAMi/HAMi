@@ -29,6 +29,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
@@ -345,6 +346,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
+		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
 	}
 
 	return expectedDevices, devicesMap

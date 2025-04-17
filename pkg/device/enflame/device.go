@@ -115,7 +115,10 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
+	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
+	if !ok || cards == 0 {
+		return nodedevices, nil
+	}
 	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
 	for int64(i)*100 < cards {
