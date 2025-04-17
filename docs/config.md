@@ -128,13 +128,6 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
   - default: false
   - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitation in that container, only for debug. 
 
-* `ACTIVE_OOM_KILLER`:
-  
-  Bool type, "true", "false"
-
-  - default: false
-  - "true" means there will be a daemon process which monitors all running tasks inside this container, and instantly kill any process which exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
-
 * `CUDA_DISABLE_CONTROL`:
 
   Bool type, "true", "false"
