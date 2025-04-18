@@ -33,14 +33,15 @@ import (
 )
 
 const (
-	HandshakeAnnos      = "hami.io/node-handshake"
-	RegisterAnnos       = "hami.io/node-nvidia-register"
-	NvidiaGPUDevice     = "NVIDIA"
-	NvidiaGPUCommonWord = "GPU"
-	GPUInUse            = "nvidia.com/use-gputype"
-	GPUNoUse            = "nvidia.com/nouse-gputype"
-	NumaBind            = "nvidia.com/numa-bind"
-	NodeLockNvidia      = "hami.io/mutex.lock"
+	HandshakeAnnos       = "hami.io/node-handshake"
+	RegisterAnnos        = "hami.io/node-nvidia-register"
+	RegisterGPUPairScore = "hami.io/node-nvidia-score"
+	NvidiaGPUDevice      = "NVIDIA"
+	NvidiaGPUCommonWord  = "GPU"
+	GPUInUse             = "nvidia.com/use-gputype"
+	GPUNoUse             = "nvidia.com/nouse-gputype"
+	NumaBind             = "nvidia.com/numa-bind"
+	NodeLockNvidia       = "hami.io/mutex.lock"
 	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
 	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.

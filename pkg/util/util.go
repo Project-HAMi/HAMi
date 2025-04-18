@@ -459,3 +459,11 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 		}
 	}
 }
+
+func GetDevicesUUIDList(infos []*DeviceInfo) []string {
+	uuids := make([]string, 0)
+	for _, info := range infos {
+		uuids = append(uuids, info.ID)
+	}
+	return uuids
+}
