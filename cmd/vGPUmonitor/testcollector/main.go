@@ -21,6 +21,7 @@ import (
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
@@ -136,8 +137,8 @@ func main() {
 
 	// Add the standard process and Go metrics to the custom registry.
 	reg.MustRegister(
-		prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
-		prometheus.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+		collectors.NewGoCollector(),
 	)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))

@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The HAMi Authors.
+Copyright 2025 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -14,11 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package iluvatar
+package enflame
 
 import (
 	"flag"
-	"maps"
 	"strconv"
 	"testing"
 	"time"
@@ -32,8 +31,6 @@ import (
 )
 
 func TestGetNodeDevices(t *testing.T) {
-	IluvatarResourceCores = "iluvatar.ai/MR-V100.vCore"
-	IluvatarResourceMemory = "iluvatar.ai/MR-V100.vMem"
 
 	tests := []struct {
 		name     string
@@ -49,19 +46,19 @@ func TestGetNodeDevices(t *testing.T) {
 				},
 				Status: corev1.NodeStatus{
 					Capacity: corev1.ResourceList{
-						corev1.ResourceName(IluvatarResourceCores):  *resource.NewQuantity(100, resource.DecimalSI),
-						corev1.ResourceName(IluvatarResourceMemory): *resource.NewQuantity(128, resource.DecimalSI),
+						corev1.ResourceName(CountNoSharedName):  *resource.NewQuantity(1, resource.DecimalSI),
+						corev1.ResourceName(SharedResourceName): *resource.NewQuantity(6, resource.DecimalSI),
 					},
 				},
 			},
 			expected: []*util.DeviceInfo{
 				{
 					Index:   0,
-					ID:      "test-iluvatar-0",
+					ID:      "test-enflame-0",
 					Count:   100,
-					Devmem:  32768,
+					Devmem:  100,
 					Devcore: 100,
-					Type:    IluvatarGPUDevice,
+					Type:    EnflameGPUDevice,
 					Numa:    0,
 					Health:  true,
 				},
@@ -72,7 +69,7 @@ func TestGetNodeDevices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dev := &IluvatarDevices{}
+			dev := &EnflameDevices{}
 			got, err := dev.GetNodeDevices(tt.node)
 			if (err != nil) != (tt.err != nil) {
 				t.Errorf("GetNodeDevices() error = %v, expected %v", err, tt.err)
@@ -103,7 +100,7 @@ func TestGetNodeDevices(t *testing.T) {
 }
 
 func TestPatchAnnotations(t *testing.T) {
-	InitIluvatarDevice(IluvatarConfig{})
+	InitEnflameDevice(EnflameConfig{})
 
 	tests := []struct {
 		name       string
@@ -121,22 +118,21 @@ func TestPatchAnnotations(t *testing.T) {
 			name:      "With devices",
 			annoInput: map[string]string{},
 			podDevices: util.PodDevices{
-				IluvatarGPUDevice: util.PodSingleDevice{
+				EnflameGPUDevice: util.PodSingleDevice{
 					[]util.ContainerDevice{
 						{
 							Idx:  0,
-							UUID: "k8s-gpu-iluvatar-0",
-							Type: "Iluvatar",
+							UUID: "k8s-gpu-enflame-0",
+							Type: "Enflame",
 						},
 					},
 				},
 			},
 			expected: map[string]string{
-				util.InRequestDevices[IluvatarGPUDevice]: "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
-				util.SupportDevices[IluvatarGPUDevice]:   "k8s-gpu-iluvatar-0,Iluvatar,0,0:;",
-				"iluvatar.ai/gpu-assigned":               "false",
-				"iluvatar.ai/predicate-time":             strconv.FormatInt(time.Now().UnixNano(), 10),
-				IluvatarDeviceSelection + "0":            "0",
+				util.SupportDevices[EnflameGPUDevice]: "k8s-gpu-enflame-0,Enflame,0,0:;",
+				PodHasAssignedGCU:                     "false",
+				PodAssignedGCUTime:                    strconv.FormatInt(time.Now().UnixNano(), 10),
+				PodAssignedGCUID:                      "0",
 			},
 		},
 	}
@@ -144,9 +140,11 @@ func TestPatchAnnotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			annoInputCopy := make(map[string]string)
-			maps.Copy(annoInputCopy, tt.annoInput)
+			for k, v := range tt.annoInput {
+				annoInputCopy[k] = v
+			}
 
-			dev := &IluvatarDevices{}
+			dev := &EnflameDevices{}
 			got := dev.PatchAnnotations(&annoInputCopy, tt.podDevices)
 
 			if len(got) != len(tt.expected) {
@@ -155,7 +153,7 @@ func TestPatchAnnotations(t *testing.T) {
 			}
 
 			for k, v := range tt.expected {
-				if k == "iluvatar.ai/predicate-time" {
+				if k == PodAssignedGCUTime {
 					if len(got[k]) != len(v) {
 						t.Errorf("Expected %s %s, got %s", k, v, got[k])
 					}
@@ -181,7 +179,7 @@ func Test_MutateAdmission(t *testing.T) {
 		err  error
 	}{
 		{
-			name: "IluvatarResourceCount and IluvatarResourceCores set to limits",
+			name: "EnflameResourceCount and EnflameResourcePercentage set to limits",
 			args: struct {
 				ctr *corev1.Container
 				p   *corev1.Pod
@@ -189,9 +187,10 @@ func Test_MutateAdmission(t *testing.T) {
 				ctr: &corev1.Container{
 					Resources: corev1.ResourceRequirements{
 						Limits: corev1.ResourceList{
-							"iluvatar.ai/vgpu":       *resource.NewQuantity(2, resource.DecimalSI),
-							"iluvatar.ai/vcuda-core": *resource.NewQuantity(1, resource.DecimalSI),
+							"enflame.com/vgcu":            *resource.NewQuantity(1, resource.DecimalSI),
+							"enflame.com/vgcu-percentage": *resource.NewQuantity(15, resource.DecimalSI),
 						},
+						Requests: corev1.ResourceList{},
 					},
 				},
 				p: &corev1.Pod{},
@@ -201,15 +200,19 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			config := IluvatarConfig{
-				ResourceCountName:  "iluvatar.ai/vgpu",
-				ResourceCoreName:   "iluvatar.ai/vcuda-core",
-				ResourceMemoryName: "iluvatar.ai/vcuda-memory",
+			config := EnflameConfig{
+				ResourceCountName:      "enflame.com/vgcu",
+				ResourcePercentageName: "enflame.com/vgcu-percentage",
 			}
-			InitIluvatarDevice(config)
-			dev := IluvatarDevices{}
+			InitEnflameDevice(config)
+			dev := EnflameDevices{
+				factor: 4,
+			}
 			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
+			limits := test.args.ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)]
+			number, _ := limits.AsInt64()
+			assert.Equal(t, number, int64(25))
 		})
 	}
 }
@@ -236,7 +239,7 @@ func Test_CheckType(t *testing.T) {
 				annos: map[string]string{},
 				d:     util.DeviceUsage{},
 				n: util.ContainerDeviceRequest{
-					Type: IluvatarGPUDevice,
+					Type: EnflameGPUDevice,
 				},
 			},
 			want1: true,
@@ -263,7 +266,7 @@ func Test_CheckType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
+			dev := EnflameDevices{}
 			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
@@ -288,7 +291,7 @@ func Test_CheckUUID(t *testing.T) {
 				d     util.DeviceUsage
 			}{
 				annos: map[string]string{
-					"iluvatar.ai/use-gpuuuid": "test1",
+					"enflame.com/use-gpuuuid": "test1",
 				},
 				d: util.DeviceUsage{
 					ID: "test1",
@@ -303,7 +306,7 @@ func Test_CheckUUID(t *testing.T) {
 				d     util.DeviceUsage
 			}{
 				annos: map[string]string{
-					"iluvatar.ai/use-gpuuuid": "test2",
+					"enflame.com/use-gpuuuid": "test2",
 				},
 				d: util.DeviceUsage{
 					ID: "test1",
@@ -331,7 +334,7 @@ func Test_CheckUUID(t *testing.T) {
 				d     util.DeviceUsage
 			}{
 				annos: map[string]string{
-					"iluvatar.ai/nouse-gpuuuid": "test1",
+					"enflame.com/nouse-gpuuuid": "test1",
 				},
 				d: util.DeviceUsage{
 					ID: "test1",
@@ -346,7 +349,7 @@ func Test_CheckUUID(t *testing.T) {
 				d     util.DeviceUsage
 			}{
 				annos: map[string]string{
-					"iluvatar.ai/nouse-gpuuuid": "test1",
+					"enflame.com/nouse-gpuuuid": "test1",
 				},
 				d: util.DeviceUsage{
 					ID: "test2",
@@ -357,7 +360,7 @@ func Test_CheckUUID(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
+			dev := EnflameDevices{}
 			result := dev.CheckUUID(test.args.annos, test.args.d)
 			assert.Equal(t, result, test.want)
 		})
@@ -375,23 +378,21 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"iluvatar.ai/vgpu":         resource.MustParse("1"),
-						"iluvatar.ai/vcuda-memory": resource.MustParse("1000"),
-						"iluvatar.ai/vcuda-core":   resource.MustParse("100"),
+						"enflame.com/vgcu":            resource.MustParse("1"),
+						"enflame.com/vgcu-percentage": resource.MustParse("15"),
 					},
 					Requests: corev1.ResourceList{
-						"iluvatar.ai/vgpu":         resource.MustParse("1"),
-						"iluvatar.ai/vcuda-memory": resource.MustParse("1000"),
-						"iluvatar.ai/vcuda-core":   resource.MustParse("100"),
+						"enflame.com/vgcu":            resource.MustParse("1"),
+						"enflame.com/vgcu-percentage": resource.MustParse("15"),
 					},
 				},
 			},
 			want: util.ContainerDeviceRequest{
 				Nums:             int32(1),
-				Type:             IluvatarGPUDevice,
-				Memreq:           int32(256000),
+				Type:             EnflameGPUDevice,
+				Memreq:           int32(15),
 				MemPercentagereq: int32(0),
-				Coresreq:         int32(100),
+				Coresreq:         int32(0),
 			},
 		},
 		{
@@ -409,25 +410,25 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"iluvatar.ai/vgpu": resource.MustParse("1"),
+						"enflame.com/vgcu": resource.MustParse("1"),
 					},
 					Requests: corev1.ResourceList{
-						"iluvatar.ai/vgpu": resource.MustParse("1"),
+						"enflame.com/vgcu": resource.MustParse("1"),
 					},
 				},
 			},
 			want: util.ContainerDeviceRequest{
 				Nums:             int32(1),
-				Type:             IluvatarGPUDevice,
-				Memreq:           int32(0),
-				MemPercentagereq: int32(100),
+				Type:             EnflameGPUDevice,
+				Memreq:           int32(100),
+				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
+			dev := EnflameDevices{factor: 4}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
 			result := dev.GenerateResourceRequests(test.args)

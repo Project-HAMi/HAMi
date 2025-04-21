@@ -68,4 +68,10 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      {{- if .Values.devices.enflame.enabled }}
+      {{- range .Values.devices.enflame.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
 {{- end }}
