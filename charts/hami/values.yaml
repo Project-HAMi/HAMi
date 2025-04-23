@@ -150,6 +150,8 @@ devicePlugin:
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
   runtimeClassName: ""
+  # Whether to create runtime class, name comes from runtimeClassName when it is set
+  createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false

@@ -25,6 +25,7 @@ data:
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
+      runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
       knownMigGeometries:
       - models: [ "A30" ]
         allowedGeometries:

@@ -76,7 +76,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 				klog.Errorf("validating pod failed:%s", err.Error())
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
-			hasResource = hasResource || found
+			if found {
+				hasResource = true
+				break
+			}
 		}
 	}
 
