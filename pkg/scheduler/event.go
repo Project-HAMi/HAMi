@@ -65,12 +65,11 @@ func (s *Scheduler) recordScheduleBindingResultEvent(pod *corev1.Pod, eventReaso
 	}
 }
 
-func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, nodeResult []string, schedulerErr error) {
+func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, successMsg string, schedulerErr error) {
 	if pod == nil {
 		return
 	}
 	if schedulerErr == nil {
-		successMsg := fmt.Sprintf("Successfully filtered to following nodes: %v for %v/%v ", nodeResult, pod.Namespace, pod.Name)
 		s.eventRecorder.Event(pod, corev1.EventTypeNormal, eventReason, successMsg)
 	} else {
 		s.eventRecorder.Event(pod, corev1.EventTypeWarning, eventReason, schedulerErr.Error())
