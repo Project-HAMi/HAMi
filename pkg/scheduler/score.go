@@ -276,10 +276,14 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 
 				if sums == 0 {
 					for idx := range score.Devices {
-						for len(score.Devices[idx]) <= ctrid {
-							score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
+						for len(score.Devices[idx]) < ctrid {
+							defaultContainerDevices := util.ContainerDevices{}
+							defaultPodSingleDevice := util.PodSingleDevice{}
+							defaultPodSingleDevice = append(defaultPodSingleDevice, defaultContainerDevices)
+							score.Devices[idx] = append(defaultPodSingleDevice, score.Devices[idx]...)
 						}
-						score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
+						defaultContainerDevices := util.ContainerDevices{}
+						score.Devices[idx] = append(score.Devices[idx], defaultContainerDevices)
 					}
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
