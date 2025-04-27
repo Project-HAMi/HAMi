@@ -184,6 +184,14 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 	return retval, nil
 }
 
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
+	}
+	return devicePairScores, nil
+}
+
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	builder := strings.Builder{}
 	for _, val := range dlist {

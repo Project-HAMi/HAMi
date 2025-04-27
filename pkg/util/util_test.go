@@ -664,3 +664,9 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestDecodeNodeDevices(t *testing.T) {
+	pairScore := "[{\"uuid\":\"GPU-0\",\"score\":{\"GPU-1\":50,\"GPU-2\":20,\"GPU-3\":20}}]"
+	_, err := DecodePairScores(pairScore)
+	assert.NilError(t, err)
+}
