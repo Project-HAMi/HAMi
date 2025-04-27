@@ -150,6 +150,10 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		}
 	}
 	if topologyEnabled == "true" {
+		if len(tmpDevs[k.Type]) == int(originReq) {
+			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs
+		}
 		if len(tmpDevs[k.Type]) > int(originReq) {
 			combinations := generateCombinations(request, tmpDevs)
 			combination := computeBestCombination(node, combinations)
