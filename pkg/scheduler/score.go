@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"os"
 	"sort"
 	"strings"
 	"sync"
@@ -71,6 +72,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
+	topologyEnabled := os.Getenv("ENABLE_TOPOLOGY_SCORE")
 	for i := len(node.Devices.DeviceLists) - 1; i >= 0; i-- {
 		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
 		found, numa := checkType(annos, *node.Devices.DeviceLists[i].Device, k)
@@ -128,7 +130,9 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		}
 		if k.Nums > 0 {
 			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices.DeviceLists[i].Device.ID)
-			k.Nums--
+			if topologyEnabled != "true" {
+				k.Nums--
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 				Idx:       int(node.Devices.DeviceLists[i].Device.Index),
 				UUID:      node.Devices.DeviceLists[i].Device.ID,
@@ -137,7 +141,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 				Usedcores: k.Coresreq,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && topologyEnabled != "true" {
 			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs
 		}
@@ -145,7 +149,72 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 			i++
 		}
 	}
+	if topologyEnabled == "true" {
+		if len(tmpDevs[k.Type]) > int(originReq) {
+			combinations := generateCombinations(request, tmpDevs)
+			combination := computeBestCombination(node, combinations)
+			tmpDevs[k.Type] = combination
+			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs
+		}
+	}
 	return false, tmpDevs
+}
+
+func generateCombinations(request util.ContainerDeviceRequest, tmpDevs map[string]util.ContainerDevices) []util.ContainerDevices {
+	k := request
+	num := int(k.Nums)
+	devices := tmpDevs[k.Type]
+	// num = 3
+	// ["GPU0", "GPU1", "GPU2", "GPU3"]
+	// [["GPU0", "GPU1", "GPU2"],["GPU0", "GPU1", "GPU3"],["GPU0", "GPU2", "GPU3"],["GPU1", "GPU2", "GPU3"]]
+	var result []util.ContainerDevices
+	var helper func(util.ContainerDevices, int, int, util.ContainerDevices)
+
+	helper = func(arr util.ContainerDevices, start, k int, current util.ContainerDevices) {
+		if k == 0 {
+			temp := make(util.ContainerDevices, len(current))
+			copy(temp, current)
+			result = append(result, temp)
+			return
+		}
+
+		for i := start; i <= len(arr)-k; i++ {
+			current = append(current, arr[i])
+			helper(arr, i+1, k-1, current)
+			current = current[:len(current)-1]
+		}
+	}
+
+	helper(devices, 0, num, util.ContainerDevices{})
+	return result
+}
+
+func computeBestCombination(node *NodeUsage, combinations []util.ContainerDevices) util.ContainerDevices {
+	bestScore := 0
+	bestCombination := util.ContainerDevices{}
+	deviceScoreMap := make(map[string]*util.DevicePairScore)
+
+	for _, dev := range node.Devices.DeviceLists {
+		deviceScoreMap[dev.Device.ID] = dev.PairScore
+	}
+
+	for _, partition := range combinations {
+		totalScore := 0
+		firstDeviceUUID := partition[0].UUID
+		scoreMap := deviceScoreMap[firstDeviceUUID]
+		for _, dev := range partition {
+			if dev.UUID == firstDeviceUUID {
+				continue
+			}
+			totalScore += scoreMap.Scores[dev.UUID]
+		}
+		if totalScore > bestScore {
+			bestScore = totalScore
+			bestCombination = partition
+		}
+	}
+	return bestCombination
 }
 
 func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, float32) {
