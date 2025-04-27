@@ -105,6 +105,8 @@ type NvidiaConfig struct {
 	MigGeometriesList []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
 	// GPUCorePolicy through webhook automatic injected to container env
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
+	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
+	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
 type FilterDevice struct {
@@ -274,9 +276,28 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 
+	hasResource := dev.mutateContainerResource(ctr)
+
+	if hasResource {
+		// Set runtime class name if it is not set by user and the runtime class name is configured
+		if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
+			p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+		}
+	}
+
+	if !hasResource && dev.config.OverwriteEnv {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "none",
+		})
+	}
+	return hasResource, nil
+}
+
+func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
 	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)]
 	if resourceNameOK {
-		return resourceNameOK, nil
+		return true
 	}
 
 	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
@@ -286,17 +307,10 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
 		if dev.config.DefaultGPUNum > 0 {
 			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
-			resourceNameOK = true
+			return true
 		}
 	}
-
-	if !resourceNameOK && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
-	}
-	return resourceNameOK, nil
+	return false
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
