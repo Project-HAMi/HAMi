@@ -452,7 +452,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if total == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("does not request any resource"))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
@@ -463,7 +463,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
@@ -473,13 +473,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores",
 			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("no available node, all node scores do not meet"))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -507,11 +507,22 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		s.delPod(args.Pod)
 		return nil, err
 	}
-	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, []string{m.NodeID}, nil)
+	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
+	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
+}
+
+func genSuccessMsg(totalNodes int, target string, nodes []*policy.NodeScore) string {
+	successMsg := "find fit node(%s), %d nodes not fit, %d nodes fit(%s)"
+	var scores []string
+	for _, no := range nodes {
+		scores = append(scores, fmt.Sprintf("%s:%.2f", no.NodeID, no.Score))
+	}
+	score := strings.Join(scores, ",")
+	return fmt.Sprintf(successMsg, target, totalNodes-len(nodes), len(nodes), score)
 }

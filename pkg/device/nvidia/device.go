@@ -332,13 +332,13 @@ func assertNuma(annos map[string]string) bool {
 }
 
 func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
-	Typecheck := checkGPUtype(annos, d.Type)
+	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
 	if ok && !strings.Contains(mode, d.Mode) {
-		Typecheck = false
+		typeCheck = false
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, Typecheck, assertNuma(annos)
+		return true, typeCheck, assertNuma(annos)
 	}
 	return false, false, false
 }
