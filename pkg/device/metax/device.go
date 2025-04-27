@@ -135,7 +135,7 @@ func (dev *MetaxDevices) CustomFilterRule(allocated *util.PodDevices, request ut
 	for _, ctrs := range (*allocated)[device.Type] {
 		for _, ctrdev := range ctrs {
 			if strings.Compare(ctrdev.UUID, device.ID) != 0 {
-				klog.InfoS("Mthreads needs all devices on a device", "used", ctrdev.UUID, "allocating", device.ID)
+				klog.InfoS("Metax needs all devices on a device", "used", ctrdev.UUID, "allocating", device.ID)
 				return false
 			}
 		}
