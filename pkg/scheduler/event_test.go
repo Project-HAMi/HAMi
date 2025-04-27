@@ -123,7 +123,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 		name          string
 		pod           *corev1.Pod
 		eventReason   string
-		nodeResult    []string
+		successMsg    string
 		schedulerErr  error
 		wantEventType string
 	}{
@@ -142,7 +142,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 					Namespace: "default",
 				},
 			},
-			nodeResult:    []string{"node-1"},
+			successMsg:    "find fit node(node-1)",
 			schedulerErr:  nil,
 			wantEventType: corev1.EventTypeNormal,
 		},
@@ -173,7 +173,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 		}
 
 		t.Run(test.name, func(t *testing.T) {
-			s.recordScheduleFilterResultEvent(test.pod, test.eventReason, test.nodeResult, test.schedulerErr)
+			s.recordScheduleFilterResultEvent(test.pod, test.eventReason, test.successMsg, test.schedulerErr)
 
 			var events *corev1.EventList
 			var err error

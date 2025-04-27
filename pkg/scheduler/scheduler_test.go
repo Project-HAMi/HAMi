@@ -359,7 +359,8 @@ func Test_Filter(t *testing.T) {
 		}
 
 		s.addNode("node1", &util.NodeInfo{
-			ID: "node1",
+			ID:   "node1",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 			Devices: []util.DeviceInfo{
 				{
 					ID:           "device1",
@@ -387,7 +388,8 @@ func Test_Filter(t *testing.T) {
 			},
 		})
 		s.addNode("node2", &util.NodeInfo{
-			ID: "node2",
+			ID:   "node2",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
 			Devices: []util.DeviceInfo{
 				{
 					ID:      "device3",
