@@ -41,8 +41,7 @@ import (
 )
 
 func Test_getNodesUsage(t *testing.T) {
-	nodeMage := nodeManager{}
-	nodeMage.init()
+	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &util.NodeInfo{
 		ID: "node1",
 		Devices: []util.DeviceInfo{
@@ -80,8 +79,7 @@ func Test_getNodesUsage(t *testing.T) {
 			},
 		},
 	}
-	podMap := podManager{}
-	podMap.init()
+	podMap := newPodManager()
 	podMap.addPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "1111",
@@ -353,8 +351,7 @@ func Test_Filter(t *testing.T) {
 	initNode := func() {
 		nodes, _ := s.ListNodes()
 		for index := range nodes {
-			node := nodes[index]
-			s.rmNodeDevice(node.ID, node, nvidia.NvidiaGPUDevice)
+			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
 		}
 		pods, _ := s.ListPodsUID()
 		for index := range pods {
@@ -362,7 +359,8 @@ func Test_Filter(t *testing.T) {
 		}
 
 		s.addNode("node1", &util.NodeInfo{
-			ID: "node1",
+			ID:   "node1",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 			Devices: []util.DeviceInfo{
 				{
 					ID:           "device1",
@@ -390,7 +388,8 @@ func Test_Filter(t *testing.T) {
 			},
 		})
 		s.addNode("node2", &util.NodeInfo{
-			ID: "node2",
+			ID:   "node2",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
 			Devices: []util.DeviceInfo{
 				{
 					ID:      "device3",

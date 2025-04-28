@@ -20,12 +20,14 @@ import (
 	"context"
 	"errors"
 	"flag"
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -671,36 +673,128 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 }
 
-func Test_NodeCleanUp(t *testing.T) {
-	client.InitGlobalClient()
+func TestDevices_LockNode(t *testing.T) {
 	tests := []struct {
-		name string
-		args string
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		hasLock     bool
+		expectError bool
 	}{
 		{
-			name: "node name don't exist",
-			args: "test-node1",
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock:     false,
+			expectError: false,
 		},
 		{
-			name: "node name exist",
-			args: "dcu-node1",
+			name: "Test with non-zero resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+			}}}}}},
+			hasLock:     true,
+			expectError: false,
 		},
 	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := DCUDevices{}
-			ctx := context.Background()
-			node := corev1.Node{
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize fake clientset and pre-load test data
+			client.KubeClient = fake.NewSimpleClientset()
+			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "dcu-node1",
+					Name:        "testNode",
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", util.InRequestDevices["DCU"]: "some-value"},
 				},
 			}
-			client.GetClient().CoreV1().Nodes().Create(ctx, &node, metav1.CreateOptions{})
-			result := dev.NodeCleanUp(test.args)
-			if result != nil {
-				klog.Errorln("get node failed", result.Error())
+
+			// Add the node to the fake clientset
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatalf("Failed to create test node: %v", err)
 			}
-			client.GetClient().CoreV1().Nodes().Delete(ctx, node.Name, metav1.DeleteOptions{})
+
+			dev := InitDCUDevice(HygonConfig{
+				ResourceCountName:  "hygon.com/dcunum",
+				ResourceMemoryName: "hygon.com/dcumem",
+				ResourceCoreName:   "hygon.com/dcucores",
+			})
+			err = dev.LockNode(node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+			node, err = client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			fmt.Println(node.Annotations)
+			_, ok := node.Annotations[NodeLockDCU]
+			assert.Equal(t, ok, tt.hasLock)
+		})
+	}
+}
+
+func TestDevices_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		hasLock     bool
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+			}}}}}},
+			hasLock:     false,
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Initialize fake clientset and pre-load test data
+			client.KubeClient = fake.NewSimpleClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "testNode",
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", util.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values"},
+				},
+			}
+
+			// Add the node to the fake clientset
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatalf("Failed to create test node: %v", err)
+			}
+
+			dev := InitDCUDevice(HygonConfig{
+				ResourceCountName:  "hygon.com/dcunum",
+				ResourceMemoryName: "hygon.com/dcumem",
+				ResourceCoreName:   "hygon.com/dcucores",
+			})
+			err = dev.ReleaseNodeLock(node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+			node, err = client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			fmt.Println(node.Annotations)
+			_, ok := node.Annotations[NodeLockDCU]
+			assert.Equal(t, ok, tt.hasLock)
 		})
 	}
 }

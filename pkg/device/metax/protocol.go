@@ -66,7 +66,7 @@ func (ni NodeMetaxSDeviceInfo) String() string {
 }
 
 func (sdev *PodMetaxSDevice) String() string {
-	str := fmt.Sprintf("\nPodMetaxSDevice:\n")
+	str := "\nPodMetaxSDevice:\n"
 
 	for ctrIdx, ctrDevices := range *sdev {
 		str += fmt.Sprintf("  container[%d]:\n", ctrIdx)

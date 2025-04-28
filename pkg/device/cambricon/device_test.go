@@ -422,8 +422,10 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				"CAMBRICON_DSMLU_ASSIGHED": "false",
-				"CAMBRICON_DSMLU_PROFILE":  "0_1_1000",
+				"CAMBRICON_DSMLU_ASSIGHED":                  "false",
+				"CAMBRICON_DSMLU_PROFILE":                   "0_1_1000",
+				"hami.io/cambricon-mlu-devices-to-allocate": "device-0,MLU,256000,1:;",
+				"hami.io/cambricon-mlu-devices-allocated":   "device-0,MLU,256000,1:;",
 			},
 		},
 		{
@@ -625,7 +627,7 @@ func Test_LockNode(t *testing.T) {
 			defer teardown()
 
 			// Set up the node with the specified annotations.
-			node.ObjectMeta.Annotations = tt.annotations
+			node.Annotations = tt.annotations
 
 			dev := InitMLUDevice(CambriconConfig{
 				ResourceCountName:  MLUResourceCount,

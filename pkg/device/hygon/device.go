@@ -19,9 +19,11 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -41,6 +43,11 @@ const (
 	DCUUseUUID = "hygon.com/use-gpuuuid"
 	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID.
 	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
+
+	// NodeLockDCU should same with device plugin node lock name
+	// there is a bug with nodelock package utils, the key is hard coded as "hami.io/mutex.lock"
+	// so we can only use this value now.
+	NodeLockDCU = "hami.io/mutex.lock"
 )
 
 var (
@@ -113,11 +120,31 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 }
 
 func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.LockNode(n.Name, NodeLockDCU, p)
 }
 
 func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockDCU, p, false)
 }
 
 func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
@@ -160,12 +187,7 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[DCUNoUseUUID]
@@ -173,12 +195,7 @@ func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bo
 		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }
@@ -191,7 +208,8 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 	v, ok := ctr.Resources.Limits[dcuResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[dcuResourceCount]
-	} else {
+	}
+	if ok {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found dcu devices")
 			memnum := 0

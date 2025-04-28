@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -96,13 +97,7 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
 		} else {
 			memnum, _ := mem.AsInt64()
-			found := false
-			for _, val := range legalMemoryslices {
-				if memnum == val {
-					found = true
-					break
-				}
-			}
+			found := slices.Contains(legalMemoryslices, memnum)
 			if !found {
 				return true, errors.New("sGPU memory request value is invalid, valid values are [1, 2, 4, 8, 16, 32, 64, 96]")
 			}
@@ -181,12 +176,7 @@ func (dev *MthreadsDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 		klog.V(5).Infof("check uuid for Mthreads user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[MthreadsNoUseUUID]
@@ -194,12 +184,7 @@ func (dev *MthreadsDevices) CheckUUID(annos map[string]string, d util.DeviceUsag
 		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }

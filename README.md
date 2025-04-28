@@ -116,7 +116,7 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 Use the following command for deployment:
 
 ```
-helm install hami hami-charts/hami  -n kube-system
+helm install hami hami-charts/hami -n kube-system
 ```
 
 Customize your installation by adjusting the [configs](docs/config.md).
@@ -127,7 +127,7 @@ Verify your installation using the following command:
 kubectl get pods -n kube-system
 ```
 
-If both `vgpu-device-plugin` and `vgpu-scheduler` pods are in the *Running* state, your installation is successful. You can try examples [here](examples/nvidia/default_use.yaml) 
+If both `hami-device-plugin` (formerly known as `vgpu-device-plugin`)  and `hami-scheduler` (formerly known as `vgpu-scheduler`)  pods are in the *Running* state, your installation is successful. You can try examples [here](examples/nvidia/default_use.yaml) 
 
 ### WebUI
 

@@ -189,9 +189,7 @@ func Test_GetNode(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			m := nodeManager{}
-			m.init()
-			m = nodeManager{
+			m := nodeManager{
 				nodes: map[string]*util.NodeInfo{
 					"node-04": {
 						ID:   "node-04",
@@ -215,12 +213,11 @@ func Test_GetNode(t *testing.T) {
 	}
 }
 
-func Test_rmNodeDevice(t *testing.T) {
+func Test_rmNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
 			nodeID       string
-			nodeInfo     *util.NodeInfo
 			deviceVendor string
 		}
 	}{
@@ -228,7 +225,6 @@ func Test_rmNodeDevice(t *testing.T) {
 			name: "no device",
 			args: struct {
 				nodeID       string
-				nodeInfo     *util.NodeInfo
 				deviceVendor string
 			}{
 				nodeID: "node-06",
@@ -238,22 +234,9 @@ func Test_rmNodeDevice(t *testing.T) {
 			name: "exist device info",
 			args: struct {
 				nodeID       string
-				nodeInfo     *util.NodeInfo
 				deviceVendor string
 			}{
-				nodeID: "node-05",
-				nodeInfo: &util.NodeInfo{
-					ID:   "node-05",
-					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
-						{
-							ID:      "GPU-0",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
-						},
-					},
-				},
+				nodeID:       "node-05",
 				deviceVendor: "NVIDIA",
 			},
 		},
@@ -261,22 +244,9 @@ func Test_rmNodeDevice(t *testing.T) {
 			name: "the different devicevendor",
 			args: struct {
 				nodeID       string
-				nodeInfo     *util.NodeInfo
 				deviceVendor string
 			}{
-				nodeID: "node-07",
-				nodeInfo: &util.NodeInfo{
-					ID:   "node-07",
-					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
-						{
-							ID:      "GPU-0",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
-						},
-					},
-				},
+				nodeID:       "node-07",
 				deviceVendor: "NVIDIA",
 			},
 		},
@@ -284,28 +254,9 @@ func Test_rmNodeDevice(t *testing.T) {
 			name: "the same of device id no less than one",
 			args: struct {
 				nodeID       string
-				nodeInfo     *util.NodeInfo
 				deviceVendor string
 			}{
-				nodeID: "node-08",
-				nodeInfo: &util.NodeInfo{
-					ID:   "node-08",
-					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
-						{
-							ID:      "GPU-2",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
-						},
-						{
-							ID:      "GPU-1",
-							Count:   int32(1),
-							Devcore: int32(1),
-							Devmem:  int32(2000),
-						},
-					},
-				},
+				nodeID:       "node-08",
 				deviceVendor: "NVIDIA",
 			},
 		},
@@ -367,7 +318,7 @@ func Test_rmNodeDevice(t *testing.T) {
 					},
 				},
 			}
-			m.rmNodeDevice(test.args.nodeID, test.args.nodeInfo, test.args.deviceVendor)
+			m.rmNodeDevices(test.args.nodeID, test.args.deviceVendor)
 		})
 	}
 }

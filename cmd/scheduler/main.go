@@ -17,7 +17,9 @@ limitations under the License.
 package main
 
 import (
+	"fmt"
 	"net/http"
+	"net/http/pprof"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
@@ -36,15 +38,16 @@ import (
 //var version string
 
 var (
-	sher        *scheduler.Scheduler
-	tlsKeyFile  string
-	tlsCertFile string
-	rootCmd     = &cobra.Command{
+	sher            *scheduler.Scheduler
+	tlsKeyFile      string
+	tlsCertFile     string
+	enableProfiling bool
+	rootCmd         = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
-		Run: func(cmd *cobra.Command, args []string) {
+		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			start()
+			return start()
 		},
 	}
 )
@@ -68,10 +71,31 @@ func init() {
 	rootCmd.Flags().Float32Var(&config.QPS, "kube-qps", client.DefaultQPS, "QPS to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Timeout, "kube-timeout", client.DefaultTimeout, "Timeout to use while talking with kube-apiserver.")
+	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable pprof profiling via HTTP server")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+
+}
+
+// injectProfilingRoute injects pprof routes into the router.
+func injectProfilingRoute(router *httprouter.Router) {
+	router.GET("/debug/pprof/*suffix", func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+		suffix := params.ByName("suffix")
+		switch suffix {
+		case "/cmdline":
+			pprof.Cmdline(w, r)
+		case "/profile":
+			pprof.Profile(w, r)
+		case "/symbol":
+			pprof.Symbol(w, r)
+		case "/trace":
+			pprof.Trace(w, r)
+		default:
+			pprof.Index(w, r)
+		}
+	})
 }
 
 func start() {
@@ -80,6 +104,7 @@ func start() {
 		client.WithQPS(config.QPS),
 		client.WithTimeout(config.Timeout),
 	)
+
 	device.InitDevices()
 	sher = scheduler.NewScheduler()
 	sher.Start()
@@ -96,15 +121,22 @@ func start() {
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
 	klog.Info("listen on ", config.HTTPBind)
+
+	if enableProfiling {
+		injectProfilingRoute(router)
+		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
+	}
+
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
+			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	} else {
 		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			klog.Fatal("Listen and Serve error, ", err)
+			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	}
+	return nil
 }
 
 func main() {

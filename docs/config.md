@@ -54,6 +54,15 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`: String type, default value is "binpack", representing the GPU node scheduling policy. "binpack" means trying to allocate tasks to the same GPU node as much as possible, while "spread" means trying to allocate tasks to different GPU nodes as much as possible.
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`: String type, default value is "spread", representing the GPU scheduling policy. "binpack" means trying to allocate tasks to the same GPU as much as possible, while "spread" means trying to allocate tasks to different GPUs as much as possible.
 
+**Webhook TLS Certificate Configs**
+
+In Kubernetes, in order for the API server to communicate with the webhook component, the webhook requires a TLS certificate that the API server is configured to trust. HAMi scheduler provides two methods to generate/configure the required TLS certificate.
+
+* `scheduler.patch.enabled`:
+  Boolean type, default value is true, if true, helm will use kube-webhook-certgen ([job-patch](../charts/hami/templates/scheduler/job-patch/job-createSecret.yaml)) to generate a self-signed certificate and create a secret.
+* `scheduler.certManager.enabled`:
+  Boolean type, default value is false, if true, cert-manager will generate a self-signed certificate. **Note: This option requires cert-manager to be installed in your cluster first.** _See [cert-manager installation](https://cert-manager.io/docs/installation/kubernetes/) for more details._
+
 ## Pod configs: annotations
 
 * `nvidia.com/use-gpuuuid`:
@@ -118,13 +127,6 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 
   - default: false
   - "true" means the HAMi-core will not be used inside container, as a result, there will be no resource isolation and limitation in that container, only for debug. 
-
-* `ACTIVE_OOM_KILLER`:
-  
-  Bool type, "true", "false"
-
-  - default: false
-  - "true" means there will be a daemon process which monitors all running tasks inside this container, and instantly kill any process which exceeds the limitation set by "nvidia.com/gpumem" or "nvidia.com/gpumemory"
 
 * `CUDA_DISABLE_CONTROL`:
 

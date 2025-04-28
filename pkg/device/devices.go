@@ -26,6 +26,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
@@ -67,6 +68,7 @@ type Config struct {
 	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
 	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -96,7 +98,7 @@ func InitDevicesWithConfig(config *Config) error {
 	var initErrors []error
 
 	// Helper function to initialize devices and handle errors
-	initializeDevice := func(deviceType string, commonWord string, initFunc func(interface{}) (Devices, error), config interface{}) {
+	initializeDevice := func(deviceType string, commonWord string, initFunc func(any) (Devices, error), config any) {
 		klog.Infof("Initializing %s device", commonWord)
 		device, err := initFunc(config)
 		if err != nil {
@@ -113,52 +115,59 @@ func InitDevicesWithConfig(config *Config) error {
 	deviceInitializers := []struct {
 		deviceType string
 		commonWord string
-		initFunc   func(interface{}) (Devices, error)
-		config     interface{}
+		initFunc   func(any) (Devices, error)
+		config     any
 	}{
-		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg interface{}) (Devices, error) {
+		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg any) (Devices, error) {
 			nvidiaConfig, ok := cfg.(nvidia.NvidiaConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUCommonWord)
 			}
 			return nvidia.InitNvidiaDevice(nvidiaConfig), nil
 		}, config.NvidiaConfig},
-		{cambricon.CambriconMLUDevice, cambricon.CambriconMLUCommonWord, func(cfg interface{}) (Devices, error) {
+		{cambricon.CambriconMLUDevice, cambricon.CambriconMLUCommonWord, func(cfg any) (Devices, error) {
 			cambriconConfig, ok := cfg.(cambricon.CambriconConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", cambricon.CambriconMLUCommonWord)
 			}
 			return cambricon.InitMLUDevice(cambriconConfig), nil
 		}, config.CambriconConfig},
-		{hygon.HygonDCUDevice, hygon.HygonDCUCommonWord, func(cfg interface{}) (Devices, error) {
+		{hygon.HygonDCUDevice, hygon.HygonDCUCommonWord, func(cfg any) (Devices, error) {
 			hygonConfig, ok := cfg.(hygon.HygonConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonDCUCommonWord)
 			}
 			return hygon.InitDCUDevice(hygonConfig), nil
 		}, config.HygonConfig},
-		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg interface{}) (Devices, error) {
+		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg any) (Devices, error) {
 			iluvatarConfig, ok := cfg.(iluvatar.IluvatarConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", iluvatar.IluvatarGPUCommonWord)
 			}
 			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
 		}, config.IluvatarConfig},
-		{mthreads.MthreadsGPUDevice, mthreads.MthreadsGPUCommonWord, func(cfg interface{}) (Devices, error) {
+		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (Devices, error) {
+			enflameConfig, ok := cfg.(enflame.EnflameConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGPUCommonWord)
+			}
+			return enflame.InitEnflameDevice(enflameConfig), nil
+		}, config.EnflameConfig},
+		{mthreads.MthreadsGPUDevice, mthreads.MthreadsGPUCommonWord, func(cfg any) (Devices, error) {
 			mthreadsConfig, ok := cfg.(mthreads.MthreadsConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", mthreads.MthreadsGPUCommonWord)
 			}
 			return mthreads.InitMthreadsDevice(mthreadsConfig), nil
 		}, config.MthreadsConfig},
-		{metax.MetaxGPUDevice, metax.MetaxGPUCommonWord, func(cfg interface{}) (Devices, error) {
+		{metax.MetaxGPUDevice, metax.MetaxGPUCommonWord, func(cfg any) (Devices, error) {
 			metaxConfig, ok := cfg.(metax.MetaxConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
 			}
 			return metax.InitMetaxDevice(metaxConfig), nil
 		}, config.MetaxConfig},
-		{metax.MetaxSGPUDevice, metax.MetaxSGPUCommonWord, func(cfg interface{}) (Devices, error) {
+		{metax.MetaxSGPUDevice, metax.MetaxSGPUCommonWord, func(cfg any) (Devices, error) {
 			metaxConfig, ok := cfg.(metax.MetaxConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
@@ -392,6 +401,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	iluvatar.ParseConfig(fs)
 	nvidia.ParseConfig(fs)
 	mthreads.ParseConfig(fs)
+	enflame.ParseConfig(fs)
 	metax.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
 	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")

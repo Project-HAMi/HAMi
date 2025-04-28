@@ -46,11 +46,11 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := node.ObjectMeta.Annotations[NodeLockKey]; ok {
+	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
 	newNode := node.DeepCopy()
-	newNode.ObjectMeta.Annotations[NodeLockKey] = GenerateNodeLockKeyByPod(pods)
+	newNode.Annotations[NodeLockKey] = GenerateNodeLockKeyByPod(pods)
 	_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	for i := 0; i < MaxLockRetry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
@@ -61,7 +61,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 			continue
 		}
 		newNode := node.DeepCopy()
-		newNode.ObjectMeta.Annotations[NodeLockKey] = GenerateNodeLockKeyByPod(pods)
+		newNode.Annotations[NodeLockKey] = GenerateNodeLockKeyByPod(pods)
 		_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	}
 	if err != nil {
@@ -79,7 +79,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 	if err != nil {
 		return err
 	}
-	if lockStr, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
+	if lockStr, ok := node.Annotations[NodeLockKey]; !ok {
 		return nil
 	} else {
 		if !strings.Contains(lockStr, pod.Name) && !timeout {
@@ -88,7 +88,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 		}
 	}
 	newNode := node.DeepCopy()
-	delete(newNode.ObjectMeta.Annotations, NodeLockKey)
+	delete(newNode.Annotations, NodeLockKey)
 	_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	for i := 0; i < MaxLockRetry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
@@ -99,7 +99,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 			continue
 		}
 		newNode := node.DeepCopy()
-		delete(newNode.ObjectMeta.Annotations, NodeLockKey)
+		delete(newNode.Annotations, NodeLockKey)
 		_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	}
 	if err != nil {
@@ -115,10 +115,10 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := node.ObjectMeta.Annotations[NodeLockKey]; !ok {
+	if _, ok := node.Annotations[NodeLockKey]; !ok {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
-	lockTime, _, _, err := ParseNodeLock(node.ObjectMeta.Annotations[NodeLockKey])
+	lockTime, _, _, err := ParseNodeLock(node.Annotations[NodeLockKey])
 	if err != nil {
 		return err
 	}

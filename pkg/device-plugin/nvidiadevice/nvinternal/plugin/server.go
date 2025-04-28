@@ -47,13 +47,13 @@ import (
 	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
 	"github.com/google/uuid"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
@@ -96,7 +96,7 @@ type NvidiaDevicePlugin struct {
 
 	server *grpc.Server
 	health chan *rm.Device
-	stop   chan interface{}
+	stop   chan any
 }
 
 func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
@@ -183,7 +183,7 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 func (plugin *NvidiaDevicePlugin) initialize() {
 	plugin.server = grpc.NewServer([]grpc.ServerOption{}...)
 	plugin.health = make(chan *rm.Device)
-	plugin.stop = make(chan interface{})
+	plugin.stop = make(chan any)
 }
 
 func (plugin *NvidiaDevicePlugin) cleanup() {
@@ -203,7 +203,12 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 func (plugin *NvidiaDevicePlugin) Start() error {
 	plugin.initialize()
 
-	err := plugin.Serve()
+	deviceNumbers, err := GetDeviceNums()
+	if err != nil {
+		return err
+	}
+
+	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
 		plugin.cleanup()
@@ -234,7 +239,7 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		if len(plugin.migCurrent.MigConfigs["current"]) == 1 && len(plugin.migCurrent.MigConfigs["current"][0].Devices) == 0 {
 			idx := 0
 			plugin.migCurrent.MigConfigs["current"][0].Devices = make([]int32, 0)
-			for idx < GetDeviceNums() {
+			for idx < deviceNumbers {
 				plugin.migCurrent.MigConfigs["current"][0].Devices = append(plugin.migCurrent.MigConfigs["current"][0].Devices, int32(idx))
 				idx++
 			}

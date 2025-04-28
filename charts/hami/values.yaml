@@ -2,6 +2,7 @@
 
 nameOverride: ""
 fullnameOverride: ""
+namespaceOverride: ""
 imagePullSecrets: [ ]
 version: "v2.5.0"
 
@@ -116,7 +117,14 @@ scheduler:
       # - istio-system
     reinvocationPolicy: Never
     failurePolicy: Ignore
+  ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
+  ## If enabled, always takes precedence over options 2.
+  certManager:
+    enabled: false
+  ## TLS Certificate Option 2: Use kube-webhook-certgen to generate self-signed certificate.
+  ## If true and certManager.enabled is false, Helm will automatically create a self-signed cert and secret for you.
   patch:
+    enabled: true
     image: docker.io/jettech/kube-webhook-certgen:v1.5.2
     imageNew: liangjw/kube-webhook-certgen:v1.1.1
     imagePullPolicy: IfNotPresent
@@ -141,7 +149,10 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
   runtimeClassName: ""
+  # Whether to create runtime class, name comes from runtimeClassName when it is set
+  createRuntimeClass: false
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false
@@ -192,6 +203,11 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  enflame:
+    enabled: false
+    customresources:
+      - enflame.com/vgcu
+      - enflame.com/vgcu-percentage
   mthreads:
     enabled: false
     customresources:

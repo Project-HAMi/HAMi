@@ -44,8 +44,8 @@ import (
 )
 
 type Scheduler struct {
-	nodeManager
-	podManager
+	*nodeManager
+	*podManager
 
 	stopCh     chan struct{}
 	kubeClient kubernetes.Interface
@@ -67,25 +67,20 @@ func NewScheduler() *Scheduler {
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
 	}
-	s.nodeManager.init()
-	s.podManager.init()
+	s.nodeManager = newNodeManager()
+	s.podManager = newPodManager()
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }
 
-func (s *Scheduler) onUpdateNode(_, newObj interface{}) {
-	s.nodeNotify <- struct{}{}
+func (s *Scheduler) doNodeNotify() {
+	select {
+	case s.nodeNotify <- struct{}{}:
+	default:
+	}
 }
 
-func (s *Scheduler) onDelNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onAddNode(obj interface{}) {
-	s.nodeNotify <- struct{}{}
-}
-
-func (s *Scheduler) onAddPod(obj interface{}) {
+func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.ErrorS(fmt.Errorf("invalid pod object"), "Failed to process pod addition")
@@ -104,11 +99,11 @@ func (s *Scheduler) onAddPod(obj interface{}) {
 	s.addPod(pod, nodeID, podDev)
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj interface{}) {
+func (s *Scheduler) onUpdatePod(_, newObj any) {
 	s.onAddPod(newObj)
 }
 
-func (s *Scheduler) onDelPod(obj interface{}) {
+func (s *Scheduler) onDelPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		klog.Errorf("unknown add object type")
@@ -128,16 +123,15 @@ func (s *Scheduler) Start() {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 
-	informer := informerFactory.Core().V1().Pods().Informer()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc:    s.onAddNode,
-		UpdateFunc: s.onUpdateNode,
-		DeleteFunc: s.onDelNode,
+		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
+		DeleteFunc: func(_ any) { s.doNodeNotify() },
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
@@ -151,6 +145,10 @@ func (s *Scheduler) Stop() {
 func (s *Scheduler) RegisterFromNodeAnnotations() {
 	klog.InfoS("Entering RegisterFromNodeAnnotations")
 	defer klog.InfoS("Exiting RegisterFromNodeAnnotations")
+
+	labelSelector := labels.Set(config.NodeLabelSelector).AsSelector()
+	klog.InfoS("Using label selector for list nodes", "selector", labelSelector.String())
+
 	ticker := time.NewTicker(time.Second * 15)
 	defer ticker.Stop()
 	printedLog := map[string]bool{}
@@ -163,11 +161,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
-		}
-		labelSelector := labels.Everything()
-		if len(config.NodeLabelSelector) > 0 {
-			labelSelector = (labels.Set)(config.NodeLabelSelector).AsSelector()
-			klog.InfoS("Using label selector", "selector", labelSelector.String())
 		}
 		rawNodes, err := s.nodeLister.List(labelSelector)
 		if err != nil {
@@ -193,11 +186,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 						klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
 					}
 
-					info, ok := s.nodes[val.Name]
-					if ok {
-						klog.InfoS("Removing device from node", "nodeName", val.Name, "deviceVendor", devhandsk, "remainingDevices", s.nodes[val.Name].Devices)
-						s.rmNodeDevice(val.Name, info, devhandsk)
-					}
+					s.rmNodeDevices(val.Name, devhandsk)
 					continue
 				}
 				if !needUpdate {
@@ -225,7 +214,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
 				nodedevices, err := devInstance.GetNodeDevices(*val)
 				if err != nil {
-					klog.ErrorS(err, "Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
@@ -463,7 +452,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if total == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("does not request any resource"))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
@@ -474,7 +463,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
@@ -484,13 +473,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores",
 			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, fmt.Errorf("no available node, all node scores do not meet"))
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -518,11 +507,22 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, []string{}, err)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		s.delPod(args.Pod)
 		return nil, err
 	}
-	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, []string{m.NodeID}, nil)
+	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
+	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
+}
+
+func genSuccessMsg(totalNodes int, target string, nodes []*policy.NodeScore) string {
+	successMsg := "find fit node(%s), %d nodes not fit, %d nodes fit(%s)"
+	var scores []string
+	for _, no := range nodes {
+		scores = append(scores, fmt.Sprintf("%s:%.2f", no.NodeID, no.Score))
+	}
+	score := strings.Join(scores, ",")
+	return fmt.Sprintf(successMsg, target, totalNodes-len(nodes), len(nodes), score)
 }

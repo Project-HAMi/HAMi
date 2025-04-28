@@ -25,7 +25,7 @@ type specTest struct {
 	name     string
 	spec     *Spec
 	input    int
-	expected interface{}
+	expected any
 }
 
 func TestSpec_DeviceMax(t *testing.T) {
@@ -342,7 +342,7 @@ func TestSpec_SetDeviceSmLimit(t *testing.T) {
 			if !ok {
 				t.Errorf("TestSpec_SetDeviceSmLimit: type assertion failed for expected value")
 			}
-			for i := 0; i < int(tt.spec.sr.num); i++ {
+			for i := range int(tt.spec.sr.num) {
 				if actual[i] != expected[i] {
 					t.Errorf("SetDeviceSmLimit(%d) failed: actual[%d] = %d, want %d", tt.input, i, actual[i], expected[i])
 				}

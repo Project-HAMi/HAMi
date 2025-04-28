@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -68,7 +69,7 @@ type MigPartedSpec struct {
 
 // MigConfigSpec defines the spec to declare the desired MIG configuration for a set of GPUs.
 type MigConfigSpec struct {
-	DeviceFilter interface{}      `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
+	DeviceFilter any              `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
 	Devices      []int32          `json:"devices"                 yaml:"devices,flow"`
 	MigEnabled   bool             `json:"mig-enabled"             yaml:"mig-enabled"`
 	MigDevices   map[string]int32 `json:"mig-devices"             yaml:"mig-devices"`
@@ -104,6 +105,8 @@ type NvidiaConfig struct {
 	MigGeometriesList []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
 	// GPUCorePolicy through webhook automatic injected to container env
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
+	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
+	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
 type FilterDevice struct {
@@ -273,9 +276,28 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 
+	hasResource := dev.mutateContainerResource(ctr)
+
+	if hasResource {
+		// Set runtime class name if it is not set by user and the runtime class name is configured
+		if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
+			p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+		}
+	}
+
+	if !hasResource && dev.config.OverwriteEnv {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{
+			Name:  "NVIDIA_VISIBLE_DEVICES",
+			Value: "none",
+		})
+	}
+	return hasResource, nil
+}
+
+func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
 	_, resourceNameOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)]
 	if resourceNameOK {
-		return resourceNameOK, nil
+		return true
 	}
 
 	_, resourceCoresOK := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
@@ -285,24 +307,17 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if resourceCoresOK || resourceMemOK || resourceMemPercentageOK {
 		if dev.config.DefaultGPUNum > 0 {
 			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
-			resourceNameOK = true
+			return true
 		}
 	}
-
-	if !resourceNameOK && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
-	}
-	return resourceNameOK, nil
+	return false
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
 	cardtype = strings.ToUpper(cardtype)
 	if inuse, ok := annos[GPUInUse]; ok {
 		useTypes := strings.Split(inuse, ",")
-		if !ContainsSliceFunc(useTypes, func(useType string) bool {
+		if !slices.ContainsFunc(useTypes, func(useType string) bool {
 			return strings.Contains(cardtype, strings.ToUpper(useType))
 		}) {
 			return false
@@ -310,22 +325,13 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 	}
 	if unuse, ok := annos[GPUNoUse]; ok {
 		unuseTypes := strings.Split(unuse, ",")
-		if ContainsSliceFunc(unuseTypes, func(unuseType string) bool {
+		if slices.ContainsFunc(unuseTypes, func(unuseType string) bool {
 			return strings.Contains(cardtype, strings.ToUpper(unuseType))
 		}) {
 			return false
 		}
 	}
 	return true
-}
-
-func ContainsSliceFunc[S ~[]E, E any](s S, match func(E) bool) bool {
-	for _, e := range s {
-		if match(e) {
-			return true
-		}
-	}
-	return false
 }
 
 func assertNuma(annos map[string]string) bool {
@@ -340,13 +346,13 @@ func assertNuma(annos map[string]string) bool {
 }
 
 func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
-	Typecheck := checkGPUtype(annos, d.Type)
+	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
 	if ok && !strings.Contains(mode, d.Mode) {
-		Typecheck = false
+		typeCheck = false
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, Typecheck, assertNuma(annos)
+		return true, typeCheck, assertNuma(annos)
 	}
 	return false, false, false
 }
@@ -357,12 +363,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[GPUNoUseUUID]
@@ -370,12 +371,7 @@ func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsa
 		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 
 	return true
