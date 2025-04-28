@@ -17,6 +17,8 @@ limitations under the License.
 package scheduler
 
 import (
+	"strconv"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -26,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
@@ -99,6 +102,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -195,6 +199,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -291,6 +296,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -403,6 +409,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -515,6 +522,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -634,6 +642,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -753,6 +762,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -776,6 +786,7 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 					"node2": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -889,6 +900,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -912,6 +924,7 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 					"node2": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -1025,6 +1038,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.NodeSchedulerPolicyBinpack.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -1109,15 +1123,7 @@ func Test_calcScore(t *testing.T) {
 											Usedmem:   1000,
 										},
 									},
-									{
-										{
-											Idx:       0,
-											UUID:      "",
-											Type:      "",
-											Usedcores: 0,
-											Usedmem:   0,
-										},
-									},
+									{},
 								},
 							},
 							Score: 0,
@@ -1137,6 +1143,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -1220,6 +1227,7 @@ func Test_calcScore(t *testing.T) {
 							NodeID: "node1",
 							Devices: util.PodDevices{
 								"NVIDIA": util.PodSingleDevice{
+									{},
 									{
 										{
 											Idx:       0,
@@ -1230,7 +1238,6 @@ func Test_calcScore(t *testing.T) {
 										},
 									},
 									{},
-									{{}},
 								},
 							},
 							Score: 0,
@@ -1250,6 +1257,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -1391,6 +1399,7 @@ func Test_calcScore(t *testing.T) {
 			}{
 				nodes: &map[string]*NodeUsage{
 					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
 						Devices: policy.DeviceUsageList{
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
@@ -1457,7 +1466,7 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{},
 				},
 				failedNodes: map[string]string{
-					"node1": "node not fit pod",
+					"node1": nodeUnfitPod,
 				},
 				err: nil,
 			},
@@ -1618,6 +1627,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 		}
 		want1 bool
 		want2 map[string]util.ContainerDevices
+		want3 map[string]int
 	}{
 		{
 			name: "allocated device",
@@ -1629,6 +1639,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1680,6 +1691,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1711,6 +1723,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardTypeMismatch: 1},
 		},
 		{
 			name: "device count less than device used",
@@ -1722,6 +1735,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1753,6 +1767,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardTimeSlicingExhausted: 1},
 		},
 		{
 			name: "core limit exceed 100",
@@ -1764,6 +1779,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1795,6 +1811,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardInsufficientCore: 1},
 		},
 		{
 			name: "card insufficient remaining memory",
@@ -1806,6 +1823,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1837,6 +1855,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardInsufficientMemory: 1},
 		},
 		{
 			name: "the container wants exclusive access to an entire card, but the card is already in use",
@@ -1848,6 +1867,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1879,6 +1899,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{exclusiveDeviceAllocateConflict: 1},
 		},
 		{
 			name: "can't allocate core=0 job to an already full GPU",
@@ -1890,6 +1911,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1921,6 +1943,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardComputeUnitsExhausted: 1},
 		},
 		{
 			name: "mode is mig",
@@ -1932,6 +1955,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -1983,6 +2007,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 			},
+			want3: map[string]int{cardNotFoundCustomFilterRule: 1, allocatedCardsInsufficientRequest: 1},
 		},
 		{
 			name: "card uuid don't match",
@@ -1994,6 +2019,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -2027,6 +2053,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardUUIDMismatch: 1},
 		},
 		{
 			name: "numa not fit",
@@ -2038,26 +2065,16 @@ func Test_fitInCertainDevice(t *testing.T) {
 				allocated *util.PodDevices
 			}{
 				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
-							{
-								Device: &util.DeviceUsage{
-									ID:        "test-0",
-									Numa:      int(1),
-									Type:      nvidia.NvidiaGPUDevice,
-									Used:      int32(1),
-									Count:     int32(4),
-									Totalmem:  int32(8192),
-									Usedmem:   int32(2048),
-									Usedcores: int32(1),
-									Totalcore: int32(4),
-								},
-							},
+							{Device: makeDevice("test-0", 0, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 4)},
+							{Device: makeDevice("test-1", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 4)},
 						},
 					},
 				},
 				request: util.ContainerDeviceRequest{
-					Nums:             int32(1),
+					Nums:             int32(2),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
 					MemPercentagereq: int32(100),
@@ -2070,7 +2087,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 				pod:       &corev1.Pod{},
 				allocated: &util.PodDevices{},
 			},
-			want1: true,
+			want1: false,
 			want2: map[string]util.ContainerDevices{
 				"NVIDIA": {
 					{
@@ -2081,15 +2098,107 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 			},
+			want3: map[string]int{numaNotFit: 1, allocatedCardsInsufficientRequest: 1},
+		},
+		{
+			name: "test device kind of not fit reason",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							// test CardTypeMismatch
+							{Device: makeDevice("a", 0, hygon.HygonDCUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("f", 0, metax.MetaxGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							// test CardUUIDMismatch
+							{Device: makeDevice("b", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("q", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("i", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							// test CardTimeSlicingExhausted
+							{Device: makeDevice("c", 1, nvidia.NvidiaGPUDevice, 4, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("j", 1, nvidia.NvidiaGPUDevice, 4, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("u", 1, nvidia.NvidiaGPUDevice, 4, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("l", 1, nvidia.NvidiaGPUDevice, 4, 4, 8192, 2048, 1, 100)},
+							// test CardInsufficientMemory
+							{Device: makeDevice("d", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 8048, 1, 100)},
+							{Device: makeDevice("m", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 8048, 1, 100)},
+							// test CardInsufficientCore
+							{Device: makeDevice("e", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 90, 100)},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(2),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(20),
+				},
+				annos:     map[string]string{nvidia.GPUUseUUID: "a,f,c,d,e,g,h,j,l,u,m"},
+				pod:       &corev1.Pod{},
+				allocated: &util.PodDevices{},
+			},
+			want1: false,
+			want2: map[string]util.ContainerDevices{},
+			want3: map[string]int{cardTypeMismatch: 2, cardUUIDMismatch: 3, cardTimeSlicingExhausted: 4,
+				cardInsufficientMemory: 2, cardInsufficientCore: 1},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1, result2 := fitInCertainDevice(test.args.node, test.args.request, test.args.annos, test.args.pod, test.args.allocated)
+			result1, result2, result3 := fitInCertainDevice(test.args.node, test.args.request, test.args.annos, test.args.pod, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
+			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
 		})
 	}
+}
+
+func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem, usedcores, totalcore int) *util.DeviceUsage {
+	return &util.DeviceUsage{
+		ID:        id,
+		Numa:      numa,
+		Type:      Type,
+		Used:      int32(used),
+		Count:     int32(count),
+		Totalmem:  int32(totalmem),
+		Usedmem:   int32(usedmem),
+		Usedcores: int32(usedcores),
+		Totalcore: int32(totalcore),
+	}
+}
+
+// convertReasonToMap converts a string in a specific format to a map.
+// The input string should be in the format "cnt/total reason1, cnt/total reason2, ...".
+// This function parses the string and returns a map where the key is the reason and the value is the corresponding count.
+func convertReasonToMap(reason string) map[string]int {
+	var reasonMap map[string]int
+	reasonSlice := strings.Split(reason, ", ")
+	for _, r := range reasonSlice {
+		parts := strings.SplitN(r, " ", 2)
+		if len(parts) != 2 {
+			continue
+		}
+		countParts := strings.SplitN(parts[0], "/", 2)
+		if len(countParts) != 2 {
+			continue
+		}
+		cnt, err := strconv.Atoi(countParts[0])
+		if err != nil {
+			continue
+		}
+		if reasonMap == nil {
+			reasonMap = make(map[string]int)
+		}
+		reasonMap[parts[1]] = cnt
+	}
+	return reasonMap
 }
 
 func Test_fitInDevices(t *testing.T) {
@@ -2103,7 +2212,7 @@ func Test_fitInDevices(t *testing.T) {
 			devinput *util.PodDevices
 		}
 		want1 bool
-		want2 float32
+		want2 string
 	}{
 		{
 			name: "all device score for one node",
@@ -2115,6 +2224,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput *util.PodDevices
 			}{
 				node: NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -2160,7 +2270,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &util.PodDevices{},
 			},
 			want1: true,
-			want2: float32(0),
+			want2: "",
 		},
 		{
 			name: "request devices nums cannot exceed the total number of devices on the node",
@@ -2172,6 +2282,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput *util.PodDevices
 			}{
 				node: NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -2204,7 +2315,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &util.PodDevices{},
 			},
 			want1: false,
-			want2: float32(0),
+			want2: "NodeInsufficientDevice",
 		},
 		{
 			name: "device type the different from request type",
@@ -2216,6 +2327,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput *util.PodDevices
 			}{
 				node: NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
@@ -2248,7 +2360,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &util.PodDevices{},
 			},
 			want1: false,
-			want2: float32(0),
+			want2: "1/1 CardTypeMismatch",
 		},
 	}
 	for _, test := range tests {

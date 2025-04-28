@@ -27,8 +27,11 @@ spec:
         app.kubernetes.io/component: hami-device-plugin
         hami.io/webhook: ignore
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
+      annotations: 
+        checksum/hami-device-plugin-config: {{ include (print $.Template.BasePath "/device-plugin/configmap.yaml") . | sha256sum }}
+        checksum/hami-scheduler-device-config: {{ include (print $.Template.BasePath "/scheduler/device-configmap.yaml") . | sha256sum }}
       {{- if .Values.devicePlugin.podAnnotations }}
-      annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
+        {{- toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
       {{- if .Values.devicePlugin.runtimeClassName }}

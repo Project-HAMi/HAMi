@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -64,37 +65,63 @@ func checkUUID(annos map[string]string, d util.DeviceUsage, n util.ContainerDevi
 	return result
 }
 
-func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices) {
+const (
+	cardTypeMismatch                  = "CardTypeMismatch"
+	cardUUIDMismatch                  = "CardUuidMismatch"
+	cardTimeSlicingExhausted          = "CardTimeSlicingExhausted"
+	cardComputeUnitsExhausted         = "CardComputeUnitsExhausted"
+	cardInsufficientMemory            = "CardInsufficientMemory"
+	cardInsufficientCore              = "CardInsufficientCore"
+	numaNotFit                        = "NumaNotFit"
+	exclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
+	cardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
+	nodeInsufficientDevice            = "NodeInsufficientDevice"
+	allocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
+	nodeUnfitPod                      = "NodeUnfitPod"
+	nodeFitPod                        = "NodeFitPod"
+)
+
+func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
+	nodeName := node.Node.Name
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
+	reason := make(map[string]int)
 	for i := len(node.Devices.DeviceLists) - 1; i >= 0; i-- {
-		klog.InfoS("scoring pod", "pod", klog.KObj(pod), "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
-		found, numa := checkType(annos, *node.Devices.DeviceLists[i].Device, k)
+		dev := node.Devices.DeviceLists[i].Device
+		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
+		found, numa := checkType(annos, *dev, k)
 		if !found {
-			klog.InfoS("card type mismatch,continuing...", "pod", klog.KObj(pod), (node.Devices.DeviceLists[i].Device).Type, k.Type)
+			reason[cardTypeMismatch]++
+			klog.V(5).InfoS(cardTypeMismatch, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if numa && prevnuma != node.Devices.DeviceLists[i].Device.Numa {
-			klog.InfoS("Numa not fit, resotoreing", "pod", klog.KObj(pod), "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", node.Devices.DeviceLists[i].Device.Numa)
+		if numa && prevnuma != dev.Numa {
+			if k.Nums != originReq {
+				reason[numaNotFit] += len(tmpDevs)
+				klog.V(5).InfoS(numaNotFit, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
+			}
 			k.Nums = originReq
-			prevnuma = node.Devices.DeviceLists[i].Device.Numa
+			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !checkUUID(annos, *node.Devices.DeviceLists[i].Device, k) {
-			klog.InfoS("card uuid mismatch,", "pod", klog.KObj(pod), "current device info is:", *node.Devices.DeviceLists[i].Device)
+		if !checkUUID(annos, *dev, k) {
+			reason[cardUUIDMismatch]++
+			klog.V(5).InfoS(cardUUIDMismatch, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "current device info is:", *dev)
 			continue
 		}
 
 		memreq := int32(0)
-		if node.Devices.DeviceLists[i].Device.Count <= node.Devices.DeviceLists[i].Device.Used {
+		if dev.Count <= dev.Used {
+			reason[cardTimeSlicingExhausted]++
+			klog.V(5).InfoS(cardTimeSlicingExhausted, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "count", dev.Count, "used", dev.Used)
 			continue
 		}
 		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod))
+			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID)
 			k.Coresreq = 100
 			//return false, tmpDevs
 		}
@@ -103,52 +130,70 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		}
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
-			memreq = node.Devices.DeviceLists[i].Device.Totalmem * k.MemPercentagereq / 100
+			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if node.Devices.DeviceLists[i].Device.Totalmem-node.Devices.DeviceLists[i].Device.Usedmem < memreq {
-			klog.V(5).InfoS("card Insufficient remaining memory", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID, "device total memory", node.Devices.DeviceLists[i].Device.Totalmem, "device used memory", node.Devices.DeviceLists[i].Device.Usedmem, "request memory", memreq)
+		if dev.Totalmem-dev.Usedmem < memreq {
+			reason[cardInsufficientMemory]++
+			klog.V(5).InfoS(cardInsufficientMemory, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		if node.Devices.DeviceLists[i].Device.Totalcore-node.Devices.DeviceLists[i].Device.Usedcores < k.Coresreq {
-			klog.V(5).InfoS("card Insufficient remaining cores", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID, "device total core", node.Devices.DeviceLists[i].Device.Totalcore, "device used core", node.Devices.DeviceLists[i].Device.Usedcores, "request cores", k.Coresreq)
+		if dev.Totalcore-dev.Usedcores < k.Coresreq {
+			reason[cardInsufficientCore]++
+			klog.V(5).InfoS(cardInsufficientCore, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		// Coresreq=100 indicates it want this card exclusively
-		if node.Devices.DeviceLists[i].Device.Totalcore == 100 && k.Coresreq == 100 && node.Devices.DeviceLists[i].Device.Used > 0 {
-			klog.V(5).InfoS("the container wants exclusive access to an entire card, but the card is already in use", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID, "used", node.Devices.DeviceLists[i].Device.Used)
+		if dev.Totalcore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+			reason[exclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(exclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if node.Devices.DeviceLists[i].Device.Totalcore != 0 && node.Devices.DeviceLists[i].Device.Usedcores == node.Devices.DeviceLists[i].Device.Totalcore && k.Coresreq == 0 {
-			klog.V(5).InfoS("can't allocate core=0 job to an already full GPU", "pod", klog.KObj(pod), "device index", i, "device", node.Devices.DeviceLists[i].Device.ID)
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
+			reason[cardComputeUnitsExhausted]++
+			klog.V(5).InfoS(cardComputeUnitsExhausted, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "device index", i)
 			continue
 		}
-		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, request, tmpDevs[k.Type], node.Devices.DeviceLists[i].Device) {
+		if !device.GetDevices()[k.Type].CustomFilterRule(allocated, request, tmpDevs[k.Type], dev) {
+			reason[cardNotFoundCustomFilterRule]++
+			klog.V(5).InfoS(cardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "device index", i)
 			continue
 		}
 		if k.Nums > 0 {
-			klog.InfoS("first fitted", "pod", klog.KObj(pod), "device", node.Devices.DeviceLists[i].Device.ID)
+			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID)
 			k.Nums--
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
-				Idx:       int(node.Devices.DeviceLists[i].Device.Index),
-				UUID:      node.Devices.DeviceLists[i].Device.ID,
+				Idx:       int(dev.Index),
+				UUID:      dev.ID,
 				Type:      k.Type,
 				Usedmem:   memreq,
 				Usedcores: k.Coresreq,
 			})
 		}
 		if k.Nums == 0 {
-			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
-			return true, tmpDevs
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "node", nodeName, "allocate device", tmpDevs)
+			return true, tmpDevs, ""
 		}
-		if node.Devices.DeviceLists[i].Device.Mode == "mig" {
+		if dev.Mode == "mig" {
 			i++
 		}
 	}
-	return false, tmpDevs
+	if len(tmpDevs) > 0 {
+		reason[allocatedCardsInsufficientRequest] = len(tmpDevs)
+		klog.V(5).InfoS(allocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "node", nodeName, "request", originReq, "allocated", len(tmpDevs))
+	}
+	return false, tmpDevs, genReason(reason, len(node.Devices.DeviceLists))
 }
 
-func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, float32) {
+func genReason(reasons map[string]int, cards int) string {
+	var reason []string
+	for r, cnt := range reasons {
+		reason = append(reason, fmt.Sprintf("%d/%d %s", cnt, cards, r))
+	}
+	return strings.Join(reason, ", ")
+}
+
+func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, string) {
 	//devmap := make(map[string]util.ContainerDevices)
 	devs := util.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
@@ -162,11 +207,11 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 	for _, k := range requests {
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
-			klog.InfoS("request devices nums cannot exceed the total number of devices on the node.", "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
-			return false, 0
+			klog.V(5).InfoS(nodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
+			return false, nodeInsufficientDevice
 		}
 		sort.Sort(node.Devices)
-		fit, tmpDevs := fitInCertainDevice(node, k, annos, pod, devinput)
+		fit, tmpDevs, reason := fitInCertainDevice(node, k, annos, pod, devinput)
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
@@ -182,19 +227,19 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 					freeMem += v.Device.Totalmem - v.Device.Usedmem
 					err := device.GetDevices()[k.Type].AddResourceUsage(node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
 					if err != nil {
-						klog.Errorf("AddResource failed:%s", err.Error())
-						return false, 0
+						klog.Errorf("AddResourceUsage failed:%s", err.Error())
+						return false, "AddResourceUsage failed"
 					}
 					klog.Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
 		} else {
-			return false, 0
+			return false, reason
 		}
 		(*devinput)[k.Type] = append((*devinput)[k.Type], devs)
 	}
-	return true, 0
+	return true, ""
 }
 
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
@@ -231,18 +276,22 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 
 				if sums == 0 {
 					for idx := range score.Devices {
-						for len(score.Devices[idx]) <= ctrid {
-							score.Devices[idx] = append(score.Devices[idx], util.ContainerDevices{})
+						for len(score.Devices[idx]) < ctrid {
+							defaultContainerDevices := util.ContainerDevices{}
+							defaultPodSingleDevice := util.PodSingleDevice{}
+							defaultPodSingleDevice = append(defaultPodSingleDevice, defaultContainerDevices)
+							score.Devices[idx] = append(defaultPodSingleDevice, score.Devices[idx]...)
 						}
-						score.Devices[idx][ctrid] = append(score.Devices[idx][ctrid], util.ContainerDevice{})
+						defaultContainerDevices := util.ContainerDevices{}
+						score.Devices[idx] = append(score.Devices[idx], defaultContainerDevices)
 					}
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, _ := fitInDevices(node, n, annos, task, &score.Devices)
+				fit, reason := fitInDevices(node, n, annos, task, &score.Devices)
 				ctrfit = fit
 				if !fit {
-					klog.InfoS("calcScore:node not fit pod", "pod", klog.KObj(task), "node", nodeID)
-					failedNodes[nodeID] = "node not fit pod"
+					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					failedNodes[nodeID] = nodeUnfitPod
 					break
 				}
 			}
@@ -252,6 +301,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 				res.NodeList = append(res.NodeList, &score)
 				mutex.Unlock()
 				score.OverrideScore(node.Devices, userNodePolicy)
+				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
 	}
