@@ -98,7 +98,7 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
-func start() {
+func start() error {
 	client.InitGlobalClient(
 		client.WithBurst(config.Burst),
 		client.WithQPS(config.QPS),
