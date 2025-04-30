@@ -121,7 +121,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	}
 	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
-	for int64(i)*100 < cards {
+	for i < int(cards) {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
 			Index:   uint(i),
 			ID:      n.Name + "-enflame-" + fmt.Sprint(i),
