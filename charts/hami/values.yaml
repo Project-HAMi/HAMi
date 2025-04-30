@@ -138,6 +138,7 @@ scheduler:
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
+    monitorTargetPort: 9395
     labels: {}
     annotations: {}
 
