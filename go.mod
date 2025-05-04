@@ -4,8 +4,8 @@ go 1.22.2
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.3.2
-	github.com/NVIDIA/go-nvlib v0.2.0
-	github.com/NVIDIA/go-nvml v0.12.0-3
+	github.com/NVIDIA/go-nvlib v0.7.1
+	github.com/NVIDIA/go-nvml v0.12.4-1
 	github.com/NVIDIA/k8s-device-plugin v0.15.0
 	github.com/NVIDIA/nvidia-container-toolkit v1.15.0
 	github.com/fsnotify/fsnotify v1.7.0
@@ -18,7 +18,7 @@ require (
 	github.com/sirupsen/logrus v1.9.3
 	github.com/spf13/cobra v1.8.1
 	github.com/spf13/pflag v1.0.5
-	github.com/stretchr/testify v1.9.0
+	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.1
 	golang.org/x/net v0.35.0
 	golang.org/x/term v0.29.0
