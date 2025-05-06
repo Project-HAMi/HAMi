@@ -8,7 +8,7 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   config.yaml: |
-    {{- if gt (.Capabilities.KubeVersion.Minor | int) 25}}
+    {{- if gt (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 25}}
     apiVersion: kubescheduler.config.k8s.io/v1
     {{- else }}
     apiVersion: kubescheduler.config.k8s.io/v1beta2

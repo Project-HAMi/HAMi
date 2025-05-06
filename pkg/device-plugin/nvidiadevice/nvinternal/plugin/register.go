@@ -94,7 +94,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 		}
 		klog.V(5).InfoS("nvidia-smi topo -m row output", "row output", words, "length", len(words))
 		if strings.Contains(words[0], fmt.Sprint(idx)) {
-			if words[numaAffinityColumnIndex] == "N/A" {
+			if len(words) <= numaAffinityColumnIndex || words[numaAffinityColumnIndex] == "N/A" {
 				klog.InfoS("current card has not established numa topology", "gpu row info", words, "index", idx)
 				return 0, nil
 			}
@@ -110,7 +110,10 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
-	nvml.Init()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		panic(0)
+	}
 	res := make([]*util.DeviceInfo, 0, len(devs))
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)

@@ -37,7 +37,7 @@ spec:
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
           command:
             - kube-scheduler
-             {{- if ge (.Capabilities.KubeVersion.Minor | int) 22 }}
+             {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
             {{- range .Values.scheduler.kubeScheduler.extraNewArgs }}
             - {{ . }}
             {{- end }}
@@ -132,7 +132,7 @@ spec:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
-            {{- if ge (.Capabilities.KubeVersion.Minor | int) 22 }}
+            {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
             name: {{ template "hami-vgpu.scheduler" . }}-newversion
             {{- else }}
             name: {{ template "hami-vgpu.scheduler" . }}

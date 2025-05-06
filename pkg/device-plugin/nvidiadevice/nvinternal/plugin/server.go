@@ -135,14 +135,8 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
 	return mode, nil
 }
 
-// NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
-func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool) *NvidiaDevicePlugin {
-	_, name := resourceManager.Resource().Split()
-
-	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
-
+func LoadNvidiaDevicePluginConfig() (*device.Config, string, error) {
 	sConfig, err := device.LoadConfig(*ConfigFile)
-	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
 	if err != nil {
 		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
 	}
@@ -150,6 +144,17 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
+	return sConfig, mode, nil
+}
+
+// NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
+func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool, sConfig *device.Config, mode string) *NvidiaDevicePlugin {
+	_, name := resourceManager.Resource().Split()
+
+	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+
+	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
+
 	// Initialize devices with configuration
 	if err := device.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)
@@ -198,7 +203,12 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 func (plugin *NvidiaDevicePlugin) Start() error {
 	plugin.initialize()
 
-	err := plugin.Serve()
+	deviceNumbers, err := GetDeviceNums()
+	if err != nil {
+		return err
+	}
+
+	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
 		plugin.cleanup()
@@ -229,7 +239,7 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		if len(plugin.migCurrent.MigConfigs["current"]) == 1 && len(plugin.migCurrent.MigConfigs["current"][0].Devices) == 0 {
 			idx := 0
 			plugin.migCurrent.MigConfigs["current"][0].Devices = make([]int32, 0)
-			for idx < GetDeviceNums() {
+			for idx < deviceNumbers {
 				plugin.migCurrent.MigConfigs["current"][0].Devices = append(plugin.migCurrent.MigConfigs["current"][0].Devices, int32(idx))
 				idx++
 			}
