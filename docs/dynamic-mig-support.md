@@ -15,7 +15,7 @@
 ## Prerequisites
 
 * NVIDIA Blackwell and Hopper™ and Ampere Devices
-* HAMi > v2.5.0
+* HAMi >= v2.5.0
 * Nvidia-container-toolkit
 
 ## Enabling Dynamic-mig Support
