@@ -453,7 +453,11 @@ func Test_PatchAnnotations(t *testing.T) {
 }
 
 func Test_setNodeLock(t *testing.T) {
-	client.InitGlobalClient(client.WithBurst(10), client.WithQPS(5.0))
+	client.InitGlobalClient(
+		client.WithBurst(10),
+		client.WithQPS(5.0),
+		client.WithTimeout(60),
+	)
 	tests := []struct {
 		name      string
 		node      corev1.Node

@@ -17,37 +17,26 @@ limitations under the License.
 package client
 
 import (
+	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 
+	"gotest.tools/v3/assert"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
-	clientcmdapi "k8s.io/client-go/tools/clientcmd/api"
 )
 
-// MockClientConfig is a mock implementation of clientcmd.ClientConfig.
-type MockClientConfig struct {
-	config *rest.Config
-	err    error
-}
-
-func (m *MockClientConfig) RawConfig() (clientcmdapi.Config, error) {
-	return clientcmdapi.Config{}, nil
-}
-
-func (m *MockClientConfig) ClientConfig() (*rest.Config, error) {
-	return m.config, m.err
-}
-
-func (m *MockClientConfig) Namespace() (string, bool, error) {
-	return "", false, nil
-}
-
-func (m *MockClientConfig) ConfigAccess() clientcmd.ConfigAccess {
-	return nil
-}
+// Mock functions for testing.
+var (
+	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
+	inClusterConfig      = rest.InClusterConfig
+)
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
@@ -117,8 +106,152 @@ func TestGetClient(t *testing.T) {
 	}
 }
 
-// Mock functions for testing.
-var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
-)
+// TestClientWithOptions tests client initialization with options.
+func TestClientWithOptions(t *testing.T) {
+	KubeClient = nil
+	once = sync.Once{}
+
+	timeout := 1
+	client, _ := NewClient(WithTimeout(timeout))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(timeout)*time.Second)
+	assert.Equal(t, client.config.QPS, DefaultQPS)
+	assert.Equal(t, client.config.Burst, DefaultBurst)
+
+	KubeClient = nil
+	once = sync.Once{}
+
+	qps := float32(50.0)
+	client, _ = NewClient(WithQPS(qps))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(DefaultTimeout)*time.Second)
+	assert.Equal(t, client.config.QPS, qps)
+	assert.Equal(t, client.config.Burst, DefaultBurst)
+
+	KubeClient = nil
+	once = sync.Once{}
+	burst := 100
+	client, _ = NewClient(WithBurst(burst))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(DefaultTimeout)*time.Second)
+	assert.Equal(t, client.config.QPS, DefaultQPS)
+	assert.Equal(t, client.config.Burst, burst)
+
+	KubeClient = nil
+	once = sync.Once{}
+	timeout = 2
+	qps = 0.5
+	burst = 100
+	client, _ = NewClient(WithTimeout(timeout), WithQPS(qps), WithBurst(burst))
+
+	assert.Equal(t, client.config.Timeout, time.Duration(timeout)*time.Second)
+	assert.Equal(t, client.config.QPS, qps)
+	assert.Equal(t, client.config.Burst, burst)
+}
+
+// TestClientRealNodePerformance tests the performance with a real Kubernetes cluster if available.
+func TestClientRealNodePerformance(t *testing.T) {
+
+	skipRealClusterTest := true
+	// Skip this test by default as it requires a real Kubernetes cluster.
+	if skipRealClusterTest == true {
+		t.Skip("Skipping real cluster test. Set TEST_WITH_REAL_CLUSTER=true to run this test.")
+	}
+
+	tests := []struct {
+		name    string
+		qps     float32
+		burst   int
+		updates int
+		timeout int
+	}{
+		{
+			name:    "Real Cluster - Low QPS and Burst",
+			qps:     1,
+			burst:   1,
+			updates: 10,
+			timeout: 1,
+		},
+		{
+			name:    "Real Cluster - Standard Timeout",
+			qps:     5,
+			burst:   10,
+			updates: 10,
+			timeout: 5,
+		},
+		{
+			name:    "Real Cluster - High Timeout",
+			qps:     10,
+			burst:   20,
+			updates: 15,
+			timeout: 10,
+		},
+		{
+			name:    "Real Cluster - Very Short Timeout",
+			qps:     5,
+			burst:   5,
+			updates: 5,
+			timeout: 1,
+		},
+	}
+
+	labelKey := "test-performance-label"
+	var nodeName string
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client, err := NewClient(WithQPS(tt.qps), WithBurst(tt.burst), WithTimeout(tt.timeout))
+			if err != nil {
+				t.Fatalf("Failed to create client: %v", err)
+			}
+
+			if nodeName == "" {
+				nodes, err := client.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+				if err != nil {
+					t.Fatalf("Failed to list nodes: %v", err)
+				}
+				if len(nodes.Items) == 0 {
+					t.Fatal("No nodes found in the cluster")
+				}
+				nodeName = nodes.Items[0].Name
+				t.Logf("Using node %s for testing", nodeName)
+			}
+			start := time.Now()
+			for i := 0; i < tt.updates; i++ {
+				labelValue := fmt.Sprintf("perf-test-value-%d", i)
+				node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("Failed to get node: %v", err)
+				}
+				if node.Labels == nil {
+					node.Labels = make(map[string]string)
+				}
+				node.Labels[labelKey] = labelValue
+				_, err = client.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+				if err != nil {
+					t.Fatalf("Failed to update node: %v", err)
+				}
+			}
+
+			elapsed := time.Since(start)
+
+			node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+			if err != nil {
+				t.Fatalf("Failed to get node during cleanup: %v", err)
+			}
+			delete(node.Labels, labelKey)
+			_, err = client.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+			if err != nil {
+				t.Fatalf("Failed to cleanup test label: %v", err)
+			}
+
+			opsPerSecond := float64(tt.updates) / elapsed.Seconds()
+
+			t.Logf("Real cluster performance test results for %s:", tt.name)
+			t.Logf("  - QPS: %.1f, Burst: %d", tt.qps, tt.burst)
+			t.Logf("  - Updates performed: %d", tt.updates)
+			t.Logf("  - Total time: %v", elapsed)
+			t.Logf("  - Operations per second: %.2f", opsPerSecond)
+		})
+	}
+}
