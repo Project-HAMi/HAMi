@@ -313,6 +313,12 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 	if ok {
 		(*annoinput)[DsmluResourceAssigned] = "false"
 		(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", devlist[0][0].Idx, devlist[0][0].Usedcores, devlist[0][0].Usedmem/256)
+		deviceStr := util.EncodePodSingleDevice(devlist)
+		(*annoinput)[util.InRequestDevices[CambriconMLUDevice]] = deviceStr
+		(*annoinput)[util.SupportDevices[CambriconMLUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.InRequestDevices[CambriconMLUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[CambriconMLUDevice], deviceStr)
+		return *annoinput
 	}
 	return *annoinput
 }
