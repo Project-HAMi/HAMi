@@ -33,7 +33,9 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -188,8 +190,25 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 		return err
 	}
 	encodeddevices := util.EncodeNodeDevices(*devices)
+	var data []byte
+	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
+		gpuScore, err := nvidia.CalculateGPUScore(util.GetDevicesUUIDList(*devices))
+		if err != nil {
+			klog.ErrorS(err, "calculate gpu topo score error")
+			return err
+		}
+		data, err = json.Marshal(gpuScore)
+		if err != nil {
+			klog.ErrorS(err, "marshal gpu score error.")
+			return err
+		}
+	}
+	klog.V(4).InfoS("patch nvidia  topo score to node", "hami.io/node-nvidia-score", string(data))
 	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
 	annos[nvidia.RegisterAnnos] = encodeddevices
+	if len(data) > 0 {
+		annos[nvidia.RegisterGPUPairScore] = string(data)
+	}
 	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
 	err = util.PatchNodeAnnotations(node, annos)
 
