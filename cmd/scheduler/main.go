@@ -100,7 +100,9 @@ func injectProfilingRoute(router *httprouter.Router) {
 
 func start() error {
 	client.InitGlobalClient(client.WithBurst(config.Burst), client.WithQPS(config.QPS))
-	device.InitDevices()
+	if err := device.InitDevices(); err != nil {
+		return fmt.Errorf("init devices error, %v", err)
+	}
 	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()

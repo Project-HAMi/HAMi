@@ -197,21 +197,23 @@ func InitDevicesWithConfig(config *Config) error {
 	return nil
 }
 
-func InitDevices() {
+// InitDevices initializes devices based on the configuration file.
+func InitDevices() error {
 	if len(devicesMap) > 0 {
 		klog.Info("Devices are already initialized, skipping initialization")
-		return
+		return nil
 	}
 	klog.Infof("Loading device configuration from file: %s", configFile)
 	config, err := LoadConfig(configFile)
 	if err != nil {
-		klog.Fatalf("Failed to load device config file %s: %v", configFile, err)
+		return fmt.Errorf("failed to load device config file %s: %v", configFile, err)
 	}
 	klog.Infof("Loaded config: %v", config)
 	err = InitDevicesWithConfig(config)
 	if err != nil {
-		klog.Fatalf("Failed to initialize devices: %v", err)
+		return fmt.Errorf("failed to initialize devices: %v", err)
 	}
+	return nil
 }
 
 func InitDefaultDevices() {
