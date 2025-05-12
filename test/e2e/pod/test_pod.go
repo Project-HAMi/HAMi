@@ -170,6 +170,7 @@ func checkPodPendingDueToFiltering(clientSet *kubernetes.Clientset, pod *corev1.
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	for _, event := range events {
+		fmt.Printf("Event: Reason=%s, Message=%s\n", event.Reason, event.Message)
 		if strings.Contains(event.Reason, utils.ErrReasonFilteringFailed) &&
 			strings.Contains(event.Message, utils.ErrMessageFilteringFailed) {
 			return true

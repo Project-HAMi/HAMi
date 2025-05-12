@@ -35,7 +35,7 @@ const (
 	HamiScheduler              = "hami-scheduler"
 	HamiDevicePlugin           = "hami-device-plugin"
 	ErrReasonFilteringFailed   = "FilteringFailed"
-	ErrMessageFilteringFailed  = "no available node, all node scores do not meet"
+	ErrMessageFilteringFailed  = "no available node"
 	ErrReasonFailedScheduling  = "FilteringFailed"
 	ErrMessageFailedScheduling = "0/1 nodes are available"
 )
