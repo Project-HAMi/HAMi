@@ -21,6 +21,7 @@ import "github.com/Project-HAMi/HAMi/pkg/util"
 var (
 	QPS                float32
 	Burst              int
+	Timeout            int
 	HTTPBind           string
 	SchedulerName      string
 	MetricsBindAddress string
