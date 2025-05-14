@@ -19,8 +19,11 @@ package main
 import (
 	"fmt"
 	"os"
+	"strings"
 	"time"
 
+	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -115,6 +118,11 @@ var (
 		"Container device last kernel description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
+	ctrDeviceMigInfo = prometheus.NewDesc(
+		"MigInfo",
+		"Container device last kernel description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
+	)
 )
 
 // Describe is implemented with DescribeByCollect. That's possible because the
@@ -186,6 +194,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	// Collect Pod and Container information
 	if err := cc.collectPodAndContainerInfo(ch); err != nil {
 		klog.Errorf("Failed to collect Pod and Container info: %v", err)
+		// Decide whether to continue or return based on business requirements
+	}
+
+	// Collect Pod and Container Mig information
+	if err := cc.collectPodAndContainerMigInfo(ch); err != nil {
+		klog.Errorf("Failed to collect Pod and Container Mig info: %v", err)
 		// Decide whether to continue or return based on business requirements
 	}
 
@@ -407,6 +421,51 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 	}
 
 	klog.V(5).Infof("Successfully collected metrics for Pod %s/%s, Container %s", pod.Namespace, pod.Name, ctr.Name)
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- prometheus.Metric) error {
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
+	pods, err := cc.ClusterManager.PodLister.List(labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: nodeName}))
+	if err != nil {
+		klog.Errorf("Failed to list pods for node %s: %v", nodeName, err)
+		return fmt.Errorf("failed to list pods: %w", err)
+	}
+	for _, pod := range pods {
+		pdevices, err := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+		if err != nil {
+			return fmt.Errorf("failed to decode pod devices: %w", err)
+		}
+		for ctrIdx, container := range pod.Spec.Containers {
+			for ctrDevIdx, ctrDevices := range pdevices[nv.NvidiaGPUDevice] {
+				if len(ctrDevices) == 0 || ctrIdx != ctrDevIdx {
+					continue
+				}
+				for _, ctrDev := range ctrDevices {
+					if strings.Contains(ctrDev.UUID, "[") {
+						uuid := strings.Split(ctrDev.UUID, "[")[0]
+						_, idx, err := util.ExtractMigTemplatesFromUUID(ctrDev.UUID)
+						if err != nil {
+							continue
+						}
+						gpuInstanceId, err := dp.GetMigGpuInstanceIdFromIndex(ctrDev.UUID, idx)
+						if err != nil {
+							continue
+						}
+						labels := []string{pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
+						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
+							klog.Errorf("Failed to send MigInfo metric for device %d in Pod %s/%s, Container %s: %v", ctrIdx, pod.Namespace, pod.Name, container.Name, err)
+							return err
+						}
+					}
+				}
+			}
+		}
+	}
 	return nil
 }
 
