@@ -17,7 +17,6 @@ package scheduler
 
 import (
 	"fmt"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"sort"
 	"strings"
 	"sync"
@@ -27,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
