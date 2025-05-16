@@ -36,7 +36,7 @@ jobs:
       - name: go tidy
         run: make tidy
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v8
         with:
           version: v2.0
       - name: import alias
