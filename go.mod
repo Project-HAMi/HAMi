@@ -1,6 +1,6 @@
 module github.com/Project-HAMi/HAMi
 
-go 1.22.2
+go 1.23.0
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.3.2
@@ -20,8 +20,8 @@ require (
 	github.com/spf13/pflag v1.0.5
 	github.com/stretchr/testify v1.10.0
 	github.com/urfave/cli/v2 v2.27.1
-	golang.org/x/net v0.35.0
-	golang.org/x/term v0.29.0
+	golang.org/x/net v0.40.0
+	golang.org/x/term v0.32.0
 	golang.org/x/tools v0.21.1-0.20240508182429-e35e4ccd0d2d
 	google.golang.org/grpc v1.63.2
 	google.golang.org/protobuf v1.33.0
@@ -76,8 +76,8 @@ require (
 	github.com/xrash/smetrics v0.0.0-20201216005158-039620a65673 // indirect
 	golang.org/x/mod v0.19.0 // indirect
 	golang.org/x/oauth2 v0.17.0 // indirect
-	golang.org/x/sys v0.30.0 // indirect
-	golang.org/x/text v0.22.0 // indirect
+	golang.org/x/sys v0.33.0 // indirect
+	golang.org/x/text v0.25.0 // indirect
 	golang.org/x/time v0.5.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/appengine v1.6.8 // indirect
