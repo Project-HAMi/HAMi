@@ -1,0 +1,10 @@
+"kind/bug":
+  - '^[Ff]ix(\(.*\))?:?.*'
+"kind/cleanup":
+  - '^[Cc]hore(\(.*\))?:?.*'
+"kind/documentation":
+  - '^[Dd]ocs?(\(.*\))?:?.*'
+"kind/enhancement":
+  - '^[Rr]efactor(\(.*\))?:?.*'
+"kind/feature":
+  - '^[Ff]eat(\(.*\))?:?.*'
