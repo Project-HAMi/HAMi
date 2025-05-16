@@ -254,6 +254,31 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 			}
 		}
 	}
+	if util.LookupEnvBoolOr("ENABLE_TOPOLOGY_SCORE", false) {
+		pairScores, ok := n.Annotations[RegisterGPUPairScore]
+		if !ok {
+			klog.Warningf("no topology score found", "node", n.Name)
+		} else {
+			devicePairScores, err := util.DecodePairScores(pairScores)
+			if err != nil {
+				klog.ErrorS(err, "failed to decode pair scores", "node", n.Name, "pair scores", pairScores)
+				return []*util.DeviceInfo{}, err
+			}
+			if devicePairScores != nil {
+				// fit pair score to device info
+				for _, deviceInfo := range nodedevices {
+					uuid := deviceInfo.ID
+
+					for _, devicePairScore := range *devicePairScores {
+						if devicePairScore.ID == uuid {
+							deviceInfo.DevicePairScore = devicePairScore
+							break
+						}
+					}
+				}
+			}
+		}
+	}
 	devDecoded := util.EncodeNodeDevices(nodedevices)
 	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
 	return nodedevices, nil

@@ -122,17 +122,24 @@ type DeviceUsage struct {
 }
 
 type DeviceInfo struct {
-	ID           string     `json:"id,omitempty"`
-	Index        uint       `json:"index,omitempty"`
-	Count        int32      `json:"count,omitempty"`
-	Devmem       int32      `json:"devmem,omitempty"`
-	Devcore      int32      `json:"devcore,omitempty"`
-	Type         string     `json:"type,omitempty"`
-	Numa         int        `json:"numa,omitempty"`
-	Mode         string     `json:"mode,omitempty"`
-	MIGTemplate  []Geometry `json:"migtemplate,omitempty"`
-	Health       bool       `json:"health,omitempty"`
-	DeviceVendor string     `json:"devicevendor,omitempty"`
+	ID              string          `json:"id,omitempty"`
+	Index           uint            `json:"index,omitempty"`
+	Count           int32           `json:"count,omitempty"`
+	Devmem          int32           `json:"devmem,omitempty"`
+	Devcore         int32           `json:"devcore,omitempty"`
+	Type            string          `json:"type,omitempty"`
+	Numa            int             `json:"numa,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	MIGTemplate     []Geometry      `json:"migtemplate,omitempty"`
+	Health          bool            `json:"health,omitempty"`
+	DeviceVendor    string          `json:"devicevendor,omitempty"`
+	DevicePairScore DevicePairScore `json:"devicepairscore,omitempty"`
+}
+
+type DevicePairScores []DevicePairScore
+type DevicePairScore struct {
+	ID     string         `json:"uuid,omitempty"`
+	Scores map[string]int `json:"score,omitempty"`
 }
 
 type NodeInfo struct {
