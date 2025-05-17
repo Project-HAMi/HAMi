@@ -23,7 +23,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin/manager"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
