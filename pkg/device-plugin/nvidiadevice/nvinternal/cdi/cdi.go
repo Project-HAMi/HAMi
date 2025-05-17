@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 
 	nvdevice "github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
 	roottransform "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/transform/root"
 	"github.com/sirupsen/logrus"
@@ -88,7 +88,7 @@ func newHandler(opts ...Option) (Interface, error) {
 		c.nvml = nvml.New()
 	}
 	if c.nvdevice == nil {
-		c.nvdevice = nvdevice.New(nvdevice.WithNvml(c.nvml))
+		c.nvdevice = nvdevice.New(c.nvml)
 	}
 	if c.deviceIDStrategy == "" {
 		c.deviceIDStrategy = "uuid"
