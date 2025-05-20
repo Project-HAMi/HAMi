@@ -223,7 +223,7 @@ func TestOverrideScore(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Name: "node1",
 						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.losses": "cpu:123,gpu:321",
+							"metax-tech.com/gpu.topology.losses": "{\"1\":123,\"2\":321}",
 						},
 					},
 				},
@@ -235,7 +235,7 @@ func TestOverrideScore(t *testing.T) {
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
 					},
-					"Metax": util.PodSingleDevice{
+					"Metax-GPU": util.PodSingleDevice{
 						util.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
@@ -282,7 +282,7 @@ func TestOverrideScore(t *testing.T) {
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
 					},
-					"Metax": util.PodSingleDevice{
+					"Metax-GPU": util.PodSingleDevice{
 						util.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},

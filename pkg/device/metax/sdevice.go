@@ -191,7 +191,9 @@ func (sdev *MetaxSDevices) CheckUUID(annos map[string]string, d util.DeviceUsage
 }
 
 func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	devices, _ := sdev.GetNodeDevices(*n)
+
+	return len(devices) > 0, true
 }
 
 func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
