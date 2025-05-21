@@ -664,3 +664,137 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 		})
 	}
 }
+
+func TestPlatternMIG(t *testing.T) {
+	tests := []struct {
+		name        string
+		n           *MigInUse
+		templates   []Geometry
+		templateIdx int
+		want        *MigInUse
+	}{
+		{
+			name: "empty template",
+			n:    &MigInUse{},
+			templates: []Geometry{
+				{},
+			},
+			templateIdx: 0,
+			want: &MigInUse{
+				Index:     0,
+				UsageList: nil,
+			},
+		},
+		{
+			name: "single template with one count",
+			n:    &MigInUse{},
+			templates: []Geometry{
+				{
+					{
+						Name:   "1g.5gb",
+						Memory: 5,
+						Count:  1,
+					},
+				},
+			},
+			templateIdx: 0,
+			want: &MigInUse{
+				Index: 0,
+				UsageList: MIGS{
+					{
+						Name:   "1g.5gb",
+						Memory: 5,
+						InUse:  false,
+					},
+				},
+			},
+		},
+		{
+			name: "multiple templates with different counts",
+			n:    &MigInUse{},
+			templates: []Geometry{
+				{
+					{
+						Name:   "1g.5gb",
+						Memory: 5,
+						Count:  2,
+					},
+					{
+						Name:   "2g.10gb",
+						Memory: 10,
+						Count:  1,
+					},
+				},
+			},
+			templateIdx: 0,
+			want: &MigInUse{
+				Index: 0,
+				UsageList: MIGS{
+					{
+						Name:   "1g.5gb",
+						Memory: 5,
+						InUse:  false,
+					},
+					{
+						Name:   "1g.5gb",
+						Memory: 5,
+						InUse:  false,
+					},
+					{
+						Name:   "2g.10gb",
+						Memory: 10,
+						InUse:  false,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			PlatternMIG(tt.n, tt.templates, tt.templateIdx)
+			assert.DeepEqual(t, tt.want, tt.n)
+		})
+	}
+}
+
+func TestGetDevicesUUIDList(t *testing.T) {
+	tests := []struct {
+		name  string
+		infos []*DeviceInfo
+		want  []string
+	}{
+		{
+			name:  "empty device list",
+			infos: []*DeviceInfo{},
+			want:  []string{},
+		},
+		{
+			name: "single device",
+			infos: []*DeviceInfo{
+				{ID: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313"},
+			},
+			want: []string{"GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313"},
+		},
+		{
+			name: "multiple devices",
+			infos: []*DeviceInfo{
+				{ID: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313"},
+				{ID: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"},
+				{ID: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4"},
+			},
+			want: []string{
+				"GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313",
+				"GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+				"GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := GetDevicesUUIDList(tt.infos)
+			assert.DeepEqual(t, tt.want, got)
+		})
+	}
+}
