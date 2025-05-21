@@ -42,6 +42,7 @@ import (
 	roottransform "github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/transform/root"
 	"github.com/sirupsen/logrus"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
+	"tags.cncf.io/container-device-interface/pkg/parser"
 )
 
 const (
@@ -189,5 +190,5 @@ func (cdi *cdiHandler) CreateSpecFile() error {
 // QualifiedName constructs a CDI qualified device name for the specified resources.
 // Note: This assumes that the specified id matches the device name returned by the naming strategy.
 func (cdi *cdiHandler) QualifiedName(class string, id string) string {
-	return cdiapi.QualifiedName(cdi.vendor, class, id)
+	return parser.QualifiedName(cdi.vendor, class, id)
 }

@@ -87,7 +87,7 @@ jobs:
     name: Unit test
     needs: [ lint, get_info ] # rely on lint & get_info successful completion
     runs-on: ubuntu-22.04
-    if: needs.get_info.outputs.e2e_run == 'true'
+    if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -160,7 +160,7 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@v6.16.0
+        uses: docker/build-push-action@v6.17.0
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
