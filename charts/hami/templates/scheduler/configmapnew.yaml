@@ -50,6 +50,8 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.iluvatarResourceName }}
         ignoredByScheduler: true
+      - name: "metax-tech.com/gpu"
+        ignoredByScheduler: true
       - name: {{ .Values.metaxResourceName }}
         ignoredByScheduler: true
       - name: {{ .Values.metaxResourceCore }}
