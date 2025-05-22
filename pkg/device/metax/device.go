@@ -17,8 +17,8 @@ limitations under the License.
 package metax
 
 import (
+	"encoding/json"
 	"fmt"
-	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -32,8 +32,8 @@ type MetaxDevices struct {
 }
 
 const (
-	MetaxGPUDevice       = "Metax"
-	MetaxGPUCommonWord   = "Metax"
+	MetaxGPUDevice       = "Metax-GPU"
+	MetaxGPUCommonWord   = "Metax-GPU"
 	MetaxAnnotationLoss  = "metax-tech.com/gpu.topology.losses"
 	MetaxAnnotationScore = "metax-tech.com/gpu.topology.scores"
 )
@@ -79,6 +79,16 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, erro
 }
 
 func (dev *MetaxDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+	devlist, ok := pd[MetaxGPUDevice]
+	if ok && len(devlist) > 0 {
+		deviceStr := util.EncodePodSingleDevice(devlist)
+
+		(*annoinput)[util.InRequestDevices[MetaxGPUDevice]] = deviceStr
+		(*annoinput)[util.SupportDevices[MetaxGPUDevice]] = deviceStr
+		klog.Infof("pod add annotation key [%s, %s], values is [%s]",
+			util.InRequestDevices[MetaxGPUDevice], util.SupportDevices[MetaxGPUDevice], deviceStr)
+	}
+
 	return *annoinput
 }
 
@@ -106,7 +116,9 @@ func (dev *MetaxDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) 
 }
 
 func (dev *MetaxDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	count, _ := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
+
+	return count > 0, true
 }
 
 func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
@@ -143,18 +155,21 @@ func (dev *MetaxDevices) CustomFilterRule(allocated *util.PodDevices, request ut
 	return true
 }
 
-func parseMetaxAnnos(input string, index int) float32 {
-	str := (strings.Split(input, ":"))[index]
-	if strings.Contains(str, ",") {
-		str = strings.Split(str, ",")[0]
-	} else {
-		str = strings.TrimRight(str, "}")
+func parseMetaxAnnos(annos string, index int) float32 {
+	scoreMap := map[int]int{}
+	err := json.Unmarshal([]byte(annos), &scoreMap)
+	if err != nil {
+		klog.Warningf("annos[%s] Unmarshal failed, %v", annos, err)
+		return 0
 	}
-	res, err := strconv.Atoi(str)
-	if err == nil {
-		return float32(res)
+
+	res, ok := scoreMap[index]
+	if !ok {
+		klog.Warningf("scoreMap[%v] not contains [%d]", scoreMap, index)
+		return 0
 	}
-	return 0
+
+	return float32(res)
 }
 
 func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
@@ -162,21 +177,29 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 	for _, dev := range podDevices {
 		sum += len(dev)
 	}
+
 	res := float32(0)
-	for idx, val := range node.Annotations {
-		if strings.Compare(policy, string(util.NodeSchedulerPolicyBinpack)) == 0 {
-			if strings.Compare(idx, MetaxAnnotationLoss) == 0 {
-				klog.InfoS("Detected annotations", "policy", policy, "key", idx, "value", val, "requesting", sum, "extract", parseMetaxAnnos(val, sum))
-				res = res + float32(2000) - parseMetaxAnnos(val, sum)
-				break
-			}
+	if policy == string(util.NodeSchedulerPolicyBinpack) {
+		lossAnno, ok := node.Annotations[MetaxAnnotationLoss]
+		if ok {
+			// it's preferred to select the node with lower loss
+			loss := parseMetaxAnnos(lossAnno, sum)
+			res = 2000 - loss
+
+			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
 		}
-		if strings.Compare(policy, string(util.NodeSchedulerPolicySpread)) == 0 {
-			klog.InfoS("Detected annotations", "policy", policy, "key", idx, "value", val, "requesting", sum, "extract", parseMetaxAnnos(val, sum))
-			res = parseMetaxAnnos(val, sum)
-			break
+	} else if policy == string(util.NodeSchedulerPolicySpread) {
+		scoreAnno, ok := node.Annotations[MetaxAnnotationScore]
+		if ok {
+			// it's preferred to select the node with higher score
+			// But we have to give it a smaller value because of Spread policy
+			score := parseMetaxAnnos(scoreAnno, sum)
+			res = 2000 - score
+
+			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
 		}
 	}
+
 	return res
 }
 

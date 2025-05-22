@@ -17,8 +17,8 @@
 
 ### 需求
 
-* Metax Driver >= 2.31.0
-* Metax GPU Operator >= 0.10.1
+* Metax Driver >= 2.32.0
+* Metax GPU Operator >= 0.10.2
 * Kubernetes >= 1.23
 
 ### 开启复用沐曦设备
