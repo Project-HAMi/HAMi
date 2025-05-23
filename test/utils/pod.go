@@ -17,8 +17,10 @@ limitations under the License.
 package utils
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -85,11 +87,11 @@ func DeletePod(clientSet *kubernetes.Clientset, namespace, podName string) error
 
 func WaitForPodRunning(clientSet kubernetes.Interface, namespace, podName string) error {
 	const (
-		checkInterval = 5 * time.Second // Interval for checking Pod status
-		timeout       = 5 * time.Minute // Increased timeout for GPU Pods
+		checkInterval = 30 * time.Second // Interval for checking Pod status
+		timeout       = 5 * time.Minute  // Increased timeout for GPU Pods
 	)
 
-	return wait.PollUntilContextTimeout(context.TODO(), checkInterval, timeout, true, func(context.Context) (bool, error) {
+	return wait.PollUntilContextTimeout(context.TODO(), checkInterval, timeout, true, func(ctx context.Context) (bool, error) {
 		// Fetch the Pod object from the Kubernetes API
 		pod, err := clientSet.CoreV1().Pods(namespace).Get(context.TODO(), podName, metav1.GetOptions{})
 		if err != nil {
@@ -122,4 +124,81 @@ func WaitForPodRunning(clientSet kubernetes.Interface, namespace, podName string
 		// If the Pod is not in Running, Failed, or Unknown state, continue waiting
 		return false, nil
 	})
+}
+
+func GetNamespaceList(clientSet *kubernetes.Clientset) ([]string, error) {
+	namespaces, err := clientSet.CoreV1().Namespaces().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		klog.Errorf("Failed to list namespaces: %v", err)
+		return nil, err
+	}
+
+	var nsList []string
+	for _, ns := range namespaces.Items {
+		nsList = append(nsList, ns.Name)
+	}
+
+	return nsList, err
+}
+
+func GetPodLogs(clientSet *kubernetes.Clientset, namespace, podName string) (string, error) {
+	req := clientSet.CoreV1().Pods(namespace).GetLogs(podName, &corev1.PodLogOptions{})
+	podLogs, err := req.Stream(context.TODO())
+	if err != nil {
+		return "", err
+	}
+	defer podLogs.Close()
+	buf := new(bytes.Buffer)
+	if _, err = io.Copy(buf, podLogs); err != nil {
+		return "", err
+	}
+	return buf.String(), nil
+}
+
+func CheckPodDetails(clientSet *kubernetes.Clientset) {
+	namespaces, err := GetNamespaceList(clientSet)
+	if err != nil {
+		klog.Errorf("Failed to get namespaces: %v", err)
+		return
+	}
+
+	for _, ns := range namespaces {
+		pods, err := GetPods(clientSet, ns)
+		if err != nil {
+			klog.Errorf("Failed to get pods in namespace %s: %v", ns, err)
+			continue
+		}
+
+		for _, pod := range pods.Items {
+			status := pod.Status.Phase
+
+			if status == corev1.PodRunning || status == corev1.PodSucceeded {
+				continue
+			}
+
+			klog.Infof("Pod %s/%s is in %s status", ns, pod.Name, status)
+
+			klog.Infof("Show events for %s/%s:", ns, pod.Name)
+			events, err := GetPodEvents(clientSet, ns, pod.Name)
+			if err != nil {
+				klog.Errorf("Failed to get events for %s/%s: %v", ns, pod.Name, err)
+				return
+			}
+
+			if len(events) > 0 {
+				for _, event := range events {
+					klog.Infof("Reason: %s, Message: %s \n", event.Reason, event.Message)
+				}
+			}
+
+			logs, err := GetPodLogs(clientSet, ns, pod.Name)
+			if err != nil {
+				klog.Errorf("Failed to get logs for %s/%s: %v", ns, pod.Name, err)
+				return
+			}
+
+			klog.Infof("Show logs for %s/%s:", ns, pod.Name)
+			klog.Infof(logs)
+		}
+	}
 }
