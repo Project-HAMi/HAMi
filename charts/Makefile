@@ -20,7 +20,7 @@ update-versions:
 	hami_version="$(VERSION)";		\
 	chart_version=` echo $(VERSION) | tr -d 'v' ` ; \
 	sed -i 's/version: "*'$(VERSION_REGEX)'"*/version: '$$chart_version'/g' $(CHART_FILE);		\
-	sed -i 's/appVersion: "*'$(VERSION_REGEX)'"*/appVersion: "'$$chart_version'"/g' $(CHART_FILE);	\
+	sed -i 's/appVersion: "*'$(VERSION_REGEX)'"*/appVersion: "'$$hami_version'"/g' $(CHART_FILE);	\
 	sed -i 's/version: "*'$(VERSION_REGEX)'"*/version: "'$$hami_version'"/g' $(VALUES_FILE)
 
 lint: update-versions
