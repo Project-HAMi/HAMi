@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -663,4 +664,19 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeNodeDevices(t *testing.T) {
+	pairScore := "[{\"uuid\":\"GPU-0\",\"score\":{\"GPU-1\":50,\"GPU-2\":20,\"GPU-3\":20}}]"
+	_, err := DecodePairScores(pairScore)
+	assert.NilError(t, err)
+}
+
+func TestLookupEnvBoolOr(t *testing.T) {
+	defer func() { _ = os.Unsetenv("FOO") }()
+	assert.Equal(t, false, LookupEnvBoolOr("", false), "default value")
+	_ = os.Setenv("FOO", "true")
+	assert.Equal(t, true, LookupEnvBoolOr("FOO", false), "env var value")
+	_ = os.Setenv("FOO", "false")
+	assert.Equal(t, false, LookupEnvBoolOr("FOO", false), "false value")
 }

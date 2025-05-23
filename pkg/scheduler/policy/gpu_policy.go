@@ -26,6 +26,8 @@ type DeviceListsScore struct {
 	Device *util.DeviceUsage
 	// Score recode every device user/allocate score
 	Score float32
+	// PairScore recode gpu topology score
+	PairScore *util.DevicePairScore
 }
 
 type DeviceUsageList struct {

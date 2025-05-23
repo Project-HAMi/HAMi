@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -90,6 +91,7 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
 	reason := make(map[string]int)
+	needTopology := checkTopology(request)
 	for i := len(node.Devices.DeviceLists) - 1; i >= 0; i-- {
 		dev := node.Devices.DeviceLists[i].Device
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -161,7 +163,9 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "node", nodeName, "device", dev.ID)
-			k.Nums--
+			if !needTopology {
+				k.Nums--
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
@@ -170,12 +174,21 @@ func fitInCertainDevice(node *NodeUsage, request util.ContainerDeviceRequest, an
 				Usedcores: k.Coresreq,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && !needTopology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "node", nodeName, "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
 		if dev.Mode == "mig" {
 			i++
+		}
+	}
+	if needTopology {
+		if len(tmpDevs[k.Type]) > int(originReq) {
+			combinations := generateCombinations(request, tmpDevs)
+			combination := computeBestCombination(node, combinations)
+			tmpDevs[k.Type] = combination
+			klog.InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs, ""
 		}
 	}
 	if len(tmpDevs) > 0 {
@@ -191,6 +204,67 @@ func genReason(reasons map[string]int, cards int) string {
 		reason = append(reason, fmt.Sprintf("%d/%d %s", cnt, cards, r))
 	}
 	return strings.Join(reason, ", ")
+}
+
+func checkTopology(request util.ContainerDeviceRequest) bool {
+	topologyEnabled := util.LookupEnvBoolOr("ENABLE_TOPOLOGY_SCORE", false)
+	return topologyEnabled && strings.Compare(request.Type, nvidia.NvidiaGPUDevice) == 0
+}
+
+func generateCombinations(request util.ContainerDeviceRequest, tmpDevs map[string]util.ContainerDevices) []util.ContainerDevices {
+	k := request
+	num := int(k.Nums)
+	devices := tmpDevs[k.Type]
+	// num = 3
+	// ["GPU0", "GPU1", "GPU2", "GPU3"]
+	// [["GPU0", "GPU1", "GPU2"],["GPU0", "GPU1", "GPU3"],["GPU0", "GPU2", "GPU3"],["GPU1", "GPU2", "GPU3"]]
+	var result []util.ContainerDevices
+	var helper func(util.ContainerDevices, int, int, util.ContainerDevices)
+
+	helper = func(arr util.ContainerDevices, start, k int, current util.ContainerDevices) {
+		if k == 0 {
+			temp := make(util.ContainerDevices, len(current))
+			copy(temp, current)
+			result = append(result, temp)
+			return
+		}
+
+		for i := start; i <= len(arr)-k; i++ {
+			current = append(current, arr[i])
+			helper(arr, i+1, k-1, current)
+			current = current[:len(current)-1]
+		}
+	}
+
+	helper(devices, 0, num, util.ContainerDevices{})
+	return result
+}
+
+func computeBestCombination(node *NodeUsage, combinations []util.ContainerDevices) util.ContainerDevices {
+	bestScore := 0
+	bestCombination := util.ContainerDevices{}
+	deviceScoreMap := make(map[string]*util.DevicePairScore)
+
+	for _, dev := range node.Devices.DeviceLists {
+		deviceScoreMap[dev.Device.ID] = dev.PairScore
+	}
+
+	for _, partition := range combinations {
+		totalScore := 0
+		firstDeviceUUID := partition[0].UUID
+		scoreMap := deviceScoreMap[firstDeviceUUID]
+		for _, dev := range partition {
+			if dev.UUID == firstDeviceUUID {
+				continue
+			}
+			totalScore += scoreMap.Scores[dev.UUID]
+		}
+		if totalScore > bestScore {
+			bestScore = totalScore
+			bestCombination = partition
+		}
+	}
+	return bestCombination
 }
 
 func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, string) {
