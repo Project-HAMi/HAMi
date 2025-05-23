@@ -236,14 +236,12 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		outStr := stdout.Bytes()
 		yaml.Unmarshal(outStr, &plugin.migCurrent)
 		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
-		if len(plugin.migCurrent.MigConfigs["current"]) == 1 && len(plugin.migCurrent.MigConfigs["current"][0].Devices) == 0 {
-			idx := 0
-			plugin.migCurrent.MigConfigs["current"][0].Devices = make([]int32, 0)
-			for idx < deviceNumbers {
-				plugin.migCurrent.MigConfigs["current"][0].Devices = append(plugin.migCurrent.MigConfigs["current"][0].Devices, int32(idx))
-				idx++
-			}
+
+		HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+		if err != nil {
+			klog.Infof("no device in node:%v", err)
 		}
+		plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
 		klog.Infoln("Mig export", plugin.migCurrent)
 	}
 	go func() {
@@ -678,4 +676,48 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(driverRoot string, ids []string
 	}
 
 	return specs
+}
+
+func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {
+	if migConfigs == nil {
+		return nil, fmt.Errorf("migConfigs cannot be nil")
+	}
+	if deviceCount <= 0 {
+		return nil, fmt.Errorf("deviceCount must be positive")
+	}
+
+	transformConfigs := func() (nvidia.MigConfigSpecSlice, error) {
+		var result nvidia.MigConfigSpecSlice
+
+		if len(migConfigs["current"]) == 1 && len(migConfigs["current"][0].Devices) == 0 {
+			for i := 0; i < deviceCount; i++ {
+				config := deepCopyMigConfig(migConfigs["current"][0])
+				config.Devices = []int32{int32(i)}
+				result = append(result, config)
+			}
+			return result, nil
+		}
+
+		deviceToConfig := make(map[int32]*nvidia.MigConfigSpec)
+		for i := range migConfigs["current"] {
+			for _, device := range migConfigs["current"][i].Devices {
+				deviceToConfig[device] = &migConfigs["current"][i]
+			}
+		}
+
+		for i := 0; i < deviceCount; i++ {
+			deviceIndex := int32(i)
+			config, exists := deviceToConfig[deviceIndex]
+			if !exists {
+				return nil, fmt.Errorf("device %d does not match any MIG configuration", i)
+			}
+			newConfig := deepCopyMigConfig(*config)
+			newConfig.Devices = []int32{deviceIndex}
+			result = append(result, newConfig)
+
+		}
+		return result, nil
+	}
+
+	return transformConfigs()
 }
