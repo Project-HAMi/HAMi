@@ -20,6 +20,7 @@ import (
 	"flag"
 	"fmt"
 	"slices"
+	"sort"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -34,8 +35,8 @@ type KunlunDevices struct {
 }
 
 const (
-	KunlunGPUDevice       = "Kunlun"
-	KunlunGPUCommonWord   = "Kunlun"
+	KunlunGPUDevice       = "kunlun"
+	KunlunGPUCommonWord   = "kunlun"
 	KunlunDeviceSelection = "BAIDU_COM_DEVICE_IDX"
 	KunlunUseUUID         = "baidu.com/use-gpuuuid"
 	KunlunNoUseUUID       = "baidu.com/nouse-gpuuuid"
@@ -174,8 +175,85 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func addidx(temp []int, value int) []int {
+	for _, val := range temp {
+		if val == value {
+			return temp
+		}
+	}
+	temp = append(temp, value)
+	return temp
+}
+
+func getvalue(t int) int {
+	if t == 4 {
+		return 0
+	}
+	if t == 1 {
+		return 2
+	}
+	return 1
+}
+
+func countbubble(t []int) int {
+	left := 0
+	right := 0
+	for _, val := range t {
+		if val < 4 {
+			left++
+		} else {
+			right++
+		}
+	}
+	if left == 0 && right == 0 {
+		return 1
+	}
+	return getvalue(left) + getvalue(right)
+}
+
+func calcscore(p []int, c []int) float32 {
+	sort.Slice(p, func(i, j int) bool {
+		return i < j
+	})
+	sort.Slice(c, func(i, j int) bool {
+		return i < j
+	})
+	prev := countbubble(p)
+	cur := countbubble(c)
+	switch cur - prev {
+	case -1:
+		return 2000
+	case 0:
+		return 1000
+	case 1:
+		return 0
+	case 2:
+		return -1000
+	}
 	return 0
+}
+
+func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+	current := []int{}
+	prev := []int{}
+	for _, dev := range previous {
+		if !strings.Contains(dev.Type, KunlunGPUDevice) {
+			return 0
+		}
+		if dev.Used > 0 {
+			prev = addidx(prev, int(dev.Index))
+		}
+	}
+	for _, ctr := range podDevices {
+		for _, val := range ctr {
+			if !strings.Contains(val.Type, KunlunGPUDevice) {
+				return 0
+			}
+			current = addidx(current, val.Idx)
+		}
+	}
+	klog.Infoln("-=-=-=-=-=-=previous=", prev, "current=", current)
+	return calcscore(prev, current)
 }
 
 func (dev *KunlunDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {

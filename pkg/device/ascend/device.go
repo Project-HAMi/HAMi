@@ -277,7 +277,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	return 0
 }
 

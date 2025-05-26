@@ -311,7 +311,7 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 	return *annoinput
 }
 
-func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	return 0
 }
 

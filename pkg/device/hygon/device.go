@@ -265,7 +265,7 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 	return *annoinput
 }
 
-func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	return 0
 }
 

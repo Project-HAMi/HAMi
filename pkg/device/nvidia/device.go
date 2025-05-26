@@ -504,7 +504,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 	return true
 }
 
-func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	return 0
 }
 

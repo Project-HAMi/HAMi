@@ -72,10 +72,50 @@ func Test_graphSelect(t *testing.T) {
 			},
 			want1: []int{},
 		},
+		{
+			name: "allocate 2 cards",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					&util.DeviceUsage{Index: 0, Used: 0},
+					&util.DeviceUsage{Index: 1, Used: 0},
+					&util.DeviceUsage{Index: 2, Used: 0},
+					&util.DeviceUsage{Index: 3, Used: 0},
+					&util.DeviceUsage{Index: 4, Used: 0},
+					&util.DeviceUsage{Index: 5, Used: 1},
+					&util.DeviceUsage{Index: 6, Used: 0},
+					&util.DeviceUsage{Index: 7, Used: 0},
+				},
+				c: 2,
+			},
+			want1: []int{4, 6},
+		},
+		{
+			name: "allocate 2 cards",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					&util.DeviceUsage{Index: 0, Used: 0},
+					&util.DeviceUsage{Index: 1, Used: 0},
+					&util.DeviceUsage{Index: 2, Used: 0},
+					&util.DeviceUsage{Index: 3, Used: 0},
+					&util.DeviceUsage{Index: 4, Used: 0},
+					&util.DeviceUsage{Index: 5, Used: 1},
+					&util.DeviceUsage{Index: 6, Used: 0},
+					&util.DeviceUsage{Index: 7, Used: 0},
+				},
+				c: 1,
+			},
+			want1: []int{4},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1 := graghSelect(test.args.d, 8)
+			result1 := graghSelect(test.args.d, test.args.c)
 			assert.DeepEqual(t, result1, test.want1)
 		})
 	}
