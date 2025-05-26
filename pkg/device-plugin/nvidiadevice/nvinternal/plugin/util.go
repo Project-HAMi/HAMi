@@ -31,6 +31,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -288,6 +289,22 @@ func containsDevice(target int, devices []int32) bool {
 		}
 	}
 	return false
+}
+
+// Helper function to deepcopy new mig spec
+func deepCopyMigConfig(src nvidia.MigConfigSpec) nvidia.MigConfigSpec {
+	dst := src
+	if src.Devices != nil {
+		dst.Devices = make([]int32, len(src.Devices))
+		copy(dst.Devices, src.Devices)
+	}
+	if src.MigDevices != nil {
+		dst.MigDevices = make(map[string]int32)
+		for k, v := range src.MigDevices {
+			dst.MigDevices[k] = v
+		}
+	}
+	return dst
 }
 
 func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c util.ContainerDevices) []string {
