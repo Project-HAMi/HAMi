@@ -70,6 +70,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 			m.nodes[nodeID].Devices = tmp
 			m.nodes[nodeID].Devices = append(m.nodes[nodeID].Devices, nodeInfo.Devices...)
 		}
+		m.nodes[nodeID].Node = nodeInfo.Node
 	} else {
 		m.nodes[nodeID] = nodeInfo
 	}
