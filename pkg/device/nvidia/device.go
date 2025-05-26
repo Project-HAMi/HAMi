@@ -88,6 +88,15 @@ const (
 	DisableCorePolicy GPUCoreUtilizationPolicy = "disable"
 )
 
+type LibCudaLogLevel string
+
+const (
+	Error    LibCudaLogLevel = "0"
+	Warnings LibCudaLogLevel = "1"
+	Infos    LibCudaLogLevel = "3"
+	Debugs   LibCudaLogLevel = "4"
+)
+
 type NvidiaConfig struct {
 	ResourceCountName            string  `yaml:"resourceCountName"`
 	ResourceMemoryName           string  `yaml:"resourceMemoryName"`
@@ -108,6 +117,8 @@ type NvidiaConfig struct {
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
 	RuntimeClassName string `yaml:"runtimeClassName"`
+	// LogLevel is LIBCUDA_LOG_LEVEL value
+	LogLevel LibCudaLogLevel `yaml:"libCudaLogLevel"`
 }
 
 type FilterDevice struct {

@@ -459,6 +459,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				if plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
+				if plugin.schedulerConfig.LogLevel != "" {
+					response.Envs["LIBCUDA_LOG_LEVEL"] = string(plugin.schedulerConfig.LogLevel)
+				}
 				if plugin.schedulerConfig.DisableCoreLimit {
 					response.Envs[util.CoreLimitSwitch] = "disable"
 				}
