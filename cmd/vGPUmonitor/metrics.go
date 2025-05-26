@@ -347,13 +347,11 @@ func (cc ClusterManagerCollector) isPodUIDMatched(pod *corev1.Pod, podUID string
 
 func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, pod *corev1.Pod, ctr corev1.Container, c *nvidia.ContainerUsage, nowSec int64) error {
 	// Validate inputs
-	klog.Infoln("0--0-0-0-0")
 	if c == nil || c.Info == nil {
 		klog.Errorf("Container or ContainerInfo is nil for Pod %s/%s, Container %s", pod.Namespace, pod.Name, ctr.Name)
 		return fmt.Errorf("container or container info is nil")
 	}
 
-	klog.Infoln("0--0-0-0-1=", c.Info, c.Info.DeviceNum())
 	// Iterate through each device
 	for i := range c.Info.DeviceNum() {
 		uuid := c.Info.DeviceUUID(i)
@@ -373,7 +371,6 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		smUtil := c.Info.DeviceSmUtil(i)
 		lastKernelTime := c.Info.LastKernelTime()
 
-		klog.Infoln("-=-=-=-=", memoryTotal, memoryLimit, lastKernelTime)
 		// Send metrics to Prometheus
 		labels := []string{pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid}
 
