@@ -237,7 +237,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 		return []*util.DeviceInfo{}, errors.New("no gpu found on node")
 	}
 	for _, val := range nodedevices {
-		if val.Mode == "mig" {
+		if val.Mode == MigMode {
 			val.MIGTemplate = make([]util.Geometry, 0)
 			for _, migTemplates := range dev.config.MigGeometriesList {
 				found := false
@@ -460,7 +460,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 		UsageList: make(util.MIGS, 0),
 	}
 	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
-	if device.Mode == "mig" {
+	if device.Mode == MigMode {
 		if len(deviceUsageCurrent.UsageList) == 0 {
 			tmpfound := false
 			for tidx, templates := range device.MigTemplate {
@@ -522,7 +522,7 @@ func (dev *NvidiaGPUDevices) migNeedsReset(n *util.DeviceUsage) bool {
 
 func (dev *NvidiaGPUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
-	if n.Mode == "mig" {
+	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
 			for tidx, templates := range n.MigTemplate {
 				if templates[0].Memory < ctr.Usedmem {

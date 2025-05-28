@@ -120,7 +120,7 @@ var (
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
 		"MigInfo",
-		"Container device last kernel description",
+		"Mig device information for container",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
 	)
 )
@@ -450,15 +450,17 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 						uuid := strings.Split(ctrDev.UUID, "[")[0]
 						_, idx, err := util.ExtractMigTemplatesFromUUID(ctrDev.UUID)
 						if err != nil {
+							klog.Errorf("Failed to get mig template for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							continue
 						}
 						gpuInstanceId, err := dp.GetMigGpuInstanceIdFromIndex(ctrDev.UUID, idx)
 						if err != nil {
+							klog.Errorf("Failed to get mig InstanceId for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							continue
 						}
 						labels := []string{pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
 						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
-							klog.Errorf("Failed to send MigInfo metric for device %d in Pod %s/%s, Container %s: %v", ctrIdx, pod.Namespace, pod.Name, container.Name, err)
+							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							return err
 						}
 					}
