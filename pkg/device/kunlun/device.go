@@ -288,6 +288,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 			}
 		}
 	}
+	oddorder := []int{1, 3, 2, 4}
 	switch count {
 	case 8:
 		{
@@ -296,39 +297,19 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 			}
 			return []int{}
 		}
-	case 4:
+	case 1, 2, 4:
 		{
-			if leftwing == count {
-				return []int{0, 1, 2, 3}
-			}
-			if rightwing == count {
-				return []int{4, 5, 6, 7}
-			}
-			return []int{}
-		}
-	case 2:
-		{
-			if leftwing >= 2 || rightwing >= 2 {
-				for slots := 2; slots <= 4; slots++ {
-					if leftwing == slots {
-						return devicepick(devices, 0, 2)
+			if leftwing >= count || rightwing >= count {
+				for slots := count; slots <= 4; slots++ {
+					num := slots
+					if count%2 == 1 {
+						num = oddorder[slots]
 					}
-					if rightwing == slots {
-						return devicepick(devices, 4, 2)
+					if leftwing == num {
+						return devicepick(devices, 0, count)
 					}
-				}
-			}
-			return []int{}
-		}
-	case 1:
-		{
-			if leftwing >= 1 || rightwing >= 1 {
-				for slots := 1; slots <= 4; slots++ {
-					if leftwing == slots {
-						return devicepick(devices, 0, 1)
-					}
-					if rightwing == slots {
-						return devicepick(devices, 4, 1)
+					if rightwing == num {
+						return devicepick(devices, 4, count)
 					}
 				}
 			}

@@ -22,8 +22,14 @@ import (
 	"k8s.io/klog/v2"
 )
 
+type DeviceListsScore struct {
+	Device *util.DeviceUsage
+	// Score recode every device user/allocate score
+	Score float32
+}
+
 type DeviceUsageList struct {
-	DeviceLists []*util.DeviceListsScore
+	DeviceLists []*DeviceListsScore
 	Policy      string
 }
 

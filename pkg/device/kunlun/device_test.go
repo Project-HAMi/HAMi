@@ -19,8 +19,10 @@ package kunlun
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func Test_graphSelect(t *testing.T) {
@@ -39,14 +41,14 @@ func Test_graphSelect(t *testing.T) {
 				c int
 			}{
 				d: []*util.DeviceUsage{
-					&util.DeviceUsage{Index: 0, Used: 0},
-					&util.DeviceUsage{Index: 1, Used: 0},
-					&util.DeviceUsage{Index: 2, Used: 0},
-					&util.DeviceUsage{Index: 3, Used: 0},
-					&util.DeviceUsage{Index: 4, Used: 0},
-					&util.DeviceUsage{Index: 5, Used: 0},
-					&util.DeviceUsage{Index: 6, Used: 0},
-					&util.DeviceUsage{Index: 7, Used: 0},
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 0},
+					{Index: 6, Used: 0},
+					{Index: 7, Used: 0},
 				},
 				c: 8,
 			},
@@ -59,14 +61,14 @@ func Test_graphSelect(t *testing.T) {
 				c int
 			}{
 				d: []*util.DeviceUsage{
-					&util.DeviceUsage{Index: 0, Used: 0},
-					&util.DeviceUsage{Index: 1, Used: 0},
-					&util.DeviceUsage{Index: 2, Used: 0},
-					&util.DeviceUsage{Index: 3, Used: 0},
-					&util.DeviceUsage{Index: 4, Used: 0},
-					&util.DeviceUsage{Index: 5, Used: 1},
-					&util.DeviceUsage{Index: 6, Used: 0},
-					&util.DeviceUsage{Index: 7, Used: 0},
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 1},
+					{Index: 6, Used: 0},
+					{Index: 7, Used: 0},
 				},
 				c: 8,
 			},
@@ -79,34 +81,54 @@ func Test_graphSelect(t *testing.T) {
 				c int
 			}{
 				d: []*util.DeviceUsage{
-					&util.DeviceUsage{Index: 0, Used: 0},
-					&util.DeviceUsage{Index: 1, Used: 0},
-					&util.DeviceUsage{Index: 2, Used: 0},
-					&util.DeviceUsage{Index: 3, Used: 0},
-					&util.DeviceUsage{Index: 4, Used: 0},
-					&util.DeviceUsage{Index: 5, Used: 1},
-					&util.DeviceUsage{Index: 6, Used: 0},
-					&util.DeviceUsage{Index: 7, Used: 0},
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 1},
+					{Index: 6, Used: 0},
+					{Index: 7, Used: 0},
 				},
 				c: 2,
 			},
 			want1: []int{4, 6},
 		},
 		{
-			name: "allocate 2 cards",
+			name: "allocate 1 card",
 			args: struct {
 				d []*util.DeviceUsage
 				c int
 			}{
 				d: []*util.DeviceUsage{
-					&util.DeviceUsage{Index: 0, Used: 0},
-					&util.DeviceUsage{Index: 1, Used: 0},
-					&util.DeviceUsage{Index: 2, Used: 0},
-					&util.DeviceUsage{Index: 3, Used: 0},
-					&util.DeviceUsage{Index: 4, Used: 0},
-					&util.DeviceUsage{Index: 5, Used: 1},
-					&util.DeviceUsage{Index: 6, Used: 0},
-					&util.DeviceUsage{Index: 7, Used: 0},
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 1},
+					{Index: 6, Used: 0},
+					{Index: 7, Used: 0},
+				},
+				c: 1,
+			},
+			want1: []int{4},
+		},
+		{
+			name: "allocate 1 card",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 1},
+					{Index: 3, Used: 1},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 0},
+					{Index: 6, Used: 6},
+					{Index: 7, Used: 0},
 				},
 				c: 1,
 			},
@@ -117,6 +139,104 @@ func Test_graphSelect(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			result1 := graghSelect(test.args.d, test.args.c)
 			assert.DeepEqual(t, result1, test.want1)
+		})
+	}
+}
+
+func Test_ScoreNode(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node       *corev1.Node
+			podDevices util.PodSingleDevice
+			usage      []*util.DeviceUsage
+			policy     string
+		}
+		want float32
+	}{
+		{
+			name: "Scenario 1",
+			args: struct {
+				node       *corev1.Node
+				podDevices util.PodSingleDevice
+				usage      []*util.DeviceUsage
+				policy     string
+			}{
+				node: &corev1.Node{},
+				podDevices: util.PodSingleDevice{
+					util.ContainerDevices{
+						{
+							Idx:  int(0),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(1),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(2),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(3),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(4),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(5),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(6),
+							Type: KunlunGPUDevice,
+						},
+						{
+							Idx:  int(7),
+							Type: KunlunGPUDevice,
+						},
+					},
+				},
+				usage: []*util.DeviceUsage{
+					{Index: 0, Used: 1, Type: KunlunGPUDevice},
+					{Index: 1, Used: 1, Type: KunlunGPUDevice},
+					{Index: 2, Used: 1, Type: KunlunGPUDevice},
+					{Index: 3, Used: 1, Type: KunlunGPUDevice},
+				},
+				policy: "binpack",
+			},
+			want: float32(2000),
+		},
+		{
+			name: "Scenario 2",
+			args: struct {
+				node       *corev1.Node
+				podDevices util.PodSingleDevice
+				usage      []*util.DeviceUsage
+				policy     string
+			}{
+				node: &corev1.Node{},
+				podDevices: util.PodSingleDevice{
+					util.ContainerDevices{
+						{
+							Idx:  int(0),
+							Type: KunlunGPUDevice,
+						},
+					},
+				},
+				usage:  []*util.DeviceUsage{},
+				policy: "spread",
+			},
+			want: float32(-1000),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := KunlunDevices{}
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.usage, test.args.policy)
+			assert.DeepEqual(t, result, test.want)
 		})
 	}
 }
