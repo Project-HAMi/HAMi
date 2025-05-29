@@ -1,7 +1,7 @@
 apiVersion: v2
 name: hami
 version: 2.5.0
-kubeVersion: ">= 1.16.0"
+kubeVersion: ">= 1.18.0-0"
 description: Heterogeneous AI Computing Virtualization Middleware
 keywords:
   - vgpu

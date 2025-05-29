@@ -452,7 +452,7 @@ func Test_ScoreNode(t *testing.T) {
 				node: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.losses": "{\"1\":100,\"2\":200}",
+							"metax-tech.com/gpu.topology.scores": "{\"1\":100,\"2\":200}",
 						},
 					},
 				},
@@ -469,7 +469,7 @@ func Test_ScoreNode(t *testing.T) {
 				},
 				policy: "spread",
 			},
-			want: float32(100),
+			want: float32(1900),
 		},
 	}
 	for _, test := range tests {
