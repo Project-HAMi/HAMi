@@ -55,7 +55,8 @@ const (
 )
 
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
-func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhealthy chan<- *Device) error {
+func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhealthy chan<- *Device, disableNVML <-chan bool) error {
+	klog.V(4).Info("Check Health start Running")
 	disableHealthChecks := strings.ToLower(os.Getenv(envDisableHealthChecks))
 	if disableHealthChecks == "all" {
 		disableHealthChecks = allHealthChecks
@@ -148,6 +149,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhe
 		select {
 		case <-stop:
 			return nil
+		case signal := <-disableNVML:
+			if signal {
+				klog.Info("Check Health has been  received close signal")
+				return fmt.Errorf("close signal received")
+			}
 		default:
 		}
 

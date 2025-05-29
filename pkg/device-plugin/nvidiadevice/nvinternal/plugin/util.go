@@ -94,6 +94,7 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
@@ -150,6 +151,7 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 }
 
 func GetMigUUIDFromIndex(uuid string, idx int) string {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
@@ -184,6 +186,7 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 }
 
 func GetDeviceNums() (int, error) {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
@@ -196,7 +199,44 @@ func GetDeviceNums() (int, error) {
 	return count, nil
 }
 
+func (nv *NvidiaDevicePlugin) DisableOtherNVMLOperation() {
+	nv.disableHealthChecks <- true
+	nv.disableWatchAndRegister <- true
+	//wait for disableHealthChecks to be closed,signal must be true or wait forever
+	var ackHealthCheck bool
+	var ackWatchAndRegister bool
+	for {
+		select {
+		case ackDisableHealthChecksSignal := <-nv.ackDisableHealthChecks:
+			if ackDisableHealthChecksSignal {
+				ackHealthCheck = true
+			} else {
+				continue
+			}
+		case ackWatchAndRegisterSignal := <-nv.ackDisableWatchAndRegister:
+			if ackWatchAndRegisterSignal {
+				ackWatchAndRegister = true
+			} else {
+				continue
+			}
+		}
+		if ackHealthCheck && ackWatchAndRegister {
+			break
+		}
+	}
+}
+func (nv *NvidiaDevicePlugin) EnableOtherNVMLOperation() {
+	nv.disableHealthChecks <- false
+	nv.disableWatchAndRegister <- false
+}
+
 func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
+	nv.applyMutex.Lock()
+	nv.DisableOtherNVMLOperation()
+	defer func() {
+		nv.EnableOtherNVMLOperation()
+		nv.applyMutex.Unlock()
+	}()
 	data, err := yaml.Marshal(nv.migCurrent)
 	if err != nil {
 		klog.Error("marshal failed", err.Error())
@@ -209,7 +249,7 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if err != nil {
-		klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+		klog.Fatalf("nvidia-mig-parted failed with %s,reason:%s\n", err, stderr.String())
 	}
 	outStr := stdout.String()
 	klog.Infoln("Mig apply", outStr)
