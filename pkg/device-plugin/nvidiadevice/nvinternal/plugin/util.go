@@ -183,6 +183,30 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 	return res
 }
 
+func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	}
+	originuuid := strings.Split(uuid, "[")[0]
+	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get device uuid error ret=`, ret)
+		return 0, fmt.Errorf("nvml get device uuid error ret=%d", ret)
+	}
+	migdev, ret := nvml.DeviceGetMigDeviceHandleByIndex(ndev, idx)
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get mig device handle error ret=`, ret)
+		return 0, fmt.Errorf("nvml get mig device handle error ret=%d", ret)
+	}
+	res, ret := migdev.GetGpuInstanceId()
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get gpu instance id error ret=`, ret)
+		return 0, fmt.Errorf("nvml get gpu instance id error ret=%d", ret)
+	}
+	return res, nil
+}
+
 func GetDeviceNums() (int, error) {
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
