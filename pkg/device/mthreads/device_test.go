@@ -562,7 +562,7 @@ func Test_CustomFilterRule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MthreadsDevices{}
-			result := dev.CustomFilterRule(test.args.allocated, test.args.request, test.args.toAllocate, test.args.device)
+			result := dev.customFilterRule(test.args.allocated, test.args.request, test.args.toAllocate, test.args.device)
 			assert.Equal(t, result, test.want)
 		})
 	}

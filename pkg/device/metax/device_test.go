@@ -390,7 +390,7 @@ func Test_CustomFilterRule(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.CustomFilterRule(test.args.allocated, test.args.request, test.args.toAllocate, test.args.device)
+			result := dev.customFilterRule(test.args.allocated, test.args.request, test.args.toAllocate, test.args.device)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -475,7 +475,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.policy)
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.policy)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

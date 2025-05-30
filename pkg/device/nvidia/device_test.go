@@ -290,7 +290,7 @@ func Test_CheckType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
+			got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
 			assert.Equal(t, test.want, got)
 		})
 	}
