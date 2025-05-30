@@ -59,7 +59,6 @@ This is the architecture diagram of the HAMi release process
 Update version information through PR and create a new tag
 
 * update 'version' and 'appVersion' filed in 'charts/hami/Chart.yaml' by pr
-* update 'version' in 'charts/hami/values.yaml' by pr
 * update version in '/VERSION' by pr
 * a version tag should be set on right branch. The version should go with
   * v0.1.0
