@@ -2248,7 +2248,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &util.PodDevices{},
 			},
 			want1: false,
-			want2: "1/1 CardTypeMismatch",
+			want2: "Device type not found",
 		},
 	}
 	for _, test := range tests {
