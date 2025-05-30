@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vxpu-pod-demo
+spec:
+  containers:
+    - name: vxpu-pod-demo
+      image: pytorch:resnet50
+      workingDir: /root
+      command: ["sleep","infinity"]
+      resources:
+        limits:
+          kunlunxin.com/xpu: 1 # requesting a GPU
+          kunlunxin.com/xpu-memory: 24576 # each xpu require 24576 MiB device memory
