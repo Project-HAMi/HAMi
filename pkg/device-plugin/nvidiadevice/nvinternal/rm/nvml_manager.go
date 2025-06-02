@@ -37,7 +37,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 )
 

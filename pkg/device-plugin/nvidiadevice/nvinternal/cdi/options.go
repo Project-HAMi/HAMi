@@ -33,7 +33,7 @@
 package cdi
 
 import (
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
 // Option defines a function for passing options to the New() call

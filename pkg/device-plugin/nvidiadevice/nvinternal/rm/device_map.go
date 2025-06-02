@@ -38,7 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
@@ -53,7 +53,7 @@ type DeviceMap map[spec.ResourceName]Devices
 // NewDeviceMap creates a device map for the specified NVML library and config.
 func NewDeviceMap(nvmllib nvml.Interface, config *nvidia.DeviceConfig) (DeviceMap, error) {
 	b := deviceMapBuilder{
-		Interface: device.New(device.WithNvml(nvmllib)),
+		Interface: device.New(nvmllib),
 		config:    config,
 	}
 	return b.build()
