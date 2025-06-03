@@ -72,7 +72,10 @@ func (dev *KunlunDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) 
 func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(KunlunResourceCount), resource.DecimalSI).AsInt64()
+	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(KunlunResourceCount), resource.DecimalSI).AsInt64()
+	if !ok || cards == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", KunlunResourceCount)
+	}
 	for int64(i) < cards {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
 			Index:   uint(i),
@@ -303,7 +306,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 				for slots := count; slots <= 4; slots++ {
 					num := slots
 					if count%2 == 1 {
-						num = oddorder[slots]
+						num = oddorder[slots-1]
 					}
 					if leftwing == num {
 						return devicepick(devices, 0, count)

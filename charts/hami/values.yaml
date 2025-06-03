@@ -4,7 +4,7 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 imagePullSecrets: [ ]
-version: "v2.5.0"
+version: "v2.6.0"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -204,13 +204,17 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  kunlun:
+    enabled: true
+    customresources:
+      - kunlunxin.com/xpu
   enflame:
-    enabled: false
+    enabled: true
     customresources:
       - enflame.com/vgcu
       - enflame.com/vgcu-percentage
   mthreads:
-    enabled: false
+    enabled: true
     customresources:
       - mthreads.com/vgpu
   nvidia:

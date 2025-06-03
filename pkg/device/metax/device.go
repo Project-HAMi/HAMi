@@ -62,7 +62,10 @@ func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (
 func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	count, _ := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
+	count, ok := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
+	if !ok || count == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MetaxResourceCount)
+	}
 	for int64(i) < count {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
 			Index:   uint(i),

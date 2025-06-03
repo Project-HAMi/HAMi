@@ -161,7 +161,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 						score.Devices[idx] = append(score.Devices[idx], defaultContainerDevices)
 					}
 				}
-				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
+				klog.V(3).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 				fit, reason := fitInDevices(node, n, annos, task, &score.Devices)
 				ctrfit = fit
 				if !fit {
