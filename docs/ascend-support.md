@@ -1,6 +1,6 @@
 # Introduction to huawei.com/Ascend910A, Ascend910B Series, and Ascend310P Support
 
-HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B, 910B2, 910B3, 910B4), and 310P devices, providing several features similar to vGPU, including:
+HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B2, 910B3, 910B4), and 310P devices, providing several features similar to vGPU, including:
 
 * **_NPU sharing_**: Each task can allocate a portion of Ascend NPU instead of a whole NLU card, thus NPU can be shared among multiple tasks.
 
@@ -12,7 +12,7 @@ HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B, 9
 
 * Ascend docker runtime
 * Driver version > 24.1.rc1
-* Ascend device type: 910B, 910B2, 910B3, 910B4, 310P
+* Ascend device type: 910A, 910B2, 910B3, 910B4, 310P
 
 ## Enabling NPU Sharing
 
