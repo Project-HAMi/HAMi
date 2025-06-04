@@ -104,6 +104,14 @@ data:
                     {
                         "name": "{{ .Values.metaxResourceMem }}",
                         "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.kunlunxinResourceName }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
+                        "name": "{{ .Values.kunlunxinResourceMem }}",
+                        "ignoredByScheduler": true
                     }
                 ],
                 "ignoreable": false

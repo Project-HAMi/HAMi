@@ -76,4 +76,8 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      - name: {{ .Values.kunlunxinResourceName }}
+        ignoredByScheduler: true
+      - name: {{ .Values.kunlunxinResourceMem }}
+        ignoredByScheduler: true
 {{- end }}
