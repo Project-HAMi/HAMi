@@ -16,7 +16,7 @@
 
 ## 开启GPU复用
 
-* 获取[vxpu-device-plugin](https://hub.docker.com/r/riseunion/vxpu-device-plugin
+* 获取[vxpu-device-plugin](https://hub.docker.com/r/riseunion/vxpu-device-plugin)
 
 * 部署[vxpu-device-plugin]
 ```
