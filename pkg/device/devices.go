@@ -20,10 +20,11 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"github.com/Project-HAMi/HAMi/pkg/device/kunlunxin"
 	"os"
 	"reflect"
 	"strings"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlunxin"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
