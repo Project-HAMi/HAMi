@@ -160,7 +160,6 @@ func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.ReleaseNodeLock(n.Name, NodeLock, p, false)
 }
 
-/* HAMI Enterprise Characteristics */
 func (dev *Devices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, dev.CommonWord()) == 0 {
 		if d.Used == 0 {
