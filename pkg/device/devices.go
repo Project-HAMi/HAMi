@@ -374,6 +374,18 @@ func PodAllocationTrySuccess(nodeName string, devName string, lockName string, p
 
 func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockName string, deviceBindPhase string) {
 	newAnnos := map[string]string{util.DeviceBindPhase: deviceBindPhase}
+
+	// If binding is successful, clear all "to-allocate" annotations to prevent scheduler confusion
+	// This fixes issue #987 where pods with successful binding still retain to-allocate annotations
+	if deviceBindPhase == util.DeviceBindSuccess {
+		klog.V(5).Infof("Clearing to-allocate annotations for successfully bound pod %s/%s", pod.Namespace, pod.Name)
+		for _, toAllocateKey := range util.InRequestDevices {
+			// Set to empty string to remove the annotation
+			newAnnos[toAllocateKey] = ""
+			klog.V(5).Infof("Clearing annotation %s for pod %s/%s", toAllocateKey, pod.Namespace, pod.Name)
+		}
+	}
+
 	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
 		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 		return
