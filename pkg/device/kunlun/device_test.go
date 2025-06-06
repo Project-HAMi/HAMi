@@ -145,14 +145,14 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 1, Used: 1},
 					{Index: 2, Used: 1},
 					{Index: 3, Used: 0},
-					{Index: 4, Used: 0},
+					{Index: 4, Used: 1},
 					{Index: 5, Used: 1},
 					{Index: 6, Used: 1},
-					{Index: 7, Used: 1},
+					{Index: 7, Used: 0},
 				},
 				c: 2,
 			},
-			want1: []int{3, 4},
+			want1: []int{3, 7},
 		},
 	}
 	for _, test := range tests {
