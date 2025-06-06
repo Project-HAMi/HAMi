@@ -123,16 +123,36 @@ func Test_graphSelect(t *testing.T) {
 				d: []*util.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
-					{Index: 2, Used: 1},
-					{Index: 3, Used: 1},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 0},
 					{Index: 4, Used: 0},
 					{Index: 5, Used: 0},
-					{Index: 6, Used: 6},
-					{Index: 7, Used: 0},
+					{Index: 6, Used: 1},
+					{Index: 7, Used: 1},
 				},
 				c: 1,
 			},
 			want1: []int{4},
+		},
+		{
+			name: "allocate 2 card according to interconnect",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					{Index: 0, Used: 1},
+					{Index: 1, Used: 1},
+					{Index: 2, Used: 1},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 1},
+					{Index: 6, Used: 1},
+					{Index: 7, Used: 1},
+				},
+				c: 2,
+			},
+			want1: []int{3, 4},
 		},
 	}
 	for _, test := range tests {

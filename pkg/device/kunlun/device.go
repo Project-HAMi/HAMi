@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -40,6 +41,7 @@ const (
 	KunlunDeviceSelection = "BAIDU_COM_DEVICE_IDX"
 	KunlunUseUUID         = "baidu.com/use-gpuuuid"
 	KunlunNoUseUUID       = "baidu.com/nouse-gpuuuid"
+	InterGroupConnection  = "1-5,2-5,2-6,3-4"
 )
 
 var (
@@ -236,6 +238,29 @@ func calcscore(p []int, c []int) float32 {
 	return 0
 }
 
+func interconnect(devices []*util.DeviceUsage) []int {
+	for _, val := range devices {
+		if val.Used > 0 {
+			continue
+		}
+		for _, val2 := range devices {
+			if val2.Used > 0 || val2.Index == val.Index {
+				continue
+			}
+			pairs := strings.Split(InterGroupConnection, ",")
+			for _, p := range pairs {
+				lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
+				rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
+				klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
+				if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
+					return []int{int(val.Index), int(val2.Index)}
+				}
+			}
+		}
+	}
+	return []int{}
+}
+
 func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	current := []int{}
 	prev := []int{}
@@ -255,7 +280,7 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingle
 			current = addidx(current, val.Idx)
 		}
 	}
-	klog.Infoln("-=-=-=-=-=-=previous=", prev, "current=", current)
+	klog.V(3).Infoln("Score kunlun previous=", prev, "current=", current)
 	return calcscore(prev, current)
 }
 
@@ -268,7 +293,7 @@ func devicepick(devices []*util.DeviceUsage, start int, count int) []int {
 	res := []int{}
 	for t := start; t < 8; t++ {
 		if devices[t].Used == 0 {
-			res = append(res, t)
+			res = append(res, int(devices[t].Index))
 			if len(res) == count {
 				return res
 			}
@@ -281,6 +306,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 	leftwing := 0
 	rightwing := 0
 	for idx, val := range devices {
+		klog.Infoln("graph select val=", *val)
 		if idx < 4 {
 			if val.Used == 0 {
 				leftwing++
@@ -308,6 +334,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 					if count%2 == 1 {
 						num = oddorder[slots-1]
 					}
+					klog.Infoln("slots=", slots, "num=", num, "leftwing=", leftwing, "==", rightwing)
 					if leftwing == num {
 						return devicepick(devices, 0, count)
 					}
@@ -315,6 +342,9 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 						return devicepick(devices, 4, count)
 					}
 				}
+			}
+			if count == 2 {
+				return interconnect(devices)
 			}
 			return []int{}
 		}
