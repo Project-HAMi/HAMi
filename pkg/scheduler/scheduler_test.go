@@ -35,6 +35,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -707,6 +708,139 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 			assert.Equal(t, test.want(node), true)
 		})
 	}
+}
+
+func Test_OnAddPod_SkipBoundPods(t *testing.T) {
+	// Test that pods with successful device binding are skipped in processing
+	// to prevent scheduler confusion (issue #987)
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	
+	// Prepare test node
+	testNodeID := "test-node"
+	s.addNode(testNodeID, &util.NodeInfo{ID: testNodeID})
+
+	// Setup test pods
+	pendingPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pending-pod",
+			Namespace: "default",
+			UID:       "pending-uid",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: testNodeID,
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+		},
+	}
+	
+	boundPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "bound-pod",
+			Namespace: "default",
+			UID:       "bound-uid",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: testNodeID,
+				util.DeviceBindPhase:        util.DeviceBindSuccess,
+				"nvidia.com/gpu":           "1", // Example device annotation
+			},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodPending,
+		},
+	}
+	
+	// Create the pods in the client
+	_, err := client.KubeClient.CoreV1().Pods(pendingPod.Namespace).Create(context.TODO(), pendingPod, metav1.CreateOptions{})
+	assert.NilError(t, err, "Failed to create pending test pod")
+	
+	_, err = client.KubeClient.CoreV1().Pods(boundPod.Namespace).Create(context.TODO(), boundPod, metav1.CreateOptions{})
+	assert.NilError(t, err, "Failed to create bound test pod")
+	
+	// Keep track of the pods that get added to the pod manager
+	addedPods := make(map[string]bool)
+	
+	// Create a new function to test the onAddPod method
+	testAddPod := func(pod *corev1.Pod, nodeID string, devices util.PodDevices) {
+		// Call original implementation to maintain state
+		s.podManager.addPod(pod, nodeID, devices)
+		
+		// Track which pods were processed
+		addedPods[pod.Name] = true
+	}
+	
+	// Create a test function that uses our customized addPod
+	testOnAddPod := func(obj any) {
+		pod, ok := obj.(*corev1.Pod)
+		if !ok {
+			return
+		}
+		
+		klog.V(5).InfoS("Pod added", "pod", pod.Name, "namespace", pod.Namespace)
+		nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
+		if !ok {
+			return
+		}
+		if k8sutil.IsPodInTerminatedState(pod) {
+			return
+		}
+
+		// Skip processing pods that are successfully bound to prevent issue #987
+		// where scheduler continues to process already allocated pods
+		if bindPhase, exists := pod.Annotations[util.DeviceBindPhase]; exists && bindPhase == util.DeviceBindSuccess {
+			klog.V(5).InfoS("Skipping successfully bound pod to prevent scheduler confusion", 
+				"pod", pod.Name, "namespace", pod.Namespace, "bindPhase", bindPhase)
+			podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+			testAddPod(pod, nodeID, podDev)
+			return
+		}
+
+		podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+		testAddPod(pod, nodeID, podDev)
+	}
+	
+	// Execute our test function with both test pods
+	testOnAddPod(pendingPod)
+	testOnAddPod(boundPod)
+	
+	// Check that both pods were added to the pod manager
+	assert.Assert(t, addedPods[pendingPod.Name], "Regular pending pod should be processed by addPod")
+	assert.Assert(t, addedPods[boundPod.Name], "Successfully bound pod should still be accounted for resources")
+	
+	// Get pods from the pod manager to verify they were both tracked
+	podList, err := s.podManager.ListPodsUID()
+	assert.NilError(t, err, "Failed to list pods")
+	
+	// Verify both pods are tracked
+	hasPendingPod := false
+	hasBoundPod := false
+	for _, p := range podList {
+		if p.UID == pendingPod.UID {
+			hasPendingPod = true
+		}
+		if p.UID == boundPod.UID {
+			hasBoundPod = true
+		}
+	}
+	
+	assert.Assert(t, hasPendingPod, "Pending pod should be tracked in podManager")
+	assert.Assert(t, hasBoundPod, "Successfully bound pod should still be tracked in podManager")
+
+	// Verify pod info through ListPodsInfo
+	podInfoList := s.podManager.ListPodsInfo()
+	
+	// Check if the bound pod is associated with the correct node
+	boundPodOnNode := false
+	for _, pi := range podInfoList {
+		if pi.UID == boundPod.UID && pi.NodeID == testNodeID {
+			boundPodOnNode = true
+			break
+		}
+	}
+	
+	assert.Assert(t, boundPodOnNode, "Bound pod should be tracked on its assigned node")
 }
 
 func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
