@@ -29,6 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -110,7 +111,7 @@ type NvidiaConfig struct {
 	DeviceSplitCount             uint    `yaml:"deviceSplitCount"`
 	DeviceMemoryScaling          float64 `yaml:"deviceMemoryScaling"`
 	DeviceCoreScaling            float64 `yaml:"deviceCoreScaling"`
-	// TODO 这个参数是否应该直接移除
+	// TODO Whether these should be removed
 	DisableCoreLimit  bool                        `yaml:"disableCoreLimit"`
 	MigGeometriesList []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
 	// GPUCorePolicy through webhook automatic injected to container env
@@ -357,19 +358,19 @@ func assertNuma(annos map[string]string) bool {
 	return false
 }
 
-func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
 	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
 	if ok && !strings.Contains(mode, d.Mode) {
 		typeCheck = false
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
-		return true, typeCheck, assertNuma(annos)
+		return typeCheck, assertNuma(annos)
 	}
-	return false, false, false
+	return false, false
 }
 
-func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[GPUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
@@ -514,7 +515,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 	return true
 }
 
-func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32 {
+func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
 	return 0
 }
 
@@ -570,4 +571,109 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.Con
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
+}
+
+func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+	k := request
+	originReq := k.Nums
+	prevnuma := -1
+	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
+	var tmpDevs map[string]util.ContainerDevices
+	tmpDevs = make(map[string]util.ContainerDevices)
+	reason := make(map[string]int)
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
+		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
+
+		found, numa := nv.checkType(annos, *dev, k)
+		if !found {
+			reason[common.CardTypeMismatch]++
+			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
+			continue
+		}
+		if numa && prevnuma != dev.Numa {
+			if k.Nums != originReq {
+				reason[common.NumaNotFit] += len(tmpDevs)
+				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
+			}
+			k.Nums = originReq
+			prevnuma = dev.Numa
+			tmpDevs = make(map[string]util.ContainerDevices)
+		}
+		if !nv.checkUUID(annos, *dev) {
+			reason[common.CardUUIDMismatch]++
+			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
+			continue
+		}
+
+		memreq := int32(0)
+		if dev.Count <= dev.Used {
+			reason[common.CardTimeSlicingExhausted]++
+			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if k.Coresreq > 100 {
+			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
+			k.Coresreq = 100
+			//return false, tmpDevs
+		}
+		if k.Memreq > 0 {
+			memreq = k.Memreq
+		}
+		if k.MemPercentagereq != 101 && k.Memreq == 0 {
+			//This incurs an issue
+			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if dev.Totalmem-dev.Usedmem < memreq {
+			reason[common.CardInsufficientMemory]++
+			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
+			continue
+		}
+		if dev.Totalcore-dev.Usedcores < k.Coresreq {
+			reason[common.CardInsufficientCore]++
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			continue
+		}
+		// Coresreq=100 indicates it want this card exclusively
+		if dev.Totalcore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+			continue
+		}
+		// You can't allocate core=0 job to an already full GPU
+		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
+			reason[common.CardComputeUnitsExhausted]++
+			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
+			continue
+		}
+		if !nv.CustomFilterRule(allocated, request, tmpDevs[k.Type], dev) {
+			reason[common.CardNotFoundCustomFilterRule]++
+			klog.V(5).InfoS(common.CardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
+			continue
+		}
+
+		if k.Nums > 0 {
+			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
+			k.Nums--
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+				Idx:       int(dev.Index),
+				UUID:      dev.ID,
+				Type:      k.Type,
+				Usedmem:   memreq,
+				Usedcores: k.Coresreq,
+			})
+		}
+		if k.Nums == 0 {
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
+		}
+		if dev.Mode == "mig" {
+			i++
+		}
+	}
+	if len(tmpDevs) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	}
+	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
