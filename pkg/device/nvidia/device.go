@@ -358,7 +358,7 @@ func assertNuma(annos map[string]string) bool {
 	return false
 }
 
-func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
 	typeCheck := checkGPUtype(annos, d.Type)
 	mode, ok := annos[AllocateMode]
 	if ok && !strings.Contains(mode, d.Mode) {
@@ -370,7 +370,7 @@ func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsa
 	return false, false
 }
 
-func (dev *NvidiaGPUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[GPUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
@@ -585,7 +585,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		found, numa := nv.CheckType(annos, *dev, k)
+		found, numa := nv.checkType(annos, *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -600,7 +600,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !nv.CheckUUID(annos, *dev) {
+		if !nv.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

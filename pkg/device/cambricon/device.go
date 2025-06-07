@@ -211,14 +211,14 @@ func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	return ok, nil
 }
 
-func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *CambriconDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, CambriconMLUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *CambriconDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *CambriconDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[MLUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
@@ -334,7 +334,7 @@ func (cam *CambriconDevices) Fit(devices []*util.DeviceUsage, request util.Conta
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := cam.CheckType(annos, *dev, k)
+		_, found, numa := cam.checkType(annos, *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -349,7 +349,7 @@ func (cam *CambriconDevices) Fit(devices []*util.DeviceUsage, request util.Conta
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !cam.CheckUUID(annos, *dev) {
+		if !cam.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

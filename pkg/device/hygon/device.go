@@ -175,14 +175,14 @@ func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) 
 	return util.CheckHealth(devType, n)
 }
 
-func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *DCUDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
 		return true, checkDCUtype(annos, d.Type), false
 	}
 	return false, false, false
 }
 
-func (dev *DCUDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *DCUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[DCUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
@@ -288,7 +288,7 @@ func (dcu *DCUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDe
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := dcu.CheckType(annos, *dev, k)
+		_, found, numa := dcu.checkType(annos, *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -303,7 +303,7 @@ func (dcu *DCUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDe
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !dcu.CheckUUID(annos, *dev) {
+		if !dcu.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

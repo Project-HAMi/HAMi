@@ -205,14 +205,14 @@ func (dev *Devices) NodeCleanUp(nn string) error {
 	return util.MarkAnnotationsToDelete(dev.handshakeAnno, nn)
 }
 
-func (dev *Devices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *Devices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, dev.CommonWord()) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *Devices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *Devices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	userUUID, ok := annos[dev.useUUIDAnno]
 	if ok {
 		klog.V(5).Infof("check uuid for ascend user uuid [%s], device id is %s", userUUID, d.ID)
@@ -300,7 +300,7 @@ func (npu *Devices) Fit(devices []*util.DeviceUsage, request util.ContainerDevic
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := npu.CheckType(annos, *dev, k)
+		_, found, numa := npu.checkType(annos, *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -315,7 +315,7 @@ func (npu *Devices) Fit(devices []*util.DeviceUsage, request util.ContainerDevic
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !npu.CheckUUID(annos, *dev) {
+		if !npu.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
