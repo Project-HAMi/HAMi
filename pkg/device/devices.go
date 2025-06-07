@@ -24,6 +24,8 @@ import (
 	"reflect"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlunxin"
+
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
@@ -69,6 +71,7 @@ type Config struct {
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
 	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
+	XpuConfig       kunlunxin.XPUConfig       `yaml:"kunlunxin"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -174,6 +177,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return metax.InitMetaxSDevice(metaxConfig), nil
 		}, config.MetaxConfig},
+		{kunlunxin.XPUDevice, kunlunxin.XPUCommonWord, func(cfg interface{}) (Devices, error) {
+			xpuConfig, ok := cfg.(kunlunxin.XPUConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", kunlunxin.XPUDevice)
+			}
+			return kunlunxin.InitXPUDevice(xpuConfig), nil
+		}, config.XpuConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -244,6 +254,9 @@ iluvatar:
   resourceCountName: "iluvatar.ai/vgpu"
   resourceMemoryName: "iluvatar.ai/vcuda-memory"
   resourceCoreName: "iluvatar.ai/vcuda-core"
+kunlunxin: 
+  resourceCountName: "kunlunxin.com/xpu"
+  resourceMemoryName: "kunlunxin.con/xpu-memory"
 vnpus:
   - chipName: "910B"
     commonWord: "Ascend910A"
@@ -403,6 +416,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	mthreads.ParseConfig(fs)
 	enflame.ParseConfig(fs)
 	metax.ParseConfig(fs)
+	kunlunxin.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
 	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")
 	klog.InitFlags(fs)

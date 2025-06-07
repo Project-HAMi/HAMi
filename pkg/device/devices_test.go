@@ -33,6 +33,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlunxin"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -348,6 +349,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
 		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
+		kunlunxin.XPUDevice:          kunlunxin.XPUCommonWord,
 	}
 
 	return expectedDevices, devicesMap

@@ -108,6 +108,9 @@ data:
       resourceCountName: {{ .Values.iluvatarResourceName }}
       resourceMemoryName: {{ .Values.iluvatarResourceMem }}
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
+    kunlunxin:
+      resourceCountName: {{ .Values.kunlunxinResourceName }}
+      resourceMemoryName: {{ .Values.kunlunxinResourceMem }}
     vnpus:
     - chipName: 910B
       commonWord: Ascend910A
