@@ -95,6 +95,16 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.delPod(pod)
 		return
 	}
+
+	// Skip processing pods that are successfully bound to prevent issue #987
+	// where scheduler continues to process already allocated pods
+	if bindPhase, exists := pod.Annotations[util.DeviceBindPhase]; exists && bindPhase == util.DeviceBindSuccess {
+		klog.V(5).InfoS("Skipping successfully bound pod to prevent scheduler confusion", "pod", pod.Name, "namespace", pod.Namespace, "bindPhase", bindPhase)
+		podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+		s.addPod(pod, nodeID, podDev)
+		return
+	}
+
 	podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
 	s.addPod(pod, nodeID, podDev)
 }
