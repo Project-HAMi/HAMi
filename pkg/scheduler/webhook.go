@@ -60,6 +60,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission as pod has no containers", req.Namespace, req.Name, req.UID)
 		return admission.Denied("pod has no containers")
 	}
+	if pod.Spec.SchedulerName != "" && (len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
+		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
+		return admission.Allowed("pod already has different scheduler assigned")
+	}
 	klog.Infof(template, req.Namespace, req.Name, req.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
