@@ -1500,121 +1500,6 @@ func Test_calcScore(t *testing.T) {
 	}
 }
 
-func Test_checkType(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     util.DeviceUsage
-			n     util.ContainerDeviceRequest
-		}
-		want1 bool
-	}{
-		{
-			name: "device type the same as node type",
-			args: struct {
-				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d: util.DeviceUsage{
-					Type: nvidia.NvidiaGPUDevice,
-				},
-				n: util.ContainerDeviceRequest{
-					Type: nvidia.NvidiaGPUDevice,
-				},
-			},
-			want1: true,
-		},
-		{
-			name: "device type the different from node type",
-			args: struct {
-				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d: util.DeviceUsage{
-					Type: nvidia.NvidiaGPUDevice,
-				},
-				n: util.ContainerDeviceRequest{
-					Type: metax.MetaxGPUDevice,
-				},
-			},
-			want1: false,
-		},
-		{
-			name: "don't set to device type and node type",
-			args: struct {
-				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n:     util.ContainerDeviceRequest{},
-			},
-			want1: false,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result1, _ := checkType(test.args.annos, test.args.d, test.args.n)
-			assert.DeepEqual(t, result1, test.want1)
-		})
-	}
-}
-
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     util.DeviceUsage
-			n     util.ContainerDeviceRequest
-		}
-		want bool
-	}{
-		{
-			name: "device the same as node",
-			args: struct {
-				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d: util.DeviceUsage{
-					Type: nvidia.NvidiaGPUDevice,
-				},
-				n: util.ContainerDeviceRequest{
-					Type: nvidia.NvidiaGPUDevice,
-				},
-			},
-			want: true,
-		},
-		{
-			name: "don't set to type",
-			args: struct {
-				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
-			}{
-				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n:     util.ContainerDeviceRequest{},
-			},
-			want: false,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result := checkUUID(test.args.annos, test.args.d, test.args.n)
-			assert.DeepEqual(t, result, test.want)
-		})
-	}
-}
-
 func Test_fitInCertainDevice(t *testing.T) {
 	tests := []struct {
 		name string
@@ -2146,13 +2031,16 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]util.ContainerDevices{},
-			want3: map[string]int{cardTypeMismatch: 2, cardUUIDMismatch: 3, cardTimeSlicingExhausted: 4,
+			want3: map[string]int{cardUUIDMismatch: 3, cardTimeSlicingExhausted: 4,
 				cardInsufficientMemory: 2, cardInsufficientCore: 1},
 		},
 	}
 	for _, test := range tests {
+
 		t.Run(test.name, func(t *testing.T) {
-			result1, result2, result3 := fitInCertainDevice(test.args.node, test.args.request, test.args.annos, test.args.pod, test.args.allocated)
+			gpuDevices := &nvidia.NvidiaGPUDevices{}
+
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
@@ -2360,7 +2248,7 @@ func Test_fitInDevices(t *testing.T) {
 				devinput: &util.PodDevices{},
 			},
 			want1: false,
-			want2: "1/1 CardTypeMismatch",
+			want2: "Device type not found",
 		},
 	}
 	for _, test := range tests {
