@@ -48,15 +48,13 @@ type Devices interface {
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error)
-	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
-	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
 	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
-	CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
-	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32
+	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32
 	AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error
+	Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string)
 	// This should not be associated with a specific device object
 	//ParseConfig(fs *flag.FlagSet)
 }

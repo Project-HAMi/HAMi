@@ -120,7 +120,7 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
-func Test_CheckUUID(t *testing.T) {
+func Test_checkUUID(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
 			ResourceCountName:            "nvidia.com/gpu",
@@ -213,13 +213,13 @@ func Test_CheckUUID(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := gpuDevices.CheckUUID(test.args.annos, test.args.d)
+			got := gpuDevices.checkUUID(test.args.annos, test.args.d)
 			assert.Equal(t, test.want, got)
 		})
 	}
 }
 
-func Test_CheckType(t *testing.T) {
+func Test_checkType(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
 			ResourceCountName:            "nvidia.com/gpu",
@@ -290,7 +290,7 @@ func Test_CheckType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			_, got, _ := gpuDevices.CheckType(test.args.annos, test.args.d, req)
+			got, _ := gpuDevices.checkType(test.args.annos, test.args.d, req)
 			assert.Equal(t, test.want, got)
 		})
 	}
