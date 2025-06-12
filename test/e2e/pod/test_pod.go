@@ -53,6 +53,10 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 	})
 
 	ginkgo.AfterEach(func() {
+		if ginkgo.CurrentSpecReport().Failed() {
+			ginkgo.By("Check pod detailed after each test")
+			utils.CheckPodDetails(clientSet)
+		}
 		ginkgo.By("Cleanup pod after each test")
 		cleanupPod(newPod, clientSet)
 	})
@@ -170,7 +174,6 @@ func checkPodPendingDueToFiltering(clientSet *kubernetes.Clientset, pod *corev1.
 	gomega.Expect(err).NotTo(gomega.HaveOccurred())
 
 	for _, event := range events {
-		fmt.Printf("Event: Reason=%s, Message=%s\n", event.Reason, event.Message)
 		if strings.Contains(event.Reason, utils.ErrReasonFilteringFailed) &&
 			strings.Contains(event.Message, utils.ErrMessageFilteringFailed) {
 			return true
