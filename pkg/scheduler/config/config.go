@@ -37,4 +37,7 @@ var (
 
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
+
+	// NodeLockTimeout is the timeout for node locks in minutes. default value is 1 minute.
+	NodeLockTimeout int
 )
