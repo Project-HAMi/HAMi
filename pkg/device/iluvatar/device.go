@@ -89,7 +89,10 @@ func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
+	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
+	if !ok || cards == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", IluvatarResourceCores)
+	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
