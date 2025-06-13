@@ -1,6 +1,6 @@
 # huawei.com/Ascend910A、Ascend910B系列 和 Ascend310P 支持简介
 
-HAMi 支持复用华为昇腾 910A、910B 系列设备（910B、910B2、910B3、910B4）和 310P 设备，并为此提供以下几种与 vGPU 类似的复用功能，包括：
+HAMi 支持复用华为昇腾 910A、910B 系列设备（910B2、910B3、910B4）和 310P 设备，并为此提供以下几种与 vGPU 类似的复用功能，包括：
 
 * **_NPU 共享_**: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡；
 
@@ -12,7 +12,7 @@ HAMi 支持复用华为昇腾 910A、910B 系列设备（910B、910B2、910B3、
 
 * Ascend docker runtime
 * driver version > 24.1.rc1
-* Ascend device type: 910B,910B2,910B3,910B4,310P
+* Ascend device type: 910A, 910B2, 910B3, 910B4, 310P
 
 ## 开启 NPU 复用
 
