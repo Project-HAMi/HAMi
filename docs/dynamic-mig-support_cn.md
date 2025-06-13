@@ -174,3 +174,20 @@ nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41e
 2. 安培架构之前的NVIDIA设备无法使用`MIG`模式
 
 3. 你不会在节点上看到MIG资源名(例如, `nvidia.com/mig-1g.10gb`)，HAMi对于hami-core和mig使用统一的资源名进行管理
+
+## 已知问题
+
+### 混合部署中的 MIG 切分失败问题
+
+* 场景： 当在同一个 GPU 节点上混合使用 HAMi 和其他 NVIDIA 原生组件（如 dcgm-exporter等）运行任务时，极有可能导致 MIG 切分失败。
+
+* 错误现象： 如果 hami-device-plugin 日志中出现错误 nvidia-mig-parted failed with exit...。
+
+* 解决方法：
+    1. 使用 lsof 命令查看设备占用情况 (例如，对于 GPU 0)：
+    ```
+    lsof /dev/nvidia0
+    ```
+    2. 停止占用目标 GPU 设备的非 HAMi 进程。
+
+根据 lsof 的输出结果，停止所有与 HAMi 无关且正在占用 /dev/nvidiaX 设备的进程 然后重新创建部署即可。
