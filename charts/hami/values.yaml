@@ -33,6 +33,10 @@ metaxResourceName: "metax-tech.com/sgpu"
 metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
 
+#kunlunxin XPU Parameters
+kunlunxinResourceName: "kunlunxin.com/xpu"
+kunlunxinResourceMem: "kunlunxin.com/xpu-memory"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
