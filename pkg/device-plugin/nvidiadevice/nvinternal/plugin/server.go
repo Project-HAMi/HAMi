@@ -44,6 +44,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -86,6 +87,12 @@ type NvidiaDevicePlugin struct {
 	deviceListStrategies spec.DeviceListStrategies
 	socket               string
 	schedulerConfig      nvidia.NvidiaConfig
+
+	applyMutex                 sync.Mutex
+	disableHealthChecks        chan bool
+	ackDisableHealthChecks     chan bool
+	disableWatchAndRegister    chan bool
+	ackDisableWatchAndRegister chan bool
 
 	cdiHandler          cdi.Interface
 	cdiEnabled          bool
@@ -160,17 +167,22 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 		klog.Fatalf("failed to initialize devices: %v", err)
 	}
 	return &NvidiaDevicePlugin{
-		rm:                   resourceManager,
-		config:               config,
-		deviceListEnvvar:     "NVIDIA_VISIBLE_DEVICES",
-		deviceListStrategies: deviceListStrategies,
-		socket:               kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
-		cdiHandler:           cdiHandler,
-		cdiEnabled:           cdiEnabled,
-		cdiAnnotationPrefix:  *config.Flags.Plugin.CDIAnnotationPrefix,
-		schedulerConfig:      sConfig.NvidiaConfig,
-		operatingMode:        mode,
-		migCurrent:           nvidia.MigPartedSpec{},
+		rm:                         resourceManager,
+		config:                     config,
+		deviceListEnvvar:           "NVIDIA_VISIBLE_DEVICES",
+		deviceListStrategies:       deviceListStrategies,
+		applyMutex:                 sync.Mutex{},
+		disableHealthChecks:        nil,
+		ackDisableHealthChecks:     nil,
+		disableWatchAndRegister:    nil,
+		ackDisableWatchAndRegister: nil,
+		socket:                     kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
+		cdiHandler:                 cdiHandler,
+		cdiEnabled:                 cdiEnabled,
+		cdiAnnotationPrefix:        *config.Flags.Plugin.CDIAnnotationPrefix,
+		schedulerConfig:            sConfig.NvidiaConfig,
+		operatingMode:              mode,
+		migCurrent:                 nvidia.MigPartedSpec{},
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -184,6 +196,10 @@ func (plugin *NvidiaDevicePlugin) initialize() {
 	plugin.server = grpc.NewServer([]grpc.ServerOption{}...)
 	plugin.health = make(chan *rm.Device)
 	plugin.stop = make(chan any)
+	plugin.disableHealthChecks = make(chan bool, 1)
+	plugin.ackDisableHealthChecks = make(chan bool, 1)
+	plugin.disableWatchAndRegister = make(chan bool, 1)
+	plugin.ackDisableWatchAndRegister = make(chan bool, 1)
 }
 
 func (plugin *NvidiaDevicePlugin) cleanup() {
@@ -191,6 +207,10 @@ func (plugin *NvidiaDevicePlugin) cleanup() {
 	plugin.server = nil
 	plugin.health = nil
 	plugin.stop = nil
+	plugin.disableHealthChecks = nil
+	plugin.ackDisableHealthChecks = nil
+	plugin.disableWatchAndRegister = nil
+	plugin.ackDisableWatchAndRegister = nil
 }
 
 // Devices returns the full set of devices associated with the plugin.
@@ -223,6 +243,19 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		return err
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
+	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
+	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
+	err = CreateMigApplyLockDir()
+	if err != nil {
+		klog.Fatalf("CreateMIGLockSubDir failed:%v", err)
+	}
+
+	// If the temporary lock file still exists, it may be a leftover from the last incomplete mig  application process.
+	// Delete the temporary lock file to make sure vgpu monitor can start.
+	err = RemoveMigApplyLock()
+	if err != nil {
+		klog.Fatalf("RemoveMigApplyLock failed:%v", err)
+	}
 
 	if plugin.operatingMode == "mig" {
 		cmd := exec.Command("nvidia-mig-parted", "export")
@@ -245,14 +278,14 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		klog.Infoln("Mig export", plugin.migCurrent)
 	}
 	go func() {
-		err := plugin.rm.CheckHealth(plugin.stop, plugin.health)
+		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
 		if err != nil {
 			klog.Infof("Failed to start health check: %v; continuing with health checks disabled", err)
 		}
 	}()
 
 	go func() {
-		plugin.WatchAndRegister()
+		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
 
 	return nil
