@@ -219,6 +219,7 @@ devices:
       - mthreads.com/vgpu
   nvidia:
     gpuCorePolicy: default
+    libCudaLogLevel: 1
   ascend:
     enabled: false
     image: ""

@@ -94,6 +94,7 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
@@ -150,6 +151,7 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 }
 
 func GetMigUUIDFromIndex(uuid string, idx int) string {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
@@ -183,7 +185,32 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 	return res
 }
 
+func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	}
+	originuuid := strings.Split(uuid, "[")[0]
+	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get device uuid error ret=`, ret)
+		return 0, fmt.Errorf("nvml get device uuid error ret=%d", ret)
+	}
+	migdev, ret := nvml.DeviceGetMigDeviceHandleByIndex(ndev, idx)
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get mig device handle error ret=`, ret)
+		return 0, fmt.Errorf("nvml get mig device handle error ret=%d", ret)
+	}
+	res, ret := migdev.GetGpuInstanceId()
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get gpu instance id error ret=`, ret)
+		return 0, fmt.Errorf("nvml get gpu instance id error ret=%d", ret)
+	}
+	return res, nil
+}
+
 func GetDeviceNums() (int, error) {
+	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		return 0, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
@@ -196,7 +223,57 @@ func GetDeviceNums() (int, error) {
 	return count, nil
 }
 
+func (nv *NvidiaDevicePlugin) DisableOtherNVMLOperation() {
+	// Create MIG apply lock file
+	if err := CreateMigApplyLock(); err != nil {
+		// If the lock file creation fails, it is highly likely that the mig apply will be failed, so the plugin should terminate.
+		klog.Fatalf("Failed to create MIG apply lock: %v", err)
+		return
+	}
+
+	nv.disableHealthChecks <- true
+	nv.disableWatchAndRegister <- true
+	//wait for disableHealthChecks to be closed,signal must be true or wait forever
+	var ackHealthCheck bool
+	var ackWatchAndRegister bool
+	for {
+		select {
+		case ackDisableHealthChecksSignal := <-nv.ackDisableHealthChecks:
+			if ackDisableHealthChecksSignal {
+				ackHealthCheck = true
+			} else {
+				continue
+			}
+		case ackWatchAndRegisterSignal := <-nv.ackDisableWatchAndRegister:
+			if ackWatchAndRegisterSignal {
+				ackWatchAndRegister = true
+			} else {
+				continue
+			}
+		}
+		if ackHealthCheck && ackWatchAndRegister {
+			break
+		}
+	}
+}
+
+func (nv *NvidiaDevicePlugin) EnableOtherNVMLOperation() {
+	// Remove MIG apply lock file
+	if err := RemoveMigApplyLock(); err != nil {
+		klog.Errorf("Failed to remove MIG apply lock: %v", err)
+	}
+
+	nv.disableHealthChecks <- false
+	nv.disableWatchAndRegister <- false
+}
+
 func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
+	nv.applyMutex.Lock()
+	nv.DisableOtherNVMLOperation()
+	defer func() {
+		nv.EnableOtherNVMLOperation()
+		nv.applyMutex.Unlock()
+	}()
 	data, err := yaml.Marshal(nv.migCurrent)
 	if err != nil {
 		klog.Error("marshal failed", err.Error())
@@ -209,7 +286,7 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 	cmd.Stderr = &stderr
 	err = cmd.Run()
 	if err != nil {
-		klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+		klog.Fatalf("nvidia-mig-parted failed with %s,reason:%s\n", err, stderr.String())
 	}
 	outStr := stdout.String()
 	klog.Infoln("Mig apply", outStr)

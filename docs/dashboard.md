@@ -74,6 +74,7 @@ cd dcgm-exporter
 vi deployment/values.yaml
 ...
 serviceMonitor:
+  apiVersion: "monitoring.coreos.com/v1"
   enabled: true
   interval: 15s
   honorLabels: false

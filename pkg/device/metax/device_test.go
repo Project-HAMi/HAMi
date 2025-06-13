@@ -209,7 +209,7 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
-func Test_CheckType(t *testing.T) {
+func Test_checkType(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
@@ -259,7 +259,7 @@ func Test_CheckType(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
+			result1, result2, result3 := dev.checkType(test.args.annos, test.args.d, test.args.n)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, result3, test.want3)

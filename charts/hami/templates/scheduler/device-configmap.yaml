@@ -25,6 +25,7 @@ data:
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
+      libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
       knownMigGeometries:
       - models: [ "A30" ]
@@ -107,8 +108,6 @@ data:
       resourceCountName: {{ .Values.iluvatarResourceName }}
       resourceMemoryName: {{ .Values.iluvatarResourceMem }}
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
-    kunlun:
-      resourceCountName: "kunlunxin.com/xpu"
     vnpus:
     - chipName: 910B
       commonWord: Ascend910A

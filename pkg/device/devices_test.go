@@ -33,7 +33,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
-	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -71,8 +70,6 @@ iluvatar:
   resourceCountName: iluvatar.ai/vgpu
   resourceMemoryName: iluvatar.ai/vcuda-memory
   resourceCoreName: iluvatar.ai/vcuda-core
-kunlun:
-  resourceCountName: "kunlunxin.com/xpu"
 vnpus:
 - chipName: 910B
   commonWord: Ascend910A
@@ -188,7 +185,6 @@ func Test_LoadConfig(t *testing.T) {
 		{"Iluvatar Config", createIluvatarConfig(), configData.IluvatarConfig},
 		{"Mthreads Config", createMthreadsConfig(), configData.MthreadsConfig},
 		{"Metax Config", createMetaxConfig(), configData.MetaxConfig},
-		{"Kunlun Config", createKunlunConfig(), configData.KunlunConfig},
 	}
 
 	for _, test := range dataDrivenTests {
@@ -250,12 +246,6 @@ func createMthreadsConfig() mthreads.MthreadsConfig {
 func createMetaxConfig() metax.MetaxConfig {
 	return metax.MetaxConfig{
 		ResourceCountName: "metax-tech.com/gpu",
-	}
-}
-
-func createKunlunConfig() kunlun.KunlunConfig {
-	return kunlun.KunlunConfig{
-		ResourceCountName: "kunlunxin.com/xpu",
 	}
 }
 
@@ -358,7 +348,6 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
 		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
-		kunlun.KunlunGPUDevice:       kunlun.KunlunGPUCommonWord,
 	}
 
 	return expectedDevices, devicesMap

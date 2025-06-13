@@ -57,7 +57,7 @@ type ResourceManager interface {
 	Devices() Devices
 	GetDevicePaths([]string) []string
 	GetPreferredAllocation(available, required []string, size int) ([]string, error)
-	CheckHealth(stop <-chan any, unhealthy chan<- *Device) error
+	CheckHealth(stop <-chan any, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error
 }
 
 // NewResourceManagers returns a []ResourceManager, one for each resource in 'config'.

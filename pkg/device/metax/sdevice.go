@@ -155,7 +155,7 @@ func (sdev *MetaxSDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (sdev *MetaxSDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (sdev *MetaxSDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, MetaxSGPUDevice) == 0 {
 		return true, true, false
 	}
@@ -163,7 +163,7 @@ func (sdev *MetaxSDevices) CheckType(annos map[string]string, d util.DeviceUsage
 	return false, false, false
 }
 
-func (sdev *MetaxSDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
 	useUUIDAnno, ok := annos[MetaxUseUUID]
 	if ok {
 		klog.V(5).Infof("check UUID for metax, useUUID[%s], deviceID[%s]", useUUIDAnno, d.ID)
@@ -275,7 +275,7 @@ func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := mats.CheckType(annos, *dev, k)
+		_, found, numa := mats.checkType(annos, *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -290,7 +290,7 @@ func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]util.ContainerDevices)
 		}
-		if !mats.CheckUUID(annos, *dev) {
+		if !mats.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
