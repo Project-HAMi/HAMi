@@ -431,9 +431,16 @@ func Test_PodAllocationTrySuccess(t *testing.T) {
 		t.Fatalf("Failed to get refreshed pod: %v", err)
 	}
 
+	// After successful allocation, the to-allocate annotation should be cleared (issue #987 fix)
 	annos, ok := refreshedPod.Annotations[util.InRequestDevices[devName]]
-	if !ok || annos == "" {
-		t.Error("Expected annotations to be updated")
+	if !ok || annos != "" {
+		t.Error("Expected to-allocate annotation to be cleared after successful binding")
+	}
+
+	// Verify that DeviceBindPhase is set to success
+	bindPhase, ok := refreshedPod.Annotations[util.DeviceBindPhase]
+	if !ok || bindPhase != util.DeviceBindSuccess {
+		t.Errorf("Expected DeviceBindPhase to be '%s', got '%s'", util.DeviceBindSuccess, bindPhase)
 	}
 }
 
