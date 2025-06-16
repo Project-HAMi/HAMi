@@ -49,6 +49,14 @@ data:
                     },
                     {{- end }}
                     {{- end }}
+                    {{- if .Values.devices.kunlun.enabled }}
+                    {{- range .Values.devices.kunlun.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
