@@ -18,7 +18,9 @@ package nodelock
 
 import (
 	"context"
+	"strings"
 	"testing"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -130,6 +132,53 @@ func Test_LockNode(t *testing.T) {
 				t.Errorf("LockNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestLockNodeWithTimeout tests the specific case where line 130 is executed
+func TestLockNodeWithTimeout(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+
+	// Set a custom timeout for testing
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	defer func() {
+		NodeLockTimeout = originalTimeout
+	}()
+
+	nodeName := "test-node-timeout"
+
+	// Create a node with a fresh lock (should not be expired)
+	freshLockTime := time.Now().Format(time.RFC3339)
+	lockValue := freshLockTime + NodeLockSep + "test-ns" + NodeLockSep + "test-pod"
+
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: lockValue,
+			},
+		},
+	}, metav1.CreateOptions{})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "new-pod",
+			Namespace: "new-ns",
+		},
+	}
+
+	// Try to lock the node again - this should trigger line 130
+	err := LockNode(nodeName, "", pod)
+
+	// Verify the error contains the NodeLockTimeout value
+	if err == nil {
+		t.Fatal("Expected error but got nil")
+	}
+
+	expectedError := "has been locked within 2m0s"
+	if !strings.Contains(err.Error(), expectedError) {
+		t.Errorf("Expected error to contain '%s', but got: %v", expectedError, err)
 	}
 }
 
