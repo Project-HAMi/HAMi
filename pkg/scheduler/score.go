@@ -100,7 +100,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 					free += v.Device.Count - v.Device.Used
 					freeCore += v.Device.Totalcore - v.Device.Usedcores
 					freeMem += v.Device.Totalmem - v.Device.Usedmem
-					err := device.GetDevices()[k.Type].AddResourceUsage(node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
+					err := device.GetDevices()[k.Type].AddResourceUsage(pod, node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
 					if err != nil {
 						klog.Errorf("AddResourceUsage failed:%s", err.Error())
 						return false, "AddResourceUsage failed"

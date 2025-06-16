@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -290,6 +291,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Type:        d.Type,
 					Numa:        d.Numa,
 					Health:      d.Health,
+					CustomInfo:  maps.Clone(d.CustomInfo),
 				},
 			})
 		}
@@ -497,7 +499,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(&annotations, m.Devices)
+		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
 	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)

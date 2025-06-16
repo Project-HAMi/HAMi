@@ -296,7 +296,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 	}
 }
 
-func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[CambriconMLUDevice]
 	if ok {
 		(*annoinput)[DsmluResourceAssigned] = "false"
@@ -315,7 +315,7 @@ func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSin
 	return 0
 }
 
-func (dev *CambriconDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
