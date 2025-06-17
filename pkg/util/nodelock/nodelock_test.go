@@ -135,7 +135,6 @@ func Test_LockNode(t *testing.T) {
 	}
 }
 
-// TestLockNodeWithTimeout tests the specific case where line 130 is executed
 func TestLockNodeWithTimeout(t *testing.T) {
 	client.KubeClient = fake.NewSimpleClientset()
 
