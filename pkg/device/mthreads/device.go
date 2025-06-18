@@ -110,7 +110,10 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	cores, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceCores), resource.DecimalSI).AsInt64()
+	cores, ok := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceCores), resource.DecimalSI).AsInt64()
+	if !ok || cores == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MthreadsResourceCores)
+	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*coresPerMthreadsGPU < cores {
 		nodedevices = append(nodedevices, &util.DeviceInfo{

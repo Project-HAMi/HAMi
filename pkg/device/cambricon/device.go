@@ -184,7 +184,10 @@ func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	cards, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceCores), resource.DecimalSI).AsInt64()
+	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceCores), resource.DecimalSI).AsInt64()
+	if !ok || cards == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MLUResourceCores)
+	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &util.DeviceInfo{

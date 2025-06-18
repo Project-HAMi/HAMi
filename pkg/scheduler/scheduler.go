@@ -176,6 +176,12 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			for devhandsk, devInstance := range device.GetDevices() {
 				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
 
+				nodedevices, err := devInstance.GetNodeDevices(*val)
+				if err != nil {
+					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
 				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
@@ -212,11 +218,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodedevices, err := devInstance.GetNodeDevices(*val)
-				if err != nil {
-					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
-				}
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
 					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
