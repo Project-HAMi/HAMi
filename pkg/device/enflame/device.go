@@ -118,7 +118,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	i := 0
 	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
 	if !ok || cards == 0 {
-		return nodedevices, nil
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", CountNoSharedName)
 	}
 	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
