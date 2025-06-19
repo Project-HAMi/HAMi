@@ -265,8 +265,8 @@ func (dev *DCUDevices) PatchAnnotations(annoinput *map[string]string, pd util.Po
 	return *annoinput
 }
 
-func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
-	return 0
+func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
+	return 0, false
 }
 
 func (dev *DCUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {

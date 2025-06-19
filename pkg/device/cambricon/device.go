@@ -314,8 +314,8 @@ func (dev *CambriconDevices) PatchAnnotations(annoinput *map[string]string, pd u
 	return *annoinput
 }
 
-func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
-	return 0
+func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
+	return 0, false
 }
 
 func (dev *CambriconDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {

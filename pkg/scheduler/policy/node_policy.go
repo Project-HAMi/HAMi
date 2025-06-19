@@ -55,17 +55,22 @@ func (l NodeScoreList) Less(i, j int) bool {
 
 func (ns *NodeScore) OverrideScore(devices DeviceUsageList, policy string) {
 	// current user having request resource
-	devscore := float32(0)
+	nodeScore := float32(0)
+	devScore := float32(0)
+	override := false
 	previous := []*util.DeviceUsage{}
 	for _, val := range devices.DeviceLists {
 		previous = append(previous, val.Device)
 	}
 	for idx, val := range ns.Devices {
-		devscore += device.GetDevices()[idx].ScoreNode(ns.Node, val, previous, policy)
+		devScore, override = device.GetDevices()[idx].ScoreNode(ns.Node, val, previous, policy)
+		if override {
+			nodeScore += devScore
+		}
 	}
-	if devscore > 0 {
-		ns.Score = devscore
-		klog.V(2).Infof("node %s computer overrided score is %f", ns.NodeID, ns.Score)
+	if override {
+		ns.Score = nodeScore
+		klog.V(2).Infof("node %s computer override score is %f", ns.NodeID, ns.Score)
 	}
 }
 

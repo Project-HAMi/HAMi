@@ -225,6 +225,7 @@ func calcscore(p []int, c []int) float32 {
 	})
 	prev := countbubble(p)
 	cur := countbubble(c)
+	klog.V(5).Infoln("Score kunlun num prev=", prev, "cur=", cur)
 	switch cur - prev {
 	case -1:
 		return 2000
@@ -261,12 +262,12 @@ func interconnect(devices []*util.DeviceUsage) []int {
 	return []int{}
 }
 
-func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
 	current := []int{}
 	prev := []int{}
 	for _, dev := range previous {
 		if !strings.Contains(dev.Type, KunlunGPUDevice) {
-			return 0
+			return 0, false
 		}
 		if dev.Used > 0 {
 			prev = addidx(prev, int(dev.Index))
@@ -275,13 +276,13 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingle
 	for _, ctr := range podDevices {
 		for _, val := range ctr {
 			if !strings.Contains(val.Type, KunlunGPUDevice) {
-				return 0
+				return 0, false
 			}
 			current = addidx(current, val.Idx)
 		}
 	}
-	klog.V(3).Infoln("Score kunlun previous=", prev, "current=", current)
-	return calcscore(prev, current)
+	klog.V(3).Infoln("Score kunlun device previous=", prev, "current=", current)
+	return calcscore(prev, current), true
 }
 
 func (dev *KunlunDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {

@@ -176,7 +176,7 @@ func parseMetaxAnnos(annos string, index int) float32 {
 	return float32(res)
 }
 
-func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
 	sum := 0
 	for _, dev := range podDevices {
 		sum += len(dev)
@@ -204,7 +204,7 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 		}
 	}
 
-	return res
+	return res, true
 }
 
 func (dev *MetaxDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {

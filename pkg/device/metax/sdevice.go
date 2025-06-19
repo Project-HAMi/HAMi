@@ -251,8 +251,8 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) util.
 	}
 }
 
-func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
-	return 0
+func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
+	return 0, false
 }
 
 func (sdev *MetaxSDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
