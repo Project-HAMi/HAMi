@@ -36,7 +36,11 @@ const (
 	NodeLockSep  = ","
 )
 
-var lock sync.Mutex
+var (
+	lock sync.Mutex
+	// NodeLockTimeout is the global timeout for node locks.
+	NodeLockTimeout time.Duration = time.Minute * 5
+)
 
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	lock.Lock()
@@ -122,8 +126,8 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if err != nil {
 		return err
 	}
-	if time.Since(lockTime) > time.Minute*5 {
-		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
+	if time.Since(lockTime) > NodeLockTimeout {
+		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
 		err = ReleaseNodeLock(nodeName, lockname, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
@@ -131,7 +135,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		}
 		return SetNodeLock(nodeName, lockname, pods)
 	}
-	return fmt.Errorf("node %s has been locked within 5 minutes", nodeName)
+	return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {

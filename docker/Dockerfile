@@ -26,7 +26,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 ARG VERSION
 LABEL version="$VERSION"
-LABEL maintainer="opensource@4paradigm.com"
+LABEL maintainer="info@dynamia.ai"
 COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=gobuild /k8s-vgpu/bin /k8s-vgpu/bin
 COPY --from=gobuild /go/bin/nvidia-mig-parted /k8s-vgpu/bin/

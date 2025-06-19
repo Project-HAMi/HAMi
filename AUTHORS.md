@@ -8,7 +8,7 @@ The following people, in alphabetical order, have either authored or signed off 
 
 | Contributor | Email |
 |-----------------|-----------|
-| [archlitchi](https://github.com/archlitchi) | limengxuan@4paradigm.com|
+| [archlitchi](https://github.com/archlitchi) | archlitchi@gmail.com|
 | [atttx123](https://github.com/atttx123) | - |
 | [chaunceyjiang](https://github.com/chaunceyjiang) | chaunceyjiang@gmail.com|
 | [CoderTH](https://github.com/CoderTH) | - |

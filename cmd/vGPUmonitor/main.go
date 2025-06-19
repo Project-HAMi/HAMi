@@ -26,6 +26,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -70,6 +71,18 @@ func start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
+	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
+	err = plugin.CreateMigApplyLockDir()
+	if err != nil {
+		return fmt.Errorf("failed to create MIG apply lock directory: %v", err)
+	}
+
+	lockChannel, err := plugin.WatchLockFile()
+	if err != nil {
+		return fmt.Errorf("failed to watch lock file: %v", err)
+	}
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
@@ -86,8 +99,19 @@ func start() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := watchAndFeedback(ctx, containerLister); err != nil {
-			errCh <- err
+		for {
+			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+				// if err is temporary closed, wait for lock file to be removed
+				if err.Error() == "temporary closed" {
+					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
+					<-lockChannel
+					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
+					continue
+				}
+				errCh <- err
+				return
+			}
+			return
 		}
 	}()
 
@@ -146,7 +170,8 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	return nil
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+	klog.Info("Starting watchAndFeedback")
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
 	}
@@ -157,6 +182,12 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister) error
 		case <-ctx.Done():
 			klog.Info("Shutting down watchAndFeedback")
 			return nil
+		case signal := <-migLockSignal:
+			if signal {
+				klog.Info("Received MIG apply lock file")
+				return fmt.Errorf("temporary closed")
+			}
+
 		case <-time.After(time.Second * 5):
 			if err := lister.Update(); err != nil {
 				klog.Errorf("Failed to update container list: %v", err)
