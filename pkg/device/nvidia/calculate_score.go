@@ -21,7 +21,7 @@ import (
 	"fmt"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 )
 
 // Device represents a GPU device as reported by NVML, including all of its
@@ -84,7 +84,7 @@ type deviceListBuilder struct {
 func NewDevices() (DeviceList, error) {
 	o := &deviceListBuilder{}
 	o.nvmllib = nvml.New()
-	o.devicelib = device.New(device.WithNvml(o.nvmllib))
+	o.devicelib = device.New(o.nvmllib)
 	return o.build()
 }
 
