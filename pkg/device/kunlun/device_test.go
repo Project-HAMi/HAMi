@@ -255,7 +255,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := KunlunDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.usage, test.args.policy)
+			result, _ := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.usage, test.args.policy)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
