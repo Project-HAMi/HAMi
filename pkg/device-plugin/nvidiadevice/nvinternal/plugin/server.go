@@ -228,6 +228,11 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		return err
 	}
 
+	deviceNames, err := GetDeviceNames()
+	if err != nil {
+		return err
+	}
+
 	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
@@ -257,7 +262,20 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		klog.Fatalf("RemoveMigApplyLock failed:%v", err)
 	}
 
-	if plugin.operatingMode == "mig" {
+	var deviceSupportMig bool
+	for _, name := range deviceNames {
+		deviceSupportMig = false
+		for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
+			if containsModel(name, migTemplate.Models) {
+				deviceSupportMig = true
+				break
+			}
+		}
+		if !deviceSupportMig {
+			break
+		}
+	}
+	if deviceSupportMig {
 		cmd := exec.Command("nvidia-mig-parted", "export")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
@@ -269,13 +287,23 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 		outStr := stdout.Bytes()
 		yaml.Unmarshal(outStr, &plugin.migCurrent)
 		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
-
-		HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-		if err != nil {
-			klog.Infof("no device in node:%v", err)
+		if plugin.operatingMode == "mig" {
+			HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+			if err != nil {
+				klog.Infof("no device in node:%v", err)
+			}
+			plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+			klog.Infoln("Open Mig export", plugin.migCurrent)
+		} else {
+			plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+			configSlice := nvidia.MigConfigSpecSlice{}
+			for i := 0; i < deviceNumbers; i++ {
+				conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+				configSlice = append(configSlice, conf)
+			}
+			plugin.migCurrent.MigConfigs["current"] = configSlice
+			klog.Infoln("Close Mig export", plugin.migCurrent)
 		}
-		plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-		klog.Infoln("Mig export", plugin.migCurrent)
 	}
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
@@ -287,6 +315,10 @@ func (plugin *NvidiaDevicePlugin) Start() error {
 	go func() {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
+
+	if deviceSupportMig {
+		plugin.ApplyMigTemplate()
+	}
 
 	return nil
 }

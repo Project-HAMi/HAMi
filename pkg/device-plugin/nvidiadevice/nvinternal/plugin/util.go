@@ -223,6 +223,34 @@ func GetDeviceNums() (int, error) {
 	return count, nil
 }
 
+func GetDeviceNames() ([]string, error) {
+	names := []string{}
+	defer nvml.Shutdown()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		return names, fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+	}
+	count, ret := nvml.DeviceGetCount()
+	if ret != nvml.SUCCESS {
+		klog.Error(`nvml get count error ret=`, ret)
+		return names, fmt.Errorf("nvml get count error ret: %s", nvml.ErrorString(ret))
+	}
+	for i := 0; i < count; i++ {
+		dev, ret := nvml.DeviceGetHandleByIndex(i)
+		if ret != nvml.SUCCESS {
+			klog.Error(`nvml get device error ret=`, ret)
+			return names, fmt.Errorf("nvml get device error ret: %s", nvml.ErrorString(ret))
+		}
+		name, ret := dev.GetName()
+		if ret != nvml.SUCCESS {
+			klog.Error(`nvml get name error ret=`, ret)
+			return names, fmt.Errorf("nvml get name error ret: %s", nvml.ErrorString(ret))
+		}
+		names = append(names, name)
+	}
+	return names, nil
+}
+
 func (nv *NvidiaDevicePlugin) DisableOtherNVMLOperation() {
 	// Create MIG apply lock file
 	if err := CreateMigApplyLock(); err != nil {
