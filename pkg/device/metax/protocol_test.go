@@ -36,7 +36,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 				{
 					UUID:              "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a9",
 					BDF:               "0000:0a:00.0",
-					Model:             "",
+					Model:             "native",
 					TotalDevCount:     16,
 					TotalCompute:      100,
 					TotalVRam:         64 * 1024,
@@ -45,11 +45,12 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					AvailableVRam:     32 * 1024,
 					Numa:              0,
 					Healthy:           true,
+					QosPolicy:         BestEffort,
 				},
 				{
 					UUID:              "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a8",
 					BDF:               "0000:09:00.0",
-					Model:             "",
+					Model:             "sgpu",
 					TotalDevCount:     8,
 					TotalCompute:      100,
 					TotalVRam:         32 * 1024,
@@ -58,6 +59,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					AvailableVRam:     32 * 1024,
 					Numa:              -1,
 					Healthy:           false,
+					QosPolicy:         BurstShare,
 				},
 			},
 			expected: []*util.DeviceInfo{
@@ -73,6 +75,10 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					MIGTemplate:  []util.Geometry{},
 					Health:       true,
 					DeviceVendor: MetaxSGPUDevice,
+					CustomInfo: map[string]any{
+						"QosPolicy": BestEffort,
+						"Model":     "native",
+					},
 				},
 				{
 					ID:           "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a8",
@@ -86,6 +92,10 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					MIGTemplate:  []util.Geometry{},
 					Health:       false,
 					DeviceVendor: MetaxSGPUDevice,
+					CustomInfo: map[string]any{
+						"QosPolicy": BurstShare,
+						"Model":     "sgpu",
+					},
 				},
 			},
 		},
