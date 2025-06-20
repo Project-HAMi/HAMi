@@ -165,13 +165,18 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		if err != nil {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
+		if !strings.HasPrefix(Model, "NVIDIA") {
+			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
+			// This is to handle cases where the model name might not be in the expected format.
+			Model = fmt.Sprintf("NVIDIA-%s", Model)
+		}
 		res = append(res, &util.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
 			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
-			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
+			Type:    Model,
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
 			Health:  health,
