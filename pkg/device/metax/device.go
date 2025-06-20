@@ -82,7 +82,7 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *MetaxDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *MetaxDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[MetaxGPUDevice]
 	if ok && len(devlist) > 0 {
 		deviceStr := util.EncodePodSingleDevice(devlist)
@@ -207,7 +207,7 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 	return res
 }
 
-func (dev *MetaxDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
