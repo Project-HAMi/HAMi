@@ -110,7 +110,7 @@ func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, e
 	return nodedevices, nil
 }
 
-func (dev *IluvatarDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *IluvatarDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[IluvatarGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.InRequestDevices[IluvatarGPUDevice]] = util.EncodePodSingleDevice(devlist)
@@ -229,7 +229,7 @@ func (dev *IluvatarDevices) ScoreNode(node *corev1.Node, podDevices util.PodSing
 	return 0, false
 }
 
-func (dev *IluvatarDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *IluvatarDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem

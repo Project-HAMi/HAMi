@@ -131,7 +131,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, e
 	return nodedevices, nil
 }
 
-func (dev *MthreadsDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *MthreadsDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[MthreadsGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.SupportDevices[MthreadsGPUDevice]] = util.EncodePodSingleDevice(devlist)
@@ -271,7 +271,7 @@ func (dev *MthreadsDevices) ScoreNode(node *corev1.Node, podDevices util.PodSing
 	return 0, false
 }
 
-func (dev *MthreadsDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *MthreadsDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem

@@ -523,7 +523,7 @@ func Test_PatchAnnotations(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &NvidiaGPUDevices{}
-			result := gpuDevices.PatchAnnotations(&test.args.annoinput, test.args.pd)
+			result := gpuDevices.PatchAnnotations(&corev1.Pod{}, &test.args.annoinput, test.args.pd)
 
 			assert.Equal(t, len(test.want), len(result), "Expected length of result to match want")
 			for k, v := range test.want {

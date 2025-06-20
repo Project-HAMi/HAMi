@@ -262,7 +262,7 @@ func Test_PatchAnnotations(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MthreadsDevices{}
-			result := dev.PatchAnnotations(test.args.annoinput, test.args.pd)
+			result := dev.PatchAnnotations(&corev1.Pod{}, test.args.annoinput, test.args.pd)
 			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
 			assert.Equal(t, result["mthreads.com/gpu-index"], test.want["mthreads.com/gpu-index"])
 			assert.Equal(t, result["mthreads.com/predicate-node"], test.want["mthreads.com/predicate-node"])
