@@ -97,7 +97,7 @@ func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, err
 	return nodedevices, nil
 }
 
-func (dev *KunlunDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *KunlunDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[KunlunGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.SupportDevices[KunlunGPUDevice]] = util.EncodePodSingleDevice(devlist)
@@ -285,7 +285,7 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingle
 	return calcscore(prev, current), true
 }
 
-func (dev *KunlunDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	return nil
 }
