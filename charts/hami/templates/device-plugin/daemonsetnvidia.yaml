@@ -42,6 +42,40 @@ spec:
       priorityClassName: system-node-critical
       hostPID: true
       hostNetwork: true
+      initContainers:
+        - args:
+            - nvidia-validator
+          command:
+            - sh
+            - -c
+          env:
+            - name: WITH_WAIT
+              value: "true"
+            - name: COMPONENT
+              value: driver
+          image: nvcr.m.daocloud.io/nvidia/cloud-native/gpu-operator-validator:v23.9.0
+          imagePullPolicy: IfNotPresent
+          name: driver-validation
+          resources: {}
+          securityContext:
+            privileged: true
+            seLinuxOptions:
+              level: s0
+          terminationMessagePath: /dev/termination-log
+          terminationMessagePolicy: File
+          volumeMounts:
+            - mountPath: /run/nvidia/driver
+              mountPropagation: HostToContainer
+              name: driver-install-path
+            - mountPath: /run/nvidia/validations
+              mountPropagation: Bidirectional
+              name: run-nvidia-validations
+            - mountPath: /host
+              mountPropagation: HostToContainer
+              name: host-root
+              readOnly: true
+            - mountPath: /host-dev-char
+              name: host-dev-char
       containers:
         - name: device-plugin
           image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
@@ -154,6 +188,22 @@ spec:
         - name: usrbin
           hostPath:
             path: /usr/bin
+        - hostPath:
+            path: /run/nvidia/driver
+            type: ""
+          name: driver-install-path
+        - hostPath:
+            path: /run/nvidia/validations
+            type: DirectoryOrCreate
+          name: run-nvidia-validations
+        - hostPath:
+            path: /
+            type: ""
+          name: host-root
+        - hostPath:
+            path: /dev/char
+            type: ""
+          name: host-dev-char
         - name: sysinfo
           hostPath:
             path: /sys
