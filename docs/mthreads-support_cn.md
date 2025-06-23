@@ -25,7 +25,7 @@
 
 ## 开启GPU复用
 
-* 部署'gpu-manager'，天数智芯的GPU共享需要配合厂家提供的'MT-CloudNative Toolkit'一起使用，请联系设备提供方获取
+* 部署'MT-CloudNative Toolkit'，摩尔线程的GPU共享需要配合厂家提供的'MT-CloudNative Toolkit'一起使用，请联系设备提供方获取
 
 > **注意:** *（可选），部署完之后，卸载掉mt-mutating-webhook与mt-scheduler组件，因为这部分功能将由HAMi调度器提供*
 
