@@ -1391,7 +1391,7 @@ func Test_calcScore(t *testing.T) {
 			},
 		},
 		{
-			name: "one node one device one pod one container use one device for kunlun.",
+			name: "one node one device one pod one container use one device and not enough resource,node should be failed.",
 			args: struct {
 				nodes *map[string]*NodeUsage
 				nums  util.PodDeviceRequests
@@ -1473,7 +1473,7 @@ func Test_calcScore(t *testing.T) {
 			},
 		},
 		{
-			name: "one node one device one pod one container use one device and not enough resource,node should be failed.",
+			name: "one node one device one pod one container use one device for kunlun.",
 			args: struct {
 				nodes *map[string]*NodeUsage
 				nums  util.PodDeviceRequests
