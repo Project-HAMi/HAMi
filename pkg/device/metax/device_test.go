@@ -475,7 +475,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result, _ := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.policy)
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.policy)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

@@ -277,8 +277,8 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 	return util.ContainerDeviceRequest{}
 }
 
-func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) (float32, bool) {
-	return 0, false
+func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+	return 0
 }
 
 func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
