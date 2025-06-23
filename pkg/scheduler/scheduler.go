@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,6 +177,12 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			for devhandsk, devInstance := range device.GetDevices() {
 				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
 
+				nodedevices, err := devInstance.GetNodeDevices(*val)
+				if err != nil {
+					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
 				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
@@ -212,11 +219,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodedevices, err := devInstance.GetNodeDevices(*val)
-				if err != nil {
-					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
-				}
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
 					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
@@ -290,6 +292,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Type:        d.Type,
 					Numa:        d.Numa,
 					Health:      d.Health,
+					CustomInfo:  maps.Clone(d.CustomInfo),
 				},
 			})
 		}
@@ -497,7 +500,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(&annotations, m.Devices)
+		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
 	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)

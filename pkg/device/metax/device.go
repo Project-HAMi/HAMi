@@ -62,7 +62,10 @@ func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (
 func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
 	nodedevices := []*util.DeviceInfo{}
 	i := 0
-	count, _ := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
+	count, ok := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
+	if !ok || count == 0 {
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MetaxResourceCount)
+	}
 	for int64(i) < count {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
 			Index:   uint(i),
@@ -79,7 +82,7 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *MetaxDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *MetaxDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[MetaxGPUDevice]
 	if ok && len(devlist) > 0 {
 		deviceStr := util.EncodePodSingleDevice(devlist)
@@ -204,7 +207,7 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 	return res
 }
 
-func (dev *MetaxDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem

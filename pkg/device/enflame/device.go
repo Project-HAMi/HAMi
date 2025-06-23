@@ -118,7 +118,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	i := 0
 	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
 	if !ok || cards == 0 {
-		return nodedevices, nil
+		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", CountNoSharedName)
 	}
 	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
@@ -138,7 +138,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	return nodedevices, nil
 }
 
-func (dev *EnflameDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[EnflameGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.SupportDevices[EnflameGPUDevice]] = util.EncodePodSingleDevice(devlist)
@@ -243,7 +243,7 @@ func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingl
 	return 0
 }
 
-func (dev *EnflameDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem

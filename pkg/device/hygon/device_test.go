@@ -572,7 +572,7 @@ func Test_PatchAnnotations(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := DCUDevices{}
-			result := dev.PatchAnnotations(test.args.annoinput, test.args.pd)
+			result := dev.PatchAnnotations(&corev1.Pod{}, test.args.annoinput, test.args.pd)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

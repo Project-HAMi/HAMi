@@ -147,7 +147,7 @@ func TestPatchAnnotations(t *testing.T) {
 			maps.Copy(annoInputCopy, tt.annoInput)
 
 			dev := &IluvatarDevices{}
-			got := dev.PatchAnnotations(&annoInputCopy, tt.podDevices)
+			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)
 
 			if len(got) != len(tt.expected) {
 				t.Errorf("PatchAnnotations() got %d annotations, expected %d", len(got), len(tt.expected))

@@ -390,7 +390,7 @@ func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d util.DeviceUsa
 	return true
 }
 
-func (dev *NvidiaGPUDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
 		deviceStr := util.EncodePodSingleDevice(devlist)
@@ -532,7 +532,7 @@ func (dev *NvidiaGPUDevices) migNeedsReset(n *util.DeviceUsage) bool {
 	return true
 }
 
-func (dev *NvidiaGPUDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
