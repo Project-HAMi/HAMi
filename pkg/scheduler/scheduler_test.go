@@ -670,8 +670,8 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 					t.Errorf("missing annotation: hami.io/node-handshake-dcu")
 					return false
 				}
-				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHami := time.Parse(time.DateTime, trimHandshakePrefix(handshakeTimeStr))
+				_, errDcu := time.Parse(time.DateTime, trimHandshakePrefix(dcuTimeStr))
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
 					return false
@@ -786,8 +786,8 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 				}
 
 				// Verify time format in annotations if they exist
-				_, errHami := time.Parse(time.DateTime, strings.TrimPrefix(handshakeTimeStr, "Requesting_"))
-				_, errDcu := time.Parse(time.DateTime, strings.TrimPrefix(dcuTimeStr, "Requesting_"))
+				_, errHami := time.Parse(time.DateTime, trimHandshakePrefix(handshakeTimeStr))
+				_, errDcu := time.Parse(time.DateTime, trimHandshakePrefix(dcuTimeStr))
 
 				if errHami != nil {
 					t.Errorf("invalid time format in annotation 'hami.io/node-handshake': %v", errHami)
@@ -836,4 +836,14 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func trimHandshakePrefix(s string) string {
+	prefixes := []string{"Requesting_", "Deleted_"}
+	for _, p := range prefixes {
+		if strings.HasPrefix(s, p) {
+			return strings.TrimPrefix(s, p)
+		}
+	}
+	return s
 }
