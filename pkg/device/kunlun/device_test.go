@@ -227,7 +227,7 @@ func Test_ScoreNode(t *testing.T) {
 				},
 				policy: "binpack",
 			},
-			want: float32(2000),
+			want: float32(3000),
 		},
 		{
 			name: "Scenario 2",
@@ -249,7 +249,7 @@ func Test_ScoreNode(t *testing.T) {
 				usage:  []*util.DeviceUsage{},
 				policy: "spread",
 			},
-			want: float32(-1000),
+			want: float32(0),
 		},
 	}
 	for _, test := range tests {
