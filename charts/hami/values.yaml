@@ -106,6 +106,7 @@ scheduler:
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
   admissionWebhook:
+    enabled: true
     customURL:
       enabled: false
       # must be an endpoint using https.

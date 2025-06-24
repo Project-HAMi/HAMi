@@ -1,3 +1,4 @@
+{{- if .Values.scheduler.admissionWebhook.enabled }}
 {{- if and (.Values.scheduler.patch.enabled) (not .Values.scheduler.certManager.enabled) }}
 apiVersion: batch/v1
 kind: Job
@@ -55,4 +56,5 @@ spec:
       securityContext:
         runAsNonRoot: true
         runAsUser: {{ .Values.scheduler.patch.runAsUser }}
+{{- end }}
 {{- end }}
