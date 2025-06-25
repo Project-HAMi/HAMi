@@ -8,7 +8,6 @@ metadata:
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: ClusterRole
-  #name: cluster-admin
   name: {{ include "hami-vgpu.device-plugin" . }}-monitor
 subjects:
   - kind: ServiceAccount

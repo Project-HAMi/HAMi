@@ -1,0 +1,20 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["pods/binding"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "patch", "update"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "get", "list"]
