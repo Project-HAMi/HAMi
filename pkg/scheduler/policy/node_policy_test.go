@@ -245,7 +245,7 @@ func TestOverrideScore(t *testing.T) {
 				Score: 0,
 			},
 			devices: []*util.DeviceUsage{
-				&util.DeviceUsage{
+				{
 					Count:     4,
 					Totalcore: 8,
 					Totalmem:  4096,
@@ -287,7 +287,7 @@ func TestOverrideScore(t *testing.T) {
 				Score: 0,
 			},
 			devices: []*util.DeviceUsage{
-				&util.DeviceUsage{
+				{
 					Count:     4,
 					Totalcore: 8,
 					Totalmem:  4096,
