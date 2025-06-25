@@ -212,7 +212,7 @@ func TestOverrideScore(t *testing.T) {
 	tests := []struct {
 		name      string
 		nodeScore *NodeScore
-		devices   DeviceUsageList
+		devices   []*util.DeviceUsage
 		policy    string
 		wantScore float32
 	}{
@@ -244,20 +244,15 @@ func TestOverrideScore(t *testing.T) {
 				},
 				Score: 0,
 			},
-			devices: DeviceUsageList{
-				DeviceLists: []*DeviceListsScore{
-					{
-						Device: &util.DeviceUsage{
-							Count:     4,
-							Totalcore: 8,
-							Totalmem:  4096,
-							Type:      "gpu",
-							Used:      0,
-							Usedcores: 0,
-							Usedmem:   0,
-						},
-						Score: 0,
-					},
+			devices: []*util.DeviceUsage{
+				&util.DeviceUsage{
+					Count:     4,
+					Totalcore: 8,
+					Totalmem:  4096,
+					Type:      "gpu",
+					Used:      0,
+					Usedcores: 0,
+					Usedmem:   0,
 				},
 			},
 			policy:    "binpack",
@@ -291,20 +286,15 @@ func TestOverrideScore(t *testing.T) {
 				},
 				Score: 0,
 			},
-			devices: DeviceUsageList{
-				DeviceLists: []*DeviceListsScore{
-					{
-						Device: &util.DeviceUsage{
-							Count:     4,
-							Totalcore: 8,
-							Totalmem:  4096,
-							Type:      "gpu",
-							Used:      0,
-							Usedcores: 0,
-							Usedmem:   0,
-						},
-						Score: 0,
-					},
+			devices: []*util.DeviceUsage{
+				&util.DeviceUsage{
+					Count:     4,
+					Totalcore: 8,
+					Totalmem:  4096,
+					Type:      "gpu",
+					Used:      0,
+					Usedcores: 0,
+					Usedmem:   0,
 				},
 			},
 			policy:    "binpack",
