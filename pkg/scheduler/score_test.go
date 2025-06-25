@@ -1617,6 +1617,142 @@ func Test_calcScore(t *testing.T) {
 							},
 						},
 					},
+					"node2": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid2",
+										Index:     1,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid3",
+										Index:     2,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid4",
+										Index:     3,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid5",
+										Index:     4,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid6",
+										Index:     5,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid7",
+										Index:     6,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid8",
+										Index:     7,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
 				},
 				nums: util.PodDeviceRequests{
 					{
@@ -1672,7 +1808,24 @@ func Test_calcScore(t *testing.T) {
 									},
 								},
 							},
-							Score: 2000,
+							Score: 0,
+						},
+						{
+							NodeID: "node2",
+							Devices: util.PodDevices{
+								"kunlun": util.PodSingleDevice{
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      kunlun.KunlunGPUDevice,
+											Usedcores: 100,
+											Usedmem:   98304,
+										},
+									},
+								},
+							},
+							Score: 1006.25,
 						},
 					},
 				},
