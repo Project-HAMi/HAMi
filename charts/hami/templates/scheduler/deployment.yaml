@@ -39,14 +39,14 @@ spec:
         {{- toYaml .Values.scheduler.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
-      {{- include "hami-vgpu.imagePullSecrets" . | nindent 6}}
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
+      {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
       {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: kube-scheduler
-          image: "{{ .Values.scheduler.kubeScheduler.image }}:{{ include "resolvedKubeSchedulerTag" . }}"
-          imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
+          image: {{ include "hami.scheduler.kubeScheduler.image" . }}
+          imagePullPolicy: {{ .Values.scheduler.kubeScheduler.image.pullPolicy }}
           command:
             - kube-scheduler
              {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
@@ -81,8 +81,8 @@ spec:
             timeoutSeconds: 15
           {{- end }}
         - name: vgpu-scheduler-extender
-          image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
-          imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
+          image: {{ include "hami.scheduler.extender.image" . }}
+          imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
           env:
           {{- if .Values.global.managedNodeSelectorEnable }}
           {{- range $key, $value := .Values.global.managedNodeSelector }}
