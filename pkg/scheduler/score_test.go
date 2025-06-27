@@ -1833,6 +1833,579 @@ func Test_calcScore(t *testing.T) {
 				err:         nil,
 			},
 		},
+		{
+			name: "two node eight device one pod two container use one device for kunlun.",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  util.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid2",
+										Index:     1,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid3",
+										Index:     2,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid4",
+										Index:     3,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid5",
+										Index:     4,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid6",
+										Index:     5,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid7",
+										Index:     6,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid8",
+										Index:     7,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+					"node2": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid2",
+										Index:     1,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid3",
+										Index:     2,
+										Used:      0,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid4",
+										Index:     3,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid5",
+										Index:     4,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid6",
+										Index:     5,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid7",
+										Index:     6,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid8",
+										Index:     7,
+										Used:      1,
+										Count:     1,
+										Usedmem:   0,
+										Totalmem:  98304, // not enough mem
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      kunlun.KunlunGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+				},
+				nums: util.PodDeviceRequests{
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     kunlun.KunlunGPUDevice,
+							Memreq:   0,
+							Coresreq: 0,
+						},
+					},
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     kunlun.KunlunGPUDevice,
+							Memreq:   0,
+							Coresreq: 0,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test1",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "xpu",
+								Image: "chrstnhntschl/xpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"kunlunxin.com/xpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+							{
+								Name:  "xpu",
+								Image: "chrstnhntschl/xpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"kunlunxin.com/xpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: util.PodDevices{
+								"kunlun": util.PodSingleDevice{
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      kunlun.KunlunGPUDevice,
+											Usedcores: 100,
+											Usedmem:   98304,
+										},
+									},
+									{
+										{
+											Idx:       1,
+											UUID:      "uuid2",
+											Type:      kunlun.KunlunGPUDevice,
+											Usedcores: 100,
+											Usedmem:   98304,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+						{
+							NodeID: "node2",
+							Devices: util.PodDevices{
+								"kunlun": util.PodSingleDevice{
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      kunlun.KunlunGPUDevice,
+											Usedcores: 100,
+											Usedmem:   98304,
+										},
+									},
+									{
+										{
+											Idx:       1,
+											UUID:      "uuid2",
+											Type:      kunlun.KunlunGPUDevice,
+											Usedcores: 100,
+											Usedmem:   98304,
+										},
+									},
+								},
+							},
+							Score: 2006.25,
+						},
+					},
+				},
+				failedNodes: map[string]string{},
+				err:         nil,
+			},
+		},
+		{
+			name: "two node per node having one device one pod two container use one device",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  util.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+					"node2": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.GPUSchedulerPolicySpread.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &util.DeviceUsage{
+										ID:        "uuid2",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+									Score: 0,
+								},
+							},
+						},
+					},
+				},
+				nums: util.PodDeviceRequests{
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 30,
+						},
+					},
+					{
+						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 40,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test1",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+							{
+								Name:  "gpu-burn1",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(40, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: util.PodDevices{
+								"NVIDIA": util.PodSingleDevice{
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 40,
+											Usedmem:   1000,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+						{
+							NodeID: "node2",
+							Devices: util.PodDevices{
+								"NVIDIA": util.PodSingleDevice{
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid2",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid2",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 40,
+											Usedmem:   1000,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+					},
+				},
+				err: nil,
+			},
+		},
 	}
 	s := NewScheduler()
 	for _, test := range tests {
