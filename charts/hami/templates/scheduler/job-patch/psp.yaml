@@ -1,3 +1,4 @@
+{{- if .Values.scheduler.admissionWebhook.enabled }}
 {{- if and (.Values.scheduler.patch.enabled) (not .Values.scheduler.certManager.enabled) }}
 {{- if .Values.podSecurityPolicy.enabled }}
 apiVersion: policy/v1beta1
@@ -34,5 +35,6 @@ spec:
   - projected
   - secret
   - downwardAPI
+{{- end }}
 {{- end }}
 {{- end }}
