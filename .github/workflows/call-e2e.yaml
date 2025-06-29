@@ -9,7 +9,6 @@ on:
         type: string
       type:
         description: 'E2E type'
-        required: true
         type: string
         default: pullrequest
 
@@ -27,8 +26,8 @@ jobs:
     runs-on: [ "${{ matrix.device }}", "${{ matrix.type }}" ]
     environment: ${{ matrix.device }}
     env:
-      E2E_TYPE: ${{ inputs.type }}
       HAMI_VERSION: ${{ inputs.ref }}
+      E2E_TYPE: ${{ inputs.type }}
     steps:
       - name: checkout code
         uses: actions/checkout@v4

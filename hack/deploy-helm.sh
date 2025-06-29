@@ -53,7 +53,7 @@ if [ "${E2E_TYPE}" == "pullrequest" ]; then
     echo "Error: No .tgz file found in the charts directory."
     exit 1
   fi
-elif [ "${E2E_TYPE}" == "release" ]; then
+elif [ "${E2E_TYPE}" == "release" ] || [ "${E2E_TYPE}" == "upgrade" ]; then
   HELM_SOURCE="${HELM_NAME}/${HAMI_ALIAS}"
   echo "Using remote chart: ${HELM_SOURCE}"
 else
@@ -88,7 +88,7 @@ echo "Kubeconfig: ${KUBE_CONF}"
 if ! helm --debug upgrade --install --create-namespace --cleanup-on-fail \
   "${HAMI_ALIAS}" "${HELM_SOURCE}" -n "${TARGET_NS}" \
   --set devicePlugin.passDeviceSpecsEnabled=false \
-  --version "${HELM_VER}" --wait --timeout 10m --kubeconfig "${KUBE_CONF}"; then
+  --version "${HELM_VER}" --wait --timeout 15m --kubeconfig "${KUBE_CONF}"; then
   echo "Error: Failed to deploy/upgrade Helm Chart. Please check the Helm logs above for more details."
   exit 1
 fi
