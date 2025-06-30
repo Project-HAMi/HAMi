@@ -53,18 +53,23 @@ func (l NodeScoreList) Less(i, j int) bool {
 	return l.NodeList[i].Score < l.NodeList[j].Score
 }
 
-func (ns *NodeScore) OverrideScore(devices DeviceUsageList, policy string) {
+func (ns *NodeScore) OverrideScore(previous []*util.DeviceUsage, policy string) {
 	// current user having request resource
 	devScore := float32(0)
-	previous := []*util.DeviceUsage{}
-	for _, val := range devices.DeviceLists {
-		previous = append(previous, val.Device)
-	}
 	for idx, val := range ns.Devices {
 		devScore += device.GetDevices()[idx].ScoreNode(ns.Node, val, previous, policy)
 	}
 	ns.Score += devScore
 	klog.V(2).Infof("node %s default score is %f, computer override score is %f", ns.NodeID, ns.Score-devScore, ns.Score)
+}
+
+func (ns *NodeScore) SnapshotDevice(devices DeviceUsageList) []*util.DeviceUsage {
+	snapshot := []*util.DeviceUsage{}
+	for _, val := range devices.DeviceLists {
+		tmp := *val.Device
+		snapshot = append(snapshot, &tmp)
+	}
+	return snapshot
 }
 
 func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
