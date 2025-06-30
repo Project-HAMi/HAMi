@@ -63,6 +63,14 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
 * `scheduler.certManager.enabled`:
   Boolean type, default value is false, if true, cert-manager will generate a self-signed certificate. **Note: This option requires cert-manager to be installed in your cluster first.** _See [cert-manager installation](https://cert-manager.io/docs/installation/kubernetes/) for more details._
 
+## Node configs: annotations
+
+* hami.io/node-nouse-gpuuuid:
+  
+  String type, supports multiple device IDs. Multiple devices should be separated by colons, ie: "GPU-XXX"
+
+  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling.
+
 ## Pod configs: annotations
 
 * `nvidia.com/use-gpuuuid`:

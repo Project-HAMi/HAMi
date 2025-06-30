@@ -77,6 +77,13 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.certManager.enabled`：
   布尔类型，默认值为 false。如果设置为 true，cert-manager 将生成自签名证书。**注意：此选项需要先在集群中安装 cert-manager。** _更多详情请参见 [cert-manager 安装说明](https://cert-manager.io/docs/installation/kubernetes/)。_
 
+# Node 配置（在注解中指定）
+
+* hami.io/node-nouse-gpuuuid：
+  
+  字符串类型，支持多个设备ID，使用:分割多个设备，如：“GPU-XXX”
+
+  如果设置，hami在进行调度将不会为Pod使用字符串中定义的任何设备
 
 # Pod 配置（在注解中指定）
 
