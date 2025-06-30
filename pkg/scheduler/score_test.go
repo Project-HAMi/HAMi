@@ -2196,7 +2196,7 @@ func Test_calcScore(t *testing.T) {
 									},
 								},
 							},
-							Score: 0,
+							Score: 1000,
 						},
 						{
 							NodeID: "node2",
