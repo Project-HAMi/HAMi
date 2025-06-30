@@ -61,6 +61,8 @@ type Scheduler struct {
 	eventRecorder record.EventRecorder
 }
 
+const NodeNoUseUUID = "hami.io/node-nouse-gpuuuid"
+
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
@@ -266,18 +268,33 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				userGPUPolicy = value
 			}
 		}
+		disableGPUUUIDMap := make(map[string]bool)
+		if nodeInfo.Node != nil {
+			if value, ok := nodeInfo.Node.Annotations[NodeNoUseUUID]; ok {
+				disableGPUUUIDList := strings.Split(value, ":")
+				klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
+				for _, gpuUUID := range disableGPUUUIDList {
+					disableGPUUUIDMap[gpuUUID] = true
+				}
+			}
+		}
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
 		for _, d := range node.Devices {
+			used := int32(0)
+			if disableGPUUUIDMap[d.ID] {
+				klog.V(5).Infof("Disable gpu uuid is: %v, its count is: %v", d.ID, d.Count)
+				used = d.Count
+			}
 			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &util.DeviceUsage{
 					ID:        d.ID,
 					Index:     d.Index,
-					Used:      0,
+					Used:      used,
 					Count:     d.Count,
 					Usedmem:   0,
 					Totalmem:  d.Devmem,
