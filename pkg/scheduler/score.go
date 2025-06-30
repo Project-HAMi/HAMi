@@ -140,6 +140,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 			viewStatus(*node)
 			score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(util.PodDevices), Score: 0}
 			score.ComputeDefaultScore(node.Devices)
+			snapshot := score.SnapshotDevice(node.Devices)
 
 			//This loop is for different container request
 			ctrfit := false
@@ -175,7 +176,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 				mutex.Lock()
 				res.NodeList = append(res.NodeList, &score)
 				mutex.Unlock()
-				score.OverrideScore(node.Devices, userNodePolicy)
+				score.OverrideScore(snapshot, userNodePolicy)
 				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
