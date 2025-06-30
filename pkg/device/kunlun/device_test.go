@@ -154,6 +154,66 @@ func Test_graphSelect(t *testing.T) {
 			},
 			want1: []int{3, 7},
 		},
+		{
+			name: "allocate 4 cards according to interconnect when have 5 cards",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 1},
+					{Index: 3, Used: 1},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 0},
+					{Index: 6, Used: 0},
+					{Index: 7, Used: 1},
+				},
+				c: 4,
+			},
+			want1: []int{0, 1, 4, 5},
+		},
+		{
+			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards unconnected",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 0},
+					{Index: 3, Used: 1},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 0},
+					{Index: 6, Used: 1},
+					{Index: 7, Used: 0},
+				},
+				c: 4,
+			},
+			want1: []int{0, 1, 4, 5},
+		},
+		{
+			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards connected",
+			args: struct {
+				d []*util.DeviceUsage
+				c int
+			}{
+				d: []*util.DeviceUsage{
+					{Index: 0, Used: 0},
+					{Index: 1, Used: 0},
+					{Index: 2, Used: 1},
+					{Index: 3, Used: 0},
+					{Index: 4, Used: 0},
+					{Index: 5, Used: 0},
+					{Index: 6, Used: 1},
+					{Index: 7, Used: 0},
+				},
+				c: 4,
+			},
+			want1: []int{0, 1, 4, 5},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -227,7 +287,7 @@ func Test_ScoreNode(t *testing.T) {
 				},
 				policy: "binpack",
 			},
-			want: float32(2000),
+			want: float32(3000),
 		},
 		{
 			name: "Scenario 2",
@@ -249,7 +309,7 @@ func Test_ScoreNode(t *testing.T) {
 				usage:  []*util.DeviceUsage{},
 				policy: "spread",
 			},
-			want: float32(-1000),
+			want: float32(0),
 		},
 	}
 	for _, test := range tests {

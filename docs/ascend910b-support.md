@@ -26,12 +26,7 @@ kubectl label node {ascend-node} accelerator=huawei-Ascend910
 
 * Deploy [Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
 
-* Download and install [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin/blob/master/build/ascendplugin-910-hami.yaml) from the HAMi project:
-
-```bash
-wget https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/master/build/ascendplugin-910-hami.yaml
-kubectl apply -f ascendplugin-910-hami.yaml
-```
+* Deploy [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin)
 
 ## Customizing NPU Virtualization Parameters
 

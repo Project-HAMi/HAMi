@@ -42,6 +42,8 @@ const (
 	KunlunUseUUID         = "baidu.com/use-gpuuuid"
 	KunlunNoUseUUID       = "baidu.com/nouse-gpuuuid"
 	InterGroupConnection  = "0-4,1-5,2-6,3-7"
+	InterGroupConnection2 = "0-1-4-5,2-3-6-7,0-2-4-6,1-3-5-7,0-3-4-7,1-2-5-6"
+	GroupConnection       = "0-1,0-2,0-3,1-2,1-3,2-3,4-5,4-6,4-7,5-6,5-7,6-7"
 )
 
 var (
@@ -97,7 +99,7 @@ func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, err
 	return nodedevices, nil
 }
 
-func (dev *KunlunDevices) PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *KunlunDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[KunlunGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.SupportDevices[KunlunGPUDevice]] = util.EncodePodSingleDevice(devlist)
@@ -225,40 +227,138 @@ func calcscore(p []int, c []int) float32 {
 	})
 	prev := countbubble(p)
 	cur := countbubble(c)
+	klog.V(5).Infoln("Score kunlun num prev=", prev, "cur=", cur)
 	switch cur - prev {
 	case -1:
-		return 2000
+		return 3000
 	case 0:
-		return 1000
+		return 2000
 	case 1:
-		return 0
+		return 1000
 	case 2:
-		return -1000
+		return 0
 	}
-	return 0
+	return 1000
 }
 
-func interconnect(devices []*util.DeviceUsage) []int {
+func parseUsage(devices []*util.DeviceUsage) []int {
+	usage := []int{}
 	for _, val := range devices {
-		if val.Used > 0 {
-			continue
+		if val.Used == 0 {
+			usage = append(usage, int(val.Index))
 		}
-		for _, val2 := range devices {
-			if val2.Used > 0 || val2.Index == val.Index {
+	}
+	return usage
+}
+
+func parseInterconnection() [][]int {
+	var interconnection [][]int
+	pairs := strings.Split(InterGroupConnection, ",")
+	for _, pair := range pairs {
+		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
+		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
+		interconnection = append(interconnection, []int{lw, rw})
+	}
+	pairs = strings.Split(GroupConnection, ",")
+	for _, pair := range pairs {
+		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
+		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
+		interconnection = append(interconnection, []int{lw, rw})
+	}
+	return interconnection
+}
+
+func parseInterconnection2() [][]int {
+	var interconnection2 [][]int
+	groups := strings.Split(InterGroupConnection2, ",")
+	for _, group := range groups {
+		values := strings.Split(group, "-")
+		connect := make([]int, 4)
+		for i, value := range values {
+			v, _ := strconv.Atoi(value)
+			connect[i] = v
+		}
+		interconnection2 = append(interconnection2, connect)
+	}
+	return interconnection2
+}
+
+func interconnect(devices []*util.DeviceUsage, count int) []int {
+	if count == 2 {
+		for _, val := range devices {
+			if val.Used > 0 {
 				continue
 			}
-			pairs := strings.Split(InterGroupConnection, ",")
-			for _, p := range pairs {
-				lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
-				rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
-				klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
-				if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
-					return []int{int(val.Index), int(val2.Index)}
+			for _, val2 := range devices {
+				if val2.Used > 0 || val2.Index == val.Index {
+					continue
+				}
+				pairs := strings.Split(InterGroupConnection, ",")
+				for _, p := range pairs {
+					lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
+					rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
+					klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
+					if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
+						return []int{int(val.Index), int(val2.Index)}
+					}
 				}
 			}
 		}
 	}
+	if count == 4 {
+		unused := parseUsage(devices)
+		interconnect2 := parseInterconnection2()
+		if len(unused) == 4 || len(unused) == 5 {
+			for _, c := range interconnect2 {
+				if canMeet(unused, c) {
+					return c
+				}
+			}
+		}
+		if len(unused) == 6 {
+			ret := []int{}
+			for _, c := range interconnect2 {
+				if canMeet(unused, c) {
+					ret = c
+					delta := delta(unused, c)
+					for _, val := range parseInterconnection() {
+						if canMeet(delta, val) {
+							return ret
+						}
+					}
+				}
+			}
+			return ret
+		}
+	}
 	return []int{}
+}
+
+func canMeet(have, want []int) bool {
+	mp := make(map[int]bool)
+	for _, v := range have {
+		mp[v] = true
+	}
+	for _, v := range want {
+		if !mp[v] {
+			return false
+		}
+	}
+	return true
+}
+
+func delta(have, want []int) []int {
+	var ret []int
+	mp := make(map[int]bool)
+	for _, v := range want {
+		mp[v] = true
+	}
+	for _, v := range have {
+		if !mp[v] {
+			ret = append(ret, v)
+		}
+	}
+	return ret
 }
 
 func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
@@ -280,11 +380,11 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingle
 			current = addidx(current, val.Idx)
 		}
 	}
-	klog.V(3).Infoln("Score kunlun previous=", prev, "current=", current)
+	klog.V(3).Infoln("Score kunlun device previous=", prev, "current=", current)
 	return calcscore(prev, current)
 }
 
-func (dev *KunlunDevices) AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	return nil
 }
@@ -343,10 +443,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 					}
 				}
 			}
-			if count == 2 {
-				return interconnect(devices)
-			}
-			return []int{}
+			return interconnect(devices, count)
 		}
 	}
 	return []int{}
