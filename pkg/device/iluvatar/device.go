@@ -244,7 +244,7 @@ func (ilu *IluvatarDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
 	reason := make(map[string]int)
-	for i := len(devices) - 1; i >= 0; i-- {
+	for i := 0; i < len(devices); i++ {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
