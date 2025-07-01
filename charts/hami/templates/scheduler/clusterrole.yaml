@@ -7,14 +7,15 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 rules:
   - apiGroups: [""]
-    resources: ["pods"]
+    resources: ["pods", "configmaps"]
     verbs: ["get", "list", "watch", "patch", "update"]
   - apiGroups: [""]
     resources: ["pods/binding"]
     verbs: ["create"]
   - apiGroups: [""]
     resources: ["nodes"]
-    verbs: ["get", "list", "patch", "update"]
+    verbs: ["get", "list", "patch", "update", "watch"]
   - apiGroups: [""]
     resources: ["events"]
     verbs: ["create", "get", "list"]
+
