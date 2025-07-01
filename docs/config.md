@@ -65,9 +65,9 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
 
 ## Node configs: annotations
 
-* hami.io/node-nouse-gpuuuid:
+* `nvidia.com/nouse-gpuuuid`:
   
-  String type, supports multiple device IDs. Multiple devices should be separated by colons, ie: "GPU-XXX"
+  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX"
 
   If set, HAMI will not allocate any devices defined in this string to Pods during scheduling.
 

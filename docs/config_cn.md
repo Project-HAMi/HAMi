@@ -79,9 +79,9 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 
 # Node 配置（在注解中指定）
 
-* hami.io/node-nouse-gpuuuid：
+* `nvidia.com/nouse-gpuuuid`：
   
-  字符串类型，支持多个设备ID，使用:分割多个设备，如：“GPU-XXX”
+  字符串类型，支持多个设备ID，使用,分割多个设备，如："GPU-AAA,GPU-BBB"
 
   如果设置，hami在进行调度将不会为Pod使用字符串中定义的任何设备
 
