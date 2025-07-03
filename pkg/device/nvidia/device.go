@@ -99,18 +99,16 @@ const (
 )
 
 type NvidiaConfig struct {
-	ResourceCountName            string  `yaml:"resourceCountName"`
-	ResourceMemoryName           string  `yaml:"resourceMemoryName"`
-	ResourceCoreName             string  `yaml:"resourceCoreName"`
-	ResourceMemoryPercentageName string  `yaml:"resourceMemoryPercentageName"`
-	ResourcePriority             string  `yaml:"resourcePriorityName"`
-	OverwriteEnv                 bool    `yaml:"overwriteEnv"`
-	DefaultMemory                int32   `yaml:"defaultMemory"`
-	DefaultCores                 int32   `yaml:"defaultCores"`
-	DefaultGPUNum                int32   `yaml:"defaultGPUNum"`
-	DeviceSplitCount             uint    `yaml:"deviceSplitCount"`
-	DeviceMemoryScaling          float64 `yaml:"deviceMemoryScaling"`
-	DeviceCoreScaling            float64 `yaml:"deviceCoreScaling"`
+	NodeDefaultConfig            `yaml:",inline"`
+	ResourceCountName            string `yaml:"resourceCountName"`
+	ResourceMemoryName           string `yaml:"resourceMemoryName"`
+	ResourceCoreName             string `yaml:"resourceCoreName"`
+	ResourceMemoryPercentageName string `yaml:"resourceMemoryPercentageName"`
+	ResourcePriority             string `yaml:"resourcePriorityName"`
+	OverwriteEnv                 bool   `yaml:"overwriteEnv"`
+	DefaultMemory                int32  `yaml:"defaultMemory"`
+	DefaultCores                 int32  `yaml:"defaultCores"`
+	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                        `yaml:"disableCoreLimit"`
 	MigGeometriesList []util.AllowedMigGeometries `yaml:"knownMigGeometries"`
@@ -118,8 +116,15 @@ type NvidiaConfig struct {
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
 	RuntimeClassName string `yaml:"runtimeClassName"`
+}
+
+// These configs can be sepecified for each node by using Nodeconfig.
+type NodeDefaultConfig struct {
+	DeviceSplitCount    *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
+	DeviceMemoryScaling *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
+	DeviceCoreScaling   *float64 `yaml:"deviceCoreScaling" json:"devicecorescaling"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
-	LogLevel LibCudaLogLevel `yaml:"libCudaLogLevel"`
+	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libCudaLogLevel"`
 }
 
 type FilterDevice struct {
@@ -131,13 +136,11 @@ type FilterDevice struct {
 
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
-		Name                string        `json:"name"`
-		OperatingMode       string        `json:"operatingmode"`
-		Devicememoryscaling float64       `json:"devicememoryscaling"`
-		Devicecorescaling   float64       `json:"devicecorescaling"`
-		Devicesplitcount    uint          `json:"devicesplitcount"`
-		Migstrategy         string        `json:"migstrategy"`
-		FilterDevice        *FilterDevice `json:"filterdevices"`
+		NvidiaConfig  NodeDefaultConfig `json:"nvidiaconfig"`
+		Name          string            `json:"name"`
+		OperatingMode string            `json:"operatingmode"`
+		Migstrategy   string            `json:"migstrategy"`
+		FilterDevice  *FilterDevice     `json:"filterdevices"`
 	} `json:"nodeconfig"`
 }
 
