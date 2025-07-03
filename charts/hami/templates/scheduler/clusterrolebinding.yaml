@@ -1,0 +1,47 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}-kube
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.scheduler" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}-volume
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:volume-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.scheduler" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: hami-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.scheduler" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
