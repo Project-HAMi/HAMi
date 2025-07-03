@@ -57,20 +57,20 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusBadRequest, err)
 	}
 	if len(pod.Spec.Containers) == 0 {
-		klog.Warningf(template+" - Denying admission as pod has no containers", req.Namespace, req.Name, req.UID)
+		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
 		return admission.Denied("pod has no containers")
 	}
 	if pod.Spec.SchedulerName != "" && (len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
 		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
-	klog.Infof(template, req.Namespace, req.Name, req.UID)
+	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
-				klog.Warningf(template+" - Denying admission as container %s is privileged", req.Namespace, req.Name, req.UID, c.Name)
+				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
 				continue
 			}
 		}
@@ -85,18 +85,18 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 
 	if !hasResource {
-		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
+		klog.Infof(template+" - Allowing admission for pod: no resource found", pod.Namespace, pod.Name, pod.UID)
 		//return admission.Allowed("no resource found")
 	} else if len(config.SchedulerName) > 0 {
 		pod.Spec.SchedulerName = config.SchedulerName
 		if pod.Spec.NodeName != "" {
-			klog.Infof(template+" - Pod already has node assigned", req.Namespace, req.Name, req.UID)
+			klog.Infof(template+" - Pod already has node assigned", pod.Namespace, pod.Name, pod.UID)
 			return admission.Denied("pod has node assigned")
 		}
 	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
-		klog.Errorf(template+" - Failed to marshal pod, error: %v", req.Namespace, req.Name, req.UID, err)
+		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
