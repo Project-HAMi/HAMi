@@ -42,6 +42,34 @@ kubectl describe cm  hami-device-plugin -n kube-system
 }
 ```
 
+```text
+Example:
+
+Assume a node has 4 GPUs (index 0,1,2,3):
+
+GPU 0: UUID GPU-abcd-1234-5678-90ab
+GPU 1: UUID GPU-efgh-1234-5678-90cd
+GPU 2: UUID GPU-ijkl-1234-5678-90ef
+GPU 3: UUID GPU-mnop-1234-5678-90gh
+
+and the configuration is
+
+{
+  "operatingmode": "mig",
+  "filterdevices": {
+    "uuid": ["GPU-abcd-1234-5678-90ab"],
+    "index": [2]
+  }
+}
+
+Result:
+- Only GPU 1,3 will be registered to K8s
+- GPU 0 will be filtered out, because it matches `uuid`
+- GPU 2 will be filtered out, because it matches `index`
+
+Device filter works in both hami-core and MIG modes. 
+```
+
 * Restart the following pods for the change to take effect:
   * hami-scheduler 
   * hami-device-plugin on 'MIG-NODE-A'
