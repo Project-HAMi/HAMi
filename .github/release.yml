@@ -12,12 +12,17 @@ changelog:
     - feature
     - design
     - enhancement
+    - kind/feature
+    - kind/design
+    - kind/enhancement
   - title: 🐛 Bug Fixes
     labels:
     - bug
+    - kind/bug
   - title: 📚 Documentation
     labels:
     - documentation
+    - kind/documentation
   - title: ⬆️ Dependencies
     labels:
     - dependencies
