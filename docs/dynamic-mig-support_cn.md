@@ -42,6 +42,33 @@ kubectl describe cm  hami-device-plugin -n kube-system
 }
 ```
 
+```text
+举个例子:
+
+假设机器上有四张GPU, 分别为，序号为 0, 1, 2, 3:
+
+GPU 0: UUID GPU-abcd-1234-5678-90ab
+GPU 1: UUID GPU-efgh-1234-5678-90cd
+GPU 2: UUID GPU-ijkl-1234-5678-90ef
+GPU 3: UUID GPU-mnop-1234-5678-90gh
+
+配置如下
+
+{
+  "operatingmode": "mig",
+  "filterdevices": {
+    "uuid": ["GPU-abcd-1234-5678-90ab"],
+    "index": [2]
+  }
+}
+
+效果:
+- 只有 1 号和 3 号被注册到 K8s
+- GPU 0 不会被注册到 K8s, 因为它的UUID匹配了 `uuid` 字段
+- GPU 2 不会被注册到 K8s, 因为它的序号匹配了 `index` 字段
+
+设备的过滤在 hami-core 和 MIG 模式下均可生效。
+```
 * 重启以下2个pod使修改后的配置生效:
   * hami-scheduler 
   * 在'MIG-NODE-A'上的hami-device-plugin 
