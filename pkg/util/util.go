@@ -22,12 +22,14 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"os"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+	log "github.com/sirupsen/logrus"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
@@ -182,6 +184,14 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 		}
 	}
 	return retval, nil
+}
+
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
+	}
+	return devicePairScores, nil
 }
 
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
@@ -466,4 +476,27 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 		uuids = append(uuids, info.ID)
 	}
 	return uuids
+}
+
+func LookupEnvBoolOr(key string, o bool) bool {
+	v, found := os.LookupEnv(key)
+	if found && v != "" {
+		d, err := strconv.ParseBool(v)
+		if err != nil {
+			log.WithField(key, v).WithError(err).Panic("failed to convert to bool")
+		} else {
+			return d
+		}
+	}
+	return o
+}
+
+func GetGPUPolicy(defaultPolicy string, task *corev1.Pod) string {
+	userGPUPolicy := defaultPolicy
+	if task != nil && task.Annotations != nil {
+		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
+			userGPUPolicy = value
+		}
+	}
+	return userGPUPolicy
 }
