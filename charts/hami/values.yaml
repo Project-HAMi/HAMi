@@ -68,6 +68,8 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
+  forceOverwriteDefaultScheduler: true
   livenessProbe: false
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
@@ -367,3 +369,4 @@ devices:
       - huawei.com/Ascend910B4-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+

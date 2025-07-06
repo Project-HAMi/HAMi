@@ -95,6 +95,7 @@ func TestHandle(t *testing.T) {
 
 func TestPodHasNodeName(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
+	config.ForceOverwriteDefaultScheduler = true
 	config := &device.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
