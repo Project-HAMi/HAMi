@@ -27,7 +27,25 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
+	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
+
+var vendorUUIDMap = map[string][]string{
+	nvidia.GPUNoUseUUID:        {nvidia.NvidiaGPUDevice},
+	cambricon.MLUNoUseUUID:     {cambricon.CambriconMLUDevice},
+	hygon.DCUNoUseUUID:         {hygon.HygonDCUDevice},
+	iluvatar.IluvatarNoUseUUID: {iluvatar.IluvatarGPUDevice},
+	enflame.EnflameNoUseUUID:   {enflame.EnflameGPUDevice},
+	mthreads.MthreadsNoUseUUID: {mthreads.MthreadsGPUDevice},
+	metax.MetaxNoUseUUID:       {metax.MetaxGPUDevice, metax.MetaxSGPUDevice},
+}
 
 type NodeUsage struct {
 	Node    *corev1.Node
@@ -74,6 +92,43 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	} else {
 		m.nodes[nodeID] = nodeInfo
 	}
+	m.nodes[nodeID].Devices = rmDeviceByNodeAnnotation(m.nodes[nodeID])
+}
+
+func rmDeviceByNodeAnnotation(nodeInfo *util.NodeInfo) []util.DeviceInfo {
+	disableGPUUUIDVendorMap := make(map[string][]string)
+	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
+		for annokKey, vendor := range vendorUUIDMap {
+			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annokKey, vendor)
+			if value, ok := nodeInfo.Node.Annotations[annokKey]; ok {
+				disableGPUUUIDList := strings.Split(value, ",")
+				klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
+				for _, disableGPUUUID := range disableGPUUUIDList {
+					disableGPUUUIDVendorMap[disableGPUUUID] = vendor
+				}
+			}
+		}
+	}
+	if len(disableGPUUUIDVendorMap) == 0 {
+		return nodeInfo.Devices
+	}
+	tmp := make([]util.DeviceInfo, 0, len(nodeInfo.Devices))
+	for _, d := range nodeInfo.Devices {
+		removeFlag := false
+		if vendorList, ok := disableGPUUUIDVendorMap[d.ID]; ok {
+			for _, vendor := range vendorList {
+				if vendor == d.DeviceVendor {
+					klog.V(5).Infof("Disable gpu uuid is : %s", d.ID)
+					removeFlag = true
+					break
+				}
+			}
+		}
+		if !removeFlag {
+			tmp = append(tmp, d)
+		}
+	}
+	return tmp
 }
 
 func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {

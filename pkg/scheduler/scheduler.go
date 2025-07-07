@@ -37,29 +37,12 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
-	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
-	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
-	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
-	"github.com/Project-HAMi/HAMi/pkg/device/metax"
-	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
-
-var vendorUUIDMap = map[string][]string{
-	nvidia.GPUNoUseUUID:        {nvidia.NvidiaGPUDevice},
-	cambricon.MLUNoUseUUID:     {cambricon.CambriconMLUDevice},
-	hygon.DCUNoUseUUID:         {hygon.HygonDCUDevice},
-	iluvatar.IluvatarNoUseUUID: {iluvatar.IluvatarGPUDevice},
-	enflame.EnflameNoUseUUID:   {enflame.EnflameGPUDevice},
-	mthreads.MthreadsNoUseUUID: {mthreads.MthreadsGPUDevice},
-	metax.MetaxNoUseUUID:       {metax.MetaxGPUDevice, metax.MetaxSGPUDevice},
-}
 
 type Scheduler struct {
 	*nodeManager
@@ -283,41 +266,18 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				userGPUPolicy = value
 			}
 		}
-		disableGPUUUIDVendorMap := make(map[string][]string)
-		if node.Node != nil && node.Node.Annotations != nil {
-			for annoKey, vendor := range vendorUUIDMap {
-				klog.V(5).Infof("current annokey is %s, and vendor is %s", annoKey, vendor)
-				if value, ok := node.Node.Annotations[annoKey]; ok {
-					disableGPUUUIDList := strings.Split(value, ",")
-					klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
-					for _, disableGPUUUID := range disableGPUUUIDList {
-						disableGPUUUIDVendorMap[disableGPUUUID] = vendor
-					}
-				}
-			}
-		}
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
 		for _, d := range node.Devices {
-			used := int32(0)
-			if vendorList, ok := disableGPUUUIDVendorMap[d.ID]; ok {
-				for _, vendor := range vendorList {
-					if vendor == d.DeviceVendor {
-						klog.V(5).Infof("Disable gpu uuid is: %v, its count is: %v", d.ID, d.Count)
-						used = d.Count
-						break
-					}
-				}
-			}
 			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &util.DeviceUsage{
 					ID:        d.ID,
 					Index:     d.Index,
-					Used:      used,
+					Used:      0,
 					Count:     d.Count,
 					Usedmem:   0,
 					Totalmem:  d.Devmem,
