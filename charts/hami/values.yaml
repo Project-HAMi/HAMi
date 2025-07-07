@@ -149,6 +149,9 @@ scheduler:
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
   admissionWebhook:
+    # If set to false, the admission webhook is not installed and any pods that should use HAMi must be
+    # configured to use the right 'schedulerName' and other device-specific configurations.
+    enabled: true
     customURL:
       enabled: false
       # must be an endpoint using https.
