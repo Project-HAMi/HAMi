@@ -1,3 +1,4 @@
+{{- if .Values.scheduler.admissionWebhook.enabled }}
 {{- if .Values.scheduler.certManager.enabled }}
 apiVersion: cert-manager.io/v1
 kind: Certificate
@@ -26,4 +27,5 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 spec:
   selfSigned: {}
+{{- end }}
 {{- end }}
