@@ -121,7 +121,33 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 			}
 		}
 	}
-	return nil, fmt.Errorf("no binding pod found on node %s", node)
+
+	// Check if there are any pods with GPU resources but using default-scheduler
+	// This helps provide a more helpful error message
+	for _, p := range podlist.Items {
+		if p.Status.Phase != corev1.PodPending {
+			continue
+		}
+		// Check if pod requests GPU resources
+		hasGPUResource := false
+		for _, container := range p.Spec.Containers {
+			if _, ok := container.Resources.Limits["nvidia.com/gpu"]; ok {
+				hasGPUResource = true
+				break
+			}
+			if _, ok := container.Resources.Requests["nvidia.com/gpu"]; ok {
+				hasGPUResource = true
+				break
+			}
+		}
+
+		// If pod has GPU resources but is using default-scheduler, provide helpful error
+		if hasGPUResource && (p.Spec.SchedulerName == "" || p.Spec.SchedulerName == "default-scheduler") {
+			return nil, fmt.Errorf("found pod %s/%s requesting GPU resources but scheduled by default-scheduler instead of hami-scheduler. Please use hami-scheduler or hami.io/gpu resource name", p.Namespace, p.Name)
+		}
+	}
+
+	return nil, fmt.Errorf("no binding pod found on node %s, which is unexpected", node)
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
