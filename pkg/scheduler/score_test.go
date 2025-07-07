@@ -2975,7 +2975,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &nvidia.NvidiaGPUDevices{}
 
-			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, nil, test.args.allocated)
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, &util.NodeInfo{}, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
