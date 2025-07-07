@@ -22,7 +22,7 @@
 
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
-* Configure `mode` in device-plugin configMap to `mig` for MIG nodes
+* Configure `mode` in device-plugin configMap to `mig` for MIG nodes. For more detailed configurations, refer to [node configs](./config.md)
 ```
 kubectl describe cm  hami-device-plugin -n kube-system
 ```

@@ -22,7 +22,7 @@
 
 * 通过[这里](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)的文档部署HAMi
 
-* 通过以下指令修改configMap，并将节点的工作模式修改为`mig`
+* 通过以下指令修改configMap，并将节点的工作模式修改为`mig`。详细配置说明见 [node config](./config_cn.md)
 ```
 kubectl describe cm  hami-device-plugin -n kube-system
 ```
