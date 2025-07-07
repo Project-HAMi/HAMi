@@ -27,15 +27,14 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
-	log "github.com/sirupsen/logrus"
-
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 const (
@@ -483,7 +482,7 @@ func LookupEnvBoolOr(key string, o bool) bool {
 	if found && v != "" {
 		d, err := strconv.ParseBool(v)
 		if err != nil {
-			log.WithField(key, v).WithError(err).Panic("failed to convert to bool")
+			klog.ErrorS(err, "Failed to parse boolean from environment variable", "key", key, "value", v)
 		} else {
 			return d
 		}
