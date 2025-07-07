@@ -60,9 +60,27 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission as pod has no containers", req.Namespace, req.Name, req.UID)
 		return admission.Denied("pod has no containers")
 	}
-	if pod.Spec.SchedulerName != "" && (len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
-		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
-		return admission.Allowed("pod already has different scheduler assigned")
+	// First, check if pod has GPU resources to determine processing strategy
+	hasGPUResource := false
+	for _, ctr := range pod.Spec.Containers {
+		for resourceName := range ctr.Resources.Limits {
+			if resourceName == "nvidia.com/gpu" || resourceName == "hami.io/gpu" {
+				hasGPUResource = true
+				break
+			}
+		}
+		if hasGPUResource {
+			break
+		}
+	}
+
+	// Skip processing only if pod explicitly specifies a non-default, non-HAMi scheduler AND has no GPU resources
+	// For GPU pods, we need to process them to add appropriate scheduling constraints
+	if !hasGPUResource && pod.Spec.SchedulerName != "" &&
+		pod.Spec.SchedulerName != "default-scheduler" &&
+		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
+		klog.Infof(template+" - Pod has no GPU resources and different scheduler assigned", req.Namespace, req.Name, req.UID)
+		return admission.Allowed("pod has no GPU resources and different scheduler assigned")
 	}
 	klog.Infof(template, req.Namespace, req.Name, req.UID)
 	hasResource := false
@@ -87,8 +105,56 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	if !hasResource {
 		klog.Infof(template+" - Allowing admission for pod: no resource found", req.Namespace, req.Name, req.UID)
 		//return admission.Allowed("no resource found")
-	} else if len(config.SchedulerName) > 0 {
-		pod.Spec.SchedulerName = config.SchedulerName
+	} else {
+		// Check if user explicitly wants to skip HAMi scheduler
+		skipHAMI := false
+		if pod.Annotations != nil {
+			if _, exists := pod.Annotations["hami.io/skip-scheduler"]; exists {
+				skipHAMI = true
+				klog.Infof(template+" - Pod has hami.io/skip-scheduler annotation, will not modify scheduler", req.Namespace, req.Name, req.UID)
+			}
+		}
+
+		// Determine scheduling strategy based on current scheduler and user preference
+		currentScheduler := pod.Spec.SchedulerName
+		if currentScheduler == "" {
+			currentScheduler = corev1.DefaultSchedulerName
+		}
+
+		if !skipHAMI && len(config.SchedulerName) > 0 && currentScheduler == corev1.DefaultSchedulerName {
+			// Default behavior: GPU pods with default-scheduler automatically use HAMi scheduler
+			pod.Spec.SchedulerName = config.SchedulerName
+			klog.Infof(template+" - Pod with GPU resources automatically switched to HAMi scheduler", req.Namespace, req.Name, req.UID)
+		} else if currentScheduler != config.SchedulerName {
+			// Pod has GPU resources but is using a different scheduler (or user opted out)
+			// Add NodeAffinity to avoid HAMi-managed nodes
+			klog.Infof(template+" - Pod has GPU resources but using non-HAMi scheduler (%s), adding NodeAffinity to avoid HAMi nodes", req.Namespace, req.Name, req.UID, currentScheduler)
+
+			// Create NodeAffinity to avoid nodes with hami.io/node-nvidia-register annotation
+			if pod.Spec.Affinity == nil {
+				pod.Spec.Affinity = &corev1.Affinity{}
+			}
+			if pod.Spec.Affinity.NodeAffinity == nil {
+				pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+			}
+			if pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+				pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = &corev1.NodeSelector{}
+			}
+
+			// Add term to avoid HAMi-managed nodes
+			avoidHAMITerm := corev1.NodeSelectorTerm{
+				MatchExpressions: []corev1.NodeSelectorRequirement{
+					{
+						Key:      "hami.io/node-nvidia-register",
+						Operator: corev1.NodeSelectorOpDoesNotExist,
+					},
+				},
+			}
+
+			pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms =
+				append(pod.Spec.Affinity.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution.NodeSelectorTerms, avoidHAMITerm)
+		}
+
 		if pod.Spec.NodeName != "" {
 			klog.Infof(template+" - Pod already has node assigned", req.Namespace, req.Name, req.UID)
 			return admission.Denied("pod has node assigned")
