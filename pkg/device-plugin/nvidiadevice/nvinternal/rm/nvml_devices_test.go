@@ -36,7 +36,9 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+
 	//"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/rm"
 	"github.com/stretchr/testify/require"
 )
@@ -51,7 +53,7 @@ func TestNvmlDevice_GetUUID(t *testing.T) {
 	}{
 		{
 			description: "Successful UUID retrieval",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetUUIDFunc: func() (string, nvml.Return) {
 					return "GPU-12345", nvml.SUCCESS
 				},
@@ -61,7 +63,7 @@ func TestNvmlDevice_GetUUID(t *testing.T) {
 		},
 		{
 			description: "Error retrieving UUID",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetUUIDFunc: func() (string, nvml.Return) {
 					return "GPU-12345", nvml.ERROR_UNKNOWN
 				},
@@ -95,7 +97,7 @@ func TestNvmlDevice_GetPaths(t *testing.T) {
 	}{
 		{
 			description: "Successful path retrieval",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetMinorNumberFunc: func() (int, nvml.Return) {
 					return 0, nvml.SUCCESS
 				},
@@ -105,7 +107,7 @@ func TestNvmlDevice_GetPaths(t *testing.T) {
 		},
 		{
 			description: "Error retrieving UUID",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetMinorNumberFunc: func() (int, nvml.Return) {
 					return 0, nvml.ERROR_UNKNOWN
 				},
@@ -140,7 +142,7 @@ func TestNvmlDevice_GetNumaNode(t *testing.T) {
 	}{
 		{
 			description: "No NUMA node",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
 					return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0', 0, 0, 0, 0}}, nvml.SUCCESS
 				},
@@ -151,7 +153,7 @@ func TestNvmlDevice_GetNumaNode(t *testing.T) {
 		},
 		{
 			description: "Error getting PCI info",
-			nvmlDevice: &nvml.DeviceMock{
+			nvmlDevice: &mock.Device{
 				GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
 					return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
 				},
