@@ -28,7 +28,7 @@ go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
 - 检出目标版本
 - 构建镜像
 ```Dockerfile
-FROM golang:1.22.5-bullseye
+FROM golang:1.24.4-bullseye
 ADD . /k8s-vgpu
 RUN cd /k8s-vgpu && make tidy
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
