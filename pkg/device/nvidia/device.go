@@ -491,7 +491,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 		for _, val := range toAllocate {
 			found := false
 			for idx := range deviceUsageCurrent.UsageList {
-				if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory > val.Usedmem {
+				if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory >= val.Usedmem {
 					deviceUsageCurrent.UsageList[idx].InUse = true
 					found = true
 					break
@@ -503,7 +503,7 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *util.PodDevices, reques
 			}
 		}
 		for idx := range deviceUsageCurrent.UsageList {
-			if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory > request.Memreq {
+			if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory >= request.Memreq {
 				deviceUsageCurrent.UsageList[idx].InUse = true
 				klog.Infoln("MIG entry device usage true=", deviceUsageCurrent.UsageList, "request", request, "toAllocate", toAllocate)
 				return true
