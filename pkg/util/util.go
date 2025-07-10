@@ -34,6 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+
+	safecast "github.com/ccoveille/go-safecast"
 )
 
 const (
@@ -164,11 +166,23 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					index, _ = strconv.Atoi(items[7])
 					mode = items[8]
 				}
+				count32, err := safecast.ToInt32(count)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devmem32, err := safecast.ToInt32(devmem)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devcore32, err := safecast.ToInt32(devcore)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
 				i := DeviceInfo{
 					ID:      items[0],
-					Count:   int32(count),
-					Devmem:  int32(devmem),
-					Devcore: int32(devcore),
+					Count:   count32,
+					Devmem:  devmem32,
+					Devcore: devcore32,
 					Type:    items[4],
 					Numa:    numa,
 					Health:  health,
@@ -446,10 +460,14 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 }
 
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
+	var err error
 	for _, val := range templates[templateIdx] {
 		count := 0
 		for count < int(val.Count) {
-			n.Index = int32(templateIdx)
+			n.Index, err = safecast.ToInt32(templateIdx)
+			if err != nil {
+				continue
+			}
 			n.UsageList = append(n.UsageList, MigTemplateUsage{
 				Name:   val.Name,
 				Memory: val.Memory,
