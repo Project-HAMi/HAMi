@@ -99,6 +99,7 @@ spec:
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
+            - --force-overwrite-default-scheduler={{ .Values.scheduler.forceOverwriteDefaultScheduler}}
             - --device-config-file=/device-config.yaml
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
