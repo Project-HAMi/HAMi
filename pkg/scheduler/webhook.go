@@ -35,7 +35,7 @@ import (
 const template = "Processing admission hook for pod %v/%v, UID: %v"
 
 type webhook struct {
-	decoder *admission.Decoder
+	decoder admission.Decoder
 }
 
 func NewWebHook() (*admission.Webhook, error) {
