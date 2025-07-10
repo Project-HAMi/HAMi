@@ -214,7 +214,7 @@ func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, 
 	return nil
 }
 
-func (mat *MetaxDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (mat *MetaxDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
