@@ -49,6 +49,7 @@ import (
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/google/uuid"
+	"github.com/imdario/mergo"
 	"golang.org/x/net/context"
 	"google.golang.org/grpc"
 	"k8s.io/apimachinery/pkg/util/yaml"
@@ -68,6 +69,7 @@ const (
 	deviceListAsVolumeMountsHostPath          = "/dev/null"
 	deviceListAsVolumeMountsContainerPathRoot = "/var/run/nvidia-container-devices"
 	NodeLockNvidia                            = "hami.io/mutex.lock"
+	ConfigFilePath                            = "/config/config.json"
 )
 
 var (
@@ -106,8 +108,8 @@ type NvidiaDevicePlugin struct {
 	stop   chan any
 }
 
-func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
-	jsonbyte, err := os.ReadFile("/config/config.json")
+func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, error) {
+	jsonbyte, err := os.ReadFile(path)
 	mode := "hami-core"
 	if err != nil {
 		return "", err
@@ -121,14 +123,8 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig) (string, error) {
 	for _, val := range deviceConfigs.Nodeconfig {
 		if os.Getenv(util.NodeNameEnvName) == val.Name {
 			klog.Infof("Reading config from file %s", val.Name)
-			if val.Devicememoryscaling > 0 {
-				sConfig.DeviceMemoryScaling = val.Devicememoryscaling
-			}
-			if val.Devicecorescaling > 0 {
-				sConfig.DeviceCoreScaling = val.Devicecorescaling
-			}
-			if val.Devicesplitcount > 0 {
-				sConfig.DeviceSplitCount = val.Devicesplitcount
+			if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
+				return "", err
 			}
 			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
 				nvidia.DevicePluginFilterDevice = val.FilterDevice
@@ -147,7 +143,7 @@ func LoadNvidiaDevicePluginConfig() (*device.Config, string, error) {
 	if err != nil {
 		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
 	}
-	mode, err := readFromConfigFile(&sConfig.NvidiaConfig)
+	mode, err := readFromConfigFile(&sConfig.NvidiaConfig, ConfigFilePath)
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
@@ -521,11 +517,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
-				if plugin.schedulerConfig.DeviceMemoryScaling > 1 {
+				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 				}
-				if plugin.schedulerConfig.LogLevel != "" {
-					response.Envs["LIBCUDA_LOG_LEVEL"] = string(plugin.schedulerConfig.LogLevel)
+				if *plugin.schedulerConfig.LogLevel != "" {
+					response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
 				}
 				if plugin.schedulerConfig.DisableCoreLimit {
 					response.Envs[util.CoreLimitSwitch] = "disable"
@@ -709,7 +705,7 @@ func (plugin *NvidiaDevicePlugin) deviceIDsFromAnnotatedDeviceIDs(ids []string) 
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
-	return plugin.rm.Devices().GetPluginDevices(plugin.schedulerConfig.DeviceSplitCount)
+	return plugin.rm.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
 }
 
 func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
