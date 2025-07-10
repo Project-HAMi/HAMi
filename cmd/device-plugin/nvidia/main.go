@@ -98,7 +98,7 @@ func main() {
 		},
 		&cli.StringSliceFlag{
 			Name:    "device-list-strategy",
-			Value:   cli.NewStringSlice(string(spec.DeviceListStrategyEnvvar)),
+			Value:   cli.NewStringSlice(string(spec.DeviceListStrategyEnvVar)),
 			Usage:   "the desired strategy for passing the device list to the underlying runtime:\n\t\t[envvar | volume-mounts | cdi-annotations]",
 			EnvVars: []string{"DEVICE_LIST_STRATEGY"},
 		},
