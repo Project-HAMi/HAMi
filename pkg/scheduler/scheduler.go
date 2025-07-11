@@ -444,6 +444,16 @@ ReleaseNodeLocks:
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
+	// Check if the pod has already been filtered successfully
+	if pod := args.Pod; pod != nil && pod.Annotations != nil {
+		if phase, ok := pod.Annotations[util.DeviceFilterPhase]; ok && phase == util.DeviceFilterSuccess {
+			nodeID := args.Pod.Annotations[util.AssignedNodeAnnotations]
+			return &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{nodeID},
+			}, nil
+		}
+	}
+
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	nums := k8sutil.Resourcereqs(args.Pod)
 	total := 0
@@ -498,6 +508,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+	annotations[util.DeviceFilterPhase] = util.DeviceFilterSuccess
 
 	for _, val := range device.GetDevices() {
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
