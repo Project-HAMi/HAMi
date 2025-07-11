@@ -18,13 +18,15 @@ package scheduler
 
 import (
 	"fmt"
+	"reflect"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_addNode_ListNodes(t *testing.T) {
@@ -319,6 +321,46 @@ func Test_rmNodeDevices(t *testing.T) {
 				},
 			}
 			m.rmNodeDevices(test.args.nodeID, test.args.deviceVendor)
+		})
+	}
+}
+
+func Test_rmDeviceByNodeAnnotation(t *testing.T) {
+	id1 := "60151478-4709-4242-a8c1-a944252d194b"
+	type args struct {
+		nodeInfo *util.NodeInfo
+	}
+	tests := []struct {
+		name string
+		args args
+		want []util.DeviceInfo
+	}{
+		{
+			name: "Test remove device",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+				},
+			},
+			want: []util.DeviceInfo{},
+		},
+		{
+			name: "Test no removing device",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+				},
+			},
+			want: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rmDeviceByNodeAnnotation(tt.args.nodeInfo); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("rmDeviceByNodeAnnotation() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }
