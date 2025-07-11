@@ -160,3 +160,10 @@ const (
 func (s SchedulerPolicyName) String() string {
 	return string(s)
 }
+
+const (
+	// NodeSchedulerPolicyAnnotationKey is user set Pod annotation to change this default node policy.
+	NodeSchedulerPolicyAnnotationKey = "hami.io/node-scheduler-policy"
+	// GPUSchedulerPolicyAnnotationKey is user set Pod annotation to change this default GPU policy.
+	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
+)

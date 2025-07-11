@@ -267,7 +267,7 @@ func (dev *MthreadsDevices) customFilterRule(allocated *util.PodDevices, request
 	return true
 }
 
-func (dev *MthreadsDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *MthreadsDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, pod *corev1.Pod) float32 {
 	return 0
 }
 
