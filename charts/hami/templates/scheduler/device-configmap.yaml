@@ -97,6 +97,7 @@ data:
       resourceVCountName: {{ .Values.metaxResourceName }}
       resourceVMemoryName: {{ .Values.metaxResourceMem }}
       resourceVCoreName: {{ .Values.metaxResourceCore }}
+      sgpuTopologyAware: {{ .Values.metaxsGPUTopologyAware }}
     enflame:
       resourceCountName: "enflame.com/vgcu"
       resourcePercentageName: "enflame.com/vgcu-percentage"

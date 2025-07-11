@@ -402,7 +402,7 @@ func Test_ScoreNode(t *testing.T) {
 		args struct {
 			node       *corev1.Node
 			podDevices util.PodSingleDevice
-			policy     string
+			pod        *corev1.Pod
 		}
 		want float32
 	}{
@@ -411,7 +411,7 @@ func Test_ScoreNode(t *testing.T) {
 			args: struct {
 				node       *corev1.Node
 				podDevices util.PodSingleDevice
-				policy     string
+				pod        *corev1.Pod
 			}{
 				node: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -438,7 +438,13 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				policy: "binpack",
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.NodeSchedulerPolicyAnnotationKey: "binpack",
+						},
+					},
+				},
 			},
 			want: float32(1800),
 		},
@@ -447,7 +453,7 @@ func Test_ScoreNode(t *testing.T) {
 			args: struct {
 				node       *corev1.Node
 				podDevices util.PodSingleDevice
-				policy     string
+				pod        *corev1.Pod
 			}{
 				node: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
@@ -467,7 +473,13 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				policy: "spread",
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.NodeSchedulerPolicyAnnotationKey: "spread",
+						},
+					},
+				},
 			},
 			want: float32(1900),
 		},
@@ -475,7 +487,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.policy)
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.pod)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
