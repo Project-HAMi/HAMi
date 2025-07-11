@@ -54,7 +54,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods))
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}},"resourceVersion":"%s"}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
 	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	for i := 0; i < MaxLockRetry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
@@ -64,7 +64,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
 			continue
 		}
-		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods))
+		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}},"resourceVersion":"%s"}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	}
 	if err != nil {
@@ -90,7 +90,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 			return nil
 		}
 	}
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, NodeLockKey)
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}},"resourceVersion":"%s"}`, NodeLockKey, node.ResourceVersion)
 	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	for i := 0; i < MaxLockRetry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
@@ -100,7 +100,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
 			continue
 		}
-		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, NodeLockKey)
+		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}},"resourceVersion":"%s"}`, NodeLockKey, node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	}
 	if err != nil {
