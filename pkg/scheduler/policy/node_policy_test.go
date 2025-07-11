@@ -213,7 +213,7 @@ func TestOverrideScore(t *testing.T) {
 		name      string
 		nodeScore *NodeScore
 		devices   []*util.DeviceUsage
-		policy    string
+		pod       *corev1.Pod
 		wantScore float32
 	}{
 		{
@@ -255,7 +255,13 @@ func TestOverrideScore(t *testing.T) {
 					Usedmem:   0,
 				},
 			},
-			policy:    "binpack",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						util.NodeSchedulerPolicyAnnotationKey: "binpack",
+					},
+				},
+			},
 			wantScore: 1679,
 		},
 		{
@@ -297,7 +303,13 @@ func TestOverrideScore(t *testing.T) {
 					Usedmem:   0,
 				},
 			},
-			policy:    "binpack",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						util.NodeSchedulerPolicyAnnotationKey: "binpack",
+					},
+				},
+			},
 			wantScore: 0,
 		},
 		// Add more test cases here to cover other scenarios and policies.
@@ -305,7 +317,7 @@ func TestOverrideScore(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			tt.nodeScore.OverrideScore(tt.devices, tt.policy)
+			tt.nodeScore.OverrideScore(tt.devices, tt.pod)
 			if gotScore := tt.nodeScore.Score; gotScore != tt.wantScore {
 				t.Errorf("OverrideScore() gotScore = %v, want %v", gotScore, tt.wantScore)
 			}

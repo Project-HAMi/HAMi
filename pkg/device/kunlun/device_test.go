@@ -230,7 +230,7 @@ func Test_ScoreNode(t *testing.T) {
 			node       *corev1.Node
 			podDevices util.PodSingleDevice
 			usage      []*util.DeviceUsage
-			policy     string
+			pod        *corev1.Pod
 		}
 		want float32
 	}{
@@ -240,7 +240,7 @@ func Test_ScoreNode(t *testing.T) {
 				node       *corev1.Node
 				podDevices util.PodSingleDevice
 				usage      []*util.DeviceUsage
-				policy     string
+				pod        *corev1.Pod
 			}{
 				node: &corev1.Node{},
 				podDevices: util.PodSingleDevice{
@@ -285,7 +285,7 @@ func Test_ScoreNode(t *testing.T) {
 					{Index: 2, Used: 1, Type: KunlunGPUDevice},
 					{Index: 3, Used: 1, Type: KunlunGPUDevice},
 				},
-				policy: "binpack",
+				pod: &corev1.Pod{},
 			},
 			want: float32(3000),
 		},
@@ -295,7 +295,7 @@ func Test_ScoreNode(t *testing.T) {
 				node       *corev1.Node
 				podDevices util.PodSingleDevice
 				usage      []*util.DeviceUsage
-				policy     string
+				pod        *corev1.Pod
 			}{
 				node: &corev1.Node{},
 				podDevices: util.PodSingleDevice{
@@ -306,8 +306,8 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				usage:  []*util.DeviceUsage{},
-				policy: "spread",
+				usage: []*util.DeviceUsage{},
+				pod:   &corev1.Pod{},
 			},
 			want: float32(0),
 		},
@@ -315,7 +315,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := KunlunDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.usage, test.args.policy)
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.usage, test.args.pod)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}

@@ -46,6 +46,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					Numa:              0,
 					Healthy:           true,
 					QosPolicy:         BestEffort,
+					LinkZone:          1,
 				},
 				{
 					UUID:              "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a8",
@@ -60,6 +61,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					Numa:              -1,
 					Healthy:           false,
 					QosPolicy:         BurstShare,
+					LinkZone:          2,
 				},
 			},
 			expected: []*util.DeviceInfo{
@@ -78,6 +80,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					CustomInfo: map[string]any{
 						"QosPolicy": BestEffort,
 						"Model":     "native",
+						"LinkZone":  int32(1),
 					},
 				},
 				{
@@ -95,6 +98,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					CustomInfo: map[string]any{
 						"QosPolicy": BurstShare,
 						"Model":     "sgpu",
+						"LinkZone":  int32(2),
 					},
 				},
 			},

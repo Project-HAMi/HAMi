@@ -53,11 +53,11 @@ func (l NodeScoreList) Less(i, j int) bool {
 	return l.NodeList[i].Score < l.NodeList[j].Score
 }
 
-func (ns *NodeScore) OverrideScore(previous []*util.DeviceUsage, policy string) {
+func (ns *NodeScore) OverrideScore(previous []*util.DeviceUsage, pod *corev1.Pod) {
 	// current user having request resource
 	devScore := float32(0)
 	for idx, val := range ns.Devices {
-		devScore += device.GetDevices()[idx].ScoreNode(ns.Node, val, previous, policy)
+		devScore += device.GetDevices()[idx].ScoreNode(ns.Node, val, previous, pod)
 	}
 	ns.Score += devScore
 	klog.V(2).Infof("node %s default score is %f, computer override score is %f", ns.NodeID, ns.Score-devScore, ns.Score)
