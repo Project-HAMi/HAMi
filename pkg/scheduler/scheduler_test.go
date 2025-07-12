@@ -748,9 +748,6 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 
 		// Check if cache sync was successful
 		_ = informerFactory.WaitForCacheSync(s.stopCh)
-		//if cacheSynced == false {
-		//	t.Fatalf("failed to sync cache")
-		//}
 
 		return s
 	}
