@@ -117,7 +117,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 	return true, ""
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if annos != nil {
 		if value, ok := annos[policy.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -144,7 +144,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 
 			//This loop is for different container request
 			ctrfit := false
-			for ctrid, n := range nums {
+			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
 					sums += int(k.Nums)
