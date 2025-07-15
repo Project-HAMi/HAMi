@@ -35,7 +35,7 @@ import (
 )
 
 const (
-	HandshakeAnnos       = "hami.io/node-handshake"
+	HandshakeAnnos       = "hami.io/node-nvidia-handshake"
 	RegisterAnnos        = "hami.io/node-nvidia-register"
 	RegisterGPUPairScore = "hami.io/node-nvidia-score"
 	NvidiaGPUDevice      = "NVIDIA"
@@ -156,7 +156,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	klog.InfoS("initializing nvidia device", "resourceName", nvconfig.ResourceCountName, "resourceMem", nvconfig.ResourceMemoryName, "DefaultGPUNum", nvconfig.DefaultGPUNum)
 	util.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
 	util.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
-	util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
+	util.HandshakeAnnos[NvidiaGPUDevice] = "hami.io/node-handshake"
 	return &NvidiaGPUDevices{
 		config: nvconfig,
 	}
