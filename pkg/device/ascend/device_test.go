@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
+	"gopkg.in/yaml.v2"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -874,6 +876,577 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 				assert.Equal(t, err != nil, true)
 			} else {
 				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestDevices_Fit(t *testing.T) {
+	configStr := `- chipName: 910B
+  commonWord: Ascend910A
+  resourceName: huawei.com/Ascend910A
+  resourceMemoryName: huawei.com/Ascend910A-memory
+  memoryAllocatable: 32768
+  memoryCapacity: 32768
+  aiCore: 30
+  templates:
+    - name: vir02
+      memory: 2184
+      aiCore: 2
+    - name: vir04
+      memory: 4369
+      aiCore: 4
+    - name: vir08
+      memory: 8738
+      aiCore: 8
+    - name: vir16
+      memory: 17476
+      aiCore: 16
+- chipName: 910B2
+  commonWord: Ascend910B2
+  resourceName: huawei.com/Ascend910B2
+  resourceMemoryName: huawei.com/Ascend910B2-memory
+  memoryAllocatable: 65536
+  memoryCapacity: 65536
+  aiCore: 24
+  aiCPU: 6
+  topologyPairs:
+    - 1,2,3,4,5,6,7
+    - 0,2,3,4,5,6,7
+    - 0,1,3,4,5,6,7
+    - 0,1,2,4,5,6,7
+    - 0,1,2,3,5,6,7
+    - 0,1,2,3,4,6,7
+    - 0,1,2,3,4,5,7
+    - 0,1,2,3,4,5,6
+  templates:
+    - name: vir03_1c_8g
+      memory: 8192
+      aiCore: 3
+      aiCPU: 1
+    - name: vir06_1c_16g
+      memory: 16384
+      aiCore: 6
+      aiCPU: 1
+    - name: vir12_3c_32g
+      memory: 32768
+      aiCore: 12
+      aiCPU: 3
+- chipName: 910B3
+  commonWord: Ascend910B
+  resourceName: huawei.com/Ascend910B
+  resourceMemoryName: huawei.com/Ascend910B-memory
+  memoryAllocatable: 65536
+  memoryCapacity: 65536
+  aiCore: 20
+  aiCPU: 7
+  topologyPairs:
+    - 1,2,3,4,5,6,7
+    - 0,2,3,4,5,6,7
+    - 0,1,3,4,5,6,7
+    - 0,1,2,4,5,6,7
+    - 0,1,2,3,5,6,7
+    - 0,1,2,3,4,6,7
+    - 0,1,2,3,4,5,7
+    - 0,1,2,3,4,5,6
+  templates:
+    - name: vir05_1c_16g
+      memory: 16384
+      aiCore: 5
+      aiCPU: 1
+    - name: vir10_3c_32g
+      memory: 32768
+      aiCore: 10
+      aiCPU: 3
+- chipName: 910B4
+  commonWord: Ascend910B4
+  resourceName: huawei.com/Ascend910B4
+  resourceMemoryName: huawei.com/Ascend910B4-memory
+  memoryAllocatable: 32768
+  memoryCapacity: 32768
+  aiCore: 20
+  aiCPU: 7
+  templates:
+    - name: vir05_1c_8g
+      memory: 8192
+      aiCore: 5
+      aiCPU: 1
+    - name: vir10_3c_16g
+      memory: 16384
+      aiCore: 10
+      aiCPU: 3
+- chipName: 910B4-1
+  commonWord: Ascend910B4
+  resourceName: huawei.com/Ascend910B4
+  resourceMemoryName: huawei.com/Ascend910B4-memory
+  memoryAllocatable: 65536
+  memoryCapacity: 65536
+  aiCore: 20
+  aiCPU: 7
+  templates:
+    - name: vir05_1c_8g
+      memory: 8192
+      aiCore: 5
+      aiCPU: 1
+    - name: vir10_3c_16g
+      memory: 16384
+      aiCore: 10
+      aiCPU: 3
+- chipName: 310P3
+  commonWord: Ascend310P
+  resourceName: huawei.com/Ascend310P
+  resourceMemoryName: huawei.com/Ascend310P-memory
+  memoryAllocatable: 21527
+  memoryCapacity: 24576
+  aiCore: 8
+  aiCPU: 7
+  templates:
+    - name: vir01
+      memory: 3072
+      aiCore: 1
+      aiCPU: 1
+    - name: vir02
+      memory: 6144
+      aiCore: 2
+      aiCPU: 2
+    - name: vir04
+      memory: 12288
+      aiCore: 4
+      aiCPU: 4
+`
+
+	var config []VNPUConfig
+	if err := yaml.Unmarshal([]byte(configStr), &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	enableAscend = true
+	devs := InitDevices(config)
+
+	tests := []struct {
+		name       string
+		devices    []*util.DeviceUsage
+		request    util.ContainerDeviceRequest
+		annos      map[string]string
+		wantFit    bool
+		wantLen    int
+		wantDevIDs []string
+		wantReason string
+	}{
+		{
+			name: "fit success",
+			devices: []*util.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Health:    true,
+				},
+			},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-1"},
+			wantReason: "",
+		},
+		{
+			name: "fit fail: memory not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
+		},
+		{
+			name: "fit fail: core not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1024,
+				Totalcore: 100,
+				Usedcores: 100,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientCore",
+		},
+		{
+			name: "fit fail: type mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "OtherType",
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "fit fail: user assign use uuid mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-1",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{"hami.io/use-Ascend910B2-uuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: user assign no use uuid match",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{"hami.io/no-use-Ascend910B2-uuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: card overused",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      100,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTimeSlicingExhausted",
+		},
+		{
+			name: "fit success: but core limit can't exceed 100",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         120,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+		{
+			name: "fit fail:  card exclusively",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         100,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail:  CardComputeUnitsExhausted",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 100,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         0,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardComputeUnitsExhausted",
+		},
+		{
+			name: "fit fail:  AllocatedCardsInsufficientRequest",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit success:  memory percentage",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 10,
+				Coresreq:         20,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+	}
+
+	for _, dev := range devs {
+		for _, test := range tests {
+			if !strings.Contains(test.name, "type mismatch") {
+				test.request.Type = dev.config.CommonWord
+			}
+			if strings.Contains(test.name, "user assign use uuid mismatch") {
+				test.annos["hami.io/use-"+dev.config.CommonWord+"-uuid"] = "dev-0"
+			}
+			if strings.Contains(test.name, "user assign no use uuid match") {
+				test.annos["hami.io/no-use-"+dev.config.CommonWord+"-uuid"] = "dev-0"
+			}
+			for _, d := range test.devices {
+				d.Type = dev.config.CommonWord
+			}
+
+			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
+				allocated := &util.PodDevices{}
+				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, allocated)
+				if fit != test.wantFit {
+					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
+				}
+				if test.wantFit {
+					if len(result[dev.config.CommonWord]) != test.wantLen {
+						t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[dev.config.CommonWord]))
+					}
+					for idx, id := range test.wantDevIDs {
+						if id != result[dev.config.CommonWord][idx].UUID {
+							t.Errorf("expected device id: %s, got device id %s", id, result[dev.config.CommonWord][idx].UUID)
+						}
+					}
+				}
+
+				if reason != test.wantReason {
+					t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
+				}
+			})
+		}
+	}
+}
+
+func TestDevices_AddResourceUsage(t *testing.T) {
+	tests := []struct {
+		name        string
+		deviceUsage *util.DeviceUsage
+		ctr         *util.ContainerDevice
+		wantErr     bool
+		wantUsage   *util.DeviceUsage
+	}{
+		{
+			name: "test add resource usage",
+			deviceUsage: &util.DeviceUsage{
+				ID:        "dev-0",
+				Used:      0,
+				Usedcores: 15,
+				Usedmem:   2000,
+			},
+			ctr: &util.ContainerDevice{
+				UUID:      "dev-0",
+				Usedcores: 50,
+				Usedmem:   1024,
+			},
+			wantUsage: &util.DeviceUsage{
+				ID:        "dev-0",
+				Used:      1,
+				Usedcores: 65,
+				Usedmem:   3024,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &Devices{}
+			if err := dev.AddResourceUsage(&corev1.Pod{}, tt.deviceUsage, tt.ctr); (err != nil) != tt.wantErr {
+				t.Errorf("AddResourceUsage() error=%v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				if tt.deviceUsage.Usedcores != tt.wantUsage.Usedcores {
+					t.Errorf("expected used cores: %d, got used cores %d", tt.wantUsage.Usedcores, tt.deviceUsage.Usedcores)
+				}
+				if tt.deviceUsage.Usedmem != tt.wantUsage.Usedmem {
+					t.Errorf("expected used mem: %d, got used mem %d", tt.wantUsage.Usedmem, tt.deviceUsage.Usedmem)
+				}
+				if tt.deviceUsage.Used != tt.wantUsage.Used {
+					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
+				}
 			}
 		})
 	}

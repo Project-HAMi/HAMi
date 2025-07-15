@@ -33,7 +33,10 @@
 package plugin
 
 import (
+	"encoding/json"
 	"fmt"
+	"os"
+	"reflect"
 	"testing"
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -391,5 +394,93 @@ func Test_pathGeneration(t *testing.T) {
 
 	if expected != result {
 		t.Errorf("Expected %s, got %s", expected, result)
+	}
+}
+
+func Test_configOverride(t *testing.T) {
+	t.Setenv("NODE_NAME", "testnode")
+	logLevel1 := nvidia.Debugs
+	logLevel2 := nvidia.Infos
+	split1 := uint(2)
+	memScale1 := 1.5
+	coreScale1 := 1.2
+
+	split2 := uint(3)
+	memScale2 := 0.8
+	coreScale2 := 1.4
+
+	config := nvidia.DevicePluginConfigs{
+		Nodeconfig: []struct {
+			nvidia.NodeDefaultConfig `json:",inline"`
+			Name                     string               `json:"name"`
+			OperatingMode            string               `json:"operatingmode"`
+			Migstrategy              string               `json:"migstrategy"`
+			FilterDevice             *nvidia.FilterDevice `json:"filterdevices"`
+		}{
+			{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceSplitCount:    &split1,
+					DeviceMemoryScaling: &memScale1,
+					DeviceCoreScaling:   &coreScale1,
+					LogLevel:            &logLevel1,
+				},
+				Name:          "node-1",
+				OperatingMode: "default",
+				Migstrategy:   "single",
+				FilterDevice:  nil,
+			},
+			{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceSplitCount:    &split2,
+					DeviceMemoryScaling: &memScale2,
+					DeviceCoreScaling:   &coreScale2,
+					LogLevel:            &logLevel2,
+				},
+				Name:          "testnode",
+				OperatingMode: "custom",
+				Migstrategy:   "mixed",
+				FilterDevice:  nil,
+			},
+		},
+	}
+
+	bytes, err := json.MarshalIndent(config, "", "  ")
+	if err != nil {
+		panic(err)
+	}
+	path := t.TempDir()
+	os.WriteFile(path+"/config.json", bytes, 0644)
+	nvconfig := nvidia.NvidiaConfig{
+		NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceSplitCount:    func() *uint { v := uint(1); return &v }(),
+			DeviceMemoryScaling: func() *float64 { v := 1.0; return &v }(),
+			DeviceCoreScaling:   func() *float64 { v := 1.0; return &v }(),
+			LogLevel:            func() *nvidia.LibCudaLogLevel { v := nvidia.Error; return &v }(),
+		},
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultGPUNum:                int32(2),
+	}
+	_, err = readFromConfigFile(&nvconfig, path+"/config.json")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	expected := nvidia.NvidiaConfig{
+		NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceSplitCount:    func() *uint { v := uint(3); return &v }(),
+			DeviceMemoryScaling: func() *float64 { v := 0.8; return &v }(),
+			DeviceCoreScaling:   func() *float64 { v := 1.4; return &v }(),
+			LogLevel:            func() *nvidia.LibCudaLogLevel { v := nvidia.Infos; return &v }(),
+		},
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultGPUNum:                int32(2),
+	}
+	if !reflect.DeepEqual(nvconfig, expected) {
+		t.Errorf("Expected %v, got %v", expected, nvconfig)
 	}
 }
