@@ -42,7 +42,7 @@ func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if request.Nums > 0 {
 				cnt += request.Nums
-				counts[i][idx] = val.GenerateResourceRequests(&pod.Spec.Containers[i])
+				counts[i][idx] = request
 			}
 		}
 	}
