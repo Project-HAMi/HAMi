@@ -27,7 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
-	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -343,9 +343,9 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 		{
 			name: "Test remove device",
 			args: args{
-				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
 				},
 			},
 			want: []device.DeviceInfo{},
@@ -353,9 +353,9 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 		{
 			name: "Test no removing device",
 			args: args{
-				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: v1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
 				},
 			},
 			want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
