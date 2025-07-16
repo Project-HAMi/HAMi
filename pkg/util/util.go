@@ -360,7 +360,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
-		klog.Infof("patch pod %v failed, %v", node.Name, err)
+		klog.Infof("patch node %v failed, %v", node.Name, err)
 	}
 	return err
 }
