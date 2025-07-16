@@ -47,7 +47,7 @@ HAMi provides device virtualization for several heterogeneous devices including 
 ### Device Resources Isolation
 
 A simple demonstration of device isolation:
-A task with the following resources:
+A task with the following resources will see 3G device memory inside container:
 
 ```yaml
       resources:
@@ -55,8 +55,6 @@ A task with the following resources:
           nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
           nvidia.com/gpumem: 3000 # identifies 3G GPU memory each physical GPU allocates to the pod
 ```
-
-will see 3G device memory inside container
 
 ![img](./imgs/hard_limit.jpg)
 
