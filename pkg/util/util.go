@@ -198,6 +198,14 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 	return retval, nil
 }
 
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
+	}
+	return devicePairScores, nil
+}
+
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	builder := strings.Builder{}
 	for _, val := range dlist {
@@ -484,4 +492,14 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 		uuids = append(uuids, info.ID)
 	}
 	return uuids
+}
+
+func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
+	userGPUPolicy := defaultPolicy
+	if task != nil && task.Annotations != nil {
+		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
+			userGPUPolicy = value
+		}
+	}
+	return userGPUPolicy
 }
