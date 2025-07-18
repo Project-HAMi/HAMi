@@ -47,7 +47,7 @@ HAMi provides device virtualization for several heterogeneous devices including 
 ### Device Resources Isolation
 
 A simple demonstration of device isolation:
-A task with the following resources will see 3G device memory inside container:
+A task with the following resources will see 3000M device memory inside container:
 
 ```yaml
       resources:
