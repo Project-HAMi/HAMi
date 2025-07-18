@@ -63,7 +63,7 @@ func getNodeResources(list NodeUsage, t string) []*util.DeviceUsage {
 	return l
 }
 
-func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, devinput *util.PodDevices) (bool, string) {
+func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, devinput *util.PodDevices) (bool, string) {
 	//devmap := make(map[string]util.ContainerDevices)
 	devs := util.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
@@ -85,7 +85,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 		if !ok {
 			return false, "Device type not found"
 		}
-		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, devinput)
+		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, nodeInfo, devinput)
 		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
@@ -142,6 +142,13 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 			score.ComputeDefaultScore(node.Devices)
 			snapshot := score.SnapshotDevice(node.Devices)
 
+			nodeInfo, err := s.GetNode(nodeID)
+			if err != nil {
+				klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
+				errCh <- err
+				return
+			}
+
 			//This loop is for different container request
 			ctrfit := false
 			for ctrid, n := range nums {
@@ -163,7 +170,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, nums util.PodDeviceR
 					}
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, annos, task, &score.Devices)
+				fit, reason := fitInDevices(node, n, annos, task, nodeInfo, &score.Devices)
 				ctrfit = fit
 				if !fit {
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)

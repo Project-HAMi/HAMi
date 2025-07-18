@@ -1378,7 +1378,7 @@ func TestDevices_Fit(t *testing.T) {
 
 			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
 				allocated := &util.PodDevices{}
-				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, allocated)
+				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
 				if fit != test.wantFit {
 					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 				}

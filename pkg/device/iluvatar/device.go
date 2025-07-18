@@ -236,7 +236,7 @@ func (dev *IluvatarDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsag
 	return nil
 }
 
-func (ilu *IluvatarDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (ilu *IluvatarDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1

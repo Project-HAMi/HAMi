@@ -30,6 +30,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -267,6 +268,30 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 				if found {
 					val.MIGTemplate = append(val.MIGTemplate, migTemplates.Geometries...)
 					break
+				}
+			}
+		}
+	}
+
+	pairScores, ok := n.Annotations[RegisterGPUPairScore]
+	if !ok {
+		klog.Warning("no topology score found", "node", n.Name)
+	} else {
+		devicePairScores, err := util.DecodePairScores(pairScores)
+		if err != nil {
+			klog.ErrorS(err, "failed to decode pair scores", "node", n.Name, "pair scores", pairScores)
+			return []*util.DeviceInfo{}, err
+		}
+		if devicePairScores != nil {
+			// fit pair score to device info
+			for _, deviceInfo := range nodedevices {
+				uuid := deviceInfo.ID
+
+				for _, devicePairScore := range *devicePairScores {
+					if devicePairScore.ID == uuid {
+						deviceInfo.DevicePairScore = devicePairScore
+						break
+					}
 				}
 			}
 		}
@@ -578,7 +603,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsa
 	return nil
 }
 
-func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -586,6 +611,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 	var tmpDevs map[string]util.ContainerDevices
 	tmpDevs = make(map[string]util.ContainerDevices)
 	reason := make(map[string]int)
+	needTopology := util.GetGPUSchedulerPolicyByPod(config.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyTopology.String()
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -659,7 +685,9 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Nums--
+			if !needTopology {
+				k.Nums--
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
@@ -668,7 +696,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 				Usedcores: k.Coresreq,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && !needTopology {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
@@ -676,9 +704,119 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 			i++
 		}
 	}
+	if needTopology {
+		if len(tmpDevs[k.Type]) == int(originReq) {
+			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
+		}
+		if len(tmpDevs[k.Type]) > int(originReq) {
+			if originReq == 1 {
+				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
+				lowestDevices := computeWorstSignleCard(nodeInfo, request, tmpDevs)
+				tmpDevs[k.Type] = lowestDevices
+				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
+			} else {
+				// If requesting multiple devices, select the best combination of cards.
+				combinations := generateCombinations(request, tmpDevs)
+				combination := computeBestCombination(nodeInfo, combinations)
+				tmpDevs[k.Type] = combination
+				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			}
+			return true, tmpDevs, ""
+		}
+	}
 	if len(tmpDevs) > 0 {
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func generateCombinations(request util.ContainerDeviceRequest, tmpDevs map[string]util.ContainerDevices) []util.ContainerDevices {
+	k := request
+	num := int(k.Nums)
+	devices := tmpDevs[k.Type]
+	// This code mainly performs permutations and combinations to generate all non-repetitive subsets.
+	// For example, if the request is 3 GPUs, and the available GPUs are ["GPU0", "GPU1", "GPU2", "GPU3"],
+	// it will generate all combinations of 3 GPUs from the available GPUs.
+	// Result：[["GPU0", "GPU1", "GPU2"],["GPU0", "GPU1", "GPU3"],["GPU0", "GPU2", "GPU3"],["GPU1", "GPU2", "GPU3"]]
+	var result []util.ContainerDevices
+	var helper func(util.ContainerDevices, int, int, util.ContainerDevices)
+
+	helper = func(arr util.ContainerDevices, start, k int, current util.ContainerDevices) {
+		if k == 0 {
+			temp := make(util.ContainerDevices, len(current))
+			copy(temp, current)
+			result = append(result, temp)
+			return
+		}
+
+		for i := start; i <= len(arr)-k; i++ {
+			current = append(current, arr[i])
+			helper(arr, i+1, k-1, current)
+			current = current[:len(current)-1]
+		}
+	}
+
+	helper(devices, 0, num, util.ContainerDevices{})
+	return result
+}
+
+func getDevicePairScoreMap(nodeInfo *util.NodeInfo) map[string]*util.DevicePairScore {
+	deviceScoreMap := make(map[string]*util.DevicePairScore)
+
+	for _, dev := range nodeInfo.Devices {
+		deviceScoreMap[dev.ID] = &dev.DevicePairScore
+	}
+
+	return deviceScoreMap
+}
+
+func computeWorstSignleCard(nodeInfo *util.NodeInfo, request util.ContainerDeviceRequest, tmpDevs map[string]util.ContainerDevices) util.ContainerDevices {
+	worstScore := -1
+	worstDevices := util.ContainerDevices{}
+	deviceScoreMap := getDevicePairScoreMap(nodeInfo)
+	// Iterate through all devices to find the one with the lowest score
+	devices := tmpDevs[request.Type]
+
+	for _, dev1 := range devices {
+		totalScore := 0
+		scoreMapDev1 := deviceScoreMap[dev1.UUID]
+		for _, dev2 := range devices {
+			if dev1.UUID == dev2.UUID {
+				continue
+			}
+			totalScore += scoreMapDev1.Scores[dev2.UUID]
+		}
+		if totalScore < worstScore || worstScore == -1 {
+			worstScore = totalScore
+			worstDevices = util.ContainerDevices{dev1}
+		}
+	}
+	return worstDevices
+}
+
+func computeBestCombination(nodeInfo *util.NodeInfo, combinations []util.ContainerDevices) util.ContainerDevices {
+	bestScore := 0
+	bestCombination := util.ContainerDevices{}
+	deviceScoreMap := getDevicePairScoreMap(nodeInfo)
+	// Iterate through all combinations to find the one with the highest score
+	for _, partition := range combinations {
+		totalScore := 0
+
+		for i := 0; i < len(partition)-1; i++ {
+			dev1 := partition[i]
+			scoreMapDev1 := deviceScoreMap[dev1.UUID]
+			for z := i + 1; z < len(partition); z++ {
+				dev2 := partition[z]
+				totalScore += scoreMapDev1.Scores[dev2.UUID]
+			}
+		}
+
+		if totalScore > bestScore {
+			bestScore = totalScore
+			bestCombination = partition
+		}
+	}
+	return bestCombination
 }
