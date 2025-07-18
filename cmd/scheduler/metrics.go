@@ -221,7 +221,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 						ctrvGPUdeviceAllocatedMemoryDesc,
 						prometheus.GaugeValue,
 						float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
-						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
+						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 					ch <- prometheus.MustNewConstMetric(
 						ctrvGPUdeviceAllocatedCoreDesc,
 						prometheus.GaugeValue,

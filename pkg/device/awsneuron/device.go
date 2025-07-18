@@ -36,6 +36,7 @@ type AWSNeuronDevices struct {
 	resourceCountName string
 	resourceCoreName  string
 	coresPerAWSNeuron uint
+	coremask          uint
 }
 
 const (
@@ -50,6 +51,7 @@ const (
 	AWSNeuronAssignedNode  = "aws.amazon.com/predicate-node"
 	AWSNeuronPredicateTime = "NEURON_ALLOC_TIME"
 	AWSNeuronResourceType  = "NEURON_RESOURCE_TYPE"
+	AWSNeuronAllocated     = "NEURON_ALLOCATED"
 	AWSUsageInfo           = "awsusageinfo"
 	AWSNodeType            = "AWSNodeType"
 )
@@ -65,6 +67,7 @@ func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
 		resourceCountName: config.ResourceCountName,
 		resourceCoreName:  config.ResourceCoreName,
 		coresPerAWSNeuron: 0,
+		coremask:          0,
 	}
 }
 
@@ -94,8 +97,15 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 	if dev.coresPerAWSNeuron == 0 {
 		dev.coresPerAWSNeuron = uint(coresTotal) / uint(counts)
 	}
+	dev.coremask = 0
+	for i < int(dev.coresPerAWSNeuron) {
+		dev.coremask *= 2
+		dev.coremask++
+		i++
+	}
+	i = 0
 	customInfo := map[string]any{}
-	customInfo[AWSNodeType] = n.Annotations["node.kubernetes.io/instance-type"]
+	customInfo[AWSNodeType] = n.Labels["node.kubernetes.io/instance-type"]
 
 	for int64(i) < counts {
 		nodedevices = append(nodedevices, &util.DeviceInfo{
@@ -103,12 +113,17 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 			ID:         n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
 			Count:      int32(dev.coresPerAWSNeuron),
 			Devmem:     0,
-			Devcore:    int32(dev.coresPerAWSNeuron),
+			Devcore:    int32(dev.coremask),
 			Type:       AWSNeuronDevice,
 			Numa:       0,
 			Health:     true,
 			CustomInfo: customInfo,
 		})
+		i++
+	}
+	i = 0
+	for i < len(nodedevices) {
+		klog.V(4).Infoln("Registered AWS nodedevices:", nodedevices[i])
 		i++
 	}
 	return nodedevices, nil
@@ -118,9 +133,9 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	devlist, ok := pd[AWSNeuronDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[util.SupportDevices[AWSNeuronDevice]] = util.EncodePodSingleDevice(devlist)
+		value := ""
 		for ctridx, dp := range devlist {
 			if len(dp) > 0 {
-				value := ""
 				for _, val := range dp {
 					devValue, ok := pod.Spec.Containers[ctridx].Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 					if ok {
@@ -129,11 +144,11 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 							value = value + fmt.Sprint(val.Idx) + ","
 						}
 					} else {
-						if val.CustomInfo[AWSUsageInfo].(int)%2 == 1 {
+						if val.Usedcores%2 == 1 {
 							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
-						if val.CustomInfo[AWSUsageInfo].(int)/2 == 1 {
+						if val.Usedcores/2 == 1 {
 							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+1) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
@@ -145,6 +160,7 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 
 					tmp := strconv.FormatInt(time.Now().UnixNano(), 10)
 					(*annoinput)[AWSNeuronPredicateTime] = tmp
+					(*annoinput)[AWSNeuronAllocated] = "false"
 					(*annoinput)[AWSNeuronAssignedNode] = (*annoinput)[util.AssignedNodeAnnotations]
 				}
 			}
@@ -228,11 +244,11 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 					"container", ctr.Name,
 					"deviceCores", n)
 				num := 1
-				if n > 2 {
+				if n >= 2 {
 					num = int(n / 2)
 				}
 				corenum := 1
-				if n > 2 {
+				if n >= 2 {
 					corenum = 2
 				}
 				return util.ContainerDeviceRequest{
@@ -258,12 +274,22 @@ func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsa
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 
-	_, ok := n.CustomInfo[AWSUsageInfo]
-	if !ok {
+	num, ok := n.CustomInfo[AWSUsageInfo]
+	if !ok || num == nil {
 		n.CustomInfo[AWSUsageInfo] = 0
 	}
-	n.CustomInfo[AWSUsageInfo] = n.CustomInfo[AWSUsageInfo].(int32) + ctr.CustomInfo[AWSUsageInfo].(int32)
+	n.CustomInfo[AWSUsageInfo] = n.CustomInfo[AWSUsageInfo].(int) + ctr.CustomInfo[AWSUsageInfo].(int)
 	return nil
+}
+
+func countMaskAvailable(mask int32) int32 {
+	tmp := mask
+	ret := int32(0)
+	for tmp > 0 {
+		ret = ret + tmp%2
+		tmp /= 2
+	}
+	return ret
 }
 
 func addCoreUsage(prev map[string]any, require int) map[string]any {
@@ -367,9 +393,13 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 	}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
+		_, ok := dev.CustomInfo[AWSUsageInfo]
+		if !ok {
+			dev.CustomInfo[AWSUsageInfo] = int(dev.Usedcores)
+		}
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type)
+		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
 		if !strings.Contains(dev.Type, k.Type) {
 			reason[common.CardTypeMismatch]++
 			continue
@@ -393,20 +423,21 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 			continue
 		}
 
-		if dev.Totalcore-dev.Usedcores < k.Coresreq {
+		if countMaskAvailable(dev.Totalcore)-countMaskAvailable(dev.Usedcores) < k.Coresreq {
 			reason[common.CardInsufficientCore]++
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
+		customInfo := addCoreUsage(dev.CustomInfo, int(k.Coresreq))
 		tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
 			Type:       k.Type,
 			Usedmem:    0,
-			Usedcores:  k.Coresreq,
-			CustomInfo: addCoreUsage(dev.CustomInfo, int(k.Coresreq)),
+			Usedcores:  int32(customInfo[AWSUsageInfo].(int)),
+			CustomInfo: customInfo,
 		})
 		klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 		return true, tmpDevs, ""

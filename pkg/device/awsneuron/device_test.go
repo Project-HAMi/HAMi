@@ -491,6 +491,41 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 }
 
+func Test_countMaskAvailable(t *testing.T) {
+	tests := []struct {
+		name string
+		args int32
+		want int32
+	}{
+		{
+			name: "test 3",
+			args: int32(3),
+			want: int32(2),
+		},
+		{
+			name: "test 2",
+			args: int32(2),
+			want: int32(1),
+		},
+		{
+			name: "test 1",
+			args: int32(1),
+			want: int32(1),
+		},
+		{
+			name: "test 0",
+			args: int32(0),
+			want: int32(0),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1 := countMaskAvailable(test.args)
+			assert.DeepEqual(t, result1, test.want)
+		})
+	}
+}
+
 func Test_graphSelect(t *testing.T) {
 	tests := []struct {
 		name string
