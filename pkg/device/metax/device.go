@@ -22,6 +22,7 @@ import (
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -176,23 +177,28 @@ func parseMetaxAnnos(annos string, index int) float32 {
 	return float32(res)
 }
 
-func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, pod *corev1.Pod) float32 {
+	userNodePolicy := config.NodeSchedulerPolicy
+	if value, ok := pod.Annotations[util.NodeSchedulerPolicyAnnotationKey]; ok {
+		userNodePolicy = value
+	}
+
 	sum := 0
 	for _, dev := range podDevices {
 		sum += len(dev)
 	}
 
 	res := float32(0)
-	if policy == string(util.NodeSchedulerPolicyBinpack) {
+	if userNodePolicy == string(util.NodeSchedulerPolicyBinpack) {
 		lossAnno, ok := node.Annotations[MetaxAnnotationLoss]
 		if ok {
 			// it's preferred to select the node with lower loss
 			loss := parseMetaxAnnos(lossAnno, sum)
 			res = 2000 - loss
 
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
+			klog.InfoS("Detected annotations", "policy", userNodePolicy, "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
 		}
-	} else if policy == string(util.NodeSchedulerPolicySpread) {
+	} else if userNodePolicy == string(util.NodeSchedulerPolicySpread) {
 		scoreAnno, ok := node.Annotations[MetaxAnnotationScore]
 		if ok {
 			// it's preferred to select the node with higher score
@@ -200,7 +206,7 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 			score := parseMetaxAnnos(scoreAnno, sum)
 			res = 2000 - score
 
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
+			klog.InfoS("Detected annotations", "policy", userNodePolicy, "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
 		}
 	}
 

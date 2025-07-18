@@ -361,7 +361,7 @@ func delta(have, want []int) []int {
 	return ret
 }
 
-func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, pod *corev1.Pod) float32 {
 	current := []int{}
 	prev := []int{}
 	for _, dev := range previous {

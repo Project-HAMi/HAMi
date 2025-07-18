@@ -43,10 +43,11 @@ iluvatarResourceName: "iluvatar.ai/vgpu"
 iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
 iluvatarResourceCore: "iluvatar.ai/vcuda-core"
 
-#Metax SGPU Parameters
+#Metax sGPU Parameters
 metaxResourceName: "metax-tech.com/sgpu"
 metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
+metaxsGPUTopologyAware: "false"
 
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
