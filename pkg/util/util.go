@@ -198,6 +198,14 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 	return retval, nil
 }
 
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
+	}
+	return devicePairScores, nil
+}
+
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	builder := strings.Builder{}
 	for _, val := range dlist {
@@ -360,7 +368,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
-		klog.Infof("patch pod %v failed, %v", node.Name, err)
+		klog.Infof("patch node %v failed, %v", node.Name, err)
 	}
 	return err
 }
@@ -484,4 +492,14 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 		uuids = append(uuids, info.ID)
 	}
 	return uuids
+}
+
+func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
+	userGPUPolicy := defaultPolicy
+	if task != nil && task.Annotations != nil {
+		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
+			userGPUPolicy = value
+		}
+	}
+	return userGPUPolicy
 }

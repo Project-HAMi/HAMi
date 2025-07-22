@@ -2410,6 +2410,15 @@ func Test_calcScore(t *testing.T) {
 	s := NewScheduler()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			for nodeName, nodeUsage := range *(test.args.nodes) {
+				devices := []util.DeviceInfo{}
+				for _, device := range nodeUsage.Devices.DeviceLists {
+					devices = append(devices, util.DeviceInfo{
+						ID: device.Device.ID,
+					})
+				}
+				s.addNode(nodeName, &util.NodeInfo{nodeName, nodeUsage.Node, devices})
+			}
 			failedNodes := map[string]string{}
 			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task, failedNodes)
 			assert.DeepEqual(t, test.wants.err, gotErr)
@@ -2975,7 +2984,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &nvidia.NvidiaGPUDevices{}
 
-			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, test.args.allocated)
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, &util.NodeInfo{}, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
@@ -3189,9 +3198,158 @@ func Test_fitInDevices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			viewStatus(test.args.node)
-			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.annos, test.args.pod, test.args.devinput)
+			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.annos, test.args.pod, nil, test.args.devinput)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
+		})
+	}
+}
+
+func Test_Nvidia_GPU_Topology(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			node      *NodeUsage
+			request   util.ContainerDeviceRequest
+			annos     map[string]string
+			pod       *corev1.Pod
+			nodeInfo  *util.NodeInfo
+			allocated *util.PodDevices
+		}
+		want1 bool
+		want2 map[string]util.ContainerDevices
+		want3 string
+	}{
+		{
+			name: "test nvidia gpu topology-aware",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				nodeInfo  *util.NodeInfo
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{Device: makeDevice("a", 0, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("b", 0, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("c", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("d", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("e", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("f", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(3),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(20),
+				},
+				annos: map[string]string{},
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+						},
+					},
+				},
+				nodeInfo: &util.NodeInfo{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+					Devices: []util.DeviceInfo{
+						{ID: "a", DevicePairScore: util.DevicePairScore{ID: "a", Scores: map[string]int{"b": 1, "c": 1, "d": 1, "e": 1, "f": 100}}},
+						{ID: "b", DevicePairScore: util.DevicePairScore{ID: "b", Scores: map[string]int{"a": 1, "c": 1, "d": 1, "e": 1, "f": 1}}},
+						{ID: "c", DevicePairScore: util.DevicePairScore{ID: "c", Scores: map[string]int{"a": 1, "b": 1, "d": 1, "e": 1, "f": 100}}},
+						{ID: "d", DevicePairScore: util.DevicePairScore{ID: "d", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "e": 1, "f": 1}}},
+						{ID: "e", DevicePairScore: util.DevicePairScore{ID: "e", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "f": 1}}},
+						{ID: "f", DevicePairScore: util.DevicePairScore{ID: "f", Scores: map[string]int{"a": 100, "b": 1, "c": 100, "d": 1, "e": 1}}},
+					},
+				},
+				allocated: &util.PodDevices{},
+			},
+			want1: true,
+			want2: map[string]util.ContainerDevices{
+				"NVIDIA": {
+					{UUID: "f", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
+					{UUID: "c", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
+					{UUID: "a", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
+				},
+			},
+			want3: "",
+		},
+		{
+			name: "test Single Card Topology ",
+			args: struct {
+				node      *NodeUsage
+				request   util.ContainerDeviceRequest
+				annos     map[string]string
+				pod       *corev1.Pod
+				nodeInfo  *util.NodeInfo
+				allocated *util.PodDevices
+			}{
+				node: &NodeUsage{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+					Devices: policy.DeviceUsageList{
+						DeviceLists: []*policy.DeviceListsScore{
+							{Device: makeDevice("a", 0, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("b", 0, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("c", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("d", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("e", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+							{Device: makeDevice("f", 1, nvidia.NvidiaGPUDevice, 1, 4, 8192, 2048, 1, 100)},
+						},
+					},
+				},
+				request: util.ContainerDeviceRequest{
+					Nums:             int32(1),
+					Type:             nvidia.NvidiaGPUDevice,
+					Memreq:           int32(1024),
+					MemPercentagereq: int32(100),
+					Coresreq:         int32(20),
+				},
+				annos: map[string]string{},
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+						},
+					},
+				},
+				nodeInfo: &util.NodeInfo{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+					Devices: []util.DeviceInfo{
+						{ID: "a", DevicePairScore: util.DevicePairScore{ID: "a", Scores: map[string]int{"b": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "b", DevicePairScore: util.DevicePairScore{ID: "b", Scores: map[string]int{"a": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "c", DevicePairScore: util.DevicePairScore{ID: "c", Scores: map[string]int{"a": 100, "b": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "d", DevicePairScore: util.DevicePairScore{ID: "d", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "e": 100, "f": 1}}},
+						{ID: "e", DevicePairScore: util.DevicePairScore{ID: "e", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "d": 100, "f": 1}}},
+						{ID: "f", DevicePairScore: util.DevicePairScore{ID: "f", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}},
+					},
+				},
+				allocated: &util.PodDevices{},
+			},
+			want1: true,
+			want2: map[string]util.ContainerDevices{
+				"NVIDIA": {
+					{UUID: "f", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
+				},
+			},
+			want3: "",
+		},
+	}
+	for _, test := range tests {
+
+		t.Run(test.name, func(t *testing.T) {
+			gpuDevices := &nvidia.NvidiaGPUDevices{}
+
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, test.args.nodeInfo, test.args.allocated)
+			assert.DeepEqual(t, result1, test.want1)
+			assert.DeepEqual(t, result2, test.want2)
+			assert.DeepEqual(t, result3, test.want3)
 		})
 	}
 }

@@ -71,6 +71,10 @@ spec:
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
+            {{- if eq (.Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy | default "spread")  "topology-aware" }}
+            - name: ENABLE_TOPOLOGY_SCORE
+              value: "true"
+            {{- end }}
           securityContext:
             privileged: true
             allowPrivilegeEscalation: true
