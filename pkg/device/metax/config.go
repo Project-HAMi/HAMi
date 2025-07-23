@@ -26,6 +26,7 @@ type MetaxConfig struct {
 	ResourceVCountName  string `yaml:"resourceVCountName"`
 	ResourceVMemoryName string `yaml:"resourceVMemoryName"`
 	ResourceVCoreName   string `yaml:"resourceVCoreName"`
+	TopologyAware       bool   `yaml:"sgpuTopologyAware"`
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -36,4 +37,5 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&MetaxResourceNameVCount, "metax-vcount", "metax-tech.com/sgpu", "metax vcount name")
 	fs.StringVar(&MetaxResourceNameVCore, "metax-vcore", "metax-tech.com/vcore", "metax vcore name")
 	fs.StringVar(&MetaxResourceNameVMemory, "metax-vmemory", "metax-tech.com/vmemory", "metax vmemory name")
+	fs.BoolVar(&MetaxTopologyAware, "sgpu-topology-aware", false, "sGPU topology aware enable")
 }
