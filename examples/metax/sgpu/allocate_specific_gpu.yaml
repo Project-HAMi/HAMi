@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: gpu-pod
   annotations:
-    metax-tech.com/use-gpuuuid: "36beae85-c835-6b14-6ab2-02671837a59c" # allocate specific gpu
+    metax-tech.com/use-gpuuuid: "GPU-36beae85-c835-6b14-6ab2-02671837a59c" # allocate specific gpu
 spec:
   containers:
     - name: ubuntu-container
