@@ -378,12 +378,14 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 		for _, dev := range alloc {
 			for _, val := range devices {
 				if val.Index == uint(dev) {
+					customInfo := addCoreUsage(val.CustomInfo, int(k.Coresreq))
 					tmpDevs[request.Type] = append(tmpDevs[request.Type], util.ContainerDevice{
-						Idx:       int(val.Index),
-						UUID:      val.ID,
-						Type:      request.Type,
-						Usedmem:   val.Totalmem,
-						Usedcores: val.Totalcore,
+						Idx:        int(val.Index),
+						UUID:       val.ID,
+						Type:       request.Type,
+						Usedmem:    val.Totalmem,
+						Usedcores:  val.Totalcore,
+						CustomInfo: customInfo,
 					})
 					break
 				}
