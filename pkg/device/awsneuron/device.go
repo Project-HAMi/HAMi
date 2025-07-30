@@ -333,7 +333,7 @@ func continuousDeviceAvailable(devices []*util.DeviceUsage, start int, count int
 }
 
 func graphSelect(devices []*util.DeviceUsage, count int) []int {
-	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] != nil {
+	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
 		return []int{}
 	}
 	AWSNodetype := ""

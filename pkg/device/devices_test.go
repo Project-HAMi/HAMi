@@ -22,6 +22,7 @@ import (
 	"slices"
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 
 	"gopkg.in/yaml.v2"
@@ -360,6 +361,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]Devices) {
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
 		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
 		kunlun.KunlunGPUDevice:       kunlun.KunlunGPUCommonWord,
+		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 	}
 
 	return expectedDevices, devicesMap

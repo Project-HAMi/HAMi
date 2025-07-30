@@ -117,7 +117,7 @@ func Test_GetNodeDevices(t *testing.T) {
 			name: "get node device",
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Annotations: map[string]string{
+					Labels: map[string]string{
 						"node.kubernetes.io/instance-type": "inf2",
 					},
 					Name: "test",
@@ -135,7 +135,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					ID:         "test-AWSNeuron-0",
 					Count:      int32(2),
 					Devmem:     int32(0),
-					Devcore:    int32(2),
+					Devcore:    int32(3),
 					Type:       AWSNeuronDevice,
 					Numa:       0,
 					Health:     true,
@@ -566,7 +566,7 @@ func Test_graphSelect(t *testing.T) {
 			want1: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
 		},
 		{
-			name: "full allocate",
+			name: "8 allocate fail",
 			args: struct {
 				d []*util.DeviceUsage
 				c int
@@ -596,7 +596,7 @@ func Test_graphSelect(t *testing.T) {
 			want1: []int{},
 		},
 		{
-			name: "full allocate",
+			name: "8 allocate success",
 			args: struct {
 				d []*util.DeviceUsage
 				c int
@@ -626,7 +626,7 @@ func Test_graphSelect(t *testing.T) {
 			want1: []int{8, 9, 10, 11, 12, 13, 14, 15},
 		},
 		{
-			name: "full allocate",
+			name: "8 allocate",
 			args: struct {
 				d []*util.DeviceUsage
 				c int
