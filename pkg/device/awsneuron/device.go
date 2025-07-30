@@ -266,7 +266,6 @@ func (dev *AWSNeuronDevices) ScoreNode(node *corev1.Node, podDevices util.PodSin
 	return 0
 }
 
-// Deal with device core topo here
 func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
@@ -276,7 +275,11 @@ func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsa
 	if !ok || num == nil {
 		n.CustomInfo[AWSUsageInfo] = 0
 	}
-	n.CustomInfo[AWSUsageInfo] = n.CustomInfo[AWSUsageInfo].(int) + ctr.CustomInfo[AWSUsageInfo].(int)
+	if nValue, ok := n.CustomInfo[AWSUsageInfo].(int); ok {
+		if ctrValue, ok2 := ctr.CustomInfo[AWSUsageInfo].(int); ok2 {
+			n.CustomInfo[AWSUsageInfo] = nValue + ctrValue
+		}
+	}
 	return nil
 }
 
@@ -306,7 +309,11 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 			return res
 		}
 	}
-	res[AWSUsageInfo] = 3 - count.(int)
+	if countValue, ok := count.(int); ok {
+		res[AWSUsageInfo] = 3 - countValue
+	} else {
+		res[AWSUsageInfo] = 3
+	}
 	return res
 }
 func continuousDeviceAvailable(devices []*util.DeviceUsage, start int, count int) []int {
@@ -329,7 +336,10 @@ func graphSelect(devices []*util.DeviceUsage, count int) []int {
 	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] != nil {
 		return []int{}
 	}
-	AWSNodetype := devices[0].CustomInfo[AWSNodeType].(string)
+	AWSNodetype := ""
+	if nodeType, ok := devices[0].CustomInfo[AWSNodeType].(string); ok {
+		AWSNodetype = nodeType
+	}
 	if strings.Contains(AWSNodetype, "inf") || strings.Contains(AWSNodetype, "Inf") {
 		//Deal with ring
 		start := 0
@@ -363,8 +373,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	tmpDevs := make(map[string]util.ContainerDevices)
 	reason := make(map[string]int)
 	if k.Nums > 1 {
 		alloc := graphSelect(devices, int(request.Nums))
@@ -431,12 +440,16 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 		customInfo := addCoreUsage(dev.CustomInfo, int(k.Coresreq))
+		usedcores := 0
+		if countValue, ok := customInfo[AWSUsageInfo].(int); ok {
+			usedcores = countValue
+		}
 		tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
 			Type:       k.Type,
 			Usedmem:    0,
-			Usedcores:  int32(customInfo[AWSUsageInfo].(int)),
+			Usedcores:  int32(usedcores),
 			CustomInfo: customInfo,
 		})
 		klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
