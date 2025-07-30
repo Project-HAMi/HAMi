@@ -783,10 +783,10 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:             MetaxSGPUDevice,
 			},
 			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
-			wantReason: "",
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientCore",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -1029,6 +1029,783 @@ func TestMetaxSDevices_AddResourceUsage(t *testing.T) {
 				if tt.deviceUsage.Used != tt.wantUsage.Used {
 					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
 				}
+			}
+		})
+	}
+}
+
+func TestPrioritizeExclusiveDevices(t *testing.T) {
+	for _, ts := range []struct {
+		name             string
+		candidateDevices util.ContainerDevices
+		require          int
+
+		expectedDevices util.ContainerDevices
+	}{
+		{
+			name: "require one device",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+			require: 1,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+		},
+		{
+			name: "require two device",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+			require: 2,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+		},
+		{
+			name: "require four device, best result",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+			require: 4,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+		},
+		{
+			name: "require four device, general result",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+			require: 4,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-1",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-2",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+		},
+		{
+			name: "no metalink, require two device",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+			},
+			require: 2,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-5",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+			},
+		},
+		{
+			name: "part metalink, require two device, best result",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-3",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-4",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+			require: 2,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+		},
+		{
+			name: "part metalink, require four device, bad result",
+			candidateDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-3",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-4",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+			require: 4,
+
+			expectedDevices: util.ContainerDevices{
+				{
+					UUID:       "GPU-6",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-7",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-8",
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					UUID:       "GPU-3",
+					CustomInfo: map[string]any{"LinkZone": int32(0)},
+				},
+			},
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			result := prioritizeExclusiveDevices(ts.candidateDevices, ts.require)
+
+			if !reflect.DeepEqual(result, ts.expectedDevices) {
+				t.Errorf("prioritizeExclusiveDevices failed: result %v, expected %v",
+					result, ts.expectedDevices)
+			}
+		})
+	}
+}
+
+func TestNeedScore(t *testing.T) {
+	for _, ts := range []struct {
+		name       string
+		podDevices util.PodSingleDevice
+
+		expected bool
+	}{
+		{
+			name: "enable, allocate 100core",
+			podDevices: util.PodSingleDevice{
+				{
+					{
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+				},
+			},
+
+			expected: true,
+		},
+		{
+			name: "disable, allocate 100core",
+			podDevices: util.PodSingleDevice{
+				{
+					{
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "false",
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+		{
+			name: "enable, allocate 99core",
+			podDevices: util.PodSingleDevice{
+				{
+					{
+						Usedcores: 99,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+		{
+			name: "enable, container[0]: 99core, container[1]: 100core",
+			podDevices: util.PodSingleDevice{
+				{
+					{
+						Usedcores: 99,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+				},
+				{
+					{
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+				},
+			},
+
+			expected: true,
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			result := needScore(ts.podDevices)
+
+			if result != ts.expected {
+				t.Errorf("needScore failed: result %v, expected %v",
+					result, ts.expected)
+			}
+		})
+	}
+}
+
+func TestScoreExclusiveDevices(t *testing.T) {
+	for _, ts := range []struct {
+		name       string
+		podDevices util.PodSingleDevice
+		previous   []*util.DeviceUsage
+
+		expectedScore int
+	}{
+		{
+			name: "allocate one device, rest zero device",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+
+			expectedScore: 0,
+		},
+		{
+			name: "allocate one device, rest three device",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+
+			expectedScore: -30,
+		},
+		{
+			name: "allocate two device, best result",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-3",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+			},
+
+			expectedScore: 60,
+		},
+		{
+			name: "allocate two device, bad result",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-5",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-5",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-6",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-7",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-8",
+					Used:       1,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+
+			expectedScore: 0,
+		},
+		{
+			name: "allocate four device, best result",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-1",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-2",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-3",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-5",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+
+			expectedScore: 600,
+		},
+		{
+			name: "allocate four device, bad result",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-3",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-5",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+					{
+						UUID:       "GPU-6",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-2",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-5",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-6",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+
+			expectedScore: 180,
+		},
+		{
+			name: "allocate eight device",
+			podDevices: util.PodSingleDevice{
+				[]util.ContainerDevice{
+					{
+						UUID:       "GPU-1",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-2",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-3",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-4",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(1)},
+					},
+					{
+						UUID:       "GPU-5",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+					{
+						UUID:       "GPU-6",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+					{
+						UUID:       "GPU-7",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+					{
+						UUID:       "GPU-8",
+						Usedcores:  100,
+						CustomInfo: map[string]any{"LinkZone": int32(2)},
+					},
+				},
+			},
+			previous: []*util.DeviceUsage{
+				{
+					ID:         "GPU-1",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-2",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-3",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-4",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(1)},
+				},
+				{
+					ID:         "GPU-5",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-6",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-7",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+				{
+					ID:         "GPU-8",
+					Used:       0,
+					CustomInfo: map[string]any{"LinkZone": int32(2)},
+				},
+			},
+
+			expectedScore: 1200,
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			result := scoreExclusiveDevices(ts.podDevices, ts.previous)
+
+			if result != ts.expectedScore {
+				t.Errorf("scoreExclusiveDevices failed: result %v, expected %v",
+					result, ts.expectedScore)
 			}
 		})
 	}
