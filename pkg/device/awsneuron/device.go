@@ -43,17 +43,15 @@ const (
 	AWSNeuronDevice          = "AWSNeuron"
 	AWSNeuronCommonWord      = "AWSNeuron"
 	AWSNeuronDeviceSelection = "aws.amazon.com/neuron-index"
-	// MthreadsUseUUID is user can use specify Mthreads device for set Mthreads UUID.
-	AWSNeuronUseUUID = "aws.amazon.com/use-neuron-uuid"
-	// MthreadsNoUseUUID is user can not use specify Mthreads device for set Mthreads UUID.
-	AWSNeuronNoUseUUID     = "aws.amazon.com/nouse-neuron-uuid"
-	AWSNeuronAssignedIndex = "AWS_NEURON_IDS"
-	AWSNeuronAssignedNode  = "aws.amazon.com/predicate-node"
-	AWSNeuronPredicateTime = "NEURON_ALLOC_TIME"
-	AWSNeuronResourceType  = "NEURON_RESOURCE_TYPE"
-	AWSNeuronAllocated     = "NEURON_ALLOCATED"
-	AWSUsageInfo           = "awsusageinfo"
-	AWSNodeType            = "AWSNodeType"
+	AWSNeuronUseUUID         = "aws.amazon.com/use-neuron-uuid"
+	AWSNeuronNoUseUUID       = "aws.amazon.com/nouse-neuron-uuid"
+	AWSNeuronAssignedIndex   = "AWS_NEURON_IDS"
+	AWSNeuronAssignedNode    = "aws.amazon.com/predicate-node"
+	AWSNeuronPredicateTime   = "NEURON_ALLOC_TIME"
+	AWSNeuronResourceType    = "NEURON_RESOURCE_TYPE"
+	AWSNeuronAllocated       = "NEURON_ALLOCATED"
+	AWSUsageInfo             = "awsusageinfo"
+	AWSNodeType              = "AWSNodeType"
 )
 
 type AWSNeuronConfig struct {
@@ -144,11 +142,11 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 							value = value + fmt.Sprint(val.Idx) + ","
 						}
 					} else {
-						if val.Usedcores%2 == 1 {
+						if (val.Usedcores & 1) != 0 {
 							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
-						if val.Usedcores/2 == 1 {
+						if (val.Usedcores & 2) != 0 {
 							value = value + fmt.Sprint(dev.coresPerAWSNeuron*uint(val.Idx)+1) + ","
 							(*annoinput)[AWSNeuronResourceType] = dev.resourceCoreName
 						}
@@ -311,7 +309,7 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 	res[AWSUsageInfo] = 3 - count.(int)
 	return res
 }
-func continousDeviceAvailable(devices []*util.DeviceUsage, start int, count int) []int {
+func continuousDeviceAvailable(devices []*util.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
 		return []int{}
 	}
@@ -327,8 +325,8 @@ func continousDeviceAvailable(devices []*util.DeviceUsage, start int, count int)
 	return res
 }
 
-func graghSelect(devices []*util.DeviceUsage, count int) []int {
-	if len(devices) == 0 {
+func graphSelect(devices []*util.DeviceUsage, count int) []int {
+	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] != nil {
 		return []int{}
 	}
 	AWSNodetype := devices[0].CustomInfo[AWSNodeType].(string)
@@ -336,7 +334,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 		//Deal with ring
 		start := 0
 		for start < len(devices) {
-			res := continousDeviceAvailable(devices, start, count)
+			res := continuousDeviceAvailable(devices, start, count)
 			if len(res) > 0 {
 				return res
 			}
@@ -349,7 +347,7 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 		{
 			start := 0
 			for start < len(devices) {
-				res := continousDeviceAvailable(devices, start, count)
+				res := continuousDeviceAvailable(devices, start, count)
 				if len(res) > 0 {
 					return res
 				}
@@ -369,7 +367,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 	tmpDevs = make(map[string]util.ContainerDevices)
 	reason := make(map[string]int)
 	if k.Nums > 1 {
-		alloc := graghSelect(devices, int(request.Nums))
+		alloc := graphSelect(devices, int(request.Nums))
 		if len(alloc) == 0 {
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
