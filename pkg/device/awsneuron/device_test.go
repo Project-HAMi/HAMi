@@ -168,7 +168,7 @@ func Test_PatchAnnotations(t *testing.T) {
 		want map[string]string
 	}{
 		{
-			name: "exist device",
+			name: "neuron device",
 			args: struct {
 				annoinput *map[string]string
 				pod       corev1.Pod
@@ -196,7 +196,7 @@ func Test_PatchAnnotations(t *testing.T) {
 								UUID:      "test1",
 								Type:      AWSNeuronDevice,
 								Usedmem:   int32(0),
-								Usedcores: int32(2),
+								Usedcores: int32(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -206,7 +206,7 @@ func Test_PatchAnnotations(t *testing.T) {
 								UUID:      "test2",
 								Type:      AWSNeuronDevice,
 								Usedmem:   int32(0),
-								Usedcores: int32(2),
+								Usedcores: int32(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -216,13 +216,13 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,2:test2,AWSNeuron,0,2;",
+				util.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,2:test2,AWSNeuron,0,3;",
 				AWSNeuronAssignedIndex:               "0,1",
 				AWSNeuronAssignedNode:                "",
 			},
 		},
 		{
-			name: "exist device",
+			name: "neuroncore device",
 			args: struct {
 				annoinput *map[string]string
 				pod       corev1.Pod
@@ -250,7 +250,7 @@ func Test_PatchAnnotations(t *testing.T) {
 								UUID:      "test1",
 								Type:      AWSNeuronDevice,
 								Usedmem:   int32(0),
-								Usedcores: int32(2),
+								Usedcores: int32(3),
 								CustomInfo: map[string]any{
 									AWSUsageInfo: 3,
 								},
@@ -260,7 +260,7 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,2:;",
+				util.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,3:;",
 				AWSNeuronAssignedIndex:               "0,1",
 				AWSNeuronAssignedNode:                "",
 			},
