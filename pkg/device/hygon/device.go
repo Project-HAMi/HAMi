@@ -95,7 +95,7 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 				return true
 			}
 		} else {
-			for _, val := range strings.Split(inuse, ",") {
+			for val := range strings.SplitSeq(inuse, ",") {
 				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
 					return true
 				}
@@ -109,7 +109,7 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 				return false
 			}
 		} else {
-			for _, val := range strings.Split(nouse, ",") {
+			for val := range strings.SplitSeq(nouse, ",") {
 				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
 					return false
 				}

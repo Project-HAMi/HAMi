@@ -333,7 +333,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			continue
 		}
 		pd[devID] = make(PodSingleDevice, 0)
-		for _, s := range strings.Split(str, OnePodMultiContainerSplitSymbol) {
+		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
 			cd, err := DecodeContainerDevices(s)
 			if err != nil {
 				return PodDevices{}, nil
