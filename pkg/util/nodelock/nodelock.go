@@ -22,7 +22,7 @@ import (
 	"strings"
 	"sync"
 	"time"
-
+	"os"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,6 +42,19 @@ var (
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
 )
+func init(){
+    // 从环境变量获取锁超时时间，默认为5分钟
+    nodelock := os.Getenv("HAMI_NODELOCK_EXPIRE")
+    if nodelock != "" {	
+        d, err := time.ParseDuration(nodelock)
+        if err != nil {
+            klog.ErrorS(err, "Failed to parse HAMI_NODELOCK_EXPIRE, using default 5m")
+        } else {
+            NodeLockTimeout = d
+            klog.InfoS("Node lock expiration time set from environment variable", "duration", d)
+        }
+    }
+}
 
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	lock.Lock()
