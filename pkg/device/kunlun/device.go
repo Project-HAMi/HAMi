@@ -270,8 +270,7 @@ func parseInterconnection() [][]int {
 
 func parseInterconnection2() [][]int {
 	var interconnection2 [][]int
-	groups := strings.Split(InterGroupConnection2, ",")
-	for _, group := range groups {
+	for group := range strings.SplitSeq(InterGroupConnection2, ",") {
 		values := strings.Split(group, "-")
 		connect := make([]int, 4)
 		for i, value := range values {
@@ -293,8 +292,7 @@ func interconnect(devices []*util.DeviceUsage, count int) []int {
 				if val2.Used > 0 || val2.Index == val.Index {
 					continue
 				}
-				pairs := strings.Split(InterGroupConnection, ",")
-				for _, p := range pairs {
+				for p := range strings.SplitSeq(InterGroupConnection, ",") {
 					lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
 					rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
 					klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
