@@ -13,7 +13,7 @@ rules:
   - apiGroups:
       - admissionregistration.k8s.io
     resources:
-      #- validatingwebhookconfigurations
+      - validatingwebhookconfigurations
       - mutatingwebhookconfigurations
     verbs:
       - get
