@@ -455,7 +455,6 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 		klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 		return true, tmpDevs, ""
 	}
-	reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
 	klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }

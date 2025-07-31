@@ -663,3 +663,281 @@ func Test_graphSelect(t *testing.T) {
 		})
 	}
 }
+
+func TestDevices_Fit(t *testing.T) {
+	config := AWSNeuronConfig{
+		ResourceCountName: "aws.amazon.com/neuron",
+		ResourceCoreName:  "aws.amazon.com/neuroncore",
+	}
+	dev := InitAWSNeuronDevice(config)
+
+	tests := []struct {
+		name       string
+		devices    []*util.DeviceUsage
+		request    util.ContainerDeviceRequest
+		annos      map[string]string
+		wantFit    bool
+		wantLen    int
+		wantDevIDs []string
+		wantReason string
+	}{
+		{
+			name: "fit success",
+			devices: []*util.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     2,
+					Usedmem:   0,
+					Totalmem:  0,
+					Totalcore: 3,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      AWSNeuronDevice,
+					Health:    true,
+					CustomInfo: map[string]any{
+						AWSNodeType: "trn",
+					},
+				},
+				{
+					ID:        "dev-1",
+					Index:     0,
+					Used:      0,
+					Count:     12,
+					Usedmem:   0,
+					Totalmem:  0,
+					Totalcore: 3,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      AWSNeuronDevice,
+					Health:    true,
+					CustomInfo: map[string]any{
+						AWSNodeType: "trn",
+					},
+				},
+			},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-1"},
+			wantReason: "",
+		},
+		{
+			name: "fit fail: memory not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      AWSNeuronDevice,
+				Health:    true,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 NumaNotFit",
+		},
+		{
+			name: "fit fail: core not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 1,
+				Numa:      0,
+				Type:      AWSNeuronDevice,
+				Health:    true,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientCore",
+		},
+		{
+			name: "fit fail: type mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+				Type:      AWSNeuronDevice,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "OtherType",
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "fit fail: user assign use uuid mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-1",
+				Index:     0,
+				Used:      0,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      AWSNeuronDevice,
+				Health:    true,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{"aws.amazon.com/use-neuron-uuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: user assign no use uuid match",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      AWSNeuronDevice,
+				Health:    true,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{"aws.amazon.com/nouse-neuron-uuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: card overused",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      2,
+				Count:     2,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 3,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      AWSNeuronDevice,
+				Health:    true,
+				CustomInfo: map[string]any{
+					AWSNodeType: "trn",
+				},
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTimeSlicingExhausted",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			allocated := &util.PodDevices{}
+			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			if fit != test.wantFit {
+				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
+			}
+			if test.wantFit {
+				if len(result[AWSNeuronDevice]) != test.wantLen {
+					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[AWSNeuronDevice]))
+				}
+				for idx, id := range test.wantDevIDs {
+					if id != result[AWSNeuronDevice][idx].UUID {
+						t.Errorf("expected device id: %s, got device id %s", id, result[AWSNeuronDevice][idx].UUID)
+					}
+				}
+			}
+			if reason != test.wantReason {
+				t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
+			}
+		})
+	}
+}
