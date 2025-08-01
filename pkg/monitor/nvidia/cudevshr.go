@@ -17,7 +17,6 @@ limitations under the License.
 package nvidia
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,9 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
@@ -82,6 +83,31 @@ type ContainerLister struct {
 	containers    map[string]*ContainerUsage
 	mutex         sync.Mutex
 	clientset     *kubernetes.Clientset
+
+	// Fields for the informer-based pod cache mechanism
+	informerFactory informers.SharedInformerFactory
+	podInformer     cache.SharedIndexInformer
+	stopCh          chan struct{}
+
+	// Cache related fields
+	podCache       map[string]*corev1.Pod
+	podCacheMutex  sync.RWMutex
+	lastUpdateTime time.Time
+	updateInterval time.Duration
+}
+
+var resyncInterval time.Duration = 5 * time.Minute
+
+func init() {
+
+	if os.Getenv("HAMI_RESYNC_INTERVAL") != "" {
+		// If HAMI_RESYNC_INTERVAL is set, parse it
+		if interval, err := time.ParseDuration(os.Getenv("HAMI_RESYNC_INTERVAL")); err == nil {
+			resyncInterval = interval
+		} else {
+			klog.Warningf("Invalid HAMI_RESYNC_INTERVAL value: %s, using default %v", os.Getenv("RESYNC_INTERVAL"), resyncInterval)
+		}
+	}
 }
 
 func NewContainerLister() (*ContainerLister, error) {
@@ -99,11 +125,22 @@ func NewContainerLister() (*ContainerLister, error) {
 		klog.Errorf("Failed to build clientset: %v", err)
 		return nil, err
 	}
-	return &ContainerLister{
-		containerPath: filepath.Join(hookPath, "containers"),
-		containers:    make(map[string]*ContainerUsage),
-		clientset:     clientset,
-	}, nil
+
+	lister := &ContainerLister{
+		containerPath:  filepath.Join(hookPath, "containers"),
+		containers:     make(map[string]*ContainerUsage),
+		clientset:      clientset,
+		stopCh:         make(chan struct{}),
+		podCache:       make(map[string]*corev1.Pod),
+		updateInterval: 30 * time.Second, // Default 30 seconds update interval
+	}
+
+	// Initialize the informer
+	if err := lister.initInformerWithConfig(resyncInterval); err != nil {
+		return nil, err
+	}
+
+	return lister, nil
 }
 
 func (l *ContainerLister) Lock() {
@@ -123,31 +160,39 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 }
 
 func (l *ContainerLister) Update() error {
-	nodename := os.Getenv(util.NodeNameEnvName)
-	if nodename == "" {
-		return fmt.Errorf("env %s not set", util.NodeNameEnvName)
+	// Check if an update is needed based on time interval
+	now := time.Now()
+	if now.Sub(l.lastUpdateTime) < l.updateInterval {
+		// Skip update if not enough time has passed since last update
+		return nil
 	}
-	pods, err := l.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodename),
-	})
-	if err != nil {
-		return err
-	}
+	l.lastUpdateTime = now
 
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
 	entries, err := os.ReadDir(l.containerPath)
 	if err != nil {
 		return err
 	}
+
+	// Use cached pod information instead of making API calls
+	l.podCacheMutex.RLock()
+	podList := make([]*corev1.Pod, 0, len(l.podCache))
+	for _, pod := range l.podCache {
+		podList = append(podList, pod)
+	}
+	l.podCacheMutex.RUnlock()
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
+
 		dirName := filepath.Join(l.containerPath, entry.Name())
-		if !isValidPod(entry.Name(), pods) {
+		if !l.isValidPodWithCache(entry.Name(), podList) {
 			dirInfo, err := os.Stat(dirName)
-			if err == nil && dirInfo.ModTime().Add(time.Second*300).After(time.Now()) {
+			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
 				continue
 			}
 			klog.Infof("Removing dirname %s in monitorpath", dirName)
@@ -158,9 +203,11 @@ func (l *ContainerLister) Update() error {
 			_ = os.RemoveAll(dirName)
 			continue
 		}
+
 		if _, ok := l.containers[entry.Name()]; ok {
 			continue
 		}
+
 		usage, err := loadCache(dirName)
 		if err != nil {
 			klog.Errorf("Failed to load cache: %s, error: %v", dirName, err)
@@ -245,11 +292,123 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	return usage, nil
 }
 
-func isValidPod(name string, pods *corev1.PodList) bool {
-	for _, val := range pods.Items {
-		if strings.Contains(name, string(val.UID)) {
+// Initialize the informer with the specified resync interval
+func (l *ContainerLister) initInformerWithConfig(resyncInterval time.Duration) error {
+	nodename := os.Getenv(util.NodeNameEnvName)
+	if nodename == "" {
+		return fmt.Errorf("env %s not set", util.NodeNameEnvName)
+	}
+
+	// Create informer factory with a longer resync period to reduce API calls
+	l.informerFactory = informers.NewSharedInformerFactoryWithOptions(
+		l.clientset,
+		resyncInterval,
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fmt.Sprintf("spec.nodeName=%s", nodename)
+		}),
+	)
+
+	l.podInformer = l.informerFactory.Core().V1().Pods().Informer()
+
+	// Add event handlers
+	l.podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    l.onPodAdd,
+		UpdateFunc: l.onPodUpdate,
+		DeleteFunc: l.onPodDelete,
+	})
+
+	// Start the informer
+	l.informerFactory.Start(l.stopCh)
+
+	// Wait for cache sync
+	if !cache.WaitForCacheSync(l.stopCh, l.podInformer.HasSynced) {
+		return fmt.Errorf("failed to sync pod informer cache")
+	}
+
+	klog.Info("Pod informer started successfully")
+	return nil
+}
+
+// Handle pod addition events
+func (l *ContainerLister) onPodAdd(obj interface{}) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+
+	l.podCacheMutex.Lock()
+	l.podCache[string(pod.UID)] = pod
+	l.podCacheMutex.Unlock()
+
+	klog.V(4).Infof("Pod added to cache: %s/%s", pod.Namespace, pod.Name)
+}
+
+// Handle pod update events
+func (l *ContainerLister) onPodUpdate(oldObj, newObj interface{}) {
+	oldPod, ok := oldObj.(*corev1.Pod)
+    if !ok {
+        klog.Errorf("unexpected old object type in onPodUpdate: %T", oldObj)
+        return
+    }
+    newPod, ok := newObj.(*corev1.Pod)
+    if !ok {
+        klog.Errorf("unexpected new object type in onPodUpdate: %T", newObj)
+        return
+    }
+
+	// Only update cache when pod phase changes
+	if oldPod.Status.Phase != newPod.Status.Phase {
+		l.podCacheMutex.Lock()
+		l.podCache[string(newPod.UID)] = newPod
+		l.podCacheMutex.Unlock()
+
+		klog.V(4).Infof("Pod status updated in cache: %s/%s, phase: %s -> %s",
+			newPod.Namespace, newPod.Name, oldPod.Status.Phase, newPod.Status.Phase)
+	}
+}
+
+// Handle pod deletion events
+func (l *ContainerLister) onPodDelete(obj interface{}) {
+    pod, ok := obj.(*corev1.Pod)
+    if !ok {
+        tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+        if !ok {
+            klog.Errorf("couldn't get object from tombstone %+v", obj)
+            return
+        }
+        pod, ok = tombstone.Obj.(*corev1.Pod)
+        if !ok {
+            klog.Errorf("tombstone contained object that is not a Pod: %+v", obj)
+            return
+        }
+    }
+    
+    l.podCacheMutex.Lock()
+    delete(l.podCache, string(pod.UID))
+    l.podCacheMutex.Unlock()
+    
+    klog.V(4).Infof("Pod removed from cache: %s/%s", pod.Namespace, pod.Name)
+}
+
+// Check if a pod is valid using cached pod information
+func (l *ContainerLister) isValidPodWithCache(name string, pods []*corev1.Pod) bool {
+	for _, pod := range pods {
+		if strings.Contains(name, string(pod.UID)) {
 			return true
 		}
 	}
 	return false
+}
+
+// Set the update interval for container list refresh
+func (l *ContainerLister) SetUpdateInterval(interval time.Duration) {
+	l.updateInterval = interval
+}
+
+// Stop the informer and clean up resources
+func (l *ContainerLister) Stop() {
+	close(l.stopCh)
+	if l.informerFactory != nil {
+		l.informerFactory.Shutdown()
+	}
 }
