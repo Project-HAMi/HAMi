@@ -367,16 +367,25 @@ func (l *ContainerLister) onPodUpdate(oldObj, newObj interface{}) {
 
 // Handle pod deletion events
 func (l *ContainerLister) onPodDelete(obj interface{}) {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		return
-	}
-
-	l.podCacheMutex.Lock()
-	delete(l.podCache, string(pod.UID))
-	l.podCacheMutex.Unlock()
-
-	klog.V(4).Infof("Pod removed from cache: %s/%s", pod.Namespace, pod.Name)
+    pod, ok := obj.(*corev1.Pod)
+    if !ok {
+        tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+        if !ok {
+            klog.Errorf("couldn't get object from tombstone %+v", obj)
+            return
+        }
+        pod, ok = tombstone.Obj.(*corev1.Pod)
+        if !ok {
+            klog.Errorf("tombstone contained object that is not a Pod: %+v", obj)
+            return
+        }
+    }
+    
+    l.podCacheMutex.Lock()
+    delete(l.podCache, string(pod.UID))
+    l.podCacheMutex.Unlock()
+    
+    klog.V(4).Infof("Pod removed from cache: %s/%s", pod.Namespace, pod.Name)
 }
 
 // Check if a pod is valid using cached pod information
