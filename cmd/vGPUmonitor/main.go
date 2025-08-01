@@ -18,13 +18,13 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
@@ -34,7 +34,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -102,7 +101,7 @@ func start() error {
 		for {
 			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
-				if err.Error() == "temporary closed" {
+				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
 					<-lockChannel
 					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
@@ -168,35 +167,6 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	}
 
 	return nil
-}
-
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
-	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
-
-	for {
-		select {
-		case <-ctx.Done():
-			klog.Info("Shutting down watchAndFeedback")
-			return nil
-		case signal := <-migLockSignal:
-			if signal {
-				klog.Info("Received MIG apply lock file")
-				return fmt.Errorf("temporary closed")
-			}
-
-		case <-time.After(time.Second * 5):
-			if err := lister.Update(); err != nil {
-				klog.Errorf("Failed to update container list: %v", err)
-				continue
-			}
-			//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
-			Observe(lister)
-		}
-	}
 }
 
 func main() {
