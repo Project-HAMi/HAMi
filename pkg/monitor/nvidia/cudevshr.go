@@ -105,7 +105,7 @@ func init() {
 		if interval, err := time.ParseDuration(os.Getenv("HAMI_RESYNC_INTERVAL")); err == nil {
 			resyncInterval = interval
 		} else {
-			klog.Warningf("Invalid RESYNC_INTERVAL value: %s, using default %v", os.Getenv("RESYNC_INTERVAL"), resyncInterval)
+			klog.Warningf("Invalid HAMI_RESYNC_INTERVAL value: %s, using default %v", os.Getenv("RESYNC_INTERVAL"), resyncInterval)
 		}
 	}
 }
