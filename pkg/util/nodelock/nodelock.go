@@ -42,10 +42,14 @@ var (
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
 )
-func init(){
-    // 从环境变量获取锁超时时间，默认为5分钟
+func init() {
+    setupNodeLockTimeout()
+}
+
+// setupNodeLockTimeout configures the node lock timeout from the environment.
+func setupNodeLockTimeout() {
     nodelock := os.Getenv("HAMI_NODELOCK_EXPIRE")
-    if nodelock != "" {	
+    if nodelock != "" {
         d, err := time.ParseDuration(nodelock)
         if err != nil {
             klog.ErrorS(err, "Failed to parse HAMI_NODELOCK_EXPIRE, using default 5m")
