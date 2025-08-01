@@ -101,7 +101,7 @@ var resyncInterval time.Duration = 5 * time.Minute
 func init() {
 
 	if os.Getenv("HAMI_RESYNC_INTERVAL") != "" {
-		// If RESYNC_INTERVAL is set, parse it
+		// If HAMI_RESYNC_INTERVAL is set, parse it
 		if interval, err := time.ParseDuration(os.Getenv("HAMI_RESYNC_INTERVAL")); err == nil {
 			resyncInterval = interval
 		} else {
