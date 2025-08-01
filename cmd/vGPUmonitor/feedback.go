@@ -20,7 +20,10 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"time"
 
+	"context"
+	"fmt"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -174,6 +177,35 @@ func Observe(lister *nvidia.ContainerLister) {
 				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
 			}
+		}
+	}
+}
+
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+	klog.Info("Starting watchAndFeedback")
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
+
+	for {
+		select {
+		case <-ctx.Done():
+			klog.Info("Shutting down watchAndFeedback")
+			return nil
+		case signal := <-migLockSignal:
+			if signal {
+				klog.Info("Received MIG apply lock file")
+				return fmt.Errorf("temporary closed")
+			}
+
+		case <-time.After(time.Second * 5):
+			if err := lister.Update(); err != nil {
+				klog.Errorf("Failed to update container list: %v", err)
+				continue
+			}
+			//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
+			Observe(lister)
 		}
 	}
 }
