@@ -19,6 +19,7 @@ package nodelock
 import (
 	"context"
 	"fmt"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -42,6 +43,24 @@ var (
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
 )
+
+func init() {
+	setupNodeLockTimeout()
+}
+
+// setupNodeLockTimeout configures the node lock timeout from the environment.
+func setupNodeLockTimeout() {
+	nodelock := os.Getenv("HAMI_NODELOCK_EXPIRE")
+	if nodelock != "" {
+		d, err := time.ParseDuration(nodelock)
+		if err != nil {
+			klog.ErrorS(err, "Failed to parse HAMI_NODELOCK_EXPIRE, using default", "duration", NodeLockTimeout)
+		} else {
+			NodeLockTimeout = d
+			klog.InfoS("Node lock expiration time set from environment variable", "duration", d)
+		}
+	}
+}
 
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	lock.Lock()
