@@ -351,6 +351,7 @@ func (l *ContainerLister) onPodUpdate(oldObj, newObj interface{}) {
 	}
 	newPod, ok := newObj.(*corev1.Pod)
 	if !ok {
+        klog.Errorf("unexpected object type in onPodAdd: %T", obj)
 		return
 	}
 
