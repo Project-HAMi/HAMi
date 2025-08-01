@@ -346,14 +346,15 @@ func (l *ContainerLister) onPodAdd(obj interface{}) {
 // Handle pod update events
 func (l *ContainerLister) onPodUpdate(oldObj, newObj interface{}) {
 	oldPod, ok := oldObj.(*corev1.Pod)
-	if !ok {
-		return
-	}
-	newPod, ok := newObj.(*corev1.Pod)
-	if !ok {
-        klog.Errorf("unexpected object type in onPodAdd: %T", obj)
-		return
-	}
+    if !ok {
+        klog.Errorf("unexpected old object type in onPodUpdate: %T", oldObj)
+        return
+    }
+    newPod, ok := newObj.(*corev1.Pod)
+    if !ok {
+        klog.Errorf("unexpected new object type in onPodUpdate: %T", newObj)
+        return
+    }
 
 	// Only update cache when pod phase changes
 	if oldPod.Status.Phase != newPod.Status.Phase {
