@@ -57,6 +57,12 @@ data:
                     },
                     {{- end }}
                     {{- end }}
+                    {{- range .Values.devices.awsneuron.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true

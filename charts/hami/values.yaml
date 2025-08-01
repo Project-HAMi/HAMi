@@ -335,6 +335,10 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  awsneuron:
+    customresources:
+      - aws.amazon.com/neuron
+      - aws.amazon.com/neuroncore
   kunlun:
     enabled: true
     customresources:
