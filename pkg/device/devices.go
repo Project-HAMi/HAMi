@@ -24,13 +24,13 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
-
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -70,6 +70,7 @@ type Config struct {
 	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
+	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -182,6 +183,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return kunlun.InitKunlunDevice(kunlunConfig), nil
 		}, config.KunlunConfig},
+		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (Devices, error) {
+			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", awsneuron.AWSNeuronCommonWord)
+			}
+			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
+		}, config.AWSNeuronConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -254,6 +262,9 @@ iluvatar:
   resourceCoreName: "iluvatar.ai/vcuda-core"
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
+awsneuron:
+  resourceCountName: "aws.amazon.com/neuron"
+  resourceCoreName: "aws.amazon.com/neuroncore"
 vnpus:
   - chipName: "910B"
     commonWord: "Ascend910A"
@@ -446,6 +457,7 @@ func validateConfig(config *Config) error {
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{})
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{})
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{})
+	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{})
 	hasAnyConfig = hasAnyConfig || len(config.VNPUs) > 0
 
 	if !hasAnyConfig {
