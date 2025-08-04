@@ -111,6 +111,9 @@ data:
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
+    awsneuron:
+      resourceCountName: "aws.amazon.com/neuron"
+      resourceCoreName: "aws.amazon.com/neuroncore"
     vnpus:
     - chipName: 910B
       commonWord: Ascend910A

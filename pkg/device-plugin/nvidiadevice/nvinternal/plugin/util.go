@@ -120,7 +120,7 @@ func GetIndexAndTypeFromUUID(uuid string) (string, int) {
 
 func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 	migmode := false
-	for _, val := range strings.Split(output, "\n") {
+	for val := range strings.SplitSeq(output, "\n") {
 		if !strings.Contains(val, "MIG") && strings.Contains(val, uuid) {
 			migmode = true
 			continue

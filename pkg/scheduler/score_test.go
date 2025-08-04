@@ -3011,8 +3011,7 @@ func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem
 // This function parses the string and returns a map where the key is the reason and the value is the corresponding count.
 func convertReasonToMap(reason string) map[string]int {
 	var reasonMap map[string]int
-	reasonSlice := strings.Split(reason, ", ")
-	for _, r := range reasonSlice {
+	for r := range strings.SplitSeq(reason, ", ") {
 		parts := strings.SplitN(r, " ", 2)
 		if len(parts) != 2 {
 			continue
