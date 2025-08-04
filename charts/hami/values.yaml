@@ -232,6 +232,12 @@ scheduler:
     monitorTargetPort: 9395
     labels: {}
     annotations: {}
+  # enable serviceMonitor resource for hami scheduler
+  serviceMonitor:
+    enabled: false
+    interval: "15s"
+    labels:
+      release: prometheus
 
 devicePlugin:
   ## @param image.registry devicePlugin image registry
@@ -296,6 +302,12 @@ devicePlugin:
     httpPort: 31992
     labels: {}
     annotations: {}
+  # enable serviceMonitor resource for device plugin
+  serviceMonitor:
+    enabled: false
+    interval: "15s"
+    labels:
+      release: prometheus
 
   pluginPath: /var/lib/kubelet/device-plugins
   libPath: /usr/local/vgpu

@@ -1,0 +1,24 @@
+{{- if .Values.devicePlugin.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hami-vgpu.device-plugin" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- if .Values.devicePlugin.serviceMonitor.labels }}
+    {{- include "common.tplvalues.render" ( dict "value" .Values.devicePlugin.serviceMonitor.labels "context" $ ) | nindent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - interval: {{ .Values.devicePlugin.serviceMonitor.interval }}
+    path: /metrics
+    port: monitorport
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+    - {{ include "hami-vgpu.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-device-plugin
+{{- end }}
