@@ -62,7 +62,10 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
-	err = retry.RetryOnConflict(DefaultStrategy, func() error {
+	err = retry.OnError(DefaultStrategy, func(err error) bool {
+		// Retry on any error
+		return true
+	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
@@ -77,7 +80,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("setNodeLock exceeds retry count %d", DefaultStrategy.Steps)
+		return fmt.Errorf("failed to set node lock on node %s: %w", nodeName, err)
 	}
 
 	klog.InfoS("Node lock set", "node", nodeName, "podName", pods.Name)
@@ -100,7 +103,10 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 			return nil
 		}
 	}
-	err = retry.RetryOnConflict(DefaultStrategy, func() error {
+	err = retry.OnError(DefaultStrategy, func(err error) bool {
+		// Retry on any error
+		return true
+	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
@@ -115,7 +121,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 		return nil
 	})
 	if err != nil {
-		return fmt.Errorf("releaseNodeLock exceeds retry count %d", DefaultStrategy.Steps)
+		return fmt.Errorf("failed to release node lock on node %s: %w", nodeName, err)
 	}
 
 	klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
