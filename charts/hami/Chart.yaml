@@ -1,6 +1,6 @@
 apiVersion: v2
 name: hami
-version: 2.5.2
+version: 2.5.3
 kubeVersion: ">= 1.18.0"
 description: Heterogeneous AI Computing Virtualization Middleware
 keywords:
@@ -12,5 +12,5 @@ maintainers:
     email: limengxuan@4paradigm.com
   - name: zhangxiao
     email: xiaozhang0210@hotmail.com
-appVersion: "2.5.2"
+appVersion: "2.5.3"
 
