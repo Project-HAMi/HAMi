@@ -70,6 +70,14 @@ Device 0:
 
 Launch your DCU tasks like you usually do
 
+## Node configs: annotations
+
+* `hygon.com/nouse-gpuuuid`:
+  
+  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX,GPU-YYY"
+
+  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling
+
 ## Notes
 
 1. DCU-sharing in init container is not supported, pods with "hygon.com/dcumem" in init container will never be scheduled.

@@ -332,6 +332,7 @@ func Test_rmNodeDevices(t *testing.T) {
 
 func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 	id1 := "60151478-4709-4242-a8c1-a944252d194b"
+	id2 := "60151478-4709-4242-a8c1-a944252d194d"
 	type args struct {
 		nodeInfo *device.NodeInfo
 	}
@@ -351,7 +352,7 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 			want: []device.DeviceInfo{},
 		},
 		{
-			name: "Test no removing device",
+			name: "Test no removing device, case1",
 			args: args{
 				nodeInfo: &util.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
@@ -359,6 +360,16 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 				},
 			},
 			want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+		},
+		{
+			name: "Test no removing device, case2",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id2}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+				},
+			},
+			want: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
 		},
 	}
 	for _, tt := range tests {
