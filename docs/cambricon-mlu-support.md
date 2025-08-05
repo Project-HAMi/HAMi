@@ -74,6 +74,14 @@ spec:
               cambricon.com/mlu.smlu.vcore: "10"
 ```
 
+## Node configs: annotations
+
+* `cambricon.com/nouse-gpuuuid`:
+  
+  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX,GPU-YYY"
+
+  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling
+
 ## Notes
 
 1. Mlu-sharing in init container is not supported, pods with "combricon.com/mlumem" in init container will never be scheduled.

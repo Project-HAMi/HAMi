@@ -62,3 +62,11 @@ spec:
 > **注意1:** *每一单位的sgpu-memory代表512M的显存.*
 
 > **注意2:** *查看更多的[用例](../examples/mthreads/).*
+
+## Node 配置（在注解中指定）
+
+* `mthreads.ai/nouse-gpuuuid`：
+  
+  字符串类型，支持多个设备ID，使用,分割多个设备，如："GPU-AAA,GPU-BBB"
+
+  如果设置，hami在进行调度将不会为Pod使用字符串中定义的任何设

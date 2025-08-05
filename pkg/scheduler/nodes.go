@@ -98,13 +98,15 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 func rmDeviceByNodeAnnotation(nodeInfo *util.NodeInfo) []util.DeviceInfo {
 	disableGPUUUIDVendorMap := make(map[string][]string)
 	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		for annokKey, vendor := range vendorUUIDMap {
-			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annokKey, vendor)
-			if value, ok := nodeInfo.Node.Annotations[annokKey]; ok {
+		for annoKey, vendor := range vendorUUIDMap {
+			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annoKey, vendor)
+			if value, ok := nodeInfo.Node.Annotations[annoKey]; ok {
 				disableGPUUUIDList := strings.Split(value, ",")
 				klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
 				for _, disableGPUUUID := range disableGPUUUIDList {
-					disableGPUUUIDVendorMap[disableGPUUUID] = vendor
+					if id := strings.TrimSpace(disableGPUUUID); id != "" {
+						disableGPUUUIDVendorMap[id] = vendor
+					}
 				}
 			}
 		}
