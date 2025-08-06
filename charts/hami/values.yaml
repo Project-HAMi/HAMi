@@ -148,6 +148,7 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
+  nodeLockExpire: "5m"
   podAnnotations: {}
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
