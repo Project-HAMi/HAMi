@@ -19,6 +19,7 @@ package scheduler
 import (
 	"fmt"
 	"reflect"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -26,6 +27,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -328,7 +330,7 @@ func Test_rmNodeDevices(t *testing.T) {
 
 func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 	id1 := "60151478-4709-4242-a8c1-a944252d194b"
-	id2 := "60151478-4709-4242-a8c1-a944252d194d"
+	id2 := "33c00a52-72ab-4b61-a7ce-43107588835b"
 	type args struct {
 		nodeInfo *util.NodeInfo
 	}
@@ -338,7 +340,7 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 		want []util.DeviceInfo
 	}{
 		{
-			name: "Test remove device",
+			name: "Test remove one device",
 			args: args{
 				nodeInfo: &util.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
@@ -346,6 +348,26 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 				},
 			},
 			want: []util.DeviceInfo{},
+		},
+		{
+			name: "Test remove two devices",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1, id2}, ",")}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+				},
+			},
+			want: []util.DeviceInfo{},
+		},
+		{
+			name: "Test remove one device and keep one device",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id2}, ",")}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+				},
+			},
+			want: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
 		},
 		{
 			name: "Test no removing device, case1",
@@ -366,6 +388,26 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 				},
 			},
 			want: []util.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+		},
+		{
+			name: "Test removing metax device, case1",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}},
+				},
+			},
+			want: []util.DeviceInfo{},
+		},
+		{
+			name: "Test removing metax device, case2",
+			args: args{
+				nodeInfo: &util.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					Devices: []util.DeviceInfo{{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}},
+				},
+			},
+			want: []util.DeviceInfo{},
 		},
 	}
 	for _, tt := range tests {

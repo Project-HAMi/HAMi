@@ -37,7 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-var vendorUUIDMap = map[string][]string{
+var vendorNoUseAnnoKeyMap = map[string][]string{
 	nvidia.GPUNoUseUUID:        {nvidia.NvidiaGPUDevice},
 	cambricon.MLUNoUseUUID:     {cambricon.CambriconMLUDevice},
 	hygon.DCUNoUseUUID:         {hygon.HygonDCUDevice},
@@ -96,34 +96,39 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 }
 
 func rmDeviceByNodeAnnotation(nodeInfo *util.NodeInfo) []util.DeviceInfo {
-	disableGPUUUIDVendorMap := make(map[string][]string)
+	vendorWithDisableGPUUUIDMap := make(map[string]map[string]bool)
 	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		for annoKey, vendor := range vendorUUIDMap {
-			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annoKey, vendor)
+		for annoKey, vendors := range vendorNoUseAnnoKeyMap {
+			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annoKey, vendors)
 			if value, ok := nodeInfo.Node.Annotations[annoKey]; ok {
 				disableGPUUUIDList := strings.Split(value, ",")
 				klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
 				for _, disableGPUUUID := range disableGPUUUIDList {
 					if id := strings.TrimSpace(disableGPUUUID); id != "" {
-						disableGPUUUIDVendorMap[id] = vendor
+						for _, vendor := range vendors {
+							if vendorWithDisableGPUUUIDMap[vendor] == nil {
+								newVendorMap := make(map[string]bool)
+								newVendorMap[disableGPUUUID] = true
+								vendorWithDisableGPUUUIDMap[vendor] = newVendorMap
+							} else {
+								vendorWithDisableGPUUUIDMap[vendor][disableGPUUUID] = true
+							}
+						}
 					}
 				}
 			}
 		}
 	}
-	if len(disableGPUUUIDVendorMap) == 0 {
+	if len(vendorWithDisableGPUUUIDMap) == 0 {
 		return nodeInfo.Devices
 	}
 	tmp := make([]util.DeviceInfo, 0, len(nodeInfo.Devices))
 	for _, d := range nodeInfo.Devices {
 		removeFlag := false
-		if vendorList, ok := disableGPUUUIDVendorMap[d.ID]; ok {
-			for _, vendor := range vendorList {
-				if vendor == d.DeviceVendor {
-					klog.V(5).Infof("Disable gpu uuid is : %s", d.ID)
-					removeFlag = true
-					break
-				}
+		if disableGPUUUIDMap, ok := vendorWithDisableGPUUUIDMap[d.DeviceVendor]; ok {
+			if ok := disableGPUUUIDMap[d.ID]; ok {
+				klog.V(5).Infof("Disable gpu uuid is : %s", d.ID)
+				removeFlag = true
 			}
 		}
 		if !removeFlag {
