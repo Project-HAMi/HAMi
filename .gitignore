@@ -6,6 +6,7 @@ libvgpu/build
 updateso.sh
 libvgpu.so
 .idea
+.vscode
 vendor
 license
 vgpuvalidator
