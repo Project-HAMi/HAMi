@@ -17,7 +17,6 @@ limitations under the License.
 package nvidia
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -34,7 +33,11 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	corelisters "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
@@ -82,6 +85,27 @@ type ContainerLister struct {
 	containers    map[string]*ContainerUsage
 	mutex         sync.Mutex
 	clientset     *kubernetes.Clientset
+	nodeName      string
+
+	// Fields for the informer-based pod cache mechanism
+	informerFactory informers.SharedInformerFactory
+	podInformer     cache.SharedIndexInformer
+	podLister       corelisters.PodLister
+	podListerSynced cache.InformerSynced
+	stopCh          chan struct{}
+}
+
+var resyncInterval time.Duration = 5 * time.Minute
+
+func init() {
+	if os.Getenv("HAMI_RESYNC_INTERVAL") != "" {
+		// If HAMI_RESYNC_INTERVAL is set, parse it
+		if interval, err := time.ParseDuration(os.Getenv("HAMI_RESYNC_INTERVAL")); err == nil {
+			resyncInterval = interval
+		} else {
+			klog.Warningf("Invalid HAMI_RESYNC_INTERVAL value: %s, using default %v", os.Getenv("HAMI_RESYNC_INTERVAL"), resyncInterval)
+		}
+	}
 }
 
 func NewContainerLister() (*ContainerLister, error) {
@@ -99,11 +123,26 @@ func NewContainerLister() (*ContainerLister, error) {
 		klog.Errorf("Failed to build clientset: %v", err)
 		return nil, err
 	}
-	return &ContainerLister{
+
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return nil, fmt.Errorf("env %s not set", util.NodeNameEnvName)
+	}
+
+	lister := &ContainerLister{
 		containerPath: filepath.Join(hookPath, "containers"),
 		containers:    make(map[string]*ContainerUsage),
 		clientset:     clientset,
-	}, nil
+		nodeName:      nodeName,
+		stopCh:        make(chan struct{}),
+	}
+
+	// Initialize the informer
+	if err := lister.initInformerWithConfig(resyncInterval); err != nil {
+		return nil, err
+	}
+
+	return lister, nil
 }
 
 func (l *ContainerLister) Lock() {
@@ -123,31 +162,34 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 }
 
 func (l *ContainerLister) Update() error {
-	nodename := os.Getenv(util.NodeNameEnvName)
-	if nodename == "" {
-		return fmt.Errorf("env %s not set", util.NodeNameEnvName)
-	}
-	pods, err := l.clientset.CoreV1().Pods("").List(context.Background(), metav1.ListOptions{
-		FieldSelector: fmt.Sprintf("spec.nodeName=%s", nodename),
-	})
-	if err != nil {
-		return err
-	}
 
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
+
 	entries, err := os.ReadDir(l.containerPath)
 	if err != nil {
 		return err
 	}
+
+	pods, err := l.podLister.List(labels.Everything())
+	if err != nil {
+		return fmt.Errorf("failed to list pods: %v", err)
+	}
+
+	podUIDs := make(map[string]bool, len(pods))
+	for _, pod := range pods {
+		podUIDs[string(pod.UID)] = true
+	}
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
 		}
 		dirName := filepath.Join(l.containerPath, entry.Name())
-		if !isValidPod(entry.Name(), pods) {
+		podUID := strings.Split(entry.Name(), "_")[0]
+		if !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
-			if err == nil && dirInfo.ModTime().Add(time.Second*300).After(time.Now()) {
+			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
 				continue
 			}
 			klog.Infof("Removing dirname %s in monitorpath", dirName)
@@ -170,7 +212,7 @@ func (l *ContainerLister) Update() error {
 			// no cuInit in container
 			continue
 		}
-		usage.PodUID = strings.Split(entry.Name(), "_")[0]
+		usage.PodUID = podUID
 		usage.ContainerName = strings.Split(entry.Name(), "_")[1]
 		l.containers[entry.Name()] = usage
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
@@ -245,11 +287,50 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	return usage, nil
 }
 
-func isValidPod(name string, pods *corev1.PodList) bool {
-	for _, val := range pods.Items {
-		if strings.Contains(name, string(val.UID)) {
-			return true
+func (l *ContainerLister) initInformerWithConfig(resyncInterval time.Duration) error {
+	// Create informer factory with a longer resync period to reduce API calls
+	l.informerFactory = informers.NewSharedInformerFactoryWithOptions(
+		l.clientset,
+		resyncInterval,
+		informers.WithTweakListOptions(func(options *metav1.ListOptions) {
+			options.FieldSelector = fmt.Sprintf("spec.nodeName=%s", l.nodeName)
+		}),
+	)
+
+	podInformer := l.informerFactory.Core().V1().Pods()
+	l.podInformer = podInformer.Informer()
+	l.podLister = podInformer.Lister()
+	l.podListerSynced = l.podInformer.HasSynced
+
+	l.podInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		DeleteFunc: l.onPodDelete,
+	})
+
+	// Start the informer
+	l.informerFactory.Start(l.stopCh)
+
+	// Wait for cache sync
+	if !cache.WaitForCacheSync(l.stopCh, l.podListerSynced) {
+		return fmt.Errorf("failed to sync pod informer cache")
+	}
+
+	klog.Info("Pod informer started successfully")
+	return nil
+}
+
+func (l *ContainerLister) onPodDelete(obj interface{}) {
+	pod, ok := obj.(*corev1.Pod)
+	if !ok {
+		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)
+		if !ok {
+			klog.Errorf("couldn't get object from tombstone %+v", obj)
+			return
+		}
+		pod, ok = tombstone.Obj.(*corev1.Pod)
+		if !ok {
+			klog.Errorf("tombstone contained object that is not a Pod: %+v", obj)
+			return
 		}
 	}
-	return false
+	klog.V(5).Infof("Pod removed: %s/%s", pod.Namespace, pod.Name)
 }
