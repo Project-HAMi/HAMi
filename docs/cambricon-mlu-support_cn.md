@@ -68,6 +68,14 @@ spec:
               cambricon.com/mlu.smlu.vcore: "10"
 ```
 
+## Node 配置（在注解中指定）
+
+* `cambricon.com/nouse-gpuuuid`：
+  
+  字符串类型，支持多个设备ID，使用,分割多个设备，如："GPU-AAA,GPU-BBB"
+
+  如果设置，hami在进行调度将不会为Pod使用字符串中定义的任何设
+
 ## 注意事项
 
 1. 在init container中无法使用MLU复用功能，否则该任务不会被调度
