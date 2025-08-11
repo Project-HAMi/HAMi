@@ -17,17 +17,22 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
-
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
 var cgroupDriver int
+var errTemporaryClosed = errors.New("temporary closed")
 
 //type hostGPUPid struct {
 //	hostGPUPid int
@@ -174,6 +179,37 @@ func Observe(lister *nvidia.ContainerLister) {
 				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
 			}
+		}
+	}
+}
+
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+	klog.Info("Starting watchAndFeedback")
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
+
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			klog.Info("Shutting down watchAndFeedback")
+			return nil
+		case signal := <-migLockSignal:
+			if signal {
+				klog.Info("Received MIG apply lock file")
+				return errTemporaryClosed
+			}
+
+		case <-ticker.C:
+			if err := lister.Update(); err != nil {
+				klog.Errorf("Failed to update container list: %v", err)
+				continue
+			}
+			Observe(lister)
 		}
 	}
 }
