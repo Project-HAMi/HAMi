@@ -26,6 +26,9 @@ update-versions:
 lint: update-versions
 	helm lint --with-subcharts --values ./hami/values.yaml ./hami --debug
 
+template: template
+	helm template ./hami --debug --values ./hami/values.yaml
+
 package: lint
 	helm package ./hami --debug
 
