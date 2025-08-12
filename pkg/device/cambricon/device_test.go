@@ -146,7 +146,7 @@ func Test_ParseConfig(t *testing.T) {
 	}
 }
 
-func Test_CheckType(t *testing.T) {
+func Test_checkType(t *testing.T) {
 	dev := CambriconDevices{}
 	tests := []struct {
 		name string
@@ -193,14 +193,14 @@ func Test_CheckType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1, result2, _ := dev.CheckType(test.args.annos, test.args.d, test.args.n)
+			result1, result2, _ := dev.checkType(test.args.annos, test.args.d, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 		})
 	}
 }
 
-func Test_CheckUUID(t *testing.T) {
+func Test_checkUUID(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
@@ -283,7 +283,7 @@ func Test_CheckUUID(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
-			result := dev.CheckUUID(test.args.annos, test.args.d)
+			result := dev.checkUUID(test.args.annos, test.args.d)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -443,7 +443,7 @@ func Test_PatchAnnotations(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
-			result := dev.PatchAnnotations(&test.args.annoinput, test.args.pd)
+			result := dev.PatchAnnotations(&corev1.Pod{}, &test.args.annoinput, test.args.pd)
 			assert.Equal(t, len(test.want), len(result), "Expected length of result to match want")
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k], "pod add annotation key [%s], values is [%s]", k, result[k])
@@ -453,11 +453,6 @@ func Test_PatchAnnotations(t *testing.T) {
 }
 
 func Test_setNodeLock(t *testing.T) {
-	client.InitGlobalClient(
-		client.WithBurst(10),
-		client.WithQPS(5.0),
-		client.WithTimeout(60),
-	)
 	tests := []struct {
 		name      string
 		node      corev1.Node
@@ -489,7 +484,7 @@ func Test_setNodeLock(t *testing.T) {
 		},
 	}
 
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	k8sClient := client.GetClient()
 	if k8sClient != nil {
 
@@ -535,7 +530,7 @@ func Test_setNodeLock(t *testing.T) {
 func setupTest(t *testing.T) (*corev1.Node, *corev1.Pod, func(), *fake.Clientset) {
 	ctx := context.Background()
 
-	clientset := fake.NewSimpleClientset()
+	clientset := fake.NewClientset()
 
 	node := &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -699,6 +694,453 @@ func Test_ReleaseNodeLock(t *testing.T) {
 			dev := CambriconDevices{}
 			result := dev.ReleaseNodeLock(&test.args.node, &test.args.pod)
 			assert.Equal(t, test.err, result)
+		})
+	}
+}
+
+func TestDevices_Fit(t *testing.T) {
+	config := CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	}
+	dev := InitMLUDevice(config)
+
+	tests := []struct {
+		name       string
+		devices    []*util.DeviceUsage
+		request    util.ContainerDeviceRequest
+		annos      map[string]string
+		wantFit    bool
+		wantLen    int
+		wantDevIDs []string
+		wantReason string
+	}{
+		{
+			name: "fit success",
+			devices: []*util.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      CambriconMLUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      CambriconMLUDevice,
+					Health:    true,
+				},
+			},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-1"},
+			wantReason: "",
+		},
+		{
+			name: "fit fail: memory not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
+		},
+		{
+			name: "fit fail: core not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1024,
+				Totalcore: 100,
+				Usedcores: 100,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientCore",
+		},
+		{
+			name: "fit fail: type mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    true,
+				Type:      CambriconMLUDevice,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "OtherType",
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "fit fail: user assign use uuid mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-1",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{"cambricon.com/use-gpuuuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: user assign no use uuid match",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{"cambricon.com/nouse-gpuuuid": "dev-0"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardUuidMismatch",
+		},
+		{
+			name: "fit fail: card overused",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      100,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTimeSlicingExhausted",
+		},
+		{
+			name: "fit success: but core limit can't exceed 100",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         120,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+		{
+			name: "fit fail:  card exclusively",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         100,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail:  CardComputeUnitsExhausted",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 100,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         0,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardComputeUnitsExhausted",
+		},
+		{
+			name: "fit fail:  AllocatedCardsInsufficientRequest",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit success:  memory percentage",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Type:      CambriconMLUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 10,
+				Coresreq:         20,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			allocated := &util.PodDevices{}
+			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			if fit != test.wantFit {
+				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
+			}
+			if test.wantFit {
+				if len(result[CambriconMLUDevice]) != test.wantLen {
+					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[CambriconMLUDevice]))
+				}
+				for idx, id := range test.wantDevIDs {
+					if id != result[CambriconMLUDevice][idx].UUID {
+						t.Errorf("expected device id: %s, got device id %s", id, result[CambriconMLUDevice][idx].UUID)
+					}
+				}
+			}
+
+			if reason != test.wantReason {
+				t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
+			}
+		})
+	}
+}
+
+func TestDevices_AddResourceUsage(t *testing.T) {
+	tests := []struct {
+		name        string
+		deviceUsage *util.DeviceUsage
+		ctr         *util.ContainerDevice
+		wantErr     bool
+		wantUsage   *util.DeviceUsage
+	}{
+		{
+			name: "test add resource usage",
+			deviceUsage: &util.DeviceUsage{
+				ID:        "dev-0",
+				Used:      0,
+				Usedcores: 15,
+				Usedmem:   2000,
+			},
+			ctr: &util.ContainerDevice{
+				UUID:      "dev-0",
+				Usedcores: 50,
+				Usedmem:   1024,
+			},
+			wantUsage: &util.DeviceUsage{
+				ID:        "dev-0",
+				Used:      1,
+				Usedcores: 65,
+				Usedmem:   3024,
+			},
+			wantErr: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &CambriconDevices{}
+			if err := dev.AddResourceUsage(&corev1.Pod{}, tt.deviceUsage, tt.ctr); (err != nil) != tt.wantErr {
+				t.Errorf("AddResourceUsage() error=%v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				if tt.deviceUsage.Usedcores != tt.wantUsage.Usedcores {
+					t.Errorf("expected used cores: %d, got used cores %d", tt.wantUsage.Usedcores, tt.deviceUsage.Usedcores)
+				}
+				if tt.deviceUsage.Usedmem != tt.wantUsage.Usedmem {
+					t.Errorf("expected used mem: %d, got used mem %d", tt.wantUsage.Usedmem, tt.deviceUsage.Usedmem)
+				}
+				if tt.deviceUsage.Used != tt.wantUsage.Used {
+					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
+				}
+			}
 		})
 	}
 }

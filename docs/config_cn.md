@@ -42,6 +42,22 @@
 * `nvidia.resourcePriorityName`：
   字符串类型，表示申请任务的任务优先级，默认："nvidia.com/priority"
 
+## 节点配置
+
+HAMi 允许为每个节点的 device plugin 配置不同的行为，只需要修改 configmap，如下:
+```sh
+kubectl -n <namespace> edit cm hami-device-plugin
+```
+* `name`: 要配置的节点名称。
+* `operatingmode`: 节点的运行模式，可以是 "hami-core" 或者 "mig", 默认: "hami-core"。
+* `devicememoryscaling`: 节点内存的超配率。
+* `devicecorescaling`: 节点算力的超配率。
+* `devicesplitcount`: 每个设备允许被分配的任务数。
+* `filterdevices`: 节点上不被 HAMi 管理的设备。
+  * `uuid`: 所要排除设备的 UUID。
+  * `index`: 所要排除设备的索引。
+  * 一个设备只要在 `uuid` 或者 `index` 列表中，就不会被 HAMi 管理。
+
 ## Chart 参数
 
 你可以在安装过程中，通过 `-set` 来修改以下的客制化参数，例如：

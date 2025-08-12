@@ -62,13 +62,13 @@ HAMi支持设备资源的硬隔离
 
 ### 支持的设备
 
-[![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
-[![cambricon MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](docs/cambricon-mlu-support.md)
-[![hygon DCU](https://img.shields.io/badge/海光-DCU-blue)](docs/hygon-dcu-support.md)
-[![iluvatar GPU](https://img.shields.io/badge/壁仞-GPU-blue)](docs/iluvatar-gpu-support.md)
-[![mthreads GPU](https://img.shields.io/badge/摩尔线程-GPU-blue)](docs/mthreads-support.md)
-[![ascend NPU](https://img.shields.io/badge/昇腾-NPU-blue)](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)
-[![metax GPU](https://img.shields.io/badge/沐曦-GPU-blue)](docs/metax-support.md)
+[NVIDIA GPU](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)   
+[寒武纪 MLU](docs/cambricon-mlu-support.md)   
+[海光 DCU](docs/hygon-dcu-support.md)   
+[天数智芯 GPU](docs/iluvatar-gpu-support.md)   
+[摩尔线程 GPU](docs/mthreads-support.md)   
+[昇腾 NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)   
+[沐曦 GPU](docs/metax-support.md)   
 
 ## 架构
 

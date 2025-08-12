@@ -29,6 +29,15 @@ const (
 
 	MetaxUseUUID   = "metax-tech.com/use-gpuuuid"
 	MetaxNoUseUUID = "metax-tech.com/nouse-gpuuuid"
+
+	MetaxSGPUQosPolicy     = "metax-tech.com/sgpu-qos-policy"
+	MetaxSGPUTopologyAware = "metax-tech.com/sgpu-topology-aware"
+)
+
+const (
+	BestEffort = "best-effort"
+	FixedShare = "fixed-share"
+	BurstShare = "burst-share"
 )
 
 type MetaxSDeviceInfo struct {
@@ -43,6 +52,8 @@ type MetaxSDeviceInfo struct {
 	AvailableVRam     int32  `json:"availableVRam,omitempty"`
 	Numa              int32  `json:"numa,omitempty"`
 	Healthy           bool   `json:"healthy,omitempty"`
+	QosPolicy         string `json:"qosPolicy,omitempty"`
+	LinkZone          int32  `json:"linkZone,omitempty"`
 }
 type NodeMetaxSDeviceInfo []*MetaxSDeviceInfo
 
@@ -58,8 +69,8 @@ func (ni NodeMetaxSDeviceInfo) String() string {
 	str := "\n"
 
 	for _, i := range ni {
-		str += fmt.Sprintf("MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t\n",
-			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy)
+		str += fmt.Sprintf("MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t, QosPolicy=%s, LinkZone=%d\n",
+			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy, i.QosPolicy, i.LinkZone)
 	}
 
 	return str
@@ -96,6 +107,11 @@ func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*util.
 			MIGTemplate:  []util.Geometry{},
 			Health:       sdevice.Healthy,
 			DeviceVendor: MetaxSGPUDevice,
+			CustomInfo: map[string]any{
+				"QosPolicy": sdevice.QosPolicy,
+				"Model":     sdevice.Model,
+				"LinkZone":  sdevice.LinkZone,
+			},
 		}
 	}
 

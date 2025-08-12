@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"sort"
 	"strconv"
 	"strings"
@@ -176,6 +177,12 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			for devhandsk, devInstance := range device.GetDevices() {
 				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
 
+				nodedevices, err := devInstance.GetNodeDevices(*val)
+				if err != nil {
+					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+
 				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
 				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
@@ -212,11 +219,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodedevices, err := devInstance.GetNodeDevices(*val)
-				if err != nil {
-					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
-				}
 				nodeInfo.Devices = make([]util.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
 					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
@@ -250,7 +252,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
-	//for _, nodeID := range *nodes {
 	allNodes, err := s.ListNodes()
 	if err != nil {
 		return &overallnodeMap, failedNodes, err
@@ -258,12 +259,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
-		userGPUPolicy := config.GPUSchedulerPolicy
-		if task != nil && task.Annotations != nil {
-			if value, ok := task.Annotations[policy.GPUSchedulerPolicyAnnotationKey]; ok {
-				userGPUPolicy = value
-			}
-		}
+		userGPUPolicy := util.GetGPUSchedulerPolicyByPod(config.GPUSchedulerPolicy, task)
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
@@ -290,6 +286,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Type:        d.Type,
 					Numa:        d.Numa,
 					Health:      d.Health,
+					CustomInfo:  maps.Clone(d.CustomInfo),
 				},
 			})
 		}
@@ -300,6 +297,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	for _, p := range podsInfo {
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
+			klog.V(5).InfoS("pod allocated unknown node resources",
+				"pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID)
 			continue
 		}
 		for _, podsingleds := range p.Devices {
@@ -442,14 +441,14 @@ ReleaseNodeLocks:
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-	nums := k8sutil.Resourcereqs(args.Pod)
-	total := 0
-	for _, n := range nums {
+	resourceReqs := k8sutil.Resourcereqs(args.Pod)
+	resourceReqTotal := 0
+	for _, n := range resourceReqs {
 		for _, k := range n {
-			total += int(k.Nums)
+			resourceReqTotal += int(k.Nums)
 		}
 	}
-	if total == 0 {
+	if resourceReqTotal == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
@@ -470,7 +469,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		klog.V(5).InfoS("Nodes failed during usage retrieval",
 			"nodes", failedNodes)
 	}
-	nodeScores, err := s.calcScore(nodeUsage, nums, annos, args.Pod, failedNodes)
+	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, annos, args.Pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
@@ -497,13 +496,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(&annotations, m.Devices)
+		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	//InRequestDevices := util.EncodePodDevices(util.InRequestDevices, m.devices)
-	//supportDevices := util.EncodePodDevices(util.SupportDevices, m.devices)
-	//maps.Copy(annotations, InRequestDevices)
-	//maps.Copy(annotations, supportDevices)
 	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {

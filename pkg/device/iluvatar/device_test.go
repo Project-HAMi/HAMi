@@ -147,7 +147,7 @@ func TestPatchAnnotations(t *testing.T) {
 			maps.Copy(annoInputCopy, tt.annoInput)
 
 			dev := &IluvatarDevices{}
-			got := dev.PatchAnnotations(&annoInputCopy, tt.podDevices)
+			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)
 
 			if len(got) != len(tt.expected) {
 				t.Errorf("PatchAnnotations() got %d annotations, expected %d", len(got), len(tt.expected))
@@ -214,7 +214,7 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
-func Test_CheckType(t *testing.T) {
+func Test_checkType(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
@@ -264,7 +264,7 @@ func Test_CheckType(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := IluvatarDevices{}
-			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
+			result1, result2, result3 := dev.checkType(test.args.annos, test.args.d, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 			assert.Equal(t, result3, test.want3)
@@ -272,7 +272,7 @@ func Test_CheckType(t *testing.T) {
 	}
 }
 
-func Test_CheckUUID(t *testing.T) {
+func Test_checkUUID(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
@@ -358,7 +358,7 @@ func Test_CheckUUID(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := IluvatarDevices{}
-			result := dev.CheckUUID(test.args.annos, test.args.d)
+			result := dev.checkUUID(test.args.annos, test.args.d)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -432,6 +432,176 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			ParseConfig(&fs)
 			result := dev.GenerateResourceRequests(test.args)
 			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+func Test_Fit(t *testing.T) {
+	config := IluvatarConfig{
+		ResourceCountName:  "iluvatar.ai/vgpu",
+		ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+	}
+	dev := InitIluvatarDevice(config)
+
+	tests := []struct {
+		name       string
+		devices    []*util.DeviceUsage
+		request    util.ContainerDeviceRequest
+		annos      map[string]string
+		wantOK     bool
+		wantLen    int
+		wantDevIDs []string
+	}{
+		{
+			name: "fit success",
+			devices: []*util.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      IluvatarGPUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      IluvatarGPUDevice,
+					Health:    true,
+				},
+			},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             IluvatarGPUDevice,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+		},
+		{
+			name: "fit fail: memory not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      IluvatarGPUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             IluvatarGPUDevice,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+		},
+		{
+			name: "fit fail: core not enough",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 100,
+				Numa:      0,
+				Type:      IluvatarGPUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             IluvatarGPUDevice,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+		},
+		{
+			name: "fit fail: type mismatch",
+			devices: []*util.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      IluvatarGPUDevice,
+				Health:    true,
+			}},
+			request: util.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "OtherType",
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			allocated := &util.PodDevices{}
+			ok, result, _ := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			if test.wantOK {
+				if len(result[IluvatarGPUDevice]) != test.wantLen {
+					t.Errorf("expected %d, got %d", test.wantLen, len(result[IluvatarGPUDevice]))
+				}
+				for idx, id := range test.wantDevIDs {
+					if id != result[IluvatarGPUDevice][idx].UUID {
+						t.Errorf("expected %s, got %s", id, result[IluvatarGPUDevice][idx].UUID)
+					}
+				}
+				if !ok {
+					t.Errorf("expected ok true, got false")
+				}
+			} else {
+				if ok {
+					t.Errorf("expected ok false, got true")
+				}
+				if len(result[IluvatarGPUDevice]) != test.wantLen {
+					t.Errorf("expected %d, got %d", test.wantLen, len(result[IluvatarGPUDevice]))
+				}
+			}
 		})
 	}
 }

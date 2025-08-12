@@ -38,7 +38,7 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"k8s.io/klog/v2"
@@ -57,7 +57,7 @@ type ResourceManager interface {
 	Devices() Devices
 	GetDevicePaths([]string) []string
 	GetPreferredAllocation(available, required []string, size int) ([]string, error)
-	CheckHealth(stop <-chan any, unhealthy chan<- *Device) error
+	CheckHealth(stop <-chan any, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error
 }
 
 // NewResourceManagers returns a []ResourceManager, one for each resource in 'config'.
@@ -160,9 +160,7 @@ func AddDefaultResourcesToConfig(config *nvidia.DeviceConfig) error {
 			}
 		}()
 
-		devicelib := device.New(
-			device.WithNvml(nvmllib),
-		)
+		devicelib := device.New(nvmllib)
 		return devicelib.VisitMigProfiles(func(p device.MigProfile) error {
 			profileInfo := p.GetInfo()
 			if profileInfo.C != profileInfo.G {

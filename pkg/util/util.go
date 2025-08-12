@@ -34,6 +34,8 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
+
+	safecast "github.com/ccoveille/go-safecast"
 )
 
 const (
@@ -164,11 +166,23 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					index, _ = strconv.Atoi(items[7])
 					mode = items[8]
 				}
+				count32, err := safecast.ToInt32(count)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devmem32, err := safecast.ToInt32(devmem)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devcore32, err := safecast.ToInt32(devcore)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
 				i := DeviceInfo{
 					ID:      items[0],
-					Count:   int32(count),
-					Devmem:  int32(devmem),
-					Devcore: int32(devcore),
+					Count:   count32,
+					Devmem:  devmem32,
+					Devcore: devcore32,
 					Type:    items[4],
 					Numa:    numa,
 					Health:  health,
@@ -182,6 +196,14 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 		}
 	}
 	return retval, nil
+}
+
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
+	}
+	return devicePairScores, nil
 }
 
 func EncodeNodeDevices(dlist []*DeviceInfo) string {
@@ -311,7 +333,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			continue
 		}
 		pd[devID] = make(PodSingleDevice, 0)
-		for _, s := range strings.Split(str, OnePodMultiContainerSplitSymbol) {
+		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
 			cd, err := DecodeContainerDevices(s)
 			if err != nil {
 				return PodDevices{}, nil
@@ -346,7 +368,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
-		klog.Infof("patch pod %v failed, %v", node.Name, err)
+		klog.Infof("patch node %v failed, %v", node.Name, err)
 	}
 	return err
 }
@@ -446,10 +468,14 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 }
 
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
+	var err error
 	for _, val := range templates[templateIdx] {
 		count := 0
 		for count < int(val.Count) {
-			n.Index = int32(templateIdx)
+			n.Index, err = safecast.ToInt32(templateIdx)
+			if err != nil {
+				continue
+			}
 			n.UsageList = append(n.UsageList, MigTemplateUsage{
 				Name:   val.Name,
 				Memory: val.Memory,
@@ -466,4 +492,14 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 		uuids = append(uuids, info.ID)
 	}
 	return uuids
+}
+
+func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
+	userGPUPolicy := defaultPolicy
+	if task != nil && task.Annotations != nil {
+		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
+			userGPUPolicy = value
+		}
+	}
+	return userGPUPolicy
 }

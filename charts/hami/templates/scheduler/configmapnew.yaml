@@ -76,4 +76,14 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      {{- if .Values.devices.kunlun.enabled }}
+      {{- range .Values.devices.kunlun.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
+      {{- range .Values.devices.awsneuron.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
 {{- end }}

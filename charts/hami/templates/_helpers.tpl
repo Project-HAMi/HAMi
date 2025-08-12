@@ -89,24 +89,17 @@ app.kubernetes.io/name: {{ include "hami-vgpu.name" . }}
 app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
-{{/*
-Image registry secret name
-*/}}
-{{- define "hami-vgpu.imagePullSecrets" -}}
-imagePullSecrets: {{ toYaml .Values.imagePullSecrets | nindent 2 }}
-{{- end }}
 
 {{/*
     Resolve the tag for kubeScheduler.
 */}}
 {{- define "resolvedKubeSchedulerTag" -}}
-{{- if .Values.scheduler.kubeScheduler.imageTag }}
-{{- .Values.scheduler.kubeScheduler.imageTag | trim -}}
+{{- if .Values.scheduler.kubeScheduler.image.tag }}
+{{- .Values.scheduler.kubeScheduler.image.tag | trim -}}
 {{- else }}
 {{- include "strippedKubeVersion" . | trim -}}
 {{- end }}
 {{- end }}
-
 
 {{/*
     Return the stripped Kubernetes version string by removing extra parts after semantic version number.
@@ -116,4 +109,44 @@ imagePullSecrets: {{ toYaml .Values.imagePullSecrets | nindent 2 }}
 */}}
 {{- define "strippedKubeVersion" -}}
 {{ regexReplaceAll "^(v[0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" .Capabilities.KubeVersion.Version "$1" }}
+{{- end -}}
+
+{{- define "hami.scheduler.kubeScheduler.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.kubeScheduler.image "global" .Values.global "tag" (include "resolvedKubeSchedulerTag" .)) }}
+{{- end -}}
+
+{{- define "hami.scheduler.extender.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{- end -}}
+
+{{- define "hami.devicePlugin.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{- end -}}
+
+{{- define "hami.devicePlugin.monitor.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{- end -}}
+
+{{- define "hami.scheduler.patch.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.patch.image "global" .Values.global) }}
+{{- end -}}
+
+{{- define "hami.scheduler.patch.new.image" -}}
+{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.patch.imageNew "global" .Values.global) }}
+{{- end -}}
+
+{{- define "hami.scheduler.extender.imagePullSecrets" -}}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.extender.image) "global" .Values.global) }}
+{{- end -}}
+
+{{- define "hami.devicePlugin.imagePullSecrets" -}}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.devicePlugin.image) "global" .Values.global) }}
+{{- end -}}
+
+{{- define "hami.scheduler.patch.imagePullSecrets" -}}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.image) "global" .Values.global) }}
+{{- end -}}
+
+{{- define "hami.scheduler.patch.new.imagePullSecrets" -}}
+{{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.imageNew) "global" .Values.global) }}
 {{- end -}}

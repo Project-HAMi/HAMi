@@ -47,7 +47,7 @@ HAMi provides device virtualization for several heterogeneous devices including 
 ### Device Resources Isolation
 
 A simple demonstration of device isolation:
-A task with the following resources:
+A task with the following resources will see 3000M device memory inside container:
 
 ```yaml
       resources:
@@ -55,8 +55,6 @@ A task with the following resources:
           nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
           nvidia.com/gpumem: 3000 # identifies 3G GPU memory each physical GPU allocates to the pod
 ```
-
-will see 3G device memory inside container
 
 ![img](./imgs/hard_limit.jpg)
 
@@ -66,13 +64,13 @@ will see 3G device memory inside container
 
 ### Supported devices
 
-[![nvidia GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
-[![cambricon MLU](https://img.shields.io/badge/Cambricon-Mlu-blue)](docs/cambricon-mlu-support.md)
-[![hygon DCU](https://img.shields.io/badge/Hygon-DCU-blue)](docs/hygon-dcu-support.md)
-[![iluvatar GPU](https://img.shields.io/badge/Iluvatar-GPU-blue)](docs/iluvatar-gpu-support.md)
-[![mthreads GPU](https://img.shields.io/badge/Mthreads-GPU-blue)](docs/mthreads-support.md)
-[![ascend NPU](https://img.shields.io/badge/Ascend-NPU-blue)](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)
-[![metax GPU](https://img.shields.io/badge/metax-GPU-blue)](docs/metax-support.md)
+[NVIDIA GPU](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)   
+[Cambricon MLU](docs/cambricon-mlu-support.md)   
+[HYGON DCU](docs/hygon-dcu-support.md)   
+[Iluvatar CoreX GPU](docs/iluvatar-gpu-support.md)   
+[Moore Threads GPU](docs/mthreads-support.md)   
+[HUAWEI Ascend NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)   
+[MetaX GPU](docs/metax-support.md)   
 
 ## Architect
 

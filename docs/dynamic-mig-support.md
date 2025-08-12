@@ -22,7 +22,7 @@
 
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
-* Configure `mode` in device-plugin configMap to `mig` for MIG nodes
+* Configure `mode` in device-plugin configMap to `mig` for MIG nodes. For more detailed configurations, refer to [node configs](./config.md)
 ```
 kubectl describe cm  hami-device-plugin -n kube-system
 ```
@@ -175,3 +175,20 @@ nodeGPUMigInstance{deviceidx="1",deviceuuid="GPU-30f90f49-43ab-0a78-bf5c-93ed41e
 2. Nvidia devices before Ampere architect can't use 'mig' mode
 
 3. You won't see any mig resources(ie, `nvidia.com/mig-1g.10gb`) on node, hami uses a unified resource name for both 'mig' and 'hami-core' node
+
+## Known Issues
+
+### MIG Partitioning Failures in Mixed Deployments
+
+* Scenario: When running workloads with HAMi and other NVIDIA-native components (e.g., dcgm-exporter) mixed on the same GPU node, MIG partitioning is highly likely to fail.
+
+* Error Indication: If the hami-device-plugin logs show the error: nvidia-mig-parted failed with exit...
+
+* Resolution:
+    1. Use the `lsof` command to view device usage (e.g., for GPU 0):
+    ```
+    lsof /dev/nvidia0
+    ```
+    2. Stop all non-HAMi processes occupying the target GPU devices.
+
+Based on the output of lsof, stop all processes unrelated to HAMi that are occupying /dev/nvidiaX devices; then recreate the workload.

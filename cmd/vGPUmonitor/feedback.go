@@ -17,17 +17,22 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
+	"fmt"
 	"os"
 	"sort"
 	"strings"
-
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
 var cgroupDriver int
+var errTemporaryClosed = errors.New("temporary closed")
 
 //type hostGPUPid struct {
 //	hostGPUPid int
@@ -84,87 +89,6 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	sort.Slice(tmp, func(i, j int) bool { return tmp[i].Pid > tmp[j].Pid })
 	return result, nvml.SUCCESS
 }
-
-//func setHostPid(pod corev1.Pod, ctr corev1.ContainerStatus, sr *podusage) error {
-//	var pids []string
-//	mutex.Lock()
-//	defer mutex.Unlock()
-//
-//	if cgroupDriver == 0 {
-//		cgroupDriver = setcGgroupDriver()
-//	}
-//	if cgroupDriver == 0 {
-//		return errors.New("can not identify cgroup driver")
-//	}
-//	usedGPUArray, err := getUsedGPUPid()
-//	if err != nvml.SUCCESS {
-//		return errors.New("get usedGPUID failed, ret:" + nvml.ErrorString(err))
-//	}
-//	if len(usedGPUArray) == 0 {
-//		return nil
-//	}
-//	qos := strings.ToLower(string(pod.Status.QOSClass))
-//	var filename string
-//	if cgroupDriver == 1 {
-//		/* Cgroupfs */
-//		filename = fmt.Sprintf("/sysinfo/fs/cgroup/memory/kubepods/%s/pod%s/%s/tasks", qos, pod.UID, strings.TrimPrefix(ctr.ContainerID, "docker://"))
-//	}
-//	if cgroupDriver == 2 {
-//		/* Systemd */
-//		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
-//		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
-//	}
-//	fmt.Println("filename=", filename)
-//	content, ferr := os.ReadFile(filename)
-//	if ferr != nil {
-//		return ferr
-//	}
-//	pids = strings.Split(string(content), "\n")
-//	hostPidArray := []hostGPUPid{}
-//	for _, val := range pids {
-//		tmp, _ := strconv.Atoi(val)
-//		if tmp != 0 {
-//			var stat os.FileInfo
-//			var err error
-//			if stat, err = os.Lstat(fmt.Sprintf("/proc/%v", tmp)); err != nil {
-//				return err
-//			}
-//			mtime := stat.ModTime().Unix()
-//			hostPidArray = append(hostPidArray, hostGPUPid{
-//				hostGPUPid: tmp,
-//				mtime:      uint64(mtime),
-//			})
-//		}
-//	}
-//	usedGPUHostArray := []hostGPUPid{}
-//	for _, val := range usedGPUArray {
-//		for _, hostpid := range hostPidArray {
-//			if uint(hostpid.hostGPUPid) == val {
-//				usedGPUHostArray = append(usedGPUHostArray, hostpid)
-//			}
-//		}
-//	}
-//	//fmt.Println("usedHostGPUArray=", usedGPUHostArray)
-//	sort.Slice(usedGPUHostArray, func(i, j int) bool { return usedGPUHostArray[i].mtime > usedGPUHostArray[j].mtime })
-//	if sr == nil || sr.sr == nil {
-//		return nil
-//	}
-//	for idx, val := range sr.sr.procs {
-//		//fmt.Println("pid=", val.pid)
-//		if val.pid == 0 {
-//			break
-//		}
-//		if idx < len(usedGPUHostArray) {
-//			if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
-//				fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
-//				sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
-//				fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
-//			}
-//		}
-//	}
-//	return nil
-//
-//}
 
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
@@ -255,6 +179,37 @@ func Observe(lister *nvidia.ContainerLister) {
 				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
 			}
+		}
+	}
+}
+
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+	klog.Info("Starting watchAndFeedback")
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
+
+	ticker := time.NewTicker(time.Second * 5)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			klog.Info("Shutting down watchAndFeedback")
+			return nil
+		case signal := <-migLockSignal:
+			if signal {
+				klog.Info("Received MIG apply lock file")
+				return errTemporaryClosed
+			}
+
+		case <-ticker.C:
+			if err := lister.Update(); err != nil {
+				klog.Errorf("Failed to update container list: %v", err)
+				continue
+			}
+			Observe(lister)
 		}
 	}
 }

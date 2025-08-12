@@ -37,7 +37,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 )
 
@@ -115,6 +115,21 @@ func (r *nvmlResourceManager) GetDevicePaths(ids []string) []string {
 }
 
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
-func (r *nvmlResourceManager) CheckHealth(stop <-chan any, unhealthy chan<- *Device) error {
-	return r.checkHealth(stop, r.devices, unhealthy)
+func (r *nvmlResourceManager) CheckHealth(stop <-chan any, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
+	for {
+		// first check if disableNVML channel signal is pass close into checkHealth function
+		// if signal is pass close, return error "close signal received"
+		err := r.checkHealth(stop, r.devices, unhealthy, disableNVML)
+		if err.Error() == "close signal received" {
+			ackDisableHealthChecks <- true
+			klog.Info("Check Health has been closed")
+			// when disableNVML channel signal is pass restart, continue to restart checkHealth function
+			// when disableNVML channel signal is not pass restart, wait for restart signal
+			<-disableNVML
+			klog.Info("Restarting Check Health")
+			continue
+
+		}
+		return err
+	}
 }

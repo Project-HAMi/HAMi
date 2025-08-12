@@ -111,6 +111,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 	devs := plugin.Devices()
+	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
@@ -143,8 +144,8 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
-		if plugin.schedulerConfig.DeviceMemoryScaling != 1 {
-			registeredmem = int32(float64(registeredmem) * plugin.schedulerConfig.DeviceMemoryScaling)
+		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+			registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
 		}
 		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
@@ -167,9 +168,9 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		res = append(res, &util.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
-			Count:   int32(plugin.schedulerConfig.DeviceSplitCount),
+			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
-			Devcore: int32(plugin.schedulerConfig.DeviceCoreScaling * 100),
+			Devcore: int32(*plugin.schedulerConfig.DeviceCoreScaling * 100),
 			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
@@ -218,11 +219,32 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	return err
 }
 
-func (plugin *NvidiaDevicePlugin) WatchAndRegister() {
+func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
 	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
 	successSleepInterval := time.Second * 30
+	var disableWatchAndRegister bool
 	for {
+		select {
+		case disable := <-disableNVML:
+			if disable {
+				// when received disableNVML signal, stop the watch and register all the time
+				klog.Info("Received disableNVML signal, stopping WatchAndRegister")
+				disableWatchAndRegister = true
+			} else {
+				// when received enableNVML signal, start the watch and register again
+				klog.Info("Received enableNVML signal, resuming WatchAndRegister")
+				disableWatchAndRegister = false
+			}
+
+		default:
+		}
+		if disableWatchAndRegister {
+			klog.Info("WatchAndRegister is disabled by disableWatchAndRegister signal, sleep a success interval")
+			ackDisableWatchAndRegister <- true
+			time.Sleep(successSleepInterval)
+			continue
+		}
 		err := plugin.RegistrInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)

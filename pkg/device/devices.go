@@ -25,10 +25,12 @@ import (
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -48,15 +50,13 @@ type Devices interface {
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
 	GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error)
-	CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool)
-	CheckUUID(annos map[string]string, d util.DeviceUsage) bool
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
-	PatchAnnotations(annoinput *map[string]string, pd util.PodDevices) map[string]string
-	CustomFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllicate util.ContainerDevices, device *util.DeviceUsage) bool
-	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, policy string) float32
-	AddResourceUsage(n *util.DeviceUsage, ctr *util.ContainerDevice) error
+	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string
+	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32
+	AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error
+	Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string)
 	// This should not be associated with a specific device object
 	//ParseConfig(fs *flag.FlagSet)
 }
@@ -69,6 +69,8 @@ type Config struct {
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
 	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
+	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
+	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -174,6 +176,20 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return metax.InitMetaxSDevice(metaxConfig), nil
 		}, config.MetaxConfig},
+		{kunlun.KunlunGPUDevice, kunlun.KunlunGPUCommonWord, func(cfg any) (Devices, error) {
+			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", kunlun.KunlunGPUCommonWord)
+			}
+			return kunlun.InitKunlunDevice(kunlunConfig), nil
+		}, config.KunlunConfig},
+		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (Devices, error) {
+			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", awsneuron.AWSNeuronCommonWord)
+			}
+			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
+		}, config.AWSNeuronConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -244,6 +260,11 @@ iluvatar:
   resourceCountName: "iluvatar.ai/vgpu"
   resourceMemoryName: "iluvatar.ai/vcuda-memory"
   resourceCoreName: "iluvatar.ai/vcuda-core"
+kunlun:
+  resourceCountName: "kunlunxin.com/xpu"
+awsneuron:
+  resourceCountName: "aws.amazon.com/neuron"
+  resourceCoreName: "aws.amazon.com/neuroncore"
 vnpus:
   - chipName: "910B"
     commonWord: "Ascend910A"
@@ -403,6 +424,7 @@ func GlobalFlagSet() *flag.FlagSet {
 	mthreads.ParseConfig(fs)
 	enflame.ParseConfig(fs)
 	metax.ParseConfig(fs)
+	kunlun.ParseConfig(fs)
 	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
 	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")
 	klog.InitFlags(fs)
@@ -434,6 +456,8 @@ func validateConfig(config *Config) error {
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.IluvatarConfig, iluvatar.IluvatarConfig{})
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{})
 	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{})
+	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{})
+	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{})
 	hasAnyConfig = hasAnyConfig || len(config.VNPUs) > 0
 
 	if !hasAnyConfig {

@@ -37,15 +37,15 @@ spec:
       {{- if .Values.devicePlugin.runtimeClassName }}
       runtimeClassName: {{ .Values.devicePlugin.runtimeClassName }}
       {{- end }}
-      {{- include "hami-vgpu.imagePullSecrets" . | nindent 6}}
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: true
       hostNetwork: true
+      {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       containers:
         - name: device-plugin
-          image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
-          imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          image: {{ include "hami.devicePlugin.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
           lifecycle:
             postStart:
               exec:
@@ -71,6 +71,10 @@ spec:
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
+            {{- if eq (.Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy | default "spread")  "topology-aware" }}
+            - name: ENABLE_TOPOLOGY_SCORE
+              value: "true"
+            {{- end }}
           securityContext:
             privileged: true
             allowPrivilegeEscalation: true
@@ -94,8 +98,8 @@ spec:
               mountPath: /device-config.yaml
               subPath: device-config.yaml
         - name: vgpu-monitor
-          image: {{ .Values.devicePlugin.image }}:{{ .Values.version }}
-          imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          image: {{ include "hami.devicePlugin.monitor.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
           command:
             - "vGPUmonitor"
             {{- range .Values.devicePlugin.extraArgs }}
@@ -121,7 +125,7 @@ spec:
           {{- toYaml .Values.devicePlugin.vgpuMonitor.resources | nindent 12 }}
           volumeMounts:
             - name: ctrs
-              mountPath: {{ .Values.devicePlugin.monitorctrPath }}
+              mountPath: {{ .Values.devicePlugin.monitor.ctrPath }}
             - name: dockers
               mountPath: /run/docker
             - name: containerds
@@ -135,7 +139,7 @@ spec:
       volumes:
         - name: ctrs
           hostPath:
-            path: {{ .Values.devicePlugin.monitorctrPath }}
+            path: {{ .Values.devicePlugin.monitor.ctrPath }}
         - name: hosttmp
           hostPath:
             path: /tmp

@@ -18,14 +18,15 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
 	"sync"
 	"syscall"
-	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
@@ -33,7 +34,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
 )
@@ -70,6 +70,18 @@ func start() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
+	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
+	err = plugin.CreateMigApplyLockDir()
+	if err != nil {
+		return fmt.Errorf("failed to create MIG apply lock directory: %v", err)
+	}
+
+	lockChannel, err := plugin.WatchLockFile()
+	if err != nil {
+		return fmt.Errorf("failed to watch lock file: %v", err)
+	}
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
@@ -86,8 +98,19 @@ func start() error {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		if err := watchAndFeedback(ctx, containerLister); err != nil {
-			errCh <- err
+		for {
+			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+				// if err is temporary closed, wait for lock file to be removed
+				if errors.Is(err, errTemporaryClosed) {
+					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
+					<-lockChannel
+					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
+					continue
+				}
+				errCh <- err
+				return
+			}
+			return
 		}
 	}()
 
@@ -144,28 +167,6 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	}
 
 	return nil
-}
-
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister) error {
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
-
-	for {
-		select {
-		case <-ctx.Done():
-			klog.Info("Shutting down watchAndFeedback")
-			return nil
-		case <-time.After(time.Second * 5):
-			if err := lister.Update(); err != nil {
-				klog.Errorf("Failed to update container list: %v", err)
-				continue
-			}
-			//klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
-			Observe(lister)
-		}
-	}
 }
 
 func main() {

@@ -38,8 +38,10 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
+
+	safecast "github.com/ccoveille/go-safecast"
 )
 
 const (
@@ -55,7 +57,8 @@ const (
 )
 
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
-func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhealthy chan<- *Device) error {
+func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhealthy chan<- *Device, disableNVML <-chan bool) error {
+	klog.V(4).Info("Check Health start Running")
 	disableHealthChecks := strings.ToLower(os.Getenv(envDisableHealthChecks))
 	if disableHealthChecks == "all" {
 		disableHealthChecks = allHealthChecks
@@ -148,6 +151,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhe
 		select {
 		case <-stop:
 			return nil
+		case signal := <-disableNVML:
+			if signal {
+				klog.Info("Check Health has been  received close signal")
+				return fmt.Errorf("close signal received")
+			}
 		default:
 		}
 
@@ -193,7 +201,12 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhe
 		if d.IsMigDevice() && e.GpuInstanceId != 0xFFFFFFFF && e.ComputeInstanceId != 0xFFFFFFFF {
 			gi := deviceIDToGiMap[d.ID]
 			ci := deviceIDToCiMap[d.ID]
-			if !(uint32(gi) == e.GpuInstanceId && uint32(ci) == e.ComputeInstanceId) {
+			giu32, err := safecast.ToUint32(gi)
+			if err != nil || giu32 != e.GpuInstanceId {
+				continue
+			}
+			ciu32, err := safecast.ToUint32(ci)
+			if err != nil || ciu32 != e.ComputeInstanceId {
 				continue
 			}
 			klog.Infof("Event for mig device %v (gi=%v, ci=%v)", d.ID, gi, ci)
@@ -213,7 +226,7 @@ func getAdditionalXids(input string) []uint64 {
 	}
 
 	var additionalXids []uint64
-	for _, additionalXid := range strings.Split(input, ",") {
+	for additionalXid := range strings.SplitSeq(input, ",") {
 		trimmed := strings.TrimSpace(additionalXid)
 		if trimmed == "" {
 			continue

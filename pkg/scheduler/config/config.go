@@ -16,7 +16,11 @@ limitations under the License.
 
 package config
 
-import "github.com/Project-HAMi/HAMi/pkg/util"
+import (
+	"time"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
+)
 
 var (
 	QPS                float32
@@ -37,4 +41,10 @@ var (
 
 	// NodeLabelSelector is scheduler filter node by node label.
 	NodeLabelSelector map[string]string
+
+	// NodeLockTimeout is the timeout for node locks.
+	NodeLockTimeout time.Duration
+
+	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
+	ForceOverwriteDefaultScheduler bool
 )

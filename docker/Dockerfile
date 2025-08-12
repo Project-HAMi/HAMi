@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.22.5-bullseye
+ARG GOLANG_IMAGE=golang:1.24.4-bullseye
 ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
 
 FROM $GOLANG_IMAGE AS build
@@ -19,6 +19,7 @@ RUN apt-get -y update; apt-get -y install cmake
 RUN bash ./build.sh
 
 FROM nvidia/cuda:12.6.3-base-ubi8
+RUN dnf update -y -x cuda-toolkit-config-common -x cuda-toolkit-12-config-common
 RUN rm -rf /usr/local/cuda-12.6/compat/libcuda.so*
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all

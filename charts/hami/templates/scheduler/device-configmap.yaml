@@ -97,6 +97,7 @@ data:
       resourceVCountName: {{ .Values.metaxResourceName }}
       resourceVMemoryName: {{ .Values.metaxResourceMem }}
       resourceVCoreName: {{ .Values.metaxResourceCore }}
+      sgpuTopologyAware: {{ .Values.metaxsGPUTopologyAware }}
     enflame:
       resourceCountName: "enflame.com/vgcu"
       resourcePercentageName: "enflame.com/vgcu-percentage"
@@ -108,6 +109,11 @@ data:
       resourceCountName: {{ .Values.iluvatarResourceName }}
       resourceMemoryName: {{ .Values.iluvatarResourceMem }}
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
+    kunlun:
+      resourceCountName: {{ .Values.kunlunResourceName }}
+    awsneuron:
+      resourceCountName: "aws.amazon.com/neuron"
+      resourceCoreName: "aws.amazon.com/neuroncore"
     vnpus:
     - chipName: 910B
       commonWord: Ascend910A

@@ -29,7 +29,7 @@ jobs:
       - name: Get branch name
         uses: nelonoel/branch-name@v1.0.1
       - name: Docker Login
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@v3.5.0
         with:
           username: ${{ secrets.DOCKERHUB_TOKEN }}
           password: ${{ secrets.DOCKERHUB_PASSWD }}
@@ -50,7 +50,7 @@ jobs:
         # Prevent running from the forked repository that doesn't need to upload coverage.
         # In addition, running on the forked repository would fail as missing the necessary secret.
         if: ${{ github.repository == 'Project-HAMi/HAMi' }}
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
           format: "table"
@@ -59,7 +59,7 @@ jobs:
           vuln-type: "os,library"
           trivyignores: .trivyignore
       - name: Run Trivy vulnerability scanner (SARIF)
-        uses: aquasecurity/trivy-action@0.30.0
+        uses: aquasecurity/trivy-action@0.32.0
         with:
           image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
           format: "sarif"

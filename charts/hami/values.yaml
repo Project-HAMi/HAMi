@@ -1,10 +1,25 @@
-# Default values for hami-vgpu.
+## @section Global configuration
+## @param global.imageRegistry Global Docker image registry
+## @param global.imagePullSecrets Global Docker image pull secrets
+global:
+  ## @param global.imageRegistry Global Docker image registry
+  imageRegistry: ""
+  ## E.g.
+  ## imagePullSecrets:
+  ##   - myRegistryKeySecretName
+  ## @param global.imagePullSecrets Global Docker image pull secrets
+  imagePullSecrets: []
+  imageTag: "v2.6.0"
+  gpuHookPath: /usr/local
+  labels: {}
+  annotations: {}
+  managedNodeSelectorEnable: false
+  managedNodeSelector:
+    usage: "gpu"
 
 nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
-imagePullSecrets: [ ]
-version: "v2.6.1"
 
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
@@ -28,24 +43,19 @@ iluvatarResourceName: "iluvatar.ai/vgpu"
 iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
 iluvatarResourceCore: "iluvatar.ai/vcuda-core"
 
-#Metax SGPU Parameters
+#Metax sGPU Parameters
 metaxResourceName: "metax-tech.com/sgpu"
 metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
+metaxsGPUTopologyAware: "false"
+
+#Kunlun XPU Parameters
+kunlunResourceName: "kunlunxin.com/xpu"
 
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
   enabled: false
-
-global:
-  gpuHookPath: /usr/local
-  labels: {}
-  annotations: {}
-  managedNodeSelectorEnable: false
-  managedNodeSelector:
-    usage: "gpu"
-
 
 scheduler:
   # @param nodeName defines the node name and the nvidia-vgpu-scheduler-scheduler will schedule to the node.
@@ -59,6 +69,8 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
+  forceOverwriteDefaultScheduler: true
   livenessProbe: false
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
@@ -66,9 +78,27 @@ scheduler:
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
-    image: registry.cn-hangzhou.aliyuncs.com/google_containers/kube-scheduler
-    imageTag: ""
-    imagePullPolicy: IfNotPresent
+    ## @param image.registry kube scheduler image registry
+    ## @param image.repository kube scheduler image repository
+    ## @param image.tag kube scheduler image tag (immutable tags are recommended)
+    ## @param image.pullPolicy kube scheduler image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
+    image:
+      registry: "registry.cn-hangzhou.aliyuncs.com"
+      repository: "google_containers/kube-scheduler"
+      tag: ""
+      ## Specify a imagePullPolicy
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+      ##
+      pullPolicy: IfNotPresent
+      ## Optionally specify an array of imagePullSecrets.
+      ## Secrets must be manually created in the namespace.
+      ## Example:
+      ## pullSecrets:
+      ##   - myRegistryKeySecretName
+      ##
+      pullSecrets: []
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -85,8 +115,27 @@ scheduler:
       - --policy-config-file=/config/config.json
       - -v=4
   extender:
-    image: "projecthami/hami"
-    imagePullPolicy: IfNotPresent
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
+    image:
+      registry: "docker.io"
+      repository: "projecthami/hami"
+      tag: ""
+      ## Specify a imagePullPolicy
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+      ##
+      pullPolicy: IfNotPresent
+      ## Optionally specify an array of imagePullSecrets.
+      ## Secrets must be manually created in the namespace.
+      ## Example:
+      ## pullSecrets:
+      ##   - myRegistryKeySecretName
+      ##
+      pullSecrets: []
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary,
       # and remove the curly braces after 'resources:'.
@@ -99,10 +148,14 @@ scheduler:
     extraArgs:
       - --debug
       - -v=4
+  nodeLockExpire: "5m"
   podAnnotations: {}
   tolerations: []
   #serviceAccountName: "hami-vgpu-scheduler-sa"
   admissionWebhook:
+    # If set to false, the admission webhook is not installed and any pods that should use HAMi must be
+    # configured to use the right 'schedulerName' and other device-specific configurations.
+    enabled: true
     customURL:
       enabled: false
       # must be an endpoint using https.
@@ -125,9 +178,48 @@ scheduler:
   ## If true and certManager.enabled is false, Helm will automatically create a self-signed cert and secret for you.
   patch:
     enabled: true
-    image: docker.io/jettech/kube-webhook-certgen:v1.5.2
-    imageNew: liangjw/kube-webhook-certgen:v1.1.1
-    imagePullPolicy: IfNotPresent
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
+    image:
+      registry: "docker.io"
+      repository: "jettech/kube-webhook-certgen"
+      tag: "v1.5.2"
+      ## Specify a imagePullPolicy
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+      ##
+      pullPolicy: IfNotPresent
+      ## Optionally specify an array of imagePullSecrets.
+      ## Secrets must be manually created in the namespace.
+      ## Example:
+      ## pullSecrets:
+      ##   - myRegistryKeySecretName
+      ##
+      pullSecrets: []
+    ## @param image.registry scheduler extender image registry
+    ## @param image.repository scheduler extender image repository
+    ## @param image.tag scheduler extender image tag (immutable tags are recommended)
+    ## @param image.pullPolicy scheduler extender image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
+    imageNew: 
+      registry: "docker.io"
+      repository: "liangjw/kube-webhook-certgen"
+      tag: "v1.1.1"
+      ## Specify a imagePullPolicy
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+      ##
+      pullPolicy: IfNotPresent
+      ## Optionally specify an array of imagePullSecrets.
+      ## Secrets must be manually created in the namespace.
+      ## Example:
+      ## pullSecrets:
+      ##   - myRegistryKeySecretName
+      ##
+      pullSecrets: []
     priorityClassName: ""
     podAnnotations: {}
     nodeSelector: {}
@@ -143,10 +235,50 @@ scheduler:
     annotations: {}
 
 devicePlugin:
-  image: "projecthami/hami"
-  monitorimage: "projecthami/hami"
-  monitorctrPath: /usr/local/vgpu/containers
-  imagePullPolicy: IfNotPresent
+  ## @param image.registry devicePlugin image registry
+  ## @param image.repository devicePlugin image repository
+  ## @param image.tag devicePlugin image tag (immutable tags are recommended)
+  ## @param image.pullPolicy devicePlugin image pull policy
+  ## @param image.pullSecrets Specify docker-registry secret names as an array
+  image:
+    registry: "docker.io"
+    repository: "projecthami/hami"
+    tag: ""
+    ## Specify a imagePullPolicy
+    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+    ##
+    pullPolicy: IfNotPresent
+    ## Optionally specify an array of imagePullSecrets.
+    ## Secrets must be manually created in the namespace.
+    ## Example:
+    ## pullSecrets:
+    ##   - myRegistryKeySecretName
+    ##
+    pullSecrets: []
+  monitor:
+    ## @param image.registry monitor image registry
+    ## @param image.repository monitor image repository
+    ## @param image.tag monitor image tag (immutable tags are recommended)
+    ## @param image.pullPolicy monitor image pull policy
+    ## @param image.pullSecrets Specify docker-registry secret names as an array
+    image:
+      registry: "docker.io"
+      repository: "projecthami/hami"
+      tag: ""
+      ## Specify a imagePullPolicy
+      ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+      ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+      ##
+      pullPolicy: IfNotPresent
+      ## Optionally specify an array of imagePullSecrets.
+      ## Secrets must be manually created in the namespace.
+      ## Example:
+      ## pullSecrets:
+      ##   - myRegistryKeySecretName
+      ##
+      pullSecrets: []
+    ctrPath: /usr/local/vgpu/containers
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
@@ -159,13 +291,13 @@ devicePlugin:
   passDeviceSpecsEnabled: false
   extraArgs:
     - -v=4
-  
+
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
     labels: {}
     annotations: {}
-    
+
   pluginPath: /var/lib/kubelet/device-plugins
   libPath: /usr/local/vgpu
 
@@ -204,13 +336,21 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  awsneuron:
+    customresources:
+      - aws.amazon.com/neuron
+      - aws.amazon.com/neuroncore
+  kunlun:
+    enabled: true
+    customresources:
+      - kunlunxin.com/xpu
   enflame:
-    enabled: false
+    enabled: true
     customresources:
       - enflame.com/vgcu
       - enflame.com/vgcu-percentage
   mthreads:
-    enabled: false
+    enabled: true
     customresources:
       - mthreads.com/vgpu
   nvidia:
@@ -235,3 +375,4 @@ devices:
       - huawei.com/Ascend910B4-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+

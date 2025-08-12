@@ -143,7 +143,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
 					},
 				},
 			},
@@ -153,10 +153,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
 					},
 				},
 			},
@@ -166,8 +166,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
 					},
 				},
 			},
@@ -664,6 +664,12 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeNodeDevices(t *testing.T) {
+	pairScore := "[{\"uuid\":\"GPU-0\",\"score\":{\"GPU-1\":50,\"GPU-2\":20,\"GPU-3\":20}}]"
+	_, err := DecodePairScores(pairScore)
+	assert.NilError(t, err)
 }
 
 func TestPlatternMIG(t *testing.T) {
