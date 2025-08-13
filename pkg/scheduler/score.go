@@ -130,7 +130,8 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 	}
 
 	wg := sync.WaitGroup{}
-	mutex := sync.Mutex{}
+	fitNodesMutex := sync.Mutex{}
+	failedNodesMutex := sync.Mutex{}
 	errCh := make(chan error, len(*nodes))
 	for nodeID, node := range *nodes {
 		wg.Add(1)
@@ -174,15 +175,17 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 				ctrfit = fit
 				if !fit {
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					failedNodesMutex.Lock()
 					failedNodes[nodeID] = nodeUnfitPod
+					failedNodesMutex.Unlock()
 					break
 				}
 			}
 
 			if ctrfit {
-				mutex.Lock()
+				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, &score)
-				mutex.Unlock()
+				fitNodesMutex.Unlock()
 				score.OverrideScore(snapshot, userNodePolicy)
 				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
