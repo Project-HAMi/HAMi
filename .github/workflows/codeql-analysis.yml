@@ -39,7 +39,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
