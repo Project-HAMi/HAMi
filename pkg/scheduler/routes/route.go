@@ -145,3 +145,30 @@ func HealthzRoute() httprouter.Handle {
 		w.WriteHeader(http.StatusOK)
 	}
 }
+
+func SchedulerLogRoute(s *scheduler.Scheduler) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, params httprouter.Params) {
+		name := params.ByName("name")
+		namespace := params.ByName("namespace")
+		if name == "" || namespace == "" {
+			w.WriteHeader(http.StatusBadRequest)
+			w.Write([]byte("pod name or namespace is empty"))
+			return
+		}
+		log, ok := s.GetPodSchedulerLog(namespace, name)
+		if !ok {
+			w.WriteHeader(http.StatusNotFound)
+			w.Write([]byte("Scheduler log not found for pod " + namespace + "/" + name))
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(log); err != nil {
+			klog.ErrorS(err, "Failed to marshal scheduler log response", "pod", name, "namespace", namespace)
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"error": "Internal Server Error"}`))
+			return
+		}
+	}
+}
