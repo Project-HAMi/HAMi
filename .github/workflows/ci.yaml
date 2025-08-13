@@ -26,7 +26,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: install Go
         uses: actions/setup-go@v5
         with:
@@ -50,7 +50,7 @@ jobs:
       e2e_run: ${{ steps.parse_code.outputs.e2e_run }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 3
 
@@ -90,7 +90,7 @@ jobs:
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
@@ -135,7 +135,7 @@ jobs:
           df -h
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -200,7 +200,7 @@ jobs:
       HELM_VERSION: v3.8.1
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           fetch-depth: 0
           ref: ${{ needs.get_ref.outputs.ref }}

@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
         run: |
@@ -29,7 +29,7 @@ jobs:
       - name: Get branch name
         uses: nelonoel/branch-name@v1.0.1
       - name: Docker Login
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@v3.5.0
         with:
           username: ${{ secrets.DOCKERHUB_TOKEN }}
           password: ${{ secrets.DOCKERHUB_PASSWD }}

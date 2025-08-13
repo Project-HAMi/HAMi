@@ -64,7 +64,7 @@ jobs:
   
 
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           persist-credentials: false
           ref: ${{ steps.ref.outputs.ref }}
@@ -80,7 +80,7 @@ jobs:
           make lint_dockerfile
 
       - name: Docker Login
-        uses: docker/login-action@v3.4.0
+        uses: docker/login-action@v3.5.0
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
