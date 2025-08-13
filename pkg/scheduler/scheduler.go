@@ -59,14 +59,18 @@ type Scheduler struct {
 	overviewstatus map[string]*NodeUsage
 
 	eventRecorder record.EventRecorder
+
+	// Scheduler log cache
+	schedulerLogCache *SchedulerLogCache
 }
 
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:       make(chan struct{}),
-		cachedstatus: make(map[string]*NodeUsage),
-		nodeNotify:   make(chan struct{}, 1),
+		stopCh:            make(chan struct{}),
+		cachedstatus:      make(map[string]*NodeUsage),
+		nodeNotify:        make(chan struct{}, 1),
+		schedulerLogCache: NewSchedulerLogCache(config.MaxCachedPods),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = newPodManager()
@@ -389,14 +393,17 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
 	if err != nil {
-		klog.ErrorS(err, "Failed to get pod", "pod", args.PodName, "namespace", args.PodNamespace)
+		msg := fmt.Sprintf("Failed to get pod %s in namespace %s", args.PodName, args.PodNamespace)
+		klog.ErrorS(err, msg)
+		s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Failed, msg)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node", "node", args.Node)
-		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
+		msg := fmt.Sprintf("Failed to get node %s", args.Node)
+		klog.ErrorS(err, msg)
+		s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Failed, msg)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
@@ -409,25 +416,32 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	for _, val := range device.GetDevices() {
 		err = val.LockNode(node, current)
 		if err != nil {
-			klog.ErrorS(err, "Failed to lock node", "node", args.Node, "device", val)
+			msg := fmt.Sprintf("Failed to lock node %s for device %s", args.Node, val)
+			klog.ErrorS(err, msg)
+			s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Failed, msg)
 			goto ReleaseNodeLocks
 		}
 	}
 
 	err = util.PatchPodAnnotations(current, tmppatch)
 	if err != nil {
-		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
+		msg := fmt.Sprintf("Failed to patch pod annotations %s", klog.KObj(current))
+		klog.ErrorS(err, msg)
+		s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Failed, msg)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 
 	err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{})
 	if err != nil {
-		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+		msg := fmt.Sprintf("Failed to bind pod %s in namespace %s to node %s", args.PodName, args.PodNamespace, args.Node)
+		klog.ErrorS(err, msg)
+		s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Failed, msg)
 		goto ReleaseNodeLocks
 	}
 
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+	s.schedulerLogCache.SetBindStatusAndSummary(args.PodNamespace, args.PodName, Passed, "bind success")
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
 
 ReleaseNodeLocks:
@@ -458,6 +472,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
+	// Remove old pod from scheduler log cache
+	s.schedulerLogCache.Remove(args.Pod.Namespace, args.Pod.Name)
 	annos := args.Pod.Annotations
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
@@ -471,13 +487,16 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, annos, args.Pod, failedNodes)
 	if err != nil {
-		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
+		msg := fmt.Sprintf("calcScore failed %v for pod %v", err, args.Pod.Name)
+		err := fmt.Errorf("%s", msg)
+		s.schedulerLogCache.SetFilterStatusAndSummary(args.Pod.Namespace, args.Pod.Name, Failed, msg)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).InfoS("No available nodes meet the required scores",
-			"pod", args.Pod.Name)
+		msg := "No available nodes meet the required scores"
+		klog.V(4).InfoS(msg, "pod", args.Pod.Name)
+		s.schedulerLogCache.SetFilterStatusAndSummary(args.Pod.Namespace, args.Pod.Name, Failed, msg)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
@@ -502,6 +521,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	s.addPod(args.Pod, m.NodeID, m.Devices)
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
+		s.schedulerLogCache.SetFilterStatusAndSummary(args.Pod.Namespace, args.Pod.Name, Failed, fmt.Sprintf("patch pod annotations failed: %v", err))
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		s.delPod(args.Pod)
 		return nil, err
@@ -509,6 +529,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
+	s.schedulerLogCache.SetFilterStatusAndSummary(args.Pod.Namespace, args.Pod.Name, Passed, successMsg)
 	return &res, nil
 }
 
@@ -520,4 +541,8 @@ func genSuccessMsg(totalNodes int, target string, nodes []*policy.NodeScore) str
 	}
 	score := strings.Join(scores, ",")
 	return fmt.Sprintf(successMsg, target, totalNodes-len(nodes), len(nodes), score)
+}
+
+func (s *Scheduler) GetPodSchedulerLog(namespace, podName string) (PodSchedulerLogResponse, bool) {
+	return s.schedulerLogCache.Get(namespace, podName)
 }

@@ -47,4 +47,9 @@ var (
 
 	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
 	ForceOverwriteDefaultScheduler bool
+
+	// SchedulerLogHTTPBind is the bind address for scheduler log http server.
+	SchedulerLogHTTPBind string
+	// MaxCachedPods is the max size of cached pods.
+	MaxCachedPods int
 )

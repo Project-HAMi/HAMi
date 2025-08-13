@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -85,8 +86,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 		if !ok {
 			return false, "Device type not found"
 		}
-		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, nodeInfo, devinput)
-		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
+		fit, tmpDevs, reason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, nodeInfo, devinput)
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
@@ -152,6 +152,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 
 			//This loop is for different container request
 			ctrfit := false
+			var containerResult []ContainerResult
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
@@ -178,8 +179,20 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 					failedNodesMutex.Lock()
 					failedNodes[nodeID] = nodeUnfitPod
 					failedNodesMutex.Unlock()
+					if len(reason) == 0 {
+						reason = fmt.Sprintf("not found any devices on node %s", nodeID)
+					}
+					containerResult = append(containerResult, ContainerResult{
+						Name:   task.Spec.Containers[ctrid].Name,
+						Status: Failed,
+						Reason: reason,
+					})
 					break
 				}
+				containerResult = append(containerResult, ContainerResult{
+					Name:   task.Spec.Containers[ctrid].Name,
+					Status: Passed,
+				})
 			}
 
 			if ctrfit {
@@ -188,6 +201,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 				fitNodesMutex.Unlock()
 				score.OverrideScore(snapshot, userNodePolicy)
 				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
+				s.schedulerLogCache.AddNodeResult(task.Namespace, task.Name, nodeID, Passed, score.Score, containerResult)
+			} else {
+				s.schedulerLogCache.AddNodeResult(task.Namespace, task.Name, nodeID, Failed, 0, containerResult)
 			}
 		}(nodeID, node)
 	}

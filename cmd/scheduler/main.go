@@ -59,6 +59,8 @@ func init() {
 	rootCmd.PersistentFlags().SortFlags = false
 
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
+	rootCmd.Flags().StringVar(&config.SchedulerLogHTTPBind, "scheduler-log-http_bind", "127.0.0.1:9090", "http server bind address for scheduler log")
+	rootCmd.Flags().IntVar(&config.MaxCachedPods, "max-cached-pods", 1000, "max size of cached pods for scheduler log")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
@@ -134,6 +136,13 @@ func start() error {
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
 	}
 
+	go func() {
+		err := runSchedulerLogServer(sher)
+		if err != nil {
+			klog.ErrorS(err, "Failed to start scheduler log server")
+		}
+	}()
+
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
 			return fmt.Errorf("listen and Serve error, %v", err)
@@ -150,4 +159,20 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		klog.Fatal(err)
 	}
+}
+
+func runSchedulerLogServer(sher *scheduler.Scheduler) error {
+	router := httprouter.New()
+	router.GET("/api/v1/namespaces/:namespace/pods/:name/schedulerlog", routes.SchedulerLogRoute(sher))
+	klog.Info("scheduler log server listen on ", config.SchedulerLogHTTPBind)
+	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
+		if err := http.ListenAndServe(config.SchedulerLogHTTPBind, router); err != nil {
+			return fmt.Errorf("scheduler log server listen and Serve error, %v", err)
+		}
+	} else {
+		if err := http.ListenAndServeTLS(config.SchedulerLogHTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
+			return fmt.Errorf("scheduler log server listen and Serve error, %v", err)
+		}
+	}
+	return nil
 }

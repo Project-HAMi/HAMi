@@ -29,6 +29,13 @@ spec:
       nodePort: {{ .Values.scheduler.service.monitorPort | default 31993 }}
       {{- end }}
       protocol: TCP
+    - name: scheduler-log
+      port: {{ .Values.scheduler.service.schedulerLogPort | default 31994 }}  # Default scheduler log port is 31993
+      targetPort: {{ .Values.scheduler.service.schedulerLogTargetPort | default 9396 }}
+      {{- if eq (.Values.scheduler.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
+      nodePort: {{ .Values.scheduler.service.schedulerLogPort | default 31994 }}
+      {{- end }}
+      protocol: TCP
   selector:
     app.kubernetes.io/component: hami-scheduler
     {{- include "hami-vgpu.selectorLabels" . | nindent 4 }}

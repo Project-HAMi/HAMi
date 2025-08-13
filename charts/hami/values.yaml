@@ -69,6 +69,17 @@ scheduler:
     nodeSchedulerPolicy: binpack
     gpuSchedulerPolicy: spread
   metricsBindAddress: ":9395"
+  # @param schedulerLogServerBindAddress defines the network address and port for the scheduler log API server to bind to.
+  # Format: ":<port>" or "host:<port>". Use ":<port>" (e.g., ":9396") to bind to all network interfaces on the specified port.
+  # Default: ":9396"
+  schedulerLogServerBindAddress: ":9396"
+  # @param maxCachePod defines the maximum number of Pod scheduling logs to cache.
+  # The scheduler stores logs for recently scheduled Pods in memory to serve the
+  # /api/v1/pod/{namespace}/{name}/schedulerlog API. This parameter controls the
+  # upper limit of this in-memory cache. When the number of cached Pods exceeds
+  # this value, the oldest entries are automatically evicted (LRU policy).
+  # Default: 1000
+  maxCachePod: 1000
   # If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it
   forceOverwriteDefaultScheduler: true
   livenessProbe: false
@@ -231,6 +242,8 @@ scheduler:
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: 9395
+    schedulerLogPort: 31994
+    schedulerLogTargetPort: 9396
     labels: {}
     annotations: {}
 
