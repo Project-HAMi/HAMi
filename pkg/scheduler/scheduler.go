@@ -417,7 +417,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	err = util.PatchPodAnnotations(current, tmppatch)
 	if err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
+		goto ReleaseNodeLocks
 	}
 
 	err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{})
