@@ -187,7 +187,11 @@ func (c *SchedulerLogCache) Get(namespace, podName string) (PodSchedulerLogRespo
 	key := getKey(namespace, podName)
 	if elem, ok := c.items[key]; ok {
 		c.oldest.MoveToFront(elem)
-		return elem.Value.(schedulerLogEntry).value, true
+		entry, ok := elem.Value.(schedulerLogEntry)
+		if !ok {
+			return PodSchedulerLogResponse{}, false
+		}
+		return entry.value, true
 	}
 	return PodSchedulerLogResponse{}, false
 }
@@ -216,7 +220,10 @@ func (c *SchedulerLogCache) SetStatus(namespace, podName string, status Status) 
 	}
 
 	// Update the existing entry
-	entry := c.items[key].Value.(schedulerLogEntry)
+	entry, ok := c.items[key].Value.(schedulerLogEntry)
+	if !ok {
+		return
+	}
 	entry.value.Status = status
 	c.items[key].Value = entry
 }
@@ -246,7 +253,10 @@ func (c *SchedulerLogCache) SetFilterStatusAndSummary(namespace, podName string,
 	}
 
 	// Update the existing entry
-	entry := c.items[key].Value.(schedulerLogEntry)
+	entry, ok := c.items[key].Value.(schedulerLogEntry)
+	if !ok {
+		return
+	}
 	entry.value.Filter.Status = status
 	entry.value.Status = status // same as Filter.Status
 	entry.value.Filter.Summary = summary
@@ -279,7 +289,10 @@ func (c *SchedulerLogCache) SetBindStatusAndSummary(namespace, podName string, s
 	}
 
 	// Update the existing entry
-	entry := c.items[key].Value.(schedulerLogEntry)
+	entry, ok := c.items[key].Value.(schedulerLogEntry)
+	if !ok {
+		return
+	}
 	entry.value.Bind.Status = status
 	entry.value.Status = status // same as Bind.Status
 	entry.value.Bind.Summary = summary
@@ -318,7 +331,10 @@ func (c *SchedulerLogCache) AddNodeResult(namespace, podName, nodeName string, s
 	}
 
 	// Update the existing entry
-	entry := c.items[key].Value.(schedulerLogEntry)
+	entry, ok := c.items[key].Value.(schedulerLogEntry)
+	if !ok {
+		return
+	}
 	logResponse := entry.value
 
 	// Find or create the node
