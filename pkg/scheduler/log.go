@@ -151,13 +151,13 @@ type BindResult struct {
 	Summary string `json:"summary"` // Summary of the bind phase result
 }
 
-// schedulerLogEntry represents an entry in the cache
+// schedulerLogEntry represents an entry in the cache.
 type schedulerLogEntry struct {
 	key   string
 	value PodSchedulerLogResponse
 }
 
-// SchedulerLogCache is a thread-safe LRU cache for pod scheduler logs
+// SchedulerLogCache is a thread-safe LRU cache for pod scheduler logs.
 type SchedulerLogCache struct {
 	items    map[string]*list.Element // map for O(1) lookups
 	oldest   *list.List               // list to track insertion order
@@ -165,7 +165,7 @@ type SchedulerLogCache struct {
 	mu       sync.Mutex               // mutex for concurrent access
 }
 
-// NewSchedulerLogCache creates a new SchedulerLogCache with the specified capacity
+// NewSchedulerLogCache creates a new SchedulerLogCache with the specified capacity.
 func NewSchedulerLogCache(capacity int) *SchedulerLogCache {
 	return &SchedulerLogCache{
 		items:    make(map[string]*list.Element),
@@ -174,12 +174,12 @@ func NewSchedulerLogCache(capacity int) *SchedulerLogCache {
 	}
 }
 
-// getKey generates a unique key for a pod
+// getKey generates a unique key for a pod.
 func getKey(namespace, podName string) string {
 	return fmt.Sprintf("%s/%s", namespace, podName)
 }
 
-// Get retrieves the scheduler log for a pod
+// Get retrieves the scheduler log for a pod.
 func (c *SchedulerLogCache) Get(namespace, podName string) (PodSchedulerLogResponse, bool) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -196,7 +196,7 @@ func (c *SchedulerLogCache) Get(namespace, podName string) (PodSchedulerLogRespo
 	return PodSchedulerLogResponse{}, false
 }
 
-// SetStatus sets the overall status of a pod's scheduling
+// SetStatus sets the overall status of a pod's scheduling.
 func (c *SchedulerLogCache) SetStatus(namespace, podName string, status Status) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -228,7 +228,7 @@ func (c *SchedulerLogCache) SetStatus(namespace, podName string, status Status) 
 	c.items[key].Value = entry
 }
 
-// SetFilterStatusAndSummary sets the filter phase status and summary
+// SetFilterStatusAndSummary sets the filter phase status and summary.
 func (c *SchedulerLogCache) SetFilterStatusAndSummary(namespace, podName string, status Status, summary string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -263,7 +263,7 @@ func (c *SchedulerLogCache) SetFilterStatusAndSummary(namespace, podName string,
 	c.items[key].Value = entry
 }
 
-// SetBindStatusAndSummary sets the bind phase status and summary
+// SetBindStatusAndSummary sets the bind phase status and summary.
 func (c *SchedulerLogCache) SetBindStatusAndSummary(namespace, podName string, status Status, summary string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -299,7 +299,7 @@ func (c *SchedulerLogCache) SetBindStatusAndSummary(namespace, podName string, s
 	c.items[key].Value = entry
 }
 
-// AddNodeResult adds a node result for a specific container in a pod
+// AddNodeResult adds a node result for a specific container in a pod.
 func (c *SchedulerLogCache) AddNodeResult(namespace, podName, nodeName string, status Status, score float32, containers []ContainerResult) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -371,7 +371,7 @@ func (c *SchedulerLogCache) AddNodeResult(namespace, podName, nodeName string, s
 	c.items[key].Value = entry
 }
 
-// Remove deletes a pod's scheduler log from the cache
+// Remove deletes a pod's scheduler log from the cache.
 func (c *SchedulerLogCache) Remove(namespace, podName string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -383,7 +383,7 @@ func (c *SchedulerLogCache) Remove(namespace, podName string) {
 	}
 }
 
-// evictIfNecessary removes the oldest item if the cache is full
+// evictIfNecessary removes the oldest item if the cache is full.
 func (c *SchedulerLogCache) evictIfNecessary() {
 	if c.oldest.Len() > c.capacity {
 		// Remove the oldest item (from the back of the list)
