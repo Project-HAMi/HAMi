@@ -389,7 +389,10 @@ func (c *SchedulerLogCache) evictIfNecessary() {
 		// Remove the oldest item (from the back of the list)
 		elem := c.oldest.Back()
 		if elem != nil {
-			entry := elem.Value.(schedulerLogEntry)
+			entry, ok := elem.Value.(schedulerLogEntry)
+			if !ok {
+				return
+			}
 			delete(c.items, entry.key)
 			c.oldest.Remove(elem)
 		}
