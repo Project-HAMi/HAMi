@@ -121,6 +121,10 @@ spec:
               value: all
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}/vgpu
+          ports:
+            - name: http
+              containerPort: 9394
+              protocol: TCP
           resources:
           {{- toYaml .Values.devicePlugin.vgpuMonitor.resources | nindent 12 }}
           volumeMounts:
