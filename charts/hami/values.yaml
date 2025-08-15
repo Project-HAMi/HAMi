@@ -235,6 +235,7 @@ scheduler:
     annotations: {}
 
 devicePlugin:
+  enabled: true
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
