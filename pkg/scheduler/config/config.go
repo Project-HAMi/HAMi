@@ -50,6 +50,6 @@ var (
 
 	// SchedulerLogHTTPBind is the bind address for scheduler log http server.
 	SchedulerLogHTTPBind string
-	// MaxCachedPods is the max size of cached pods.
-	MaxCachedPods int
+	// SchedulerLogMaxCachePod is the max size of cached scheduler log pod.
+	SchedulerLogMaxCachePod int
 )

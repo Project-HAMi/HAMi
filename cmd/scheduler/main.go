@@ -60,7 +60,7 @@ func init() {
 
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
 	rootCmd.Flags().StringVar(&config.SchedulerLogHTTPBind, "scheduler-log-http_bind", "127.0.0.1:9090", "http server bind address for scheduler log")
-	rootCmd.Flags().IntVar(&config.MaxCachedPods, "max-cached-pods", 1000, "max size of cached pods for scheduler log")
+	rootCmd.Flags().IntVar(&config.SchedulerLogMaxCachePod, "scheduler-log-max-cached-pods", 1000, "max size of cached pods for scheduler log")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")

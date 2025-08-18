@@ -98,7 +98,7 @@ spec:
             - scheduler
             - --http_bind=0.0.0.0:443
             - --scheduler-log-http_bind={{ .Values.scheduler.schedulerLogServerBindAddress }}
-            - --max-cached-pods={{ .Values.scheduler.maxCachePod }}
+            - --scheduler-log-max-cached-pods={{ .Values.scheduler.schedulerLogMaxCachePod }}
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             - --scheduler-name={{ .Values.schedulerName }}

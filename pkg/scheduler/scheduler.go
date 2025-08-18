@@ -70,7 +70,7 @@ func NewScheduler() *Scheduler {
 		stopCh:            make(chan struct{}),
 		cachedstatus:      make(map[string]*NodeUsage),
 		nodeNotify:        make(chan struct{}, 1),
-		schedulerLogCache: NewSchedulerLogCache(config.MaxCachedPods),
+		schedulerLogCache: NewSchedulerLogCache(config.SchedulerLogMaxCachePod),
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = newPodManager()
