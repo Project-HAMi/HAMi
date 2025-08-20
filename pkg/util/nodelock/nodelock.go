@@ -27,21 +27,30 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/wait"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
 const (
-	NodeLockKey  = "hami.io/mutex.lock"
-	MaxLockRetry = 5
-	NodeLockSep  = ","
+	NodeLockKey = "hami.io/mutex.lock"
+	NodeLockSep = ","
 )
 
 var (
 	lock sync.Mutex
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
+
+	DefaultStrategy = wait.Backoff{
+		Steps:    5,
+		Duration: 100 * time.Millisecond,
+		Factor:   1.0,
+		Jitter:   0.1,
+	}
 )
 
 func init() {
@@ -73,27 +82,32 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
-	for i := 0; i < MaxLockRetry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
-		time.Sleep(100 * time.Millisecond)
+	err = retry.OnError(DefaultStrategy, func(err error) bool {
+		// Retry on any error
+		return true
+	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
-			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
-			continue
+			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
+			return err
 		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
-	}
+		if err != nil {
+			klog.ErrorS(err, "Failed to patch node when retry to patch", "node", nodeName)
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("setNodeLock exceeds retry count %d", MaxLockRetry)
+		return fmt.Errorf("failed to set node lock (node=%s, retry strategy=%+v): %w", nodeName, DefaultStrategy, err)
 	}
+
 	klog.InfoS("Node lock set", "node", nodeName, "podName", pods.Name)
 	return nil
 }
 
-func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout bool) error {
+func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
 	lock.Lock()
 	defer lock.Unlock()
 	ctx := context.Background()
@@ -101,30 +115,37 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, timeout 
 	if err != nil {
 		return err
 	}
-	if lockStr, ok := node.Annotations[NodeLockKey]; !ok {
+
+	lockStr, ok := node.Annotations[NodeLockKey]
+	if !ok {
 		return nil
-	} else {
-		if !strings.Contains(lockStr, pod.Name) && !timeout {
-			klog.InfoS("NodeLock is not set by this pod", lockStr, "pod", pod.Name)
-			return nil
-		}
 	}
-	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
-	for i := 0; i < MaxLockRetry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
-		time.Sleep(100 * time.Millisecond)
+	if !skipNodeLockOwnerCheck && !strings.Contains(lockStr, pod.Name) {
+		klog.InfoS("NodeLock is not set by this pod", lockStr, "pod", pod.Name)
+		return nil
+	}
+
+	err = retry.OnError(DefaultStrategy, func(err error) bool {
+		// Retry on any error
+		return true
+	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
-			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
-			continue
+			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
+			return err
 		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
-	}
+		if err != nil {
+			klog.ErrorS(err, "Failed to patch node when retry to patch", "node", nodeName)
+			return err
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("releaseNodeLock exceeds retry count %d", MaxLockRetry)
+		return fmt.Errorf("failed to release node lock (node=%s, retry strategy=%+v): %w", nodeName, DefaultStrategy, err)
 	}
+
 	klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
 	return nil
 }
@@ -138,12 +159,29 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if _, ok := node.Annotations[NodeLockKey]; !ok {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
-	lockTime, _, _, err := ParseNodeLock(node.Annotations[NodeLockKey])
+	lockTime, ns, previousPodName, err := ParseNodeLock(node.Annotations[NodeLockKey])
 	if err != nil {
 		return err
 	}
+
+	var skipOwnerCheck = false
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
+		skipOwnerCheck = true
+	} else
+	// Check dangling nodeLock
+	if ns != "" && previousPodName != "" && (ns != pods.Namespace || previousPodName != pods.Name) {
+		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
+			if !apierrors.IsNotFound(err) {
+				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)
+				return err
+			}
+			klog.InfoS("Previous pod of NodeLock not found, releasing lock", "podName", previousPodName, "namespace", ns, "nodeLock", node.Annotations[NodeLockKey])
+			skipOwnerCheck = true
+		}
+	}
+
+	if skipOwnerCheck {
 		err = ReleaseNodeLock(nodeName, lockname, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
@@ -151,6 +189,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		}
 		return SetNodeLock(nodeName, lockname, pods)
 	}
+
 	return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
 }
 
