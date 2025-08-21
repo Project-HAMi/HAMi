@@ -63,11 +63,3 @@ spec:
 > **NOTICE1:** *Each unit of sgpu-memory indicates 512M device memory*
 
 > **NOTICE2:** *You can find more examples in [examples/mthreads folder](../examples/mthreads/)*
-
-## Node configs: annotations
-
-* `mthreads.ai/nouse-gpuuuid`:
-  
-  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX,GPU-YYY"
-
-  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling

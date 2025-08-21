@@ -113,11 +113,3 @@ spec:
 ```
 
 > **NOTICE2:** *You can find more examples in [examples/metax folder](../examples/metax/gpu)*
-
-## Node configs: annotations
-
-* `metax-tech.com/nouse-gpuuuid`:
-  
-  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX,GPU-YYY"
-
-  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling
