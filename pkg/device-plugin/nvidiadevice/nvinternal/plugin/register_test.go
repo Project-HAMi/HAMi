@@ -75,6 +75,31 @@ GPU0	X`,
 			want:    0,
 			wantErr: false,
 		},
+		{
+			name: "multi-gpu topo with index 4",
+			idx:  4,
+			nvidiaTopoStr: `	GPU0	GPU1	GPU2	GPU3	GPU4	GPU5	GPU6	GPU7	CPU Affinity	NUMA Affinity	GPU NUMA ID
+GPU0	X	NV18	NV18	NV18	NV18	NV18	NV18	NV18	0-191	0	N/A
+GPU1	NV18	X	NV18	NV18	NV18	NV18	NV18	NV18	0-191	0	N/A
+GPU2	NV18	NV18	X	NV18	NV18	NV18	NV18	NV18	0-191	0	N/A
+GPU3	NV18	NV18	NV18	X	NV18	NV18	NV18	NV18	0-191	0	N/A
+GPU4	NV18	NV18	NV18	NV18	X	NV18	NV18	NV18	192-383	1	N/A
+GPU5	NV18	NV18	NV18	NV18	NV18	X	NV18	NV18	192-383	1	N/A
+GPU6	NV18	NV18	NV18	NV18	NV18	NV18	X	NV18	192-383	1	N/A
+GPU7	NV18	NV18	NV18	NV18	NV18	NV18	NV18	X	192-383	1	N/A
+
+Legend:
+
+  X    = Self
+  SYS  = Connection traversing PCIe as well as the SMP interconnect between NUMA nodes (e.g., QPI/UPI)
+  NODE = Connection traversing PCIe as well as the interconnect between PCIe Host Bridges within a NUMA node
+  PHB  = Connection traversing PCIe as well as a PCIe Host Bridge (typically the CPU)
+  PXB  = Connection traversing multiple PCIe bridges (without traversing the PCIe Host Bridge)
+  PIX  = Connection traversing at most a single PCIe bridge
+  NV#  = Connection traversing a bonded set of # NVLinks`,
+			want:    1,
+			wantErr: false,
+		},
 	}
 
 	for _, tt := range tests {
