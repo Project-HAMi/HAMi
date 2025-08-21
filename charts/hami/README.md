@@ -163,13 +163,13 @@ This document provides detailed descriptions of all configurable values paramete
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `devicePlugin.deviceSplitCount` | Device split count | `10` |
+| `devicePlugin.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
 | `devicePlugin.deviceMemoryScaling` | Device memory scaling ratio | `1` |
 | `devicePlugin.deviceCoreScaling` | Device core scaling ratio | `1` |
 | `devicePlugin.runtimeClassName` | Runtime class name | `""` |
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
-| `devicePlugin.migStrategy` | MIG strategy | `"none"` |
-| `devicePlugin.disablecorelimit` | Whether to disable core limit | `"false"` |
+| `devicePlugin.migStrategy` | String type, "none" means ignore MIG functionality, "mixed" means allocate MIG devices through independent resources | `"none"` |
+| `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 
