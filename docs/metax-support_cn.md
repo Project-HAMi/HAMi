@@ -112,11 +112,3 @@ spec:
 ```
 
 > **NOTICE2:** *你可以在这里找到更多样例 [examples/metax folder](../examples/metax/gpu)*
-
-## Node 配置（在注解中指定）
-
-* `metax-tech.com/nouse-gpuuuid`：
-  
-  字符串类型，支持多个设备ID，使用,分割多个设备，如："GPU-AAA,GPU-BBB"
-
-  如果设置，hami在进行调度将不会为Pod使用字符串中定义的任何设

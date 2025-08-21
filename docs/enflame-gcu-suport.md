@@ -95,14 +95,6 @@ spec:
 
 > **NOTE:** The device ID format is `{node-name}-enflame-{index}`. You can find the available device IDs in the node status.
 
-## Node configs: annotations
-
-* `enflame.com/nouse-gpuuuid`:
-  
-  String type, supports multiple device IDs. Multiple devices should be separated by comma, ie: "GPU-XXX,GPU-YYY"
-
-  If set, HAMI will not allocate any devices defined in this string to Pods during scheduling
-
 ### Finding Device UUIDs
 
 You can find the UUIDs of Enflame GCUs on a node using the following command:
