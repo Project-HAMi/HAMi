@@ -93,6 +93,7 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.certManager.enabled`：
   布尔类型，默认值为 false。如果设置为 true，cert-manager 将生成自签名证书。**注意：此选项需要先在集群中安装 cert-manager。** _更多详情请参见 [cert-manager 安装说明](https://cert-manager.io/docs/installation/kubernetes/)。_
 
+
 # Pod 配置（在注解中指定）
 
 * `nvidia.com/use-gpuuuid`：
