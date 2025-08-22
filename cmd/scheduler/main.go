@@ -129,28 +129,25 @@ func start() error {
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
-	klog.Info("listen on ", config.HTTPBind)
 
 	if enableProfiling {
 		injectProfilingRoute(router)
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
 	}
 
+	// start scheduler log http server
 	go func() {
-		err := runSchedulerLogServer(sher)
-		if err != nil {
-			klog.ErrorS(err, "Failed to start scheduler log server")
+		logRouter := httprouter.New()
+		logRouter.GET("/api/v1/namespaces/:namespace/pods/:name/schedulerlog", routes.SchedulerLogRoute(sher))
+		klog.InfoS("Starting scheduler log server", "address", config.SchedulerLogHTTPBind)
+		if err := runServer(config.SchedulerLogHTTPBind, logRouter); err != nil {
+			klog.Fatalf("Failed to start scheduler log server：%v", err)
 		}
 	}()
 
-	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
-		}
-	} else {
-		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
-		}
+	klog.InfoS("Starting main HTTP server", "address", config.HTTPBind)
+	if err := runServer(config.HTTPBind, router); err != nil {
+		return fmt.Errorf("listen and Serve error, %v", err)
 	}
 	return nil
 }
@@ -161,18 +158,12 @@ func main() {
 	}
 }
 
-func runSchedulerLogServer(sher *scheduler.Scheduler) error {
-	router := httprouter.New()
-	router.GET("/api/v1/namespaces/:namespace/pods/:name/schedulerlog", routes.SchedulerLogRoute(sher))
-	klog.Info("scheduler log server listen on ", config.SchedulerLogHTTPBind)
+// runServer is a common function to start an HTTP or HTTPS server with the given address and router.
+// It handles both TLS and non-TLS configurations.
+func runServer(address string, router *httprouter.Router) error {
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		if err := http.ListenAndServe(config.SchedulerLogHTTPBind, router); err != nil {
-			return fmt.Errorf("scheduler log server listen and Serve error, %v", err)
-		}
+		return http.ListenAndServe(address, router)
 	} else {
-		if err := http.ListenAndServeTLS(config.SchedulerLogHTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("scheduler log server listen and Serve error, %v", err)
-		}
+		return http.ListenAndServeTLS(address, tlsCertFile, tlsKeyFile, router)
 	}
-	return nil
 }

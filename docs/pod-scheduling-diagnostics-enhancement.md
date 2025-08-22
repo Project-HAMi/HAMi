@@ -98,7 +98,7 @@ The response will provide a structured view of the scheduling process, organized
                         "status": "passed"
                     },
                     {
-                        "name": "container1",
+                        "name": "container2",
                         "status": "passed"
                     }
                 ]
@@ -143,13 +143,13 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 2000 # identifies 2000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
+          nvidia.com/gpumem: 2000 # identifies 2000M GPU memory each physical GPU allocates to the pod (Optional,Integer)
           #nvidia.com/gpucores: 90 # identifies 90% GPU GPU core each physical GPU allocates to the pod
 ```
 
 
 1. create pod
-2. use `curl https://<nodeip>:31994/api/v1/namespaces/default/pods/gpu-pod-default/schedulerlog` to get pod scheduling log
+2. use `curl https://<nodeip>:31994/api/v1/namespaces/default/pods/gpu-pod/schedulerlog` to get pod scheduling log
 
 ![](./images/pod-scheduling-success-demonstration.png)
 
@@ -168,8 +168,8 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 5 # declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
-          nvidia.com/gpucores: 30 # identifies 30% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
+          nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod (Optional,Integer)
+          nvidia.com/gpucores: 30 # identifies 30% GPU GPU core each physical GPU allocates to the pod (Optional,Integer)
 ```
 
 1. create pod

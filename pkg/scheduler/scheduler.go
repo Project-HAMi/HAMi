@@ -487,8 +487,8 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, annos, args.Pod, failedNodes)
 	if err != nil {
-		msg := fmt.Sprintf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		err := fmt.Errorf("%s", msg)
+		err = fmt.Errorf("calcScore failed for pod %v: %w", args.Pod.Name, err)
+		msg := err.Error()
 		s.schedulerLogCache.SetFilterStatusAndSummary(args.Pod.Namespace, args.Pod.Name, Failed, msg)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err

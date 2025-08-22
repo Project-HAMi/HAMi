@@ -30,7 +30,7 @@ spec:
       {{- end }}
       protocol: TCP
     - name: scheduler-log
-      port: {{ .Values.scheduler.service.schedulerLogPort | default 31994 }}  # Default scheduler log port is 31993
+      port: {{ .Values.scheduler.service.schedulerLogPort | default 31994 }}  # Default scheduler log port is 31994
       targetPort: {{ .Values.scheduler.service.schedulerLogTargetPort | default 9396 }}
       {{- if eq (.Values.scheduler.service.type | default "NodePort") "NodePort" }}  # If type is NodePort, set nodePort
       nodePort: {{ .Values.scheduler.service.schedulerLogPort | default 31994 }}

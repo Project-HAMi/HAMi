@@ -75,7 +75,7 @@ pod scheduler log like this
                         "status": "passed"
                     },
                     {
-                        "name": "container1",
+                        "name": "container2",
                         "status": "passed"
                     }
                 ]
@@ -90,7 +90,7 @@ pod scheduler log like this
                         "status": "passed"
                     },
                     {
-                        "name": "container1",
+                        "name": "container2",
                         "status": "passed"
                     }
                 ]
@@ -140,7 +140,7 @@ type NodeResult struct {
 
 // ContainerResult represents the evaluation result of a single node for a container.
 type ContainerResult struct {
-	Name   string `json:"name"`             // Name of the node
+	Name   string `json:"name"`             // Name of the container
 	Status Status `json:"status"`           // Evaluation status on this node: "passed" or "failed"
 	Reason string `json:"reason,omitempty"` // Reason for failure, present only if status is "failed"
 }
@@ -154,7 +154,7 @@ type BindResult struct {
 // schedulerLogEntry represents an entry in the cache.
 type schedulerLogEntry struct {
 	key   string
-	value PodSchedulerLogResponse
+	value *PodSchedulerLogResponse
 }
 
 // SchedulerLogCache is a thread-safe LRU cache for pod scheduler logs.
@@ -179,6 +179,44 @@ func getKey(namespace, podName string) string {
 	return fmt.Sprintf("%s/%s", namespace, podName)
 }
 
+// getOrCreateEntry is a private helper method that retrieves an existing entry or creates a new one.
+// It handles the LRU mechanics (moving to front, eviction) and returns a pointer to the entry's value.
+// The caller is responsible for updating the entry's value and setting it back.
+func (c *SchedulerLogCache) getOrCreateEntry(key string) *PodSchedulerLogResponse {
+	// Check if the pod exists
+	if elem, exists := c.items[key]; exists {
+		// Move the existing entry to the front (most recently used)
+		c.oldest.MoveToFront(elem)
+		entry, ok := elem.Value.(schedulerLogEntry)
+		if !ok {
+			// This should not happen. If it does, it's a programming error.
+			panic(fmt.Sprintf("unexpected type in scheduler log cache: got %T, want schedulerLogEntry", elem.Value))
+		}
+		return entry.value
+	}
+
+	// Entry doesn't exist, create a new one
+	newEntry := schedulerLogEntry{
+		key: key,
+		value: &PodSchedulerLogResponse{
+			Filter: FilterResult{
+				Nodes: []NodeResult{},
+			},
+			Bind: BindResult{},
+		},
+	}
+	// Add the new entry to the front of the list
+	elem := c.oldest.PushFront(newEntry)
+	// Store the map reference
+	c.items[key] = elem
+
+	// Handle eviction if necessary
+	c.evictIfNecessary()
+
+	// Return a pointer to the new entry's value
+	return newEntry.value
+}
+
 // Get retrieves the scheduler log for a pod.
 func (c *SchedulerLogCache) Get(namespace, podName string) (PodSchedulerLogResponse, bool) {
 	c.mu.Lock()
@@ -191,7 +229,7 @@ func (c *SchedulerLogCache) Get(namespace, podName string) (PodSchedulerLogRespo
 		if !ok {
 			return PodSchedulerLogResponse{}, false
 		}
-		return entry.value, true
+		return *entry.value, true
 	}
 	return PodSchedulerLogResponse{}, false
 }
@@ -202,30 +240,10 @@ func (c *SchedulerLogCache) SetStatus(namespace, podName string, status Status) 
 	defer c.mu.Unlock()
 
 	key := getKey(namespace, podName)
-
-	// If the pod doesn't exist, create a new entry
-	if _, exists := c.items[key]; !exists {
-		c.items[key] = c.oldest.PushFront(schedulerLogEntry{
-			key: key,
-			value: PodSchedulerLogResponse{
-				Status: status,
-				Filter: FilterResult{
-					Nodes: []NodeResult{},
-				},
-				Bind: BindResult{},
-			},
-		})
-		c.evictIfNecessary()
-		return
-	}
-
-	// Update the existing entry
-	entry, ok := c.items[key].Value.(schedulerLogEntry)
-	if !ok {
-		return
-	}
-	entry.value.Status = status
-	c.items[key].Value = entry
+	// Get or create the entry
+	logResponse := c.getOrCreateEntry(key)
+	// Update the field
+	logResponse.Status = status
 }
 
 // SetFilterStatusAndSummary sets the filter phase status and summary.
@@ -234,33 +252,12 @@ func (c *SchedulerLogCache) SetFilterStatusAndSummary(namespace, podName string,
 	defer c.mu.Unlock()
 
 	key := getKey(namespace, podName)
-
-	// If the pod doesn't exist, create a new entry
-	if _, exists := c.items[key]; !exists {
-		c.items[key] = c.oldest.PushFront(schedulerLogEntry{
-			key: key,
-			value: PodSchedulerLogResponse{
-				Filter: FilterResult{
-					Status:  status,
-					Summary: summary,
-					Nodes:   []NodeResult{},
-				},
-				Bind: BindResult{},
-			},
-		})
-		c.evictIfNecessary()
-		return
-	}
-
-	// Update the existing entry
-	entry, ok := c.items[key].Value.(schedulerLogEntry)
-	if !ok {
-		return
-	}
-	entry.value.Filter.Status = status
-	entry.value.Status = status // same as Filter.Status
-	entry.value.Filter.Summary = summary
-	c.items[key].Value = entry
+	// Get or create the entry
+	logResponse := c.getOrCreateEntry(key)
+	// Update the fields
+	logResponse.Filter.Status = status
+	logResponse.Status = status // same as Filter.Status
+	logResponse.Filter.Summary = summary
 }
 
 // SetBindStatusAndSummary sets the bind phase status and summary.
@@ -269,34 +266,12 @@ func (c *SchedulerLogCache) SetBindStatusAndSummary(namespace, podName string, s
 	defer c.mu.Unlock()
 
 	key := getKey(namespace, podName)
-
-	// If the pod doesn't exist, create a new entry
-	if _, exists := c.items[key]; !exists {
-		c.items[key] = c.oldest.PushFront(schedulerLogEntry{
-			key: key,
-			value: PodSchedulerLogResponse{
-				Bind: BindResult{
-					Status:  status,
-					Summary: summary,
-				},
-				Filter: FilterResult{
-					Nodes: []NodeResult{},
-				},
-			},
-		})
-		c.evictIfNecessary()
-		return
-	}
-
-	// Update the existing entry
-	entry, ok := c.items[key].Value.(schedulerLogEntry)
-	if !ok {
-		return
-	}
-	entry.value.Bind.Status = status
-	entry.value.Status = status // same as Bind.Status
-	entry.value.Bind.Summary = summary
-	c.items[key].Value = entry
+	// Get or create the entry
+	logResponse := c.getOrCreateEntry(key)
+	// Update the fields
+	logResponse.Bind.Status = status
+	logResponse.Status = status // same as Bind.Status
+	logResponse.Bind.Summary = summary
 }
 
 // AddNodeResult adds a node result for a specific container in a pod.
@@ -305,37 +280,8 @@ func (c *SchedulerLogCache) AddNodeResult(namespace, podName, nodeName string, s
 	defer c.mu.Unlock()
 
 	key := getKey(namespace, podName)
-
-	// If the pod doesn't exist, create a new entry
-	if _, exists := c.items[key]; !exists {
-		// Create a new node with the node result
-		node := NodeResult{
-			Name:       nodeName,
-			Status:     status,
-			Score:      score,
-			Containers: containers,
-		}
-
-		// Create a new pod scheduler log response
-		c.items[key] = c.oldest.PushFront(schedulerLogEntry{
-			key: key,
-			value: PodSchedulerLogResponse{
-				Filter: FilterResult{
-					Nodes: []NodeResult{node},
-				},
-				Bind: BindResult{},
-			},
-		})
-		c.evictIfNecessary()
-		return
-	}
-
-	// Update the existing entry
-	entry, ok := c.items[key].Value.(schedulerLogEntry)
-	if !ok {
-		return
-	}
-	logResponse := entry.value
+	// Get or create the entry
+	logResponse := c.getOrCreateEntry(key)
 
 	// Find or create the node
 	nodeIndex := -1
@@ -356,19 +302,18 @@ func (c *SchedulerLogCache) AddNodeResult(namespace, podName, nodeName string, s
 			Containers: containers,
 		}
 		logResponse.Filter.Nodes = append(logResponse.Filter.Nodes, node)
-		nodeIndex = len(logResponse.Filter.Nodes) - 1
 	} else {
+		// Node exists, update it
 		node = logResponse.Filter.Nodes[nodeIndex]
+		node.Status = status
+		node.Score = score
+		node.Containers = containers
+		logResponse.Filter.Nodes[nodeIndex] = node
 	}
-
-	// Add the node result
-	node.Containers = containers
-	// Update the container in the log response
-	logResponse.Filter.Nodes[nodeIndex] = node
-
-	// Update the entry
-	entry.value = logResponse
-	c.items[key].Value = entry
+	// Note: The logResponse pointer points to the value inside the cache.
+	// Any modifications to the fields of logResponse (like Filter.Nodes)
+	// are automatically reflected in the cache because slices are reference types.
+	// We don't need to do c.items[key].Value = entry again.
 }
 
 // Remove deletes a pod's scheduler log from the cache.

@@ -151,14 +151,16 @@ func SchedulerLogRoute(s *scheduler.Scheduler) httprouter.Handle {
 		name := params.ByName("name")
 		namespace := params.ByName("namespace")
 		if name == "" || namespace == "" {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusBadRequest)
-			w.Write([]byte("pod name or namespace is empty"))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "pod name or namespace is empty"})
 			return
 		}
 		log, ok := s.GetPodSchedulerLog(namespace, name)
 		if !ok {
+			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusNotFound)
-			w.Write([]byte("Scheduler log not found for pod " + namespace + "/" + name))
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": "Scheduler log not found for pod " + namespace + "/" + name})
 			return
 		}
 
