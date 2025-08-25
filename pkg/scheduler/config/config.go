@@ -23,6 +23,9 @@ import (
 	"reflect"
 	"time"
 
+	"gopkg.in/yaml.v2"
+	"k8s.io/klog/v2"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
@@ -35,9 +38,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-	"gopkg.in/yaml.v2"
-
-	"k8s.io/klog/v2"
 )
 
 var (

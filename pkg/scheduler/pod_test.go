@@ -21,9 +21,10 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func TestPodInfo(t *testing.T) {
