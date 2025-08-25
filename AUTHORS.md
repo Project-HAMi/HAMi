@@ -12,12 +12,13 @@ The following people, in alphabetical order, have either authored or signed off 
 | [atttx123](https://github.com/atttx123) | - |
 | [chaunceyjiang](https://github.com/chaunceyjiang) | chaunceyjiang@gmail.com|
 | [CoderTH](https://github.com/CoderTH) | - |
+| [fyp711](https://github.com/fyp711) | - |
 | [gsakun](https://github.com/gsakun) | - |
 | [lengrongfu](https://github.com/lengrongfu) | - |
 | [ouyangluwei](https://github.com/ouyangluwei163) | ouyangluwei@riseunion.io |
 | peizhaoyou | peizhaoyou@4paradigm.com |
 | [wawa0210](https://github.com/wawa0210) | xiaozhang0210@hotmail.com |
 | [whybeyoung](https://github.com/whybeyoung) | - |
-| [yinyu](https://github.com/Nimbus318) | nimbus-nimo@proton.me |
 | [yangshiqi](https://github.com/yangshiqi) | yangshiqi@riseunion.io |
+| [yinyu](https://github.com/Nimbus318) | nimbus-nimo@proton.me |
 | zhengbingxian | - |
