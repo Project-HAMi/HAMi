@@ -1,3 +1,4 @@
+{{- if .Values.devicePlugin.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -121,6 +122,8 @@ spec:
               value: all
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}/vgpu
+            - name: HAMI_RESYNC_INTERVAL
+              value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
           resources:
           {{- toYaml .Values.devicePlugin.vgpuMonitor.resources | nindent 12 }}
           volumeMounts:
@@ -176,3 +179,4 @@ spec:
       {{- if .Values.devicePlugin.tolerations }}
       tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}
       {{- end }}
+{{- end -}}

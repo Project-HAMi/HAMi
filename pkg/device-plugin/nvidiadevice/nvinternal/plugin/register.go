@@ -104,6 +104,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 			if err != nil {
 				return result, err
 			}
+			return result, nil
 		}
 	}
 	return result, nil

@@ -149,7 +149,9 @@ func TestLockNodeWithTimeout(t *testing.T) {
 
 	// Create a node with a fresh lock (should not be expired)
 	freshLockTime := time.Now().Format(time.RFC3339)
-	lockValue := freshLockTime + NodeLockSep + "test-ns" + NodeLockSep + "test-pod"
+	testNamespace := "test-ns"
+	testPodName := "test-pod"
+	lockValue := freshLockTime + NodeLockSep + testNamespace + NodeLockSep + testPodName
 
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
@@ -157,6 +159,14 @@ func TestLockNodeWithTimeout(t *testing.T) {
 			Annotations: map[string]string{
 				NodeLockKey: lockValue,
 			},
+		},
+	}, metav1.CreateOptions{})
+
+	// Pod must exist to avoid dangling node lock
+	client.KubeClient.CoreV1().Pods(testNamespace).Create(context.TODO(), &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      testPodName,
+			Namespace: testNamespace,
 		},
 	}, metav1.CreateOptions{})
 
@@ -178,6 +188,46 @@ func TestLockNodeWithTimeout(t *testing.T) {
 	expectedError := "has been locked within 2m0s"
 	if !strings.Contains(err.Error(), expectedError) {
 		t.Errorf("Expected error to contain '%s', but got: %v", expectedError, err)
+	}
+}
+
+func TestLockNodeWithDangling(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+
+	// Set a custom timeout for testing
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 2
+	defer func() {
+		NodeLockTimeout = originalTimeout
+	}()
+
+	nodeName := "test-node-timeout"
+
+	// Create a node with a fresh lock (should not be expired)
+	freshLockTime := time.Now().Format(time.RFC3339)
+	testNamespace := "test-ns"
+	testPodName := "test-pod"
+	lockValue := freshLockTime + NodeLockSep + testNamespace + NodeLockSep + testPodName
+
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: lockValue,
+			},
+		},
+	}, metav1.CreateOptions{})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "new-pod",
+			Namespace: "new-ns",
+		},
+	}
+
+	// Try to lock the node again - this should pass and release the old dangling lock
+	if err := LockNode(nodeName, "", pod); err != nil {
+		t.Fatal("Expected nil but got error")
 	}
 }
 
