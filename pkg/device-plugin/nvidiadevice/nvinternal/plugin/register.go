@@ -44,6 +44,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -110,7 +111,7 @@ func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
 	return result, nil
 }
 
-func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
+func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
 	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
@@ -118,7 +119,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
 	}
-	res := make([]*util.DeviceInfo, 0, len(devs))
+	res := make([]*device.DeviceInfo, 0, len(devs))
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
@@ -166,7 +167,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*util.DeviceInfo {
 		if err != nil {
 			klog.ErrorS(err, "failed to get numa information", "idx", idx)
 		}
-		res = append(res, &util.DeviceInfo{
+		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
@@ -191,10 +192,10 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := util.EncodeNodeDevices(*devices)
+	encodeddevices := device.EncodeNodeDevices(*devices)
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
-		gpuScore, err := nvidia.CalculateGPUScore(util.GetDevicesUUIDList(*devices))
+		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
 			return err

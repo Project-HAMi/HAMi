@@ -21,8 +21,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
-
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/stretchr/testify/assert"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 )
@@ -45,7 +44,7 @@ func TestPodInfo(t *testing.T) {
 				Name:      "my-pod",
 				UID:       k8stypes.UID("12345678"),
 				NodeID:    "node1",
-				Devices: util.PodDevices{
+				Devices: device.PodDevices{
 					"device1": {
 						{
 							{
@@ -61,7 +60,7 @@ func TestPodInfo(t *testing.T) {
 				Name:      "my-pod",
 				UID:       k8stypes.UID("12345678"),
 				NodeID:    "node1",
-				Devices: util.PodDevices{
+				Devices: device.PodDevices{
 					"device1": {
 						{
 							{
@@ -127,7 +126,7 @@ func TestGetScheduledPods(t *testing.T) {
 		Name:      "pod1",
 		UID:       k8stypes.UID("uid1"),
 		NodeID:    "node1",
-		Devices:   util.PodDevices{"device1": {{}}},
+		Devices:   device.PodDevices{"device1": {{}}},
 		CtrIDs:    []string{"ctr1"},
 	}
 	pod2 := &podInfo{
@@ -135,7 +134,7 @@ func TestGetScheduledPods(t *testing.T) {
 		Name:      "pod2",
 		UID:       k8stypes.UID("uid2"),
 		NodeID:    "node2",
-		Devices:   util.PodDevices{"device2": {{}}},
+		Devices:   device.PodDevices{"device2": {{}}},
 		CtrIDs:    []string{"ctr2"},
 	}
 	podManager.pods[pod1.UID] = pod1

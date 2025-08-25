@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -59,8 +60,8 @@ func InitMetaxSDevice(config MetaxConfig) *MetaxSDevices {
 	MetaxResourceNameVMemory = config.ResourceVMemoryName
 	MetaxTopologyAware = config.TopologyAware
 
-	util.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
-	util.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
+	device.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
+	device.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
 
 	return &MetaxSDevices{
 		jqCache: NewJitteryQosCache(),
@@ -97,10 +98,10 @@ func (sdev *MetaxSDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	}
 }
 
-func (sdev *MetaxSDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
+func (sdev *MetaxSDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	metaxSDevices, err := sdev.getMetaxSDevices(n)
 	if err != nil {
-		return []*util.DeviceInfo{}, err
+		return []*device.DeviceInfo{}, err
 	}
 
 	sdev.jqCache.Sync(metaxSDevices)
@@ -108,16 +109,16 @@ func (sdev *MetaxSDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	return convertMetaxSDeviceToHAMIDevice(metaxSDevices), nil
 }
 
-func (sdev *MetaxSDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (sdev *MetaxSDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[MetaxSGPUDevice]
 	if ok && len(devlist) > 0 {
-		deviceStr := util.EncodePodSingleDevice(devlist)
+		deviceStr := device.EncodePodSingleDevice(devlist)
 
 		// hami
-		(*annoinput)[util.InRequestDevices[MetaxSGPUDevice]] = deviceStr
-		(*annoinput)[util.SupportDevices[MetaxSGPUDevice]] = deviceStr
+		(*annoinput)[device.InRequestDevices[MetaxSGPUDevice]] = deviceStr
+		(*annoinput)[device.SupportDevices[MetaxSGPUDevice]] = deviceStr
 		klog.Infof("pod add annotation key [%s, %s], values is [%s]",
-			util.InRequestDevices[MetaxSGPUDevice], util.SupportDevices[MetaxSGPUDevice], deviceStr)
+			device.InRequestDevices[MetaxSGPUDevice], device.SupportDevices[MetaxSGPUDevice], deviceStr)
 
 		// metax
 		metaxPodDevice := convertHAMIPodDeviceToMetaxPodDevice(devlist)
@@ -175,7 +176,7 @@ func (sdev *MetaxSDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (sdev *MetaxSDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) bool {
+func (sdev *MetaxSDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) bool {
 	if strings.Compare(n.Type, MetaxSGPUDevice) == 0 {
 		if sdev.checkDeviceQos(annos[MetaxSGPUQosPolicy], d, n) {
 			return true
@@ -187,7 +188,7 @@ func (sdev *MetaxSDevices) checkType(annos map[string]string, d util.DeviceUsage
 	return false
 }
 
-func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	useUUIDAnno, ok := annos[MetaxUseUUID]
 	if ok {
 		klog.V(5).Infof("check UUID for metax, useUUID[%s], deviceID[%s]", useUUIDAnno, d.ID)
@@ -221,17 +222,17 @@ func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 	return len(devices) > 0, true
 }
 
-func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	value, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCount)]
 	if !ok {
-		return util.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}
 	}
 
 	count, ok := value.AsInt64()
 	if !ok {
 		klog.Errorf("container<%s> resource<%s> cannot decode to int64",
 			ctr.Name, MetaxResourceNameVCount)
-		return util.ContainerDeviceRequest{}
+		return device.ContainerDeviceRequest{}
 	}
 
 	core := int64(100)
@@ -266,7 +267,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) util.
 
 	klog.Infof("container<%s> request<count:%d, mem:%d, memPercent:%d, core:%d>",
 		ctr.Name, count, mem, memPercent, core)
-	return util.ContainerDeviceRequest{
+	return device.ContainerDeviceRequest{
 		Nums:             int32(count),
 		Type:             MetaxSGPUDevice,
 		Memreq:           int32(mem),
@@ -275,7 +276,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) util.
 	}
 }
 
-func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	if !needScore(podDevices) {
 		return 0
 	}
@@ -290,7 +291,7 @@ func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingl
 	return float32(weight * scoreExclusiveDevices(podDevices, previous))
 }
 
-func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
@@ -310,11 +311,11 @@ func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage
 	return nil
 }
 
-func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.Infof("pod[%v] container request[%v] devices fit", klog.KObj(pod), request)
 
 	reason := make(map[string]int)
-	candidateDevices := util.ContainerDevices{}
+	candidateDevices := device.ContainerDevices{}
 
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -370,7 +371,7 @@ func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 			continue
 		}
 
-		ctrDevice := util.ContainerDevice{
+		ctrDevice := device.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
 			Type:       dev.Type,
@@ -396,7 +397,7 @@ func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 		}
 
 		klog.V(5).Infof("pod[%v] fit devices Insufficient: request[%d], fit[%d]", klog.KObj(pod), request.Nums, len(candidateDevices))
-		return false, map[string]util.ContainerDevices{request.Type: candidateDevices}, common.GenReason(reason, len(devices))
+		return false, map[string]device.ContainerDevices{request.Type: candidateDevices}, common.GenReason(reason, len(devices))
 	}
 
 	bestDevices := candidateDevices[0:request.Nums]
@@ -405,7 +406,7 @@ func (mats *MetaxSDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 	}
 
 	klog.Infof("pod[%v] devices fit success, fit devices[%v]", klog.KObj(pod), bestDevices)
-	return true, map[string]util.ContainerDevices{request.Type: bestDevices}, ""
+	return true, map[string]device.ContainerDevices{request.Type: bestDevices}, ""
 }
 
 func (sdev *MetaxSDevices) getMetaxSDevices(n corev1.Node) ([]*MetaxSDeviceInfo, error) {
@@ -430,7 +431,7 @@ func (sdev *MetaxSDevices) getMetaxSDevices(n corev1.Node) ([]*MetaxSDeviceInfo,
 	return metaxSDevices, nil
 }
 
-func (sdev *MetaxSDevices) checkDeviceQos(reqQos string, usage util.DeviceUsage, request util.ContainerDeviceRequest) bool {
+func (sdev *MetaxSDevices) checkDeviceQos(reqQos string, usage device.DeviceUsage, request device.ContainerDeviceRequest) bool {
 	if usage.Used == 0 {
 		klog.Infof("device[%s] not use, it can switch to any qos", usage.ID)
 		return true
@@ -460,7 +461,7 @@ func (sdev *MetaxSDevices) checkDeviceQos(reqQos string, usage util.DeviceUsage,
 	}
 }
 
-func (sdev *MetaxSDevices) addJitteryQos(reqQos string, devs util.PodSingleDevice) {
+func (sdev *MetaxSDevices) addJitteryQos(reqQos string, devs device.PodSingleDevice) {
 	for _, ctrdev := range devs {
 		for _, dev := range ctrdev {
 			if value, ok := dev.CustomInfo["QosPolicy"]; ok {
@@ -481,12 +482,12 @@ func (sdev *MetaxSDevices) addJitteryQos(reqQos string, devs util.PodSingleDevic
 	}
 }
 
-func prioritizeExclusiveDevices(candidateDevices util.ContainerDevices, require int) util.ContainerDevices {
+func prioritizeExclusiveDevices(candidateDevices device.ContainerDevices, require int) device.ContainerDevices {
 	if len(candidateDevices) <= require {
 		return candidateDevices
 	}
 
-	linkDevicesMap := map[int32]util.ContainerDevices{}
+	linkDevicesMap := map[int32]device.ContainerDevices{}
 	for _, device := range candidateDevices {
 		linkZone := int32(0)
 		if v, ok := device.CustomInfo["LinkZone"]; ok {
@@ -498,8 +499,8 @@ func prioritizeExclusiveDevices(candidateDevices util.ContainerDevices, require 
 		linkDevicesMap[linkZone] = append(linkDevicesMap[linkZone], device)
 	}
 
-	linkDevices := []util.ContainerDevices{}
-	otherDevices := util.ContainerDevices{}
+	linkDevices := []device.ContainerDevices{}
+	otherDevices := device.ContainerDevices{}
 	for link, devices := range linkDevicesMap {
 		if link <= 0 {
 			otherDevices = append(otherDevices, devices...)
@@ -522,7 +523,7 @@ func prioritizeExclusiveDevices(candidateDevices util.ContainerDevices, require 
 		}
 	}
 
-	prioritizeDevices := util.ContainerDevices{}
+	prioritizeDevices := device.ContainerDevices{}
 
 	// 2. pickup devices cross MetaLink
 	for _, devices := range linkDevices {
@@ -549,7 +550,7 @@ func prioritizeExclusiveDevices(candidateDevices util.ContainerDevices, require 
 	return candidateDevices[0:require]
 }
 
-func needScore(podDevices util.PodSingleDevice) bool {
+func needScore(podDevices device.PodSingleDevice) bool {
 	enableTopoAware := MetaxTopologyAware
 
 	for _, ctrDevices := range podDevices {
@@ -571,7 +572,7 @@ func needScore(podDevices util.PodSingleDevice) bool {
 	return false
 }
 
-func scoreExclusiveDevices(podDevices util.PodSingleDevice, previous []*util.DeviceUsage) int {
+func scoreExclusiveDevices(podDevices device.PodSingleDevice, previous []*device.DeviceUsage) int {
 	availableDevices := LinkDevices{}
 	allocatedDevices := LinkDevices{}
 	restDevices := LinkDevices{}

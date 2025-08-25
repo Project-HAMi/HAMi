@@ -22,7 +22,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -203,7 +203,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 		name      string
 		container *corev1.Container
 
-		expected util.ContainerDeviceRequest
+		expected device.ContainerDeviceRequest
 	}{
 		{
 			name: "one full sgpu test",
@@ -215,7 +215,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           0,
@@ -233,7 +233,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             2,
 				Type:             MetaxSGPUDevice,
 				Memreq:           0,
@@ -252,7 +252,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           0,
@@ -271,7 +271,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           16 * 1024,
@@ -291,7 +291,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           16 * 1024,
@@ -311,7 +311,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           1024,
@@ -331,7 +331,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				},
 			},
 
-			expected: util.ContainerDeviceRequest{
+			expected: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           16 * 1024,
@@ -444,22 +444,22 @@ func TestCheckDeviceQos(t *testing.T) {
 	for _, ts := range []struct {
 		name    string
 		reqQos  string
-		usage   util.DeviceUsage
-		request util.ContainerDeviceRequest
+		usage   device.DeviceUsage
+		request device.ContainerDeviceRequest
 
 		expected bool
 	}{
 		{
 			name:   "check no use device",
 			reqQos: BestEffort,
-			usage: util.DeviceUsage{
+			usage: device.DeviceUsage{
 				ID:   "GPU-123",
 				Used: 0,
 				CustomInfo: map[string]any{
 					"QosPolicy": BurstShare,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Coresreq: 50,
 			},
 
@@ -468,14 +468,14 @@ func TestCheckDeviceQos(t *testing.T) {
 		{
 			name:   "check request exclusive",
 			reqQos: BestEffort,
-			usage: util.DeviceUsage{
+			usage: device.DeviceUsage{
 				ID:   "GPU-123",
 				Used: 2,
 				CustomInfo: map[string]any{
 					"QosPolicy": BurstShare,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Coresreq: 100,
 			},
 
@@ -484,14 +484,14 @@ func TestCheckDeviceQos(t *testing.T) {
 		{
 			name:   "check fail",
 			reqQos: BestEffort,
-			usage: util.DeviceUsage{
+			usage: device.DeviceUsage{
 				ID:   "GPU-123",
 				Used: 2,
 				CustomInfo: map[string]any{
 					"QosPolicy": BurstShare,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Coresreq: 50,
 			},
 
@@ -500,14 +500,14 @@ func TestCheckDeviceQos(t *testing.T) {
 		{
 			name:   "check pass",
 			reqQos: BestEffort,
-			usage: util.DeviceUsage{
+			usage: device.DeviceUsage{
 				ID:   "GPU-123",
 				Used: 2,
 				CustomInfo: map[string]any{
 					"QosPolicy": BestEffort,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Coresreq: 50,
 			},
 
@@ -532,14 +532,14 @@ func TestAddJitteryQos(t *testing.T) {
 	for _, ts := range []struct {
 		name   string
 		reqQos string
-		devs   util.PodSingleDevice
+		devs   device.PodSingleDevice
 
 		expectedCache map[string]string
 	}{
 		{
 			name:   "request BestEffort",
 			reqQos: BestEffort,
-			devs: util.PodSingleDevice{
+			devs: device.PodSingleDevice{
 				{
 					{
 						UUID:      "GPU-123",
@@ -597,8 +597,8 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		devices    []*util.DeviceUsage
-		request    util.ContainerDeviceRequest
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
 		annos      map[string]string
 		wantFit    bool
 		wantLen    int
@@ -607,7 +607,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 	}{
 		{
 			name: "fit success",
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					ID:        "dev-0",
 					Index:     0,
@@ -635,7 +635,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 					Health:    true,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           64,
 				MemPercentagereq: 0,
@@ -650,7 +650,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: memory not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -663,7 +663,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -678,7 +678,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: core not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -691,7 +691,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -706,7 +706,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: type mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -719,7 +719,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Health:    true,
 				Type:      MetaxSGPUDevice,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             "OtherType",
 				Memreq:           512,
@@ -734,7 +734,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: card overused",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      100,
@@ -747,7 +747,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -762,7 +762,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success: but core limit can't exceed 100",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -775,7 +775,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -790,7 +790,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  card exclusively",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -803,7 +803,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -818,7 +818,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign use uuid mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-1",
 				Index:     0,
 				Used:      0,
@@ -831,7 +831,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -846,7 +846,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign no use uuid match",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -859,7 +859,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -874,7 +874,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  CardComputeUnitsExhausted",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -887,7 +887,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -902,7 +902,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  AllocatedCardsInsufficientRequest",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -915,7 +915,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -930,7 +930,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success:  memory percentage",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -943,7 +943,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Type:      MetaxSGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
 				MemPercentagereq: 10,
@@ -960,8 +960,8 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			allocated := &util.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			allocated := &device.PodDevices{}
+			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
@@ -986,25 +986,25 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 func TestMetaxSDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
-		deviceUsage *util.DeviceUsage
-		ctr         *util.ContainerDevice
+		deviceUsage *device.DeviceUsage
+		ctr         *device.ContainerDevice
 		wantErr     bool
-		wantUsage   *util.DeviceUsage
+		wantUsage   *device.DeviceUsage
 	}{
 		{
 			name: "test add resource usage",
-			deviceUsage: &util.DeviceUsage{
+			deviceUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      0,
 				Usedcores: 15,
 				Usedmem:   2000,
 			},
-			ctr: &util.ContainerDevice{
+			ctr: &device.ContainerDevice{
 				UUID:      "dev-0",
 				Usedcores: 50,
 				Usedmem:   1024,
 			},
-			wantUsage: &util.DeviceUsage{
+			wantUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      1,
 				Usedcores: 65,
@@ -1037,14 +1037,14 @@ func TestMetaxSDevices_AddResourceUsage(t *testing.T) {
 func TestPrioritizeExclusiveDevices(t *testing.T) {
 	for _, ts := range []struct {
 		name             string
-		candidateDevices util.ContainerDevices
+		candidateDevices device.ContainerDevices
 		require          int
 
-		expectedDevices util.ContainerDevices
+		expectedDevices device.ContainerDevices
 	}{
 		{
 			name: "require one device",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1060,7 +1060,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 1,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
@@ -1069,7 +1069,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "require two device",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1093,7 +1093,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 2,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1106,7 +1106,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "require four device, best result",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1134,7 +1134,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 4,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
@@ -1155,7 +1155,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "require four device, general result",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1179,7 +1179,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 4,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1200,7 +1200,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "no metalink, require two device",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
@@ -1216,7 +1216,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 2,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
@@ -1229,7 +1229,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "part metalink, require two device, best result",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-3",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
@@ -1249,7 +1249,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 2,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1262,7 +1262,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "part metalink, require four device, bad result",
-			candidateDevices: util.ContainerDevices{
+			candidateDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-3",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
@@ -1286,7 +1286,7 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 			},
 			require: 4,
 
-			expectedDevices: util.ContainerDevices{
+			expectedDevices: device.ContainerDevices{
 				{
 					UUID:       "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
@@ -1320,13 +1320,13 @@ func TestPrioritizeExclusiveDevices(t *testing.T) {
 func TestNeedScore(t *testing.T) {
 	for _, ts := range []struct {
 		name       string
-		podDevices util.PodSingleDevice
+		podDevices device.PodSingleDevice
 
 		expected bool
 	}{
 		{
 			name: "enable, allocate 100core",
-			podDevices: util.PodSingleDevice{
+			podDevices: device.PodSingleDevice{
 				{
 					{
 						Usedcores: 100,
@@ -1343,7 +1343,7 @@ func TestNeedScore(t *testing.T) {
 		},
 		{
 			name: "disable, allocate 100core",
-			podDevices: util.PodSingleDevice{
+			podDevices: device.PodSingleDevice{
 				{
 					{
 						Usedcores: 100,
@@ -1360,7 +1360,7 @@ func TestNeedScore(t *testing.T) {
 		},
 		{
 			name: "enable, allocate 99core",
-			podDevices: util.PodSingleDevice{
+			podDevices: device.PodSingleDevice{
 				{
 					{
 						Usedcores: 99,
@@ -1377,7 +1377,7 @@ func TestNeedScore(t *testing.T) {
 		},
 		{
 			name: "enable, container[0]: 99core, container[1]: 100core",
-			podDevices: util.PodSingleDevice{
+			podDevices: device.PodSingleDevice{
 				{
 					{
 						Usedcores: 99,
@@ -1417,15 +1417,15 @@ func TestNeedScore(t *testing.T) {
 func TestScoreExclusiveDevices(t *testing.T) {
 	for _, ts := range []struct {
 		name       string
-		podDevices util.PodSingleDevice
-		previous   []*util.DeviceUsage
+		podDevices device.PodSingleDevice
+		previous   []*device.DeviceUsage
 
 		expectedScore int
 	}{
 		{
 			name: "allocate one device, rest zero device",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
@@ -1433,7 +1433,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       1,
@@ -1460,8 +1460,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate one device, rest three device",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
@@ -1469,7 +1469,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       0,
@@ -1496,8 +1496,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate two device, best result",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
@@ -1510,7 +1510,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       0,
@@ -1537,8 +1537,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate two device, bad result",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-4",
 						Usedcores:  100,
@@ -1551,7 +1551,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       1,
@@ -1598,8 +1598,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate four device, best result",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-1",
 						Usedcores:  100,
@@ -1622,7 +1622,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       0,
@@ -1654,8 +1654,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate four device, bad result",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-3",
 						Usedcores:  100,
@@ -1678,7 +1678,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-2",
 					Used:       0,
@@ -1710,8 +1710,8 @@ func TestScoreExclusiveDevices(t *testing.T) {
 		},
 		{
 			name: "allocate eight device",
-			podDevices: util.PodSingleDevice{
-				[]util.ContainerDevice{
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
 					{
 						UUID:       "GPU-1",
 						Usedcores:  100,
@@ -1754,7 +1754,7 @@ func TestScoreExclusiveDevices(t *testing.T) {
 					},
 				},
 			},
-			previous: []*util.DeviceUsage{
+			previous: []*device.DeviceUsage{
 				{
 					ID:         "GPU-1",
 					Used:       0,

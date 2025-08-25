@@ -27,7 +27,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func viewStatus(usage NodeUsage) {
@@ -53,8 +52,8 @@ const (
 	nodeFitPod                        = "NodeFitPod"
 )
 
-func getNodeResources(list NodeUsage, t string) []*util.DeviceUsage {
-	l := []*util.DeviceUsage{}
+func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
+	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
 		if strings.Contains(val.Device.Type, t) {
 			l = append(l, val.Device)
@@ -63,9 +62,9 @@ func getNodeResources(list NodeUsage, t string) []*util.DeviceUsage {
 	return l
 }
 
-func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, devinput *util.PodDevices) (bool, string) {
-	//devmap := make(map[string]util.ContainerDevices)
-	devs := util.ContainerDevices{}
+func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
+	//devmap := make(map[string]device.ContainerDevices)
+	devs := device.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
 	free, freeCore, freeMem := int32(0), int32(0), int32(0)
 	sums := 0
@@ -117,7 +116,7 @@ func fitInDevices(node *NodeUsage, requests util.ContainerDeviceRequests, annos 
 	return true, ""
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if annos != nil {
 		if value, ok := annos[policy.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -139,7 +138,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 			defer wg.Done()
 
 			viewStatus(*node)
-			score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(util.PodDevices), Score: 0}
+			score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(device.PodDevices), Score: 0}
 			score.ComputeDefaultScore(node.Devices)
 			snapshot := score.SnapshotDevice(node.Devices)
 
@@ -161,12 +160,12 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 				if sums == 0 {
 					for idx := range score.Devices {
 						for len(score.Devices[idx]) < ctrid {
-							defaultContainerDevices := util.ContainerDevices{}
-							defaultPodSingleDevice := util.PodSingleDevice{}
+							defaultContainerDevices := device.ContainerDevices{}
+							defaultPodSingleDevice := device.PodSingleDevice{}
 							defaultPodSingleDevice = append(defaultPodSingleDevice, defaultContainerDevices)
 							score.Devices[idx] = append(defaultPodSingleDevice, score.Devices[idx]...)
 						}
-						defaultContainerDevices := util.ContainerDevices{}
+						defaultContainerDevices := device.ContainerDevices{}
 						score.Devices[idx] = append(score.Devices[idx], defaultContainerDevices)
 					}
 				}

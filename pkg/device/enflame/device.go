@@ -23,8 +23,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -67,7 +67,7 @@ type EnflameConfig struct {
 func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
 	EnflameResourceCount = config.ResourceCountName
 	EnflameResourcePercentage = config.ResourcePercentageName
-	util.SupportDevices[EnflameGPUDevice] = "hami.io/enflame-vgpu-devices-allocated"
+	device.SupportDevices[EnflameGPUDevice] = "hami.io/enflame-vgpu-devices-allocated"
 	return &EnflameDevices{
 		factor: 0,
 	}
@@ -113,17 +113,17 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	return ok, nil
 }
 
-func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
-	nodedevices := []*util.DeviceInfo{}
+func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(CountNoSharedName), resource.DecimalSI).AsInt64()
 	if !ok || cards == 0 {
-		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", CountNoSharedName)
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", CountNoSharedName)
 	}
 	shared, _ := n.Status.Capacity.Name(corev1.ResourceName(SharedResourceName), resource.DecimalSI).AsInt64()
 	dev.factor = int(shared / cards)
 	for i < int(cards) {
-		nodedevices = append(nodedevices, &util.DeviceInfo{
+		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:   uint(i),
 			ID:      n.Name + "-enflame-" + fmt.Sprint(i),
 			Count:   100,
@@ -138,10 +138,10 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, er
 	return nodedevices, nil
 }
 
-func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[EnflameGPUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[util.SupportDevices[EnflameGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.SupportDevices[EnflameGPUDevice]] = device.EncodePodSingleDevice(devlist)
 		(*annoinput)[PodHasAssignedGCU] = "false"
 		(*annoinput)[PodAssignedGCUTime] = strconv.FormatInt(time.Now().UnixNano(), 10)
 		annoKey := PodAssignedGCUID
@@ -168,14 +168,14 @@ func (dev *EnflameDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *EnflameDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, EnflameGPUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *EnflameDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[EnflameUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
@@ -206,7 +206,7 @@ func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 	return true, true
 }
 
-func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
 	resourceCount := corev1.ResourceName(EnflameResourceCount)
 	resourcePercentage := corev1.ResourceName(EnflameResourcePercentage)
@@ -225,7 +225,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) util.
 			if ok {
 				memnum = int(mem.Value())
 			}
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             EnflameGPUDevice,
 				Memreq:           int32(memnum),
@@ -234,27 +234,27 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) util.
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
-func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (enf *EnflameDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -273,7 +273,7 @@ func (enf *EnflameDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 			}
 			k.Nums = originReq
 			prevnuma = dev.Numa
-			tmpDevs = make(map[string]util.ContainerDevices)
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !enf.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
@@ -325,7 +325,7 @@ func (enf *EnflameDevices) Fit(devices []*util.DeviceUsage, request util.Contain
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,

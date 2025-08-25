@@ -18,14 +18,13 @@ package k8sutil
 
 import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
-func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
-	counts = make(util.PodDeviceRequests, len(pod.Spec.Containers))
+func Resourcereqs(pod *corev1.Pod) (counts device.PodDeviceRequests) {
+	counts = make(device.PodDeviceRequests, len(pod.Spec.Containers))
 	klog.V(4).InfoS("Processing resource requirements",
 		"pod", klog.KObj(pod),
 		"containerCount", len(pod.Spec.Containers))
@@ -33,7 +32,7 @@ func Resourcereqs(pod *corev1.Pod) (counts util.PodDeviceRequests) {
 	cnt := int32(0)
 	for i := range pod.Spec.Containers {
 		devices := device.GetDevices()
-		counts[i] = make(util.ContainerDeviceRequests)
+		counts[i] = make(device.ContainerDeviceRequests)
 		klog.V(5).InfoS("Processing container resources",
 			"pod", klog.KObj(pod),
 			"containerIndex", i,

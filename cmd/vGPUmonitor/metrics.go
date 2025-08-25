@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
@@ -436,7 +437,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 	for _, pod := range pods {
-		pdevices, err := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+		pdevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 		if err != nil {
 			return fmt.Errorf("failed to decode pod devices: %w", err)
 		}
@@ -448,7 +449,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 				for _, ctrDev := range ctrDevices {
 					if strings.Contains(ctrDev.UUID, "[") {
 						uuid := strings.Split(ctrDev.UUID, "[")[0]
-						_, idx, err := util.ExtractMigTemplatesFromUUID(ctrDev.UUID)
+						_, idx, err := device.ExtractMigTemplatesFromUUID(ctrDev.UUID)
 						if err != nil {
 							klog.Errorf("Failed to get mig template for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							continue

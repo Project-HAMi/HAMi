@@ -22,6 +22,7 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -67,8 +68,8 @@ func InitDCUDevice(config HygonConfig) *DCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
-	util.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
-	util.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
+	device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
+	device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
 	util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
 	return &DCUDevices{}
 }
@@ -148,21 +149,21 @@ func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.ReleaseNodeLock(n.Name, NodeLockDCU, p, false)
 }
 
-func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
+func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	devEncoded, ok := n.Annotations[RegisterAnnos]
 	if !ok {
-		return []*util.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
+		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
-	nodedevices, err := util.DecodeNodeDevices(devEncoded)
+	nodedevices, err := device.DecodeNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
-		return []*util.DeviceInfo{}, err
+		return []*device.DeviceInfo{}, err
 	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
-		return []*util.DeviceInfo{}, errors.New("no gpu found on node")
+		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
 	}
-	devDecoded := util.EncodeNodeDevices(nodedevices)
+	devDecoded := device.EncodeNodeDevices(nodedevices)
 	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
 	return nodedevices, nil
 }
@@ -172,17 +173,17 @@ func (dev *DCUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return util.CheckHealth(devType, n)
+	return device.CheckHealth(devType, n)
 }
 
-func (dev *DCUDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *DCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
 		return true, checkDCUtype(annos, d.Type), false
 	}
 	return false, false, false
 }
 
-func (dev *DCUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *DCUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[DCUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
@@ -201,7 +202,7 @@ func (dev *DCUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bo
 	return true
 }
 
-func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count dcu devices for container ", ctr.Name)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
 	dcuResourceMem := corev1.ResourceName(HygonResourceMemory)
@@ -241,7 +242,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 				mempnum = 100
 			}
 
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             HygonDCUDevice,
 				Memreq:           int32(memnum),
@@ -250,39 +251,39 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.Cont
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
-func (dev *DCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *DCUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[HygonDCUDevice]
 	if ok && len(devlist) > 0 {
-		deviceStr := util.EncodePodSingleDevice(devlist)
-		(*annoinput)[util.InRequestDevices[HygonDCUDevice]] = deviceStr
-		(*annoinput)[util.SupportDevices[HygonDCUDevice]] = deviceStr
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.InRequestDevices[HygonDCUDevice], deviceStr)
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[HygonDCUDevice], deviceStr)
+		deviceStr := device.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.InRequestDevices[HygonDCUDevice]] = deviceStr
+		(*annoinput)[device.SupportDevices[HygonDCUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[HygonDCUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[HygonDCUDevice], deviceStr)
 	}
 	return *annoinput
 }
 
-func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *DCUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *DCUDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *DCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (dcu *DCUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -301,7 +302,7 @@ func (dcu *DCUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDe
 			}
 			k.Nums = originReq
 			prevnuma = dev.Numa
-			tmpDevs = make(map[string]util.ContainerDevices)
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !dcu.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
@@ -353,7 +354,7 @@ func (dcu *DCUDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDe
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,

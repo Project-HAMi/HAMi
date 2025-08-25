@@ -21,7 +21,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -30,7 +30,7 @@ import (
 )
 
 func Test_Resourcereqs(t *testing.T) {
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -42,14 +42,14 @@ func Test_Resourcereqs(t *testing.T) {
 		},
 	}
 
-	if err := device.InitDevicesWithConfig(config); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 
 	tests := []struct {
 		name string
 		args *corev1.Pod
-		want util.PodDeviceRequests
+		want device.PodDeviceRequests
 	}{
 		{
 			name: "don't resource",
@@ -66,7 +66,7 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{{}},
+			want: []device.ContainerDeviceRequests{{}},
 		},
 		{
 			name: "one container use gpu",
@@ -85,9 +85,9 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{
+			want: []device.ContainerDeviceRequests{
 				{
-					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+					nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 						Nums:             1,
 						Type:             nvidia.NvidiaGPUDevice,
 						Memreq:           1000,
@@ -121,9 +121,9 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{
+			want: []device.ContainerDeviceRequests{
 				{
-					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+					nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 						Nums:             1,
 						Type:             nvidia.NvidiaGPUDevice,
 						Memreq:           1000,
@@ -165,9 +165,9 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{
+			want: []device.ContainerDeviceRequests{
 				{
-					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+					nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 						Nums:             1,
 						Type:             nvidia.NvidiaGPUDevice,
 						Memreq:           1000,
@@ -210,10 +210,10 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{
+			want: []device.ContainerDeviceRequests{
 				{},
 				{
-					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+					nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 						Nums:             1,
 						Type:             nvidia.NvidiaGPUDevice,
 						Memreq:           1000,
@@ -255,11 +255,11 @@ func Test_Resourcereqs(t *testing.T) {
 					},
 				},
 			},
-			want: []util.ContainerDeviceRequests{
+			want: []device.ContainerDeviceRequests{
 				{},
 				{},
 				{
-					nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+					nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 						Nums:             1,
 						Type:             nvidia.NvidiaGPUDevice,
 						Memreq:           1000,

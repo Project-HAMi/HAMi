@@ -19,39 +19,39 @@ package plugin
 import (
 	"testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGenerateMigTemplate(t *testing.T) {
 	sconfig := nvidia.NvidiaConfig{
-		MigGeometriesList: []util.AllowedMigGeometries{
+		MigGeometriesList: []device.AllowedMigGeometries{
 			{
 				Models: []string{"A30"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.6gb", Memory: 6144, Count: 4}},
-					{util.MigTemplate{Name: "2g.12gb", Memory: 12288, Count: 2}},
-					{util.MigTemplate{Name: "4g.24gb", Memory: 24576, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.6gb", Memory: 6144, Count: 4}},
+					{device.MigTemplate{Name: "2g.12gb", Memory: 12288, Count: 2}},
+					{device.MigTemplate{Name: "4g.24gb", Memory: 24576, Count: 1}},
 				},
 			},
 			{
 				Models: []string{"A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 7}},
-					{util.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
-					{util.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}},
-					{util.MigTemplate{Name: "3g.20gb", Memory: 20480, Count: 2}},
-					{util.MigTemplate{Name: "7g.40gb", Memory: 40960, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 7}},
+					{device.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
+					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}},
+					{device.MigTemplate{Name: "3g.20gb", Memory: 20480, Count: 2}},
+					{device.MigTemplate{Name: "7g.40gb", Memory: 40960, Count: 1}},
 				},
 			},
 			{
 				Models: []string{"A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 7}},
-					{util.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
-					{util.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}},
-					{util.MigTemplate{Name: "3g.40gb", Memory: 40960, Count: 2}},
-					{util.MigTemplate{Name: "7g.80gb", Memory: 81920, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 7}},
+					{device.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
+					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}},
+					{device.MigTemplate{Name: "3g.40gb", Memory: 40960, Count: 2}},
+					{device.MigTemplate{Name: "7g.80gb", Memory: 81920, Count: 1}},
 				},
 			},
 		},
@@ -77,7 +77,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 		name          string
 		model         string
 		deviceIdx     int
-		containerDev  util.ContainerDevice
+		containerDev  device.ContainerDevice
 		expectedPos   int
 		expectedReset bool
 		expectedMig   map[string]int32
@@ -86,7 +86,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "2g.10gb template",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[1-1]",
 				Usedmem: 3000,
@@ -101,7 +101,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "1g.5gb template",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[0-1]",
 				Usedmem: 3000,
@@ -116,7 +116,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "no reset needed",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[0-2]",
 				Usedmem: 3000,
