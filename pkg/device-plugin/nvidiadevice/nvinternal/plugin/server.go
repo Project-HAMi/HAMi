@@ -470,21 +470,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		if strings.Contains(req.DevicesIDs[0], "MIG") {
 			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
 				if len(req.DevicesIDs) > 1 {
-					util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIDs))
 				}
 			}
 
 			for _, id := range req.DevicesIDs {
 				if !plugin.rm.Devices().Contains(id) {
-					util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
 			response, err := plugin.getAllocateResponse(req.DevicesIDs)
 			if err != nil {
-				util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
@@ -492,11 +492,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-				util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
@@ -506,7 +506,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				util.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
@@ -581,7 +581,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	util.PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 

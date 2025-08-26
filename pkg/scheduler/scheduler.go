@@ -37,7 +37,6 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -92,7 +91,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	if !ok {
 		return
 	}
-	if k8sutil.IsPodInTerminatedState(pod) {
+	if util.IsPodInTerminatedState(pod) {
 		s.delPod(pod)
 		return
 	}
@@ -441,7 +440,7 @@ ReleaseNodeLocks:
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-	resourceReqs := k8sutil.Resourcereqs(args.Pod)
+	resourceReqs := device.Resourcereqs(args.Pod)
 	resourceReqTotal := 0
 	for _, n := range resourceReqs {
 		for _, k := range n {

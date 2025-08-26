@@ -26,14 +26,18 @@ import (
 	"strings"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"golang.org/x/net/context"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 // GetLibPath returns the path to the vGPU library.
@@ -431,4 +435,42 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)
 	return tmp
+}
+
+func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
+	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+	annos := refreshed.Annotations[device.InRequestDevices[devName]]
+	klog.Infof("Trying allocation success: %s", annos)
+	for _, val := range device.DevicesToHandle {
+		if strings.Contains(annos, val) {
+			return
+		}
+	}
+	klog.Infof("All devices allocate success, releasing lock")
+	PodAllocationSuccess(nodeName, pod, lockName)
+}
+
+func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
+	klog.Infof("Pod allocation successful for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
+	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
+}
+
+func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockName string, deviceBindPhase string) {
+	newAnnos := map[string]string{util.DeviceBindPhase: deviceBindPhase}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+		return
+	}
+	if err := nodelock.ReleaseNodeLock(nodeName, lockName, pod, false); err != nil {
+		klog.Errorf("Failed to release node lock for node %s and lock %s: %v", nodeName, lockName, err)
+	}
+}
+
+func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
+	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
+	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
 }

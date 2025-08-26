@@ -25,7 +25,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -377,114 +376,144 @@ func TestPatchPodAnnotations(t *testing.T) {
 	}
 }
 
-func Test_PodAllocationTrySuccess(t *testing.T) {
-	// Initialize fake clientset and pre-load test data
-	client.KubeClient = fake.NewSimpleClientset()
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "testpod",
-			Namespace:   "default",
-			Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["NVIDIA"]: "some-value"},
-		},
-	}
-
-	// Add the pod to the fake clientset
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
-	nodeName := "test-node"
-	devName := "NVIDIA"
-	lockName := "test-lock"
-
-	// Call the function under test
-	PodAllocationTrySuccess(nodeName, devName, lockName, pod)
-
-	// Refresh the pod state from the fake clientset and check the annotations
-	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get refreshed pod: %v", err)
-	}
-
-	annos, ok := refreshedPod.Annotations[device.InRequestDevices[devName]]
-	if !ok || annos == "" {
-		t.Error("Expected annotations to be updated")
-	}
-}
-
-func Test_PodAllocationSuccess(t *testing.T) {
-	// Initialize fake clientset and pre-load test data
-	client.KubeClient = fake.NewSimpleClientset()
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "testpod",
-			Namespace: "default",
-			Annotations: map[string]string{
-				"test-annotation-key": "test-annotation-value",
+func Test_IsPodInTerminatedState(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "pod in failed state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodFailed,
+				},
 			},
+			want: true,
+		},
+		{
+			name: "pod in succeeded state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodSucceeded,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod in running state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "pod in pending state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodPending,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "pod in unknown state",
+			args: &corev1.Pod{
+				Status: corev1.PodStatus{
+					Phase: corev1.PodUnknown,
+				},
+			},
+			want: false,
 		},
 	}
 
-	// Add the pod to the fake clientset
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
-	nodeName := "test-node"
-	lockName := "test-lock"
-
-	// Update pod annotations and release the lock as part of the setup for the test
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, DeviceBindSuccess)
-
-	// Call the function under test
-	PodAllocationSuccess(nodeName, pod, lockName)
-
-	// Refresh the pod state from the fake clientset and check the DeviceBindPhase annotation
-	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get refreshed pod: %v", err)
-	}
-
-	annos, ok := refreshedPod.Annotations[DeviceBindPhase]
-	if !ok || annos != DeviceBindSuccess {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", DeviceBindSuccess, annos)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodInTerminatedState(test.args)
+			assert.Equal(t, test.want, got)
+		})
 	}
 }
-func Test_PodAllocationFailed(t *testing.T) {
-
-	client.KubeClient = fake.NewSimpleClientset()
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:        "testpod",
-			Namespace:   "default",
-			Annotations: map[string]string{"test-annotation-key": "test-annotation-value"},
+func Test_AllContainersCreated(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "all containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+						{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "not all containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "no containers created",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "more container statuses than containers",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{},
+					},
+				},
+				Status: corev1.PodStatus{
+					ContainerStatuses: []corev1.ContainerStatus{
+						{},
+						{},
+					},
+				},
+			},
+			want: true,
 		},
 	}
 
-	// add pod to the fake client
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
-	nodeName := "test-node"
-	lockName := "test-lock"
-
-	// simulate a failed pod allocation
-	PodAllocationFailed(nodeName, pod, lockName)
-
-	// retrieve the pod from the fake client
-	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get refreshed pod: %v", err)
-	}
-
-	annos, ok := refreshedPod.Annotations[DeviceBindPhase]
-	if !ok {
-		t.Error("Expected DeviceBindPhase annotation to be present")
-	} else if annos != DeviceBindFailed {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", DeviceBindFailed, annos)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := AllContainersCreated(test.args)
+			assert.Equal(t, test.want, got)
+		})
 	}
 }

@@ -24,7 +24,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
@@ -215,40 +214,10 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	return userGPUPolicy
 }
 
-func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
-	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		return
-	}
-	annos := refreshed.Annotations[device.InRequestDevices[devName]]
-	klog.Infof("Trying allocation success: %s", annos)
-	for _, val := range device.DevicesToHandle {
-		if strings.Contains(annos, val) {
-			return
-		}
-	}
-	klog.Infof("All devices allocate success, releasing lock")
-	PodAllocationSuccess(nodeName, pod, lockName)
+func IsPodInTerminatedState(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 
-func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockName string, deviceBindPhase string) {
-	newAnnos := map[string]string{DeviceBindPhase: deviceBindPhase}
-	if err := PatchPodAnnotations(pod, newAnnos); err != nil {
-		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		return
-	}
-	if err := nodelock.ReleaseNodeLock(nodeName, lockName, pod, false); err != nil {
-		klog.Errorf("Failed to release node lock for node %s and lock %s: %v", nodeName, lockName, err)
-	}
-}
-
-func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
-	klog.Infof("Pod allocation successful for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, DeviceBindSuccess)
-}
-
-func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
-	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, DeviceBindFailed)
+func AllContainersCreated(pod *corev1.Pod) bool {
+	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }
