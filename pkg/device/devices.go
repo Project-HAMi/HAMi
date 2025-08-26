@@ -331,9 +331,6 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	contdev := ContainerDevices{}
 	tmpdev := ContainerDevice{}
 	klog.V(5).Infof("Start to decode container device %s", str)
-	if len(str) == 0 {
-		return ContainerDevices{}, nil
-	}
 	for _, val := range cd {
 		if strings.Contains(val, ",") {
 			//fmt.Println("cd is ", val)
@@ -450,4 +447,34 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 	}
 
 	return templateIdx, pos, nil
+}
+
+func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
+	counts = make(PodDeviceRequests, len(pod.Spec.Containers))
+	klog.V(4).InfoS("Processing resource requirements",
+		"pod", klog.KObj(pod),
+		"containerCount", len(pod.Spec.Containers))
+	//Count Nvidia GPU
+	cnt := int32(0)
+	for i := range pod.Spec.Containers {
+		devices := GetDevices()
+		counts[i] = make(ContainerDeviceRequests)
+		klog.V(5).InfoS("Processing container resources",
+			"pod", klog.KObj(pod),
+			"containerIndex", i,
+			"containerName", pod.Spec.Containers[i].Name)
+		for idx, val := range devices {
+			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if request.Nums > 0 {
+				cnt += request.Nums
+				counts[i][idx] = request
+			}
+		}
+	}
+	if cnt == 0 {
+		klog.V(4).InfoS("No device requests found", "pod", klog.KObj(pod))
+	} else {
+		klog.V(4).InfoS("Resource requirements collected", "pod", klog.KObj(pod), "requests", counts)
+	}
+	return counts
 }
