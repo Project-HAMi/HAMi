@@ -177,6 +177,11 @@ func (sdev *MetaxSDevices) NodeCleanUp(nn string) error {
 
 func (sdev *MetaxSDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) bool {
 	if strings.Compare(n.Type, MetaxSGPUDevice) == 0 {
+		if !d.Health {
+			klog.Infof("device[%s] unhealthy, check failed", d.ID)
+			return false
+		}
+
 		if sdev.checkDeviceQos(annos[MetaxSGPUQosPolicy], d, n) {
 			return true
 		} else {
