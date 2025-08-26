@@ -26,7 +26,6 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type NodeUsage struct {
@@ -35,17 +34,17 @@ type NodeUsage struct {
 }
 
 type nodeManager struct {
-	nodes map[string]*util.NodeInfo
+	nodes map[string]*device.NodeInfo
 	mutex sync.RWMutex
 }
 
 func newNodeManager() *nodeManager {
 	return &nodeManager{
-		nodes: make(map[string]*util.NodeInfo),
+		nodes: make(map[string]*device.NodeInfo),
 	}
 }
 
-func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
+func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	if nodeInfo == nil || len(nodeInfo.Devices) == 0 {
 		return
 	}
@@ -54,7 +53,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *util.NodeInfo) {
 	_, ok := m.nodes[nodeID]
 	if ok {
 		if len(nodeInfo.Devices) > 0 {
-			tmp := make([]util.DeviceInfo, 0, len(nodeInfo.Devices))
+			tmp := make([]device.DeviceInfo, 0, len(nodeInfo.Devices))
 			devices := device.GetDevices()
 			deviceType := ""
 			for _, val := range devices {
@@ -85,7 +84,7 @@ func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {
 		return
 	}
 
-	devices := make([]util.DeviceInfo, 0)
+	devices := make([]device.DeviceInfo, 0)
 	for _, val := range nodeInfo.Devices {
 		if val.DeviceVendor != deviceVendor {
 			devices = append(devices, val)
@@ -100,16 +99,16 @@ func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {
 	klog.InfoS("Removing device from node", "nodeName", nodeID, "deviceVendor", deviceVendor, "remainingDevices", devices)
 }
 
-func (m *nodeManager) GetNode(nodeID string) (*util.NodeInfo, error) {
+func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	if n, ok := m.nodes[nodeID]; ok {
 		return n, nil
 	}
-	return &util.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	return &device.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 }
 
-func (m *nodeManager) ListNodes() (map[string]*util.NodeInfo, error) {
+func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 	return m.nodes, nil

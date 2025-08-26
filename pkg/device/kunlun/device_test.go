@@ -22,14 +22,14 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func Test_graphSelect(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
-			d []*util.DeviceUsage
+			d []*device.DeviceUsage
 			c int
 		}
 		want1 []int
@@ -37,10 +37,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "full allocate",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -57,10 +57,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "full allocate not success",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -77,10 +77,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 2 cards",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -97,10 +97,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 1 card",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -117,10 +117,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 1 card",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -137,10 +137,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 2 card according to interconnect",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 1},
 					{Index: 1, Used: 1},
 					{Index: 2, Used: 1},
@@ -157,10 +157,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 4 cards according to interconnect when have 5 cards",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 1},
@@ -177,10 +177,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards unconnected",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 0},
@@ -197,10 +197,10 @@ func Test_graphSelect(t *testing.T) {
 		{
 			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards connected",
 			args: struct {
-				d []*util.DeviceUsage
+				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*util.DeviceUsage{
+				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
 					{Index: 1, Used: 0},
 					{Index: 2, Used: 1},
@@ -228,8 +228,8 @@ func Test_ScoreNode(t *testing.T) {
 		name string
 		args struct {
 			node       *corev1.Node
-			podDevices util.PodSingleDevice
-			usage      []*util.DeviceUsage
+			podDevices device.PodSingleDevice
+			usage      []*device.DeviceUsage
 			policy     string
 		}
 		want float32
@@ -238,13 +238,13 @@ func Test_ScoreNode(t *testing.T) {
 			name: "Scenario 1",
 			args: struct {
 				node       *corev1.Node
-				podDevices util.PodSingleDevice
-				usage      []*util.DeviceUsage
+				podDevices device.PodSingleDevice
+				usage      []*device.DeviceUsage
 				policy     string
 			}{
 				node: &corev1.Node{},
-				podDevices: util.PodSingleDevice{
-					util.ContainerDevices{
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
 						{
 							Idx:  int(0),
 							Type: KunlunGPUDevice,
@@ -279,7 +279,7 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				usage: []*util.DeviceUsage{
+				usage: []*device.DeviceUsage{
 					{Index: 0, Used: 1, Type: KunlunGPUDevice},
 					{Index: 1, Used: 1, Type: KunlunGPUDevice},
 					{Index: 2, Used: 1, Type: KunlunGPUDevice},
@@ -293,20 +293,20 @@ func Test_ScoreNode(t *testing.T) {
 			name: "Scenario 2",
 			args: struct {
 				node       *corev1.Node
-				podDevices util.PodSingleDevice
-				usage      []*util.DeviceUsage
+				podDevices device.PodSingleDevice
+				usage      []*device.DeviceUsage
 				policy     string
 			}{
 				node: &corev1.Node{},
-				podDevices: util.PodSingleDevice{
-					util.ContainerDevices{
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
 						{
 							Idx:  int(0),
 							Type: KunlunGPUDevice,
 						},
 					},
 				},
-				usage:  []*util.DeviceUsage{},
+				usage:  []*device.DeviceUsage{},
 				policy: "spread",
 			},
 			want: float32(0),

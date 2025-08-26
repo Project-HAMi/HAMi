@@ -24,8 +24,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -56,7 +56,7 @@ type KunlunConfig struct {
 
 func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
 	KunlunResourceCount = config.ResourceCountName
-	util.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
+	device.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
 	return &KunlunDevices{}
 }
 
@@ -73,15 +73,15 @@ func (dev *KunlunDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) 
 	return ok, nil
 }
 
-func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
-	nodedevices := []*util.DeviceInfo{}
+func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(KunlunResourceCount), resource.DecimalSI).AsInt64()
 	if !ok || cards == 0 {
-		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", KunlunResourceCount)
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", KunlunResourceCount)
 	}
 	for int64(i) < cards {
-		nodedevices = append(nodedevices, &util.DeviceInfo{
+		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:   uint(i),
 			ID:      n.Name + "-kunlun-" + fmt.Sprint(i),
 			Count:   100,
@@ -99,10 +99,10 @@ func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, err
 	return nodedevices, nil
 }
 
-func (dev *KunlunDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *KunlunDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[KunlunGPUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[util.SupportDevices[KunlunGPUDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.SupportDevices[KunlunGPUDevice]] = device.EncodePodSingleDevice(devlist)
 		for _, dp := range devlist {
 			annoKey := KunlunDeviceSelection
 			value := ""
@@ -129,14 +129,14 @@ func (dev *KunlunDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *KunlunDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+func (dev *KunlunDevices) CheckType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool) {
 	if strings.Compare(n.Type, KunlunGPUDevice) == 0 {
 		return true, false
 	}
 	return false, false
 }
 
-func (dev *KunlunDevices) CheckUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *KunlunDevices) CheckUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[KunlunUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for Kunlun user uuid [%s], device id is %s", userUUID, d.ID)
@@ -159,7 +159,7 @@ func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, boo
 	return true, true
 }
 
-func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count kunlun devices for container ", ctr.Name)
 	kunlunResourceCount := corev1.ResourceName(KunlunResourceCount)
 	v, ok := ctr.Resources.Limits[kunlunResourceCount]
@@ -170,7 +170,7 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found kunlunxin devices")
 
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             KunlunGPUDevice,
 				Memreq:           0,
@@ -179,7 +179,7 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) util.C
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
 func addidx(temp []int, value int) []int {
@@ -241,7 +241,7 @@ func calcscore(p []int, c []int) float32 {
 	return 1000
 }
 
-func parseUsage(devices []*util.DeviceUsage) []int {
+func parseUsage(devices []*device.DeviceUsage) []int {
 	usage := []int{}
 	for _, val := range devices {
 		if val.Used == 0 {
@@ -282,7 +282,7 @@ func parseInterconnection2() [][]int {
 	return interconnection2
 }
 
-func interconnect(devices []*util.DeviceUsage, count int) []int {
+func interconnect(devices []*device.DeviceUsage, count int) []int {
 	if count == 2 {
 		for _, val := range devices {
 			if val.Used > 0 {
@@ -359,7 +359,7 @@ func delta(have, want []int) []int {
 	return ret
 }
 
-func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	current := []int{}
 	prev := []int{}
 	for _, dev := range previous {
@@ -382,12 +382,12 @@ func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingle
 	return calcscore(prev, current)
 }
 
-func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	return nil
 }
 
-func devicepick(devices []*util.DeviceUsage, start int, count int) []int {
+func devicepick(devices []*device.DeviceUsage, start int, count int) []int {
 	res := []int{}
 	for t := start; t < 8; t++ {
 		if devices[t].Used == 0 {
@@ -400,7 +400,7 @@ func devicepick(devices []*util.DeviceUsage, start int, count int) []int {
 	return res
 }
 
-func graghSelect(devices []*util.DeviceUsage, count int) []int {
+func graghSelect(devices []*device.DeviceUsage, count int) []int {
 	leftwing := 0
 	rightwing := 0
 	for idx, val := range devices {
@@ -447,9 +447,9 @@ func graghSelect(devices []*util.DeviceUsage, count int) []int {
 	return []int{}
 }
 
-func (kl *KunlunDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
-	tmpDevs := make(map[string]util.ContainerDevices)
+	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
 	alloc := graghSelect(devices, int(request.Nums))
@@ -462,7 +462,7 @@ func (kl *KunlunDevices) Fit(devices []*util.DeviceUsage, request util.Container
 	for _, dev := range alloc {
 		for _, val := range devices {
 			if val.Index == uint(dev) {
-				tmpDevs[request.Type] = append(tmpDevs[request.Type], util.ContainerDevice{
+				tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 					Idx:       int(val.Index),
 					UUID:      val.ID,
 					Type:      request.Type,

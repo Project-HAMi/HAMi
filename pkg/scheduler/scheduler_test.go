@@ -35,6 +35,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -42,9 +43,9 @@ import (
 
 func Test_getNodesUsage(t *testing.T) {
 	nodeMage := newNodeManager()
-	nodeMage.addNode("node1", &util.NodeInfo{
+	nodeMage.addNode("node1", &device.NodeInfo{
 		ID: "node1",
-		Devices: []util.DeviceInfo{
+		Devices: []device.DeviceInfo{
 			{
 				ID:      "GPU0",
 				Index:   0,
@@ -67,9 +68,9 @@ func Test_getNodesUsage(t *testing.T) {
 			},
 		},
 	})
-	podDevces := util.PodDevices{
-		"NVIDIA": util.PodSingleDevice{
-			[]util.ContainerDevice{
+	podDevces := device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			[]device.ContainerDevice{
 				{
 					Idx:       0,
 					UUID:      "GPU0",
@@ -211,7 +212,7 @@ func Test_getPodUsage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for _, pod := range test.pods {
 				client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-				s.addPod(pod, pod.Spec.NodeName, util.PodDevices{})
+				s.addPod(pod, pod.Spec.NodeName, device.PodDevices{})
 			}
 
 			result, err := s.getPodUsage()
@@ -249,7 +250,7 @@ func Test_Filter(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	s.addAllEventHandlers()
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -261,7 +262,7 @@ func Test_Filter(t *testing.T) {
 		},
 	}
 
-	if err := device.InitDevicesWithConfig(config); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 	pod1 := &corev1.Pod{
@@ -358,10 +359,10 @@ func Test_Filter(t *testing.T) {
 			s.delPod(pods[index])
 		}
 
-		s.addNode("node1", &util.NodeInfo{
+		s.addNode("node1", &device.NodeInfo{
 			ID:   "node1",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			Devices: []util.DeviceInfo{
+			Devices: []device.DeviceInfo{
 				{
 					ID:           "device1",
 					Index:        0,
@@ -387,10 +388,10 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addNode("node2", &util.NodeInfo{
+		s.addNode("node2", &device.NodeInfo{
 			ID:   "node2",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
-			Devices: []util.DeviceInfo{
+			Devices: []device.DeviceInfo{
 				{
 					ID:      "device3",
 					Index:   0,
@@ -414,8 +415,8 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addPod(pod1, "node1", util.PodDevices{
-			nvidia.NvidiaGPUDevice: util.PodSingleDevice{
+		s.addPod(pod1, "node1", device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
 						Idx:       0,
@@ -427,8 +428,8 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addPod(pod2, "node2", util.PodDevices{
-			nvidia.NvidiaGPUDevice: util.PodSingleDevice{
+		s.addPod(pod2, "node2", device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
 						Idx:       0,
@@ -607,7 +608,7 @@ func Test_Filter(t *testing.T) {
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
 			getPod, _ := client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Get(context.Background(), test.args.Pod.Name, metav1.GetOptions{})
-			podDevices, _ := util.DecodePodDevices(util.SupportDevices, getPod.Annotations)
+			podDevices, _ := device.DecodePodDevices(device.SupportDevices, getPod.Annotations)
 			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
 		})
 	}

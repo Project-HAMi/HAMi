@@ -23,7 +23,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -52,7 +52,7 @@ func TestNodeScoreListLen(t *testing.T) {
 							Spec:       corev1.NodeSpec{},
 							Status:     corev1.NodeStatus{},
 						},
-						Devices: util.PodDevices{},
+						Devices: device.PodDevices{},
 						Score:   85.5,
 					},
 					{
@@ -62,7 +62,7 @@ func TestNodeScoreListLen(t *testing.T) {
 							Spec:       corev1.NodeSpec{},
 							Status:     corev1.NodeStatus{},
 						},
-						Devices: util.PodDevices{},
+						Devices: device.PodDevices{},
 						Score:   90.0,
 					},
 					{
@@ -72,7 +72,7 @@ func TestNodeScoreListLen(t *testing.T) {
 							Spec:       corev1.NodeSpec{},
 							Status:     corev1.NodeStatus{},
 						},
-						Devices: util.PodDevices{},
+						Devices: device.PodDevices{},
 						Score:   78.0,
 					},
 				},
@@ -188,15 +188,15 @@ func TestLess(t *testing.T) {
 }
 
 // setup initializes the devices with a given configuration.
-func setup(t *testing.T, config *device.Config) {
-	if err := device.InitDevicesWithConfig(config); err != nil {
+func setup(t *testing.T, sConfig *config.Config) {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 }
 
 // TestOverrideScore tests the OverrideScore method for different scenarios.
 func TestOverrideScore(t *testing.T) {
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -207,12 +207,12 @@ func TestOverrideScore(t *testing.T) {
 			DefaultGPUNum:                1,
 		},
 	}
-	setup(t, config)
+	setup(t, sConfig)
 
 	tests := []struct {
 		name      string
 		nodeScore *NodeScore
-		devices   []*util.DeviceUsage
+		devices   []*device.DeviceUsage
 		policy    string
 		wantScore float32
 	}{
@@ -228,15 +228,15 @@ func TestOverrideScore(t *testing.T) {
 					},
 				},
 				NodeID: "node1",
-				Devices: util.PodDevices{
-					"DCU": util.PodSingleDevice{
-						util.ContainerDevices{
+				Devices: device.PodDevices{
+					"DCU": device.PodSingleDevice{
+						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
 					},
-					"Metax-GPU": util.PodSingleDevice{
-						util.ContainerDevices{
+					"Metax-GPU": device.PodSingleDevice{
+						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
@@ -244,7 +244,7 @@ func TestOverrideScore(t *testing.T) {
 				},
 				Score: 0,
 			},
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					Count:     4,
 					Totalcore: 8,
@@ -270,15 +270,15 @@ func TestOverrideScore(t *testing.T) {
 					},
 				},
 				NodeID: "node1",
-				Devices: util.PodDevices{
-					"DCU": util.PodSingleDevice{
-						util.ContainerDevices{
+				Devices: device.PodDevices{
+					"DCU": device.PodSingleDevice{
+						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
 					},
-					"Metax-GPU": util.PodSingleDevice{
-						util.ContainerDevices{
+					"Metax-GPU": device.PodSingleDevice{
+						device.ContainerDevices{
 							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
 							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
 						},
@@ -286,7 +286,7 @@ func TestOverrideScore(t *testing.T) {
 				},
 				Score: 0,
 			},
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					Count:     4,
 					Totalcore: 8,
@@ -314,7 +314,7 @@ func TestOverrideScore(t *testing.T) {
 }
 
 func TestComputeDefaultScore(t *testing.T) {
-	device1 := &util.DeviceUsage{
+	device1 := &device.DeviceUsage{
 		ID:        "device1",
 		Index:     1,
 		Used:      50,
@@ -328,7 +328,7 @@ func TestComputeDefaultScore(t *testing.T) {
 		Health:    true,
 	}
 
-	device2 := &util.DeviceUsage{
+	device2 := &device.DeviceUsage{
 		ID:        "device2",
 		Index:     2,
 		Used:      75,

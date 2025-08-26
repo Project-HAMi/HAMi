@@ -19,39 +19,46 @@ package plugin
 import (
 	"testing"
 
+	"golang.org/x/net/context"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestGenerateMigTemplate(t *testing.T) {
 	sconfig := nvidia.NvidiaConfig{
-		MigGeometriesList: []util.AllowedMigGeometries{
+		MigGeometriesList: []device.AllowedMigGeometries{
 			{
 				Models: []string{"A30"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.6gb", Memory: 6144, Count: 4}},
-					{util.MigTemplate{Name: "2g.12gb", Memory: 12288, Count: 2}},
-					{util.MigTemplate{Name: "4g.24gb", Memory: 24576, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.6gb", Memory: 6144, Count: 4}},
+					{device.MigTemplate{Name: "2g.12gb", Memory: 12288, Count: 2}},
+					{device.MigTemplate{Name: "4g.24gb", Memory: 24576, Count: 1}},
 				},
 			},
 			{
 				Models: []string{"A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 7}},
-					{util.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
-					{util.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}},
-					{util.MigTemplate{Name: "3g.20gb", Memory: 20480, Count: 2}},
-					{util.MigTemplate{Name: "7g.40gb", Memory: 40960, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 7}},
+					{device.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
+					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}},
+					{device.MigTemplate{Name: "3g.20gb", Memory: 20480, Count: 2}},
+					{device.MigTemplate{Name: "7g.40gb", Memory: 40960, Count: 1}},
 				},
 			},
 			{
 				Models: []string{"A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"},
-				Geometries: []util.Geometry{
-					{util.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 7}},
-					{util.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
-					{util.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}},
-					{util.MigTemplate{Name: "3g.40gb", Memory: 40960, Count: 2}},
-					{util.MigTemplate{Name: "7g.80gb", Memory: 81920, Count: 1}},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 7}},
+					{device.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
+					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}},
+					{device.MigTemplate{Name: "3g.40gb", Memory: 40960, Count: 2}},
+					{device.MigTemplate{Name: "7g.80gb", Memory: 81920, Count: 1}},
 				},
 			},
 		},
@@ -77,7 +84,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 		name          string
 		model         string
 		deviceIdx     int
-		containerDev  util.ContainerDevice
+		containerDev  device.ContainerDevice
 		expectedPos   int
 		expectedReset bool
 		expectedMig   map[string]int32
@@ -86,7 +93,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "2g.10gb template",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[1-1]",
 				Usedmem: 3000,
@@ -101,7 +108,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "1g.5gb template",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[0-1]",
 				Usedmem: 3000,
@@ -116,7 +123,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			name:      "no reset needed",
 			model:     "A100-SXM4-40GB",
 			deviceIdx: 0,
-			containerDev: util.ContainerDevice{
+			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[0-2]",
 				Usedmem: 3000,
@@ -152,5 +159,117 @@ func TestGenerateMigTemplate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func Test_PodAllocationTrySuccess(t *testing.T) {
+	// Initialize fake clientset and pre-load test data
+	client.KubeClient = fake.NewSimpleClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "testpod",
+			Namespace:   "default",
+			Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["NVIDIA"]: "some-value"},
+		},
+	}
+
+	// Add the pod to the fake clientset
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test pod: %v", err)
+	}
+
+	nodeName := "test-node"
+	devName := "NVIDIA"
+	lockName := "test-lock"
+
+	// Call the function under test
+	PodAllocationTrySuccess(nodeName, devName, lockName, pod)
+
+	// Refresh the pod state from the fake clientset and check the annotations
+	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed pod: %v", err)
+	}
+
+	annos, ok := refreshedPod.Annotations[device.InRequestDevices[devName]]
+	if !ok || annos == "" {
+		t.Error("Expected annotations to be updated")
+	}
+}
+
+func Test_PodAllocationSuccess(t *testing.T) {
+	// Initialize fake clientset and pre-load test data
+	client.KubeClient = fake.NewSimpleClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testpod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"test-annotation-key": "test-annotation-value",
+			},
+		},
+	}
+
+	// Add the pod to the fake clientset
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test pod: %v", err)
+	}
+
+	nodeName := "test-node"
+	lockName := "test-lock"
+
+	// Update pod annotations and release the lock as part of the setup for the test
+	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
+
+	// Call the function under test
+	PodAllocationSuccess(nodeName, pod, lockName)
+
+	// Refresh the pod state from the fake clientset and check the DeviceBindPhase annotation
+	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed pod: %v", err)
+	}
+
+	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
+	if !ok || annos != util.DeviceBindSuccess {
+		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindSuccess, annos)
+	}
+}
+func Test_PodAllocationFailed(t *testing.T) {
+
+	client.KubeClient = fake.NewSimpleClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "testpod",
+			Namespace:   "default",
+			Annotations: map[string]string{"test-annotation-key": "test-annotation-value"},
+		},
+	}
+
+	// add pod to the fake client
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test pod: %v", err)
+	}
+
+	nodeName := "test-node"
+	lockName := "test-lock"
+
+	// simulate a failed pod allocation
+	PodAllocationFailed(nodeName, pod, lockName)
+
+	// retrieve the pod from the fake client
+	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed pod: %v", err)
+	}
+
+	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
+	if !ok {
+		t.Error("Expected DeviceBindPhase annotation to be present")
+	} else if annos != util.DeviceBindFailed {
+		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
 	}
 }

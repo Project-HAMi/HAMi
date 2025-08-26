@@ -26,8 +26,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -80,8 +80,8 @@ func InitMLUDevice(config CambriconConfig) *CambriconDevices {
 	MLUResourceCount = config.ResourceCountName
 	MLUResourceMemory = config.ResourceMemoryName
 	MLUResourceCores = config.ResourceCoreName
-	util.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
-	util.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
+	device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
 	return &CambriconDevices{}
 }
 
@@ -181,16 +181,16 @@ func (dev *CambriconDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	return true, true
 }
 
-func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
-	nodedevices := []*util.DeviceInfo{}
+func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceCores), resource.DecimalSI).AsInt64()
 	if !ok || cards == 0 {
-		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MLUResourceCores)
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", MLUResourceCores)
 	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
-		nodedevices = append(nodedevices, &util.DeviceInfo{
+		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:   uint(i),
 			ID:      n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:   100,
@@ -214,14 +214,14 @@ func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	return ok, nil
 }
 
-func (dev *CambriconDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, CambriconMLUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *CambriconDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *CambriconDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[MLUUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
@@ -240,7 +240,7 @@ func (dev *CambriconDevices) checkUUID(annos map[string]string, d util.DeviceUsa
 	return true
 }
 
-func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count mlu devices for container ", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
@@ -285,7 +285,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 				mempnum = 100
 			}
 
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             CambriconMLUDevice,
 				Memreq:           int32(memnum),
@@ -294,44 +294,44 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{
+	return device.ContainerDeviceRequest{
 		Nums: 0,
 	}
 }
 
-func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[CambriconMLUDevice]
 	if ok {
 		(*annoinput)[DsmluResourceAssigned] = "false"
 		(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", devlist[0][0].Idx, devlist[0][0].Usedcores, devlist[0][0].Usedmem/256)
-		deviceStr := util.EncodePodSingleDevice(devlist)
-		(*annoinput)[util.InRequestDevices[CambriconMLUDevice]] = deviceStr
-		(*annoinput)[util.SupportDevices[CambriconMLUDevice]] = deviceStr
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.InRequestDevices[CambriconMLUDevice], deviceStr)
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", util.SupportDevices[CambriconMLUDevice], deviceStr)
+		deviceStr := device.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.InRequestDevices[CambriconMLUDevice]] = deviceStr
+		(*annoinput)[device.SupportDevices[CambriconMLUDevice]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[CambriconMLUDevice], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[CambriconMLUDevice], deviceStr)
 		return *annoinput
 	}
 	return *annoinput
 }
 
-func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *CambriconDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (cam *CambriconDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -350,7 +350,7 @@ func (cam *CambriconDevices) Fit(devices []*util.DeviceUsage, request util.Conta
 			}
 			k.Nums = originReq
 			prevnuma = dev.Numa
-			tmpDevs = make(map[string]util.ContainerDevices)
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !cam.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
@@ -402,7 +402,7 @@ func (cam *CambriconDevices) Fit(devices []*util.DeviceUsage, request util.Conta
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,

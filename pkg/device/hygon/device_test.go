@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -204,7 +205,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Node
-		want []*util.DeviceInfo
+		want []*device.DeviceInfo
 		err  error
 	}{
 		{
@@ -214,7 +215,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Annotations: map[string]string{},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  errors.New("annos not found " + RegisterAnnos),
 		},
 		{
@@ -226,7 +227,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{
+			want: []*device.DeviceInfo{
 				{
 					ID:      "test-0",
 					Count:   int32(1),
@@ -250,7 +251,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  errors.New("no gpu found on node"),
 		},
 		{
@@ -262,7 +263,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  errors.New("node annotations not decode successfully"),
 		},
 		{
@@ -274,7 +275,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  errors.New("node annotations not decode successfully"),
 		},
 	}
@@ -369,8 +370,8 @@ func Test_checkType(t *testing.T) {
 		name string
 		args struct {
 			annos map[string]string
-			d     util.DeviceUsage
-			n     util.ContainerDeviceRequest
+			d     device.DeviceUsage
+			n     device.ContainerDeviceRequest
 		}
 		want1 bool
 		want2 bool
@@ -380,16 +381,16 @@ func Test_checkType(t *testing.T) {
 			name: "the same type",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{
 					"hygon.com/use-dcutype": "DCU",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					Type: "DCU",
 				},
-				n: util.ContainerDeviceRequest{
+				n: device.ContainerDeviceRequest{
 					Type: "DCU",
 				},
 			},
@@ -401,16 +402,16 @@ func Test_checkType(t *testing.T) {
 			name: "the different type",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{
 					"hygon.com/use-dcutype": "DCU",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					Type: "DCU",
 				},
-				n: util.ContainerDeviceRequest{
+				n: device.ContainerDeviceRequest{
 					Type: "test",
 				},
 			},
@@ -435,7 +436,7 @@ func Test_checkUUID(t *testing.T) {
 		name string
 		args struct {
 			annos map[string]string
-			d     util.DeviceUsage
+			d     device.DeviceUsage
 		}
 		want bool
 	}{
@@ -443,12 +444,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "device id the same as the dcu in use uuid",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					"hygon.com/use-gpuuuid": "123",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "123",
 				},
 			},
@@ -458,12 +459,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "device id the different from the dcu in use uuid",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					"hygon.com/use-gpuuuid": "123",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "456",
 				},
 			},
@@ -473,10 +474,10 @@ func Test_checkUUID(t *testing.T) {
 			name: "no dcu in use uuid annos",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "456",
 				},
 			},
@@ -486,12 +487,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "device id the same as the dcu no use uuid",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					"hygon.com/nouse-gpuuuid": "123",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "123",
 				},
 			},
@@ -501,12 +502,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "device id the different from the dcu no use uuid",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					"hygon.com/nouse-gpuuuid": "123",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "456",
 				},
 			},
@@ -527,7 +528,7 @@ func Test_PatchAnnotations(t *testing.T) {
 		name string
 		args struct {
 			annoinput *map[string]string
-			pd        util.PodDevices
+			pd        device.PodDevices
 		}
 		want map[string]string
 	}{
@@ -535,12 +536,12 @@ func Test_PatchAnnotations(t *testing.T) {
 			name: "exist device",
 			args: struct {
 				annoinput *map[string]string
-				pd        util.PodDevices
+				pd        device.PodDevices
 			}{
 				annoinput: &map[string]string{},
-				pd: util.PodDevices{
-					HygonDCUDevice: util.PodSingleDevice{
-						[]util.ContainerDevice{
+				pd: device.PodDevices{
+					HygonDCUDevice: device.PodSingleDevice{
+						[]device.ContainerDevice{
 							{
 								Idx:       1,
 								UUID:      "test1",
@@ -553,18 +554,18 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.InRequestDevices[HygonDCUDevice]: "test1,DCU,2048,1:;",
-				util.SupportDevices[HygonDCUDevice]:   "test1,DCU,2048,1:;",
+				device.InRequestDevices[HygonDCUDevice]: "test1,DCU,2048,1:;",
+				device.SupportDevices[HygonDCUDevice]:   "test1,DCU,2048,1:;",
 			},
 		},
 		{
 			name: "no device",
 			args: struct {
 				annoinput *map[string]string
-				pd        util.PodDevices
+				pd        device.PodDevices
 			}{
 				annoinput: &map[string]string{},
-				pd:        util.PodDevices{},
+				pd:        device.PodDevices{},
 			},
 			want: map[string]string{},
 		},
@@ -582,7 +583,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
 		args *corev1.Container
-		want util.ContainerDeviceRequest
+		want device.ContainerDeviceRequest
 	}{
 		{
 			name: "don't set to limits and request",
@@ -592,7 +593,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Requests: corev1.ResourceList{},
 				},
 			},
-			want: util.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "dcuResourceCount,dcuesourceMem and dcuResourceCores set to limits and request",
@@ -610,7 +611,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             HygonDCUDevice,
 				Memreq:           int32(1024),
@@ -632,7 +633,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             HygonDCUDevice,
 				Memreq:           int32(1024),
@@ -653,7 +654,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             HygonDCUDevice,
 				Memreq:           int32(0),
@@ -706,7 +707,7 @@ func TestDevices_LockNode(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", util.InRequestDevices["DCU"]: "some-value"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value"},
 				},
 			}
 
@@ -769,7 +770,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", util.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values"},
 				},
 			}
 
@@ -809,8 +810,8 @@ func TestDevices_Fit(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		devices    []*util.DeviceUsage
-		request    util.ContainerDeviceRequest
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
 		annos      map[string]string
 		wantFit    bool
 		wantLen    int
@@ -819,7 +820,7 @@ func TestDevices_Fit(t *testing.T) {
 	}{
 		{
 			name: "fit success",
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					ID:        "dev-0",
 					Index:     0,
@@ -847,7 +848,7 @@ func TestDevices_Fit(t *testing.T) {
 					Health:    true,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           64,
 				MemPercentagereq: 0,
@@ -862,7 +863,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: memory not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -875,7 +876,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -890,7 +891,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: core not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -903,7 +904,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -918,7 +919,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: type mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -931,7 +932,7 @@ func TestDevices_Fit(t *testing.T) {
 				Health:    true,
 				Type:      HygonDCUDevice,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             "OtherType",
 				Memreq:           512,
@@ -946,7 +947,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign use uuid mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-1",
 				Index:     0,
 				Used:      0,
@@ -959,7 +960,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -974,7 +975,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign no use uuid match",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -987,7 +988,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1002,7 +1003,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: card overused",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      100,
@@ -1015,7 +1016,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1030,7 +1031,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success: but core limit can't exceed 100",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1043,7 +1044,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1058,7 +1059,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  card exclusively",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1071,7 +1072,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1086,7 +1087,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  CardComputeUnitsExhausted",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1099,7 +1100,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1114,7 +1115,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  AllocatedCardsInsufficientRequest",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1127,7 +1128,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1142,7 +1143,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success:  memory percentage",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1155,7 +1156,7 @@ func TestDevices_Fit(t *testing.T) {
 				Type:      HygonDCUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
 				MemPercentagereq: 10,
@@ -1172,8 +1173,8 @@ func TestDevices_Fit(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			allocated := &util.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			allocated := &device.PodDevices{}
+			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
@@ -1198,25 +1199,25 @@ func TestDevices_Fit(t *testing.T) {
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
-		deviceUsage *util.DeviceUsage
-		ctr         *util.ContainerDevice
+		deviceUsage *device.DeviceUsage
+		ctr         *device.ContainerDevice
 		wantErr     bool
-		wantUsage   *util.DeviceUsage
+		wantUsage   *device.DeviceUsage
 	}{
 		{
 			name: "test add resource usage",
-			deviceUsage: &util.DeviceUsage{
+			deviceUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      0,
 				Usedcores: 15,
 				Usedmem:   2000,
 			},
-			ctr: &util.ContainerDevice{
+			ctr: &device.ContainerDevice{
 				UUID:      "dev-0",
 				Usedcores: 50,
 				Usedmem:   1024,
 			},
-			wantUsage: &util.DeviceUsage{
+			wantUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      1,
 				Usedcores: 65,

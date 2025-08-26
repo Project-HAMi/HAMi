@@ -19,10 +19,8 @@ package util
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -34,27 +32,13 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
-
-	safecast "github.com/ccoveille/go-safecast"
-)
-
-const (
-	// OneContainerMultiDeviceSplitSymbol this is when one container use multi device, use : symbol to join device info.
-	OneContainerMultiDeviceSplitSymbol = ":"
-
-	// OnePodMultiContainerSplitSymbol this is when one pod having multi container and more than one container use device, use ; symbol to join device info.
-	OnePodMultiContainerSplitSymbol = ";"
 )
 
 var (
-	InRequestDevices map[string]string
-	SupportDevices   map[string]string
-	HandshakeAnnos   map[string]string
+	HandshakeAnnos map[string]string
 )
 
 func init() {
-	InRequestDevices = make(map[string]string)
-	SupportDevices = make(map[string]string)
 	HandshakeAnnos = make(map[string]string)
 }
 
@@ -145,209 +129,6 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 	return nil, nil
 }
 
-func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
-	if !strings.Contains(str, OneContainerMultiDeviceSplitSymbol) {
-		return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-	}
-	tmp := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
-	var retval []*DeviceInfo
-	for _, val := range tmp {
-		if strings.Contains(val, ",") {
-			items := strings.Split(val, ",")
-			if len(items) == 7 || len(items) == 9 {
-				count, _ := strconv.ParseInt(items[1], 10, 32)
-				devmem, _ := strconv.ParseInt(items[2], 10, 32)
-				devcore, _ := strconv.ParseInt(items[3], 10, 32)
-				health, _ := strconv.ParseBool(items[6])
-				numa, _ := strconv.Atoi(items[5])
-				mode := "hami-core"
-				index := 0
-				if len(items) == 9 {
-					index, _ = strconv.Atoi(items[7])
-					mode = items[8]
-				}
-				count32, err := safecast.ToInt32(count)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				devmem32, err := safecast.ToInt32(devmem)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				devcore32, err := safecast.ToInt32(devcore)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				i := DeviceInfo{
-					ID:      items[0],
-					Count:   count32,
-					Devmem:  devmem32,
-					Devcore: devcore32,
-					Type:    items[4],
-					Numa:    numa,
-					Health:  health,
-					Mode:    mode,
-					Index:   uint(index),
-				}
-				retval = append(retval, &i)
-			} else {
-				return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-			}
-		}
-	}
-	return retval, nil
-}
-
-func DecodePairScores(pairScores string) (*DevicePairScores, error) {
-	devicePairScores := &DevicePairScores{}
-	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
-		return nil, err
-	}
-	return devicePairScores, nil
-}
-
-func EncodeNodeDevices(dlist []*DeviceInfo) string {
-	builder := strings.Builder{}
-	for _, val := range dlist {
-		builder.WriteString(val.ID)
-		builder.WriteString(",")
-		builder.WriteString(strconv.FormatInt(int64(val.Count), 10))
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devmem)))
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Devcore)))
-		builder.WriteString(",")
-		builder.WriteString(val.Type)
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(val.Numa))
-		builder.WriteString(",")
-		builder.WriteString(strconv.FormatBool(val.Health))
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Index)))
-		builder.WriteString(",")
-		builder.WriteString(val.Mode)
-		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
-		//tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + "," + strconv.Itoa(val.Index) + OneContainerMultiDeviceSplitSymbol
-	}
-	tmp := builder.String()
-	klog.V(5).Infof("Encoded node Devices: %s", tmp)
-	return tmp
-}
-
-func MarshalNodeDevices(dlist []*DeviceInfo) string {
-	data, err := json.Marshal(dlist)
-	if err != nil {
-		return ""
-	}
-	return string(data)
-}
-
-func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
-	var dlist []*DeviceInfo
-	err := json.Unmarshal([]byte(str), &dlist)
-	return dlist, err
-}
-
-func EncodeContainerDevices(cd ContainerDevices) string {
-	tmp := ""
-	for _, val := range cd {
-		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + OneContainerMultiDeviceSplitSymbol
-	}
-	klog.Infof("Encoded container Devices: %s", tmp)
-	return tmp
-	//return strings.Join(cd, ",")
-}
-
-func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
-	tmp := ""
-	for _, val := range cd {
-		if strings.Compare(val.Type, t) == 0 {
-			tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
-		}
-		tmp += OneContainerMultiDeviceSplitSymbol
-	}
-	klog.Infof("Encoded container Certain Device type: %s->%s", t, tmp)
-	return tmp
-}
-
-func EncodePodSingleDevice(pd PodSingleDevice) string {
-	res := ""
-	for _, ctrdevs := range pd {
-		res = res + EncodeContainerDevices(ctrdevs)
-		res = res + OnePodMultiContainerSplitSymbol
-	}
-	klog.Infof("Encoded pod single devices %s", res)
-	return res
-}
-
-func EncodePodDevices(checklist map[string]string, pd PodDevices) map[string]string {
-	res := map[string]string{}
-	for devType, cd := range pd {
-		klog.Infoln("devtype=", devType)
-		res[checklist[devType]] = EncodePodSingleDevice(cd)
-	}
-	klog.Infof("Encoded pod Devices %s\n", res)
-	return res
-}
-
-func DecodeContainerDevices(str string) (ContainerDevices, error) {
-	if len(str) == 0 {
-		return ContainerDevices{}, nil
-	}
-	cd := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
-	contdev := ContainerDevices{}
-	tmpdev := ContainerDevice{}
-	klog.V(5).Infof("Start to decode container device %s", str)
-	if len(str) == 0 {
-		return ContainerDevices{}, nil
-	}
-	for _, val := range cd {
-		if strings.Contains(val, ",") {
-			//fmt.Println("cd is ", val)
-			tmpstr := strings.Split(val, ",")
-			if len(tmpstr) < 4 {
-				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
-			}
-			tmpdev.UUID = tmpstr[0]
-			tmpdev.Type = tmpstr[1]
-			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
-			tmpdev.Usedmem = int32(devmem)
-			devcores, _ := strconv.ParseInt(tmpstr[3], 10, 32)
-			tmpdev.Usedcores = int32(devcores)
-			contdev = append(contdev, tmpdev)
-		}
-	}
-	klog.V(5).Infof("Finished decoding container devices. Total devices: %d", len(contdev))
-	return contdev, nil
-}
-
-func DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error) {
-	klog.V(5).Infof("checklist is [%+v], annos is [%+v]", checklist, annos)
-	if len(annos) == 0 {
-		return PodDevices{}, nil
-	}
-	pd := make(PodDevices)
-	for devID, devs := range checklist {
-		str, ok := annos[devs]
-		if !ok {
-			continue
-		}
-		pd[devID] = make(PodSingleDevice, 0)
-		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
-			cd, err := DecodeContainerDevices(s)
-			if err != nil {
-				return PodDevices{}, nil
-			}
-			if len(cd) == 0 {
-				continue
-			}
-			pd[devID] = append(pd[devID], cd)
-		}
-	}
-	klog.InfoS("Decoded pod annos", "poddevices", pd)
-	return pd, nil
-}
-
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
@@ -412,18 +193,6 @@ func InitKlogFlags() *flag.FlagSet {
 	return flagset
 }
 
-func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	handshake := n.Annotations[HandshakeAnnos[devType]]
-	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
-		return time.Now().Before(formertime.Add(time.Second * 60)), false
-	} else if strings.Contains(handshake, "Deleted") {
-		return true, false
-	} else {
-		return true, true
-	}
-}
-
 func MarkAnnotationsToDelete(devType string, nn string) error {
 	tmppat := make(map[string]string)
 	tmppat[devType] = "Deleted_" + time.Now().Format(time.DateTime)
@@ -435,65 +204,6 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 	return PatchNodeAnnotations(n, tmppat)
 }
 
-// Enhanced ExtractMigTemplatesFromUUID with error handling.
-func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
-	parts := strings.Split(uuid, "[")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing '[' delimiter")
-	}
-
-	tmp := parts[1]
-	parts = strings.Split(tmp, "]")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing ']' delimiter")
-	}
-
-	tmp = parts[0]
-	parts = strings.Split(tmp, "-")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing '-' delimiter")
-	}
-
-	templateIdx, err := strconv.Atoi(parts[0])
-	if err != nil {
-		return -1, -1, fmt.Errorf("invalid template index: %v", err)
-	}
-
-	pos, err := strconv.Atoi(parts[1])
-	if err != nil {
-		return -1, -1, fmt.Errorf("invalid position: %v", err)
-	}
-
-	return templateIdx, pos, nil
-}
-
-func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
-	var err error
-	for _, val := range templates[templateIdx] {
-		count := 0
-		for count < int(val.Count) {
-			n.Index, err = safecast.ToInt32(templateIdx)
-			if err != nil {
-				continue
-			}
-			n.UsageList = append(n.UsageList, MigTemplateUsage{
-				Name:   val.Name,
-				Memory: val.Memory,
-				InUse:  false,
-			})
-			count++
-		}
-	}
-}
-
-func GetDevicesUUIDList(infos []*DeviceInfo) []string {
-	uuids := make([]string, 0)
-	for _, info := range infos {
-		uuids = append(uuids, info.ID)
-	}
-	return uuids
-}
-
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	userGPUPolicy := defaultPolicy
 	if task != nil && task.Annotations != nil {
@@ -502,4 +212,12 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 		}
 	}
 	return userGPUPolicy
+}
+
+func IsPodInTerminatedState(pod *corev1.Pod) bool {
+	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
+}
+
+func AllContainersCreated(pod *corev1.Pod) bool {
+	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }

@@ -57,10 +57,10 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -138,8 +138,8 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 	return mode, nil
 }
 
-func LoadNvidiaDevicePluginConfig() (*device.Config, string, error) {
-	sConfig, err := device.LoadConfig(*ConfigFile)
+func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
+	sConfig, err := config.LoadConfig(*ConfigFile)
 	if err != nil {
 		klog.Fatalf(`failed to load device config file %s: %v`, *ConfigFile, err)
 	}
@@ -151,20 +151,20 @@ func LoadNvidiaDevicePluginConfig() (*device.Config, string, error) {
 }
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
-func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool, sConfig *device.Config, mode string) *NvidiaDevicePlugin {
+func NewNvidiaDevicePlugin(nvconfig *nvidia.DeviceConfig, resourceManager rm.ResourceManager, cdiHandler cdi.Interface, cdiEnabled bool, sConfig *config.Config, mode string) *NvidiaDevicePlugin {
 	_, name := resourceManager.Resource().Split()
 
-	deviceListStrategies, _ := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+	deviceListStrategies, _ := spec.NewDeviceListStrategies(*nvconfig.Flags.Plugin.DeviceListStrategy)
 
-	klog.Infoln("reading config=", config, "resourceName", config.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
+	klog.Infoln("reading config=", nvconfig, "resourceName", nvconfig.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
 
 	// Initialize devices with configuration
-	if err := device.InitDevicesWithConfig(sConfig); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)
 	}
 	return &NvidiaDevicePlugin{
 		rm:                         resourceManager,
-		config:                     config,
+		config:                     nvconfig,
 		deviceListEnvvar:           "NVIDIA_VISIBLE_DEVICES",
 		deviceListStrategies:       deviceListStrategies,
 		applyMutex:                 sync.Mutex{},
@@ -175,7 +175,7 @@ func NewNvidiaDevicePlugin(config *nvidia.DeviceConfig, resourceManager rm.Resou
 		socket:                     kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
 		cdiHandler:                 cdiHandler,
 		cdiEnabled:                 cdiEnabled,
-		cdiAnnotationPrefix:        *config.Flags.Plugin.CDIAnnotationPrefix,
+		cdiAnnotationPrefix:        *nvconfig.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:            sConfig.NvidiaConfig,
 		operatingMode:              mode,
 		migCurrent:                 nvidia.MigPartedSpec{},
@@ -470,21 +470,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		if strings.Contains(req.DevicesIDs[0], "MIG") {
 			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
 				if len(req.DevicesIDs) > 1 {
-					device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIDs))
 				}
 			}
 
 			for _, id := range req.DevicesIDs {
 				if !plugin.rm.Devices().Contains(id) {
-					device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
 			response, err := plugin.getAllocateResponse(req.DevicesIDs)
 			if err != nil {
-				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
@@ -492,11 +492,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
@@ -506,7 +506,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				device.PodAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
@@ -581,7 +581,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	device.PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 

@@ -27,7 +27,7 @@ import (
 type NodeScore struct {
 	NodeID  string
 	Node    *corev1.Node
-	Devices util.PodDevices
+	Devices device.PodDevices
 	// Score recode every node all device user/allocate score
 	Score float32
 }
@@ -53,7 +53,7 @@ func (l NodeScoreList) Less(i, j int) bool {
 	return l.NodeList[i].Score < l.NodeList[j].Score
 }
 
-func (ns *NodeScore) OverrideScore(previous []*util.DeviceUsage, policy string) {
+func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string) {
 	// current user having request resource
 	devScore := float32(0)
 	for idx, val := range ns.Devices {
@@ -63,8 +63,8 @@ func (ns *NodeScore) OverrideScore(previous []*util.DeviceUsage, policy string) 
 	klog.V(2).Infof("node %s default score is %f, computer override score is %f", ns.NodeID, ns.Score-devScore, ns.Score)
 }
 
-func (ns *NodeScore) SnapshotDevice(devices DeviceUsageList) []*util.DeviceUsage {
-	snapshot := []*util.DeviceUsage{}
+func (ns *NodeScore) SnapshotDevice(devices DeviceUsageList) []*device.DeviceUsage {
+	snapshot := []*device.DeviceUsage{}
 	for _, val := range devices.DeviceLists {
 		tmp := *val.Device
 		snapshot = append(snapshot, &tmp)

@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -60,7 +61,7 @@ type AWSNeuronConfig struct {
 }
 
 func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
-	util.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
+	device.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
 	return &AWSNeuronDevices{
 		resourceCountName: config.ResourceCountName,
 		resourceCoreName:  config.ResourceCoreName,
@@ -84,12 +85,12 @@ func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	return ok, nil
 }
 
-func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
-	nodedevices := []*util.DeviceInfo{}
+func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	counts, ok := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCountName), resource.DecimalSI).AsInt64()
 	if !ok || counts == 0 {
-		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", dev.resourceCountName)
 	}
 	coresTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(dev.resourceCoreName), resource.DecimalSI).AsInt64()
 	if dev.coresPerAWSNeuron == 0 {
@@ -106,7 +107,7 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 	customInfo[AWSNodeType] = n.Labels["node.kubernetes.io/instance-type"]
 
 	for int64(i) < counts {
-		nodedevices = append(nodedevices, &util.DeviceInfo{
+		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:      uint(i),
 			ID:         n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
 			Count:      int32(dev.coresPerAWSNeuron),
@@ -127,10 +128,10 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, 
 	return nodedevices, nil
 }
 
-func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[AWSNeuronDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[util.SupportDevices[AWSNeuronDevice]] = util.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.SupportDevices[AWSNeuronDevice]] = device.EncodePodSingleDevice(devlist)
 		value := ""
 		for ctridx, dp := range devlist {
 			if len(dp) > 0 {
@@ -180,14 +181,14 @@ func (dev *AWSNeuronDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *AWSNeuronDevices) checkType(n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *AWSNeuronDevices) checkType(n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, AWSNeuronDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *AWSNeuronDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *AWSNeuronDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[AWSNeuronUseUUID]
 	if ok {
 		klog.V(5).Infof("check uuid for AWSNeuron user uuid [%s], device id is %s", userUUID, d.ID)
@@ -210,7 +211,7 @@ func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	return true, true
 }
 
-func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count awsNeuron devices for container ", ctr.Name)
 	awsResourceCount := corev1.ResourceName(dev.resourceCountName)
 	awsResourceCores := corev1.ResourceName(dev.resourceCoreName)
@@ -223,7 +224,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 			klog.InfoS("Detected awsNeuron device request",
 				"container", ctr.Name,
 				"deviceCount", n)
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             AWSNeuronDevice,
 				Memreq:           0,
@@ -249,7 +250,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 				if n >= 2 {
 					corenum = 2
 				}
-				return util.ContainerDeviceRequest{
+				return device.ContainerDeviceRequest{
 					Nums:             int32(num),
 					Type:             AWSNeuronDevice,
 					Memreq:           0,
@@ -259,14 +260,14 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) uti
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
-func (dev *AWSNeuronDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *AWSNeuronDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
@@ -316,7 +317,7 @@ func addCoreUsage(prev map[string]any, require int) map[string]any {
 	}
 	return res
 }
-func continuousDeviceAvailable(devices []*util.DeviceUsage, start int, count int) []int {
+func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count int) []int {
 	if len(devices) < start+count {
 		return []int{}
 	}
@@ -332,7 +333,7 @@ func continuousDeviceAvailable(devices []*util.DeviceUsage, start int, count int
 	return res
 }
 
-func graphSelect(devices []*util.DeviceUsage, count int) []int {
+func graphSelect(devices []*device.DeviceUsage, count int) []int {
 	if len(devices) == 0 || devices[0].CustomInfo == nil || devices[0].CustomInfo[AWSNodeType] == nil {
 		return []int{}
 	}
@@ -369,11 +370,11 @@ func graphSelect(devices []*util.DeviceUsage, count int) []int {
 	return []int{}
 }
 
-func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeinfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	tmpDevs := make(map[string]util.ContainerDevices)
+	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	if k.Nums > 1 {
 		alloc := graphSelect(devices, int(request.Nums))
@@ -386,7 +387,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 			for _, val := range devices {
 				if val.Index == uint(dev) {
 					customInfo := addCoreUsage(val.CustomInfo, int(k.Coresreq))
-					tmpDevs[request.Type] = append(tmpDevs[request.Type], util.ContainerDevice{
+					tmpDevs[request.Type] = append(tmpDevs[request.Type], device.ContainerDevice{
 						Idx:        int(val.Index),
 						UUID:       val.ID,
 						Type:       request.Type,
@@ -444,7 +445,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*util.DeviceUsage, request util.Co
 		if countValue, ok := customInfo[AWSUsageInfo].(int); ok {
 			usedcores = countValue
 		}
-		tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+		tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 			Idx:        int(dev.Index),
 			UUID:       dev.ID,
 			Type:       k.Type,

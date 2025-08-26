@@ -19,7 +19,7 @@ package scheduler
 import (
 	"sync"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +32,7 @@ type podInfo struct {
 	Name      string
 	UID       k8stypes.UID
 	NodeID    string
-	Devices   util.PodDevices
+	Devices   device.PodDevices
 	CtrIDs    []string
 }
 
@@ -55,7 +55,7 @@ func newPodManager() *podManager {
 	return pm
 }
 
-func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices util.PodDevices) {
+func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDevices) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
