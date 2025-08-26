@@ -59,6 +59,8 @@ func init() {
 	rootCmd.PersistentFlags().SortFlags = false
 
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
+	rootCmd.Flags().StringVar(&config.SchedulerLogHTTPBind, "scheduler-log-http_bind", "127.0.0.1:9090", "http server bind address for scheduler log")
+	rootCmd.Flags().IntVar(&config.SchedulerLogMaxCachePod, "scheduler-log-max-cached-pods", 1000, "max size of cached pods for scheduler log")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
@@ -127,21 +129,25 @@ func start() error {
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
-	klog.Info("listen on ", config.HTTPBind)
 
 	if enableProfiling {
 		injectProfilingRoute(router)
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
 	}
 
-	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
+	// start scheduler log http server
+	go func() {
+		logRouter := httprouter.New()
+		logRouter.GET("/api/v1/namespaces/:namespace/pods/:name/schedulerlog", routes.SchedulerLogRoute(sher))
+		klog.InfoS("Starting scheduler log server", "address", config.SchedulerLogHTTPBind)
+		if err := runServer(config.SchedulerLogHTTPBind, logRouter); err != nil {
+			klog.Fatalf("Failed to start scheduler log server：%v", err)
 		}
-	} else {
-		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
-		}
+	}()
+
+	klog.InfoS("Starting main HTTP server", "address", config.HTTPBind)
+	if err := runServer(config.HTTPBind, router); err != nil {
+		return fmt.Errorf("listen and Serve error, %v", err)
 	}
 	return nil
 }
@@ -149,5 +155,15 @@ func start() error {
 func main() {
 	if err := rootCmd.Execute(); err != nil {
 		klog.Fatal(err)
+	}
+}
+
+// runServer is a common function to start an HTTP or HTTPS server with the given address and router.
+// It handles both TLS and non-TLS configurations.
+func runServer(address string, router *httprouter.Router) error {
+	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
+		return http.ListenAndServe(address, router)
+	} else {
+		return http.ListenAndServeTLS(address, tlsCertFile, tlsKeyFile, router)
 	}
 }
