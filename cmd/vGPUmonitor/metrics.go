@@ -105,12 +105,32 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
-		"Container device meory description",
+		"Container device memory description. The label context, module, data and offset will be deprecated in 2.8.0.",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"Device_utilization_desc_of_container",
 		"Container device utilization description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+	ctrDeviceMemoryContext = prometheus.NewDesc(
+		"Device_memory_context_of_container",
+		"Container device memory context description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+	ctrDeviceMemoryModule = prometheus.NewDesc(
+		"Device_memory_module_of_container",
+		"Container device memory module description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+	ctrDeviceMemoryData = prometheus.NewDesc(
+		"Device_memory_data_of_container",
+		"Container device memory data description",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+	ctrDeviceMemoryOffset = prometheus.NewDesc(
+		"Device_memory_offset_of_container",
+		"Container device memory offset description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	ctrDeviceLastKernelDesc = prometheus.NewDesc(
@@ -400,8 +420,28 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 
 		// Send memory-related metrics with additional labels
 		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.CounterValue, float64(memoryTotal), memoryLabels...); err != nil {
+		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...); err != nil {
 			klog.Errorf("Failed to send memory-related metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			return err
+		}
+
+		if err := sendMetric(ch, ctrDeviceMemoryContext, prometheus.GaugeValue, float64(memoryContextSize), labels...); err != nil {
+			klog.Errorf("Failed to send memory context metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			return err
+		}
+
+		if err := sendMetric(ch, ctrDeviceMemoryModule, prometheus.GaugeValue, float64(memoryModuleSize), labels...); err != nil {
+			klog.Errorf("Failed to send memory module metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			return err
+		}
+
+		if err := sendMetric(ch, ctrDeviceMemoryData, prometheus.GaugeValue, float64(memoryBufferSize), labels...); err != nil {
+			klog.Errorf("Failed to send memory buffer metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			return err
+		}
+
+		if err := sendMetric(ch, ctrDeviceMemoryOffset, prometheus.GaugeValue, float64(memoryOffset), labels...); err != nil {
+			klog.Errorf("Failed to send memory offset metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
 			return err
 		}
 
