@@ -158,7 +158,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 				for _, k := range n {
 					sums += int(k.Nums)
 				}
-				
+
 				// container need no device and we have got certain deviceType
 				if sums == 0 && deviceType != "" {
 					score.Devices[deviceType] = append(score.Devices[deviceType], util.ContainerDevices{})
@@ -170,10 +170,10 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs util.Po
 				for idx := range score.Devices {
 					deviceType = idx
 					for len(score.Devices[idx]) <= ctrid {
-							emptyContainerDevices := util.ContainerDevices{}
-							emptyPodSingleDevice := util.PodSingleDevice{}
-							emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
-							score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+						emptyContainerDevices := util.ContainerDevices{}
+						emptyPodSingleDevice := util.PodSingleDevice{}
+						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
+						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
 					}
 				}
 				ctrfit = fit
