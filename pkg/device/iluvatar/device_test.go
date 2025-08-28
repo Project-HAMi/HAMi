@@ -23,6 +23,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
@@ -32,8 +33,8 @@ import (
 )
 
 func TestGetNodeDevices(t *testing.T) {
-	IluvatarResourceCores = "iluvatar.ai/MR-V100.vCore"
-	IluvatarResourceMemory = "iluvatar.ai/MR-V100.vMem"
+	IluvatarResourceCores = "iluvatar.ai/mrv100-core"
+	IluvatarResourceMemory = "iluvatar.ai/mrv100-memory"
 
 	tests := []struct {
 		name     string
@@ -72,7 +73,7 @@ func TestGetNodeDevices(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			dev := &IluvatarDevices{}
+			dev := &iluvatar.Devices{}
 			got, err := dev.GetNodeDevices(tt.node)
 			if (err != nil) != (tt.err != nil) {
 				t.Errorf("GetNodeDevices() error = %v, expected %v", err, tt.err)
@@ -145,8 +146,7 @@ func TestPatchAnnotations(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			annoInputCopy := make(map[string]string)
 			maps.Copy(annoInputCopy, tt.annoInput)
-
-			dev := &IluvatarDevices{}
+			dev := &iluvatar.Devices{}
 			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)
 
 			if len(got) != len(tt.expected) {
@@ -207,7 +207,7 @@ func Test_MutateAdmission(t *testing.T) {
 				ResourceMemoryName: "iluvatar.ai/vcuda-memory",
 			}
 			InitIluvatarDevice(config)
-			dev := IluvatarDevices{}
+			dev := &iluvatar.Devices{}
 			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
 		})
@@ -263,8 +263,8 @@ func Test_checkType(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
-			result1, result2, result3 := dev.checkType(test.args.annos, test.args.d, test.args.n)
+			dev := &iluvatar.Devices{}
+			result1, result2, result3 := dev.CheckType(test.args.annos, test.args.d, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 			assert.Equal(t, result3, test.want3)
@@ -357,8 +357,8 @@ func Test_checkUUID(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
-			result := dev.checkUUID(test.args.annos, test.args.d)
+			dev := iluvatar.Devices{}
+			result := dev.CheckUUID(test.args.annos, test.args.d)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -427,7 +427,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{}
+			dev := iluvatar.Devices{}
 			fs := flag.FlagSet{}
 			ParseConfig(&fs)
 			result := dev.GenerateResourceRequests(test.args)

@@ -338,6 +338,21 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  iluvatar:
+    enabled: true
+    customresources:
+      - iluvatar.ai/mrv50-vgpu
+      - iluvatar.ai/mrv50-memory
+      - iluvatar.ai/mrv50-core
+      - iluvatar.ai/mrv100-vgpu
+      - iluvatar.ai/mrv100-memory
+      - iluvatar.ai/mrv100-core
+      - iluvatar.ai/biv150-vgpu
+      - iluvatar.ai/biv150-memory
+      - iluvatar.ai/biv150-core
+      - iluvatar.ai/biv100-vgpu
+      - iluvatar.ai/biv100-memory
+      - iluvatar.ai/biv100-core
   awsneuron:
     customresources:
       - aws.amazon.com/neuron
