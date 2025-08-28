@@ -99,10 +99,14 @@ data:
                         "name": "{{ .Values.dcuResourceCores }}",
                         "ignoredByScheduler": true
                     },
+                    {{- if .Values.devices.iluvatar.enabled }}
+                    {{- range .Values.devices.iluvatar.customresources }}
                     {
-                        "name": "{{ .Values.iluvatarResourceName }}",
-                        "ignoredByScheduler": true
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
                     },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "metax-tech.com/gpu",
                         "ignoredByScheduler": true
