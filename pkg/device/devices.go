@@ -58,7 +58,7 @@ type Devices interface {
 	AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error
 	Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string)
 	// This should not be associated with a specific device object
-	//ParseConfig(fs *flag.FlagSet)
+	// ParseConfig(fs *flag.FlagSet)
 }
 
 type Config struct {
@@ -67,7 +67,7 @@ type Config struct {
 	HygonConfig     hygon.HygonConfig         `yaml:"hygon"`
 	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
-	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	IluvatarConfig  []iluvatar.VGPUConfig     `yaml:"iluvatar"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
@@ -141,13 +141,6 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return hygon.InitDCUDevice(hygonConfig), nil
 		}, config.HygonConfig},
-		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg any) (Devices, error) {
-			iluvatarConfig, ok := cfg.(iluvatar.IluvatarConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", iluvatar.IluvatarGPUCommonWord)
-			}
-			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
-		}, config.IluvatarConfig},
 		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {
@@ -195,6 +188,14 @@ func InitDevicesWithConfig(config *Config) error {
 	// Initialize all devices using the wrapped functions
 	for _, initializer := range deviceInitializers {
 		initializeDevice(initializer.deviceType, initializer.commonWord, initializer.initFunc, initializer.config)
+	}
+
+	// Initialize iluvatar devices
+	for _, dev := range iluvatar.InitDevices(config.IluvatarConfig) {
+		commonWord := dev.CommonWord()
+		devicesMap[commonWord] = dev
+		DevicesToHandle = append(DevicesToHandle, commonWord)
+		klog.Infof("Iluvatar device %s initialized", commonWord)
 	}
 
 	// Initialize Ascend devices
@@ -256,10 +257,27 @@ mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
   resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
-  resourceCountName: "iluvatar.ai/vgpu"
-  resourceMemoryName: "iluvatar.ai/vcuda-memory"
-  resourceCoreName: "iluvatar.ai/vcuda-core"
+iluvatar:
+  - chipName: Iluvatar MR-V100
+    commonWord: mrv100
+    resourceName: iluvatar.ai/mrv100-vgpu
+    resourceMemoryName: iluvatar.ai/mrv100-memory
+    resourceCoreName: iluvatar.ai/mrv100-core
+  - chipName: Iluvatar MR-V50
+    commonWord: mrv50
+    resourceName: iluvatar.ai/mrv50-vgpu
+    resourceMemoryName: iluvatar.ai/mrv50-memory
+    resourceCoreName: iluvatar.ai/mrv50-core
+  - chipName: Iluvatar BI-V150
+    commonWord: biv150
+    resourceName: iluvatar.ai/biv150-vgpu
+    resourceMemoryName: iluvatar.ai/biv150-memory
+    resourceCoreName: iluvatar.ai/biv150-core
+  - chipName: Iluvatar BI-V100
+    commonWord: biv100
+    resourceName: iluvatar.ai/biv100-vgpu
+    resourceMemoryName: iluvatar.ai/biv100-memory
+    resourceCoreName: iluvatar.ai/biv100-core
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
 awsneuron:
