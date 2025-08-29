@@ -49,7 +49,11 @@ const (
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
 	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
-	AllocateMode = "nvidia.com/vgpu-mode"
+	// GPUUseIndexes is user can use specify GPU device for set GPU indexes.
+	GPUUseIndexes = "nvidia.com/use-gpuindexes"
+	// GPUNoUseIndexes is user can not use specify GPU device for set GPU indexes.
+	GPUNoUseIndexes = "nvidia.com/nouse-gpuindexes"
+	AllocateMode    = "nvidia.com/vgpu-mode"
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
@@ -420,6 +424,22 @@ func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d util.DeviceUsa
 	return true
 }
 
+func (dev *NvidiaGPUDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	userIndexes, ok := annos[GPUUseIndexes]
+	if ok {
+		klog.V(5).Infof("check index for nvidia user indexes [%s], device index is %d", userIndexes, d.Index)
+		return util.ContainsTargetNonNegativeInt(userIndexes, ",", int(d.Index))
+	}
+
+	noUserIndexes, ok := annos[GPUNoUseIndexes]
+	if ok {
+		klog.V(5).Infof("check index for nvidia not user indexes [%s], device index is %d", noUserIndexes, d.Index)
+		return !util.ContainsTargetNonNegativeInt(noUserIndexes, ",", int(d.Index))
+	}
+
+	return true
+}
+
 func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
@@ -634,6 +654,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*util.DeviceUsage, request util.Contai
 		if !nv.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
+			continue
+		}
+		if !nv.checkIndex(annos, *dev) {
+			reason[common.CardIndexMismatch]++
+			klog.V(5).InfoS(common.CardIndexMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
 		}
 

@@ -193,6 +193,10 @@ func (dev *MthreadsDevices) checkUUID(annos map[string]string, d util.DeviceUsag
 	return true
 }
 
+func (dev *MthreadsDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }

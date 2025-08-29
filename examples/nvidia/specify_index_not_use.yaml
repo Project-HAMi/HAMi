@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gpu-pod
+  annotations:
+    # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get gpu-type
+    # index is like 0
+    nvidia.com/nouse-gpuindex: "0" # Specify the blacklist card indexs for this job, use comma to seperate, will not launch job on specified cards
+    # In this job, we don't want our job to run on index 0.
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ubuntu:18.04
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs

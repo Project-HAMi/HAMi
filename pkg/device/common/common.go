@@ -24,6 +24,7 @@ import (
 const (
 	CardTypeMismatch                  = "CardTypeMismatch"
 	CardUUIDMismatch                  = "CardUuidMismatch"
+	CardIndexMismatch                 = "CardIndexMismatch"
 	CardTimeSlicingExhausted          = "CardTimeSlicingExhausted"
 	CardComputeUnitsExhausted         = "CardComputeUnitsExhausted"
 	CardInsufficientMemory            = "CardInsufficientMemory"
