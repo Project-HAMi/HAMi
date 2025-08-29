@@ -201,6 +201,10 @@ func (dev *DCUDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bo
 	return true
 }
 
+func (dev *DCUDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
 	klog.Info("Start to count dcu devices for container ", ctr.Name)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)

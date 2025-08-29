@@ -220,6 +220,10 @@ func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d util.DeviceUsage
 	return true
 }
 
+func (sdev *MetaxSDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	devices, _ := sdev.getMetaxSDevices(*n)
 

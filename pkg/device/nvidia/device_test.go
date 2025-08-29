@@ -219,6 +219,109 @@ func Test_checkUUID(t *testing.T) {
 	}
 }
 
+func Test_checkIndex(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
+	tests := []struct {
+		name string
+		args struct {
+			annos map[string]string
+			d     util.DeviceUsage
+		}
+		want bool
+	}{
+		{
+			name: "don't set GPUUseIndex and GPUNoUseIndex annotation",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: make(map[string]string),
+				d:     util.DeviceUsage{},
+			},
+			want: true,
+		},
+		{
+			name: "use set GPUUseIndex don't set GPUNoUseIndex annotation,device match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUUseIndexes: "0,1",
+				},
+				d: util.DeviceUsage{
+					ID:    "abc",
+					Index: 0,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "use set GPUUseIndex don't set GPUNoUseIndex annotation,device don't match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUUseIndexes: "1",
+				},
+				d: util.DeviceUsage{
+					ID:    "abc",
+					Index: 0,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseIndex set GPUNoUseIndex annotation,device match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUNoUseIndexes: "0",
+				},
+				d: util.DeviceUsage{
+					ID:    "abc",
+					Index: 0,
+				},
+			},
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseIndex set GPUNoUseIndex annotation,device don't match",
+			args: struct {
+				annos map[string]string
+				d     util.DeviceUsage
+			}{
+				annos: map[string]string{
+					GPUNoUseIndexes: "0",
+				},
+				d: util.DeviceUsage{
+					ID:    "abc",
+					Index: 1,
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := gpuDevices.checkIndex(test.args.annos, test.args.d)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func Test_checkType(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{

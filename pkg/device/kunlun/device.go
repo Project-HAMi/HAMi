@@ -155,6 +155,10 @@ func (dev *KunlunDevices) CheckUUID(annos map[string]string, d util.DeviceUsage)
 	return true
 }
 
+func (dev *KunlunDevices) CheckIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }

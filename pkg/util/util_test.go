@@ -1147,3 +1147,115 @@ func TestPatchPodAnnotations(t *testing.T) {
 		})
 	}
 }
+
+func TestContainsTargetNonNegativeInt(t *testing.T) {
+	testCases := []struct {
+		name      string
+		input     string
+		separator string
+		target    int
+		want      bool
+	}{
+		{
+			name:      "target 0 with valid element '0'",
+			input:     "0, 1, 2",
+			separator: ",",
+			target:    0,
+			want:      true,
+		},
+		{
+			name:      "target 0 with invalid leading zeros '00'",
+			input:     "00, 1, 2",
+			separator: ",",
+			target:    0,
+			want:      false,
+		},
+		{
+			name:      "target 5 with valid element '5'",
+			input:     "3, 5, 7",
+			separator: ",",
+			target:    5,
+			want:      true,
+		},
+		{
+			name:      "target 5 with invalid leading zero '05'",
+			input:     "3, 05, 7",
+			separator: ",",
+			target:    5,
+			want:      false,
+		},
+		{
+			name:      "element with whitespace and valid format",
+			input:     "  10  , 20, 30",
+			separator: ",",
+			target:    10,
+			want:      true,
+		},
+		{
+			name:      "element with whitespace and leading zeros",
+			input:     " 010  , 20",
+			separator: ",",
+			target:    10,
+			want:      false,
+		},
+		{
+			name:      "custom separator and valid element",
+			input:     "15;25;35",
+			separator: ";",
+			target:    25,
+			want:      true,
+		},
+		{
+			name:      "custom separator and leading zeros",
+			input:     "15;025;35",
+			separator: ";",
+			target:    25,
+			want:      false,
+		},
+		{
+			name:      "non-integer elements",
+			input:     "abc, 123, def",
+			separator: ",",
+			target:    123,
+			want:      true,
+		},
+		{
+			name:      "negative target (invalid)",
+			input:     "5, 10, 15",
+			separator: ",",
+			target:    -5,
+			want:      false,
+		},
+		{
+			name:      "empty input",
+			input:     "",
+			separator: ",",
+			target:    0,
+			want:      false,
+		},
+		{
+			name:      "single element with leading zero",
+			input:     "000",
+			separator: ",",
+			target:    0,
+			want:      false,
+		},
+		{
+			name:      "element is float (non-integer)",
+			input:     "5.0, 5",
+			separator: ",",
+			target:    5,
+			want:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			got := ContainsTargetNonNegativeInt(tc.input, tc.separator, tc.target)
+			if got != tc.want {
+				t.Errorf("ContainsTargetNonNegativeInt(%q, %q, %d) = %v, want %v",
+					tc.input, tc.separator, tc.target, got, tc.want)
+			}
+		})
+	}
+}

@@ -92,6 +92,18 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
 
   If set, devices allocated by this pod will NOT in UUIDs defined in this string.
 
+* `nvidia.com/use-gpuindexes`:
+
+  String type, ie: "0,1"
+
+  If set, devices allocated by this pod must be one of indexes defined in this string.
+
+* `nvidia.com/nouse-gpuindexes`:
+
+  String type, ie: "0,1"
+
+  If set, devices allocated by this pod will NOT in indexes defined in this string.
+
 * `nvidia.com/nouse-gputype`:
 
   String type, ie: "Tesla V100-PCIE-32GB, NVIDIA A10"
