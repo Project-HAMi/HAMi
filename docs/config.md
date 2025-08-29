@@ -92,7 +92,7 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
 
   If set, devices allocated by this pod will NOT in UUIDs defined in this string.
 
-`nvidia.com/use-gpuindexes`:
+* `nvidia.com/use-gpuindexes`:
 
 String type, ie: "0,1"
 

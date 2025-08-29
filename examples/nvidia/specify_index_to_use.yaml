@@ -5,7 +5,7 @@ metadata:
   annotations:
     # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get gpu-type
     # Index is like 0
-    nvidia.com/use-gpuindex: "0,1" # Specify the card indexs for this job, separated by commas. The job will run on the specified cards
+    nvidia.com/use-gpuindexes: "0,1" # Specify the card indexes for this job, separated by commas. The job will run on the specified cards
     # In this example, we want to run this job on index 0 or index 1
 spec:
   containers:

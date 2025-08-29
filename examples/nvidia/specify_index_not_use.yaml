@@ -5,7 +5,7 @@ metadata:
   annotations:
     # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-nvidia-register}' to get gpu-type
     # index is like 0
-    nvidia.com/nouse-gpuindex: "0" # Specify the blacklist card indexs for this job, use comma to seperate, will not launch job on specified cards
+    nvidia.com/nouse-gpuindexes: "0" # Specify the blacklist card indexes for this job, use comma to seperate, will not launch job on specified cards
     # In this job, we don't want our job to run on index 0.
 spec:
   containers:
