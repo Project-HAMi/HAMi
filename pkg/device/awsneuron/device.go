@@ -206,6 +206,10 @@ func (dev *AWSNeuronDevices) checkUUID(annos map[string]string, d util.DeviceUsa
 	return true
 }
 
+func (dev *AWSNeuronDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }

@@ -119,6 +119,10 @@ func (dev *MetaxDevices) checkUUID(annos map[string]string, d util.DeviceUsage) 
 	return true
 }
 
+func (dev *MetaxDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *MetaxDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	count, _ := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
 
