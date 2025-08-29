@@ -106,9 +106,26 @@ data:
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
     iluvatar:
-      resourceCountName: {{ .Values.iluvatarResourceName }}
-      resourceMemoryName: {{ .Values.iluvatarResourceMem }}
-      resourceCoreName: {{ .Values.iluvatarResourceCore }}
+    - chipName: Iluvatar MR-V100
+      commonWord: mrv100
+      resourceName: iluvatar.ai/mrv100-vgpu
+      resourceMemoryName: iluvatar.ai/mrv100-memory
+      resourceCoreName: iluvatar.ai/mrv100-core
+    - chipName: Iluvatar MR-V50
+      commonWord: mrv50
+      resourceName: iluvatar.ai/mrv50-vgpu
+      resourceMemoryName: iluvatar.ai/mrv50-memory
+      resourceCoreName: iluvatar.ai/mrv50-core
+    - chipName: Iluvatar BI-V150
+      commonWord: biv150
+      resourceName: iluvatar.ai/biv150-vgpu
+      resourceMemoryName: iluvatar.ai/biv150-memory
+      resourceCoreName: iluvatar.ai/biv150-core
+    - chipName: Iluvatar BI-V100
+      commonWord: biv100
+      resourceName: iluvatar.ai/biv100-vgpu
+      resourceMemoryName: iluvatar.ai/biv100-memory
+      resourceCoreName: iluvatar.ai/biv100-core
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
     awsneuron:
