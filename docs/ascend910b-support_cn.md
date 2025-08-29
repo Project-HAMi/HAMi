@@ -56,7 +56,7 @@ HAMi 目前有一个 NPU 内置[虚拟化配置文件](https://github.com/Projec
 
   ```yaml
   vnpus:
-  - chipName: 910B
+  - chipName: 910A
     commonWord: Ascend910A
     resourceName: huawei.com/Ascend910A
     resourceMemoryName: huawei.com/Ascend910A-memory
@@ -98,9 +98,9 @@ HAMi 目前有一个 NPU 内置[虚拟化配置文件](https://github.com/Projec
         aiCore: 12
         aiCPU: 3  
   - chipName: 910B3
-    commonWord: Ascend910B
-    resourceName: huawei.com/Ascend910B
-    resourceMemoryName: huawei.com/Ascend910B-memory
+    commonWord: Ascend910B3
+    resourceName: huawei.com/Ascend910B3
+    resourceMemoryName: huawei.com/Ascend910B3-memory
     memoryAllocatable: 65536
     memoryCapacity: 65536
     aiCore: 20
@@ -223,7 +223,7 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ascend910B-pod
+  name: ascend910B3-pod
 spec:
   containers:
     - name: ubuntu-container
@@ -231,8 +231,8 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          huawei.com/Ascend910B: 1 # requesting 1 vGPUs
-          huawei.com/Ascend910B-memory: 2000 # requesting 2000m device memory
+          huawei.com/Ascend910B3: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910B3-memory: 2000 # requesting 2000m device memory
 ---
 apiVersion: v1
 kind: Pod
