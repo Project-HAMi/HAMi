@@ -94,9 +94,9 @@ In Kubernetes, in order for the API server to communicate with the webhook compo
 
 * `nvidia.com/use-gpuindexes`:
 
-String type, ie: "0,1"
+  String type, ie: "0,1"
 
-If set, devices allocated by this pod must be one of indexes defined in this string.
+  If set, devices allocated by this pod must be one of indexes defined in this string.
 
 * `nvidia.com/nouse-gpuindexes`:
 
