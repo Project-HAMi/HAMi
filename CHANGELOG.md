@@ -229,7 +229,7 @@ Fix issue where device-plugin failed to start
 
 ## v2.3.11
 
-Add support for Ascend910B device
+Add support for Ascend910B3 device
 
 Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
