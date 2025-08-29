@@ -202,6 +202,10 @@ func (dev *EnflameDevices) checkUUID(annos map[string]string, d util.DeviceUsage
 	return true
 }
 
+func (dev *EnflameDevices) checkIndex(annos map[string]string, d util.DeviceUsage) bool {
+	return true
+}
+
 func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }

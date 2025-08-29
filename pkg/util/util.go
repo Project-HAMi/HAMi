@@ -503,3 +503,49 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	}
 	return userGPUPolicy
 }
+
+// ContainsTargetNonNegativeInt checks if the input string contains the target non-negative integer (including 0) as a distinct element.
+// It splits the input string by the given separator, trims whitespace from each element,
+// and verifies if any element is exactly equal to the target non-negative integer.
+// Parameters:
+//
+//	input:      The input string to be parsed (e.g., "0, 5, 10")
+//	separator:  The delimiter used to split the input string (e.g., ",", "|")
+//	target:     The non-negative integer to check for (must be greater than or equal to 0)
+//
+// Returns:
+//
+//	bool: true if the target exists as a distinct non-negative integer element; false otherwise
+func ContainsTargetNonNegativeInt(input, separator string, target int) bool {
+	// Target must be a non-negative integer (greater than or equal to 0)
+	if target < 0 {
+		return false
+	}
+
+	// Split the input string into elements using the separator
+	elements := strings.Split(input, separator)
+
+	// Check each element
+	for _, elem := range elements {
+		// Remove leading and trailing whitespace from the element
+		trimmedElem := strings.TrimSpace(elem)
+		if trimmedElem == "" {
+			continue // Skip empty elements (e.g., from consecutive separators like ",,")
+		}
+
+		// Check for leading zeros (invalid unless the element is exactly "0")
+		if len(trimmedElem) > 1 && trimmedElem[0] == '0' {
+			continue // Skip elements with leading zeros (e.g., "01", "005")
+		}
+
+		// Convert the trimmed element to an integer
+		num, err := strconv.Atoi(trimmedElem)
+		// Check if conversion succeeded and the number matches the target (non-negative check is implicit via target validation)
+		if err == nil && num == target {
+			return true
+		}
+	}
+
+	// Target not found in any valid element
+	return false
+}
