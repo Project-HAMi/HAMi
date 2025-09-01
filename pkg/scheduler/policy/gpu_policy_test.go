@@ -19,7 +19,7 @@ package policy
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func TestDeviceUsageListLen(t *testing.T) {
@@ -38,14 +38,14 @@ func TestDeviceUsageListLen(t *testing.T) {
 			list: DeviceUsageList{
 				DeviceLists: []*DeviceListsScore{
 					{
-						Device: &util.DeviceUsage{
+						Device: &device.DeviceUsage{
 							ID:     "device1",
 							Count:  1,
 							Health: true,
 						},
 					},
 					{
-						Device: &util.DeviceUsage{
+						Device: &device.DeviceUsage{
 							ID:     "device2",
 							Count:  2,
 							Health: false,
@@ -67,7 +67,7 @@ func TestDeviceUsageListLen(t *testing.T) {
 }
 
 func TestSwap(t *testing.T) {
-	device1 := &util.DeviceUsage{
+	device1 := &device.DeviceUsage{
 		ID:        "device1",
 		Index:     1,
 		Used:      50,
@@ -81,7 +81,7 @@ func TestSwap(t *testing.T) {
 		Health:    true,
 	}
 
-	device2 := &util.DeviceUsage{
+	device2 := &device.DeviceUsage{
 		ID:        "device2",
 		Index:     2,
 		Used:      75,
@@ -129,8 +129,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Binpack policy with same Numa",
 			policy: "binpack",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
 			},
 			expectedLess: true,
 		},
@@ -138,8 +138,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Binpack policy with different Numa true",
 			policy: "binpack",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
 			},
 			expectedLess: true,
 		},
@@ -147,8 +147,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Binpack policy with different Numa false",
 			policy: "binpack",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
 			},
 			expectedLess: false,
 		},
@@ -156,8 +156,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Spread policy with same Numa",
 			policy: "spread",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
 			},
 			expectedLess: false,
 		},
@@ -165,8 +165,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Spread policy with different Numa false",
 			policy: "spread",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
 			},
 			expectedLess: false,
 		},
@@ -174,8 +174,8 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			name:   "Spread policy with different Numa true",
 			policy: "spread",
 			deviceLists: []*DeviceListsScore{
-				{Device: &util.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &util.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
 			},
 			expectedLess: true,
 		},
@@ -199,13 +199,13 @@ func TestDeviceUsageList_Less(t *testing.T) {
 func TestComputeScore(t *testing.T) {
 	tests := []struct {
 		name          string
-		device        *util.DeviceUsage
-		requests      util.ContainerDeviceRequests
+		device        *device.DeviceUsage
+		requests      device.ContainerDeviceRequests
 		expectedScore float32
 	}{
 		{
 			name: "ContainerDeviceRequests has no data",
-			device: &util.DeviceUsage{
+			device: &device.DeviceUsage{
 				ID:        "test-device",
 				Totalcore: 4,
 				Totalmem:  8192,
@@ -214,12 +214,12 @@ func TestComputeScore(t *testing.T) {
 				Usedcores: 1,
 				Usedmem:   2048,
 			},
-			requests:      make(util.ContainerDeviceRequests),
+			requests:      make(device.ContainerDeviceRequests),
 			expectedScore: 7,
 		},
 		{
 			name: "ContainerDeviceRequests has  data",
-			device: &util.DeviceUsage{
+			device: &device.DeviceUsage{
 				ID:        "test-device",
 				Totalcore: 4,
 				Totalmem:  8192,
@@ -228,7 +228,7 @@ func TestComputeScore(t *testing.T) {
 				Usedcores: 1,
 				Usedmem:   2048,
 			},
-			requests: util.ContainerDeviceRequests{
+			requests: device.ContainerDeviceRequests{
 				"container1": {
 					Nums:             1,
 					Type:             "type1",
@@ -248,7 +248,7 @@ func TestComputeScore(t *testing.T) {
 		},
 		{
 			name: "ContainerDeviceRequests has  data",
-			device: &util.DeviceUsage{
+			device: &device.DeviceUsage{
 				ID:        "test-device",
 				Totalcore: 4,
 				Totalmem:  8192,
@@ -257,7 +257,7 @@ func TestComputeScore(t *testing.T) {
 				Usedcores: 1,
 				Usedmem:   2048,
 			},
-			requests: util.ContainerDeviceRequests{
+			requests: device.ContainerDeviceRequests{
 				"container1": {
 					Nums:             1,
 					Type:             "type1",
@@ -277,7 +277,7 @@ func TestComputeScore(t *testing.T) {
 		},
 		{
 			name: "ContainerDeviceRequests has  data",
-			device: &util.DeviceUsage{
+			device: &device.DeviceUsage{
 				ID:        "test-device",
 				Totalcore: 4,
 				Totalmem:  8192,
@@ -286,7 +286,7 @@ func TestComputeScore(t *testing.T) {
 				Usedcores: 1,
 				Usedmem:   2048,
 			},
-			requests: util.ContainerDeviceRequests{
+			requests: device.ContainerDeviceRequests{
 				"container1": {
 					Nums:             1,
 					Type:             "type1",

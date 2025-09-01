@@ -180,7 +180,7 @@ ROUTINE ======================== github.com/Project-HAMi/HAMi/pkg/scheduler.(*Sc
          .          .    226:						klog.ErrorS(err, "Failed to patch node annotations", "nodeName", val.Name)
          .          .    227:					}
          .          .    228:				}
-   11.50MB    11.50MB    229:				nodeInfo := &util.NodeInfo{}
+   11.50MB    11.50MB    229:				nodeInfo := &device.NodeInfo{}
          .          .    230:				nodeInfo.ID = val.Name
          .          .    231:				nodeInfo.Node = val
    24.50MB    24.50MB    232:				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -189,4 +189,4 @@ ROUTINE ======================== github.com/Project-HAMi/HAMi/pkg/scheduler.(*Sc
          .          .    235:					klog.ErrorS(err, "Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
          .          .    236:					continue
          .          .    237:				}
-         .          .    238:				nodeInfo.Devices = make([]util.DeviceInfo, 0)
+         .          .    238:				nodeInfo.Devices = make([]device.DeviceInfo, 0)

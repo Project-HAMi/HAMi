@@ -17,30 +17,16 @@ limitations under the License.
 package device
 
 import (
-	"context"
-	"flag"
+	"encoding/json"
+	"errors"
 	"fmt"
-	"os"
-	"reflect"
+	"strconv"
 	"strings"
+	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
-	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
-	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
-	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
-	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
-	"github.com/Project-HAMi/HAMi/pkg/device/iluvatar"
-	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
-	"github.com/Project-HAMi/HAMi/pkg/device/metax"
-	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
-	"github.com/Project-HAMi/HAMi/pkg/util"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+	"github.com/ccoveille/go-safecast"
 
-	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -49,419 +35,446 @@ type Devices interface {
 	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
-	GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error)
+	GetNodeDevices(n corev1.Node) ([]*DeviceInfo, error)
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
-	GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest
-	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string
-	ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32
-	AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error
-	Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string)
-	// This should not be associated with a specific device object
-	//ParseConfig(fs *flag.FlagSet)
+	GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest
+	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
+	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32
+	AddResourceUsage(pod *corev1.Pod, n *DeviceUsage, ctr *ContainerDevice) error
+	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
-type Config struct {
-	NvidiaConfig    nvidia.NvidiaConfig       `yaml:"nvidia"`
-	MetaxConfig     metax.MetaxConfig         `yaml:"metax"`
-	HygonConfig     hygon.HygonConfig         `yaml:"hygon"`
-	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
-	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
-	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
-	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
-	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
-	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
-	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
+type MigTemplate struct {
+	Name   string `yaml:"name"`
+	Memory int32  `yaml:"memory"`
+	Count  int32  `yaml:"count"`
 }
 
-var (
-	HandshakeAnnos  = map[string]string{}
-	RegisterAnnos   = map[string]string{}
-	devicesMap      map[string]Devices
-	DevicesToHandle []string
-	configFile      string
-	DebugMode       bool
+type MigTemplateUsage struct {
+	Name   string `json:"name,omitempty"`
+	Memory int32  `json:"memory,omitempty"`
+	InUse  bool   `json:"inuse,omitempty"`
+}
+
+type Geometry []MigTemplate
+
+type MIGS []MigTemplateUsage
+
+type MigInUse struct {
+	Index     int32
+	UsageList MIGS
+}
+
+type AllowedMigGeometries struct {
+	Models     []string   `yaml:"models"`
+	Geometries []Geometry `yaml:"allowedGeometries"`
+}
+
+type DeviceUsage struct {
+	ID          string
+	Index       uint
+	Used        int32
+	Count       int32
+	Usedmem     int32
+	Totalmem    int32
+	Totalcore   int32
+	Usedcores   int32
+	Mode        string
+	MigTemplate []Geometry
+	MigUsage    MigInUse
+	Numa        int
+	Type        string
+	Health      bool
+	CustomInfo  map[string]any
+}
+
+type DeviceInfo struct {
+	ID              string          `json:"id,omitempty"`
+	Index           uint            `json:"index,omitempty"`
+	Count           int32           `json:"count,omitempty"`
+	Devmem          int32           `json:"devmem,omitempty"`
+	Devcore         int32           `json:"devcore,omitempty"`
+	Type            string          `json:"type,omitempty"`
+	Numa            int             `json:"numa,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	MIGTemplate     []Geometry      `json:"migtemplate,omitempty"`
+	Health          bool            `json:"health,omitempty"`
+	DeviceVendor    string          `json:"devicevendor,omitempty"`
+	CustomInfo      map[string]any  `json:"custominfo,omitempty"`
+	DevicePairScore DevicePairScore `json:"devicepairscore,omitempty"`
+}
+
+type DevicePairScores []DevicePairScore
+type DevicePairScore struct {
+	ID     string         `json:"uuid,omitempty"`
+	Scores map[string]int `json:"score,omitempty"`
+}
+
+type NodeInfo struct {
+	ID      string
+	Node    *corev1.Node
+	Devices []DeviceInfo
+}
+
+type ResoureNames struct {
+	ResourceCountName  string
+	ResourceMemoryName string
+	ResourceCoreName   string
+}
+
+type ContainerDevice struct {
+	// TODO current Idx cannot use, because EncodeContainerDevices method not encode this filed.
+	Idx        int
+	UUID       string
+	Type       string
+	Usedmem    int32
+	Usedcores  int32
+	CustomInfo map[string]any
+}
+
+type ContainerDeviceRequest struct {
+	Nums             int32
+	Type             string
+	Memreq           int32
+	MemPercentagereq int32
+	Coresreq         int32
+}
+
+type ContainerDevices []ContainerDevice
+type ContainerDeviceRequests map[string]ContainerDeviceRequest
+
+// type ContainerAllDevices map[string]ContainerDevices.
+type PodSingleDevice []ContainerDevices
+type PodDeviceRequests []ContainerDeviceRequests
+type PodDevices map[string]PodSingleDevice
+
+const (
+	// OneContainerMultiDeviceSplitSymbol this is when one container use multi device, use : symbol to join device info.
+	OneContainerMultiDeviceSplitSymbol = ":"
+
+	// OnePodMultiContainerSplitSymbol this is when one pod having multi container and more than one container use device, use ; symbol to join device info.
+	OnePodMultiContainerSplitSymbol = ";"
 )
 
+var (
+	HandshakeAnnos     = map[string]string{}
+	RegisterAnnos      = map[string]string{}
+	configFile         string
+	DebugMode          bool
+	GPUSchedulerPolicy string
+	InRequestDevices   map[string]string
+	SupportDevices     map[string]string
+	DevicesMap         map[string]Devices
+	DevicesToHandle    []string
+)
+
+func init() {
+	InRequestDevices = make(map[string]string)
+	SupportDevices = make(map[string]string)
+}
+
 func GetDevices() map[string]Devices {
-	return devicesMap
+	return DevicesMap
 }
 
-func InitDevicesWithConfig(config *Config) error {
-	if err := validateConfig(config); err != nil {
-		klog.Errorf("Invalid configuration: %v", err)
-		return err
+func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
+	if !strings.Contains(str, OneContainerMultiDeviceSplitSymbol) {
+		return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 	}
-
-	klog.Info("Initializing devices with configuration")
-
-	devicesMap = make(map[string]Devices)
-	DevicesToHandle = []string{}
-	var initErrors []error
-
-	// Helper function to initialize devices and handle errors
-	initializeDevice := func(deviceType string, commonWord string, initFunc func(any) (Devices, error), config any) {
-		klog.Infof("Initializing %s device", commonWord)
-		device, err := initFunc(config)
-		if err != nil {
-			klog.Errorf("Failed to initialize %s device: %v", commonWord, err)
-			initErrors = append(initErrors, fmt.Errorf("%s: %v", commonWord, err))
-			return
-		}
-		devicesMap[deviceType] = device
-		DevicesToHandle = append(DevicesToHandle, commonWord)
-		klog.Infof("%s device initialized successfully", commonWord)
-	}
-
-	// Wrapper for each device's initialization function to include type assertion check
-	deviceInitializers := []struct {
-		deviceType string
-		commonWord string
-		initFunc   func(any) (Devices, error)
-		config     any
-	}{
-		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg any) (Devices, error) {
-			nvidiaConfig, ok := cfg.(nvidia.NvidiaConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUCommonWord)
+	tmp := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
+	var retval []*DeviceInfo
+	for _, val := range tmp {
+		if strings.Contains(val, ",") {
+			items := strings.Split(val, ",")
+			if len(items) == 7 || len(items) == 9 {
+				count, _ := strconv.ParseInt(items[1], 10, 32)
+				devmem, _ := strconv.ParseInt(items[2], 10, 32)
+				devcore, _ := strconv.ParseInt(items[3], 10, 32)
+				health, _ := strconv.ParseBool(items[6])
+				numa, _ := strconv.Atoi(items[5])
+				mode := "hami-core"
+				index := 0
+				if len(items) == 9 {
+					index, _ = strconv.Atoi(items[7])
+					mode = items[8]
+				}
+				count32, err := safecast.ToInt32(count)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devmem32, err := safecast.ToInt32(devmem)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				devcore32, err := safecast.ToInt32(devcore)
+				if err != nil {
+					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+				}
+				i := DeviceInfo{
+					ID:      items[0],
+					Count:   count32,
+					Devmem:  devmem32,
+					Devcore: devcore32,
+					Type:    items[4],
+					Numa:    numa,
+					Health:  health,
+					Mode:    mode,
+					Index:   uint(index),
+				}
+				retval = append(retval, &i)
+			} else {
+				return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 			}
-			return nvidia.InitNvidiaDevice(nvidiaConfig), nil
-		}, config.NvidiaConfig},
-		{cambricon.CambriconMLUDevice, cambricon.CambriconMLUCommonWord, func(cfg any) (Devices, error) {
-			cambriconConfig, ok := cfg.(cambricon.CambriconConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", cambricon.CambriconMLUCommonWord)
-			}
-			return cambricon.InitMLUDevice(cambriconConfig), nil
-		}, config.CambriconConfig},
-		{hygon.HygonDCUDevice, hygon.HygonDCUCommonWord, func(cfg any) (Devices, error) {
-			hygonConfig, ok := cfg.(hygon.HygonConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", hygon.HygonDCUCommonWord)
-			}
-			return hygon.InitDCUDevice(hygonConfig), nil
-		}, config.HygonConfig},
-		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg any) (Devices, error) {
-			iluvatarConfig, ok := cfg.(iluvatar.IluvatarConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", iluvatar.IluvatarGPUCommonWord)
-			}
-			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
-		}, config.IluvatarConfig},
-		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (Devices, error) {
-			enflameConfig, ok := cfg.(enflame.EnflameConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGPUCommonWord)
-			}
-			return enflame.InitEnflameDevice(enflameConfig), nil
-		}, config.EnflameConfig},
-		{mthreads.MthreadsGPUDevice, mthreads.MthreadsGPUCommonWord, func(cfg any) (Devices, error) {
-			mthreadsConfig, ok := cfg.(mthreads.MthreadsConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", mthreads.MthreadsGPUCommonWord)
-			}
-			return mthreads.InitMthreadsDevice(mthreadsConfig), nil
-		}, config.MthreadsConfig},
-		{metax.MetaxGPUDevice, metax.MetaxGPUCommonWord, func(cfg any) (Devices, error) {
-			metaxConfig, ok := cfg.(metax.MetaxConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
-			}
-			return metax.InitMetaxDevice(metaxConfig), nil
-		}, config.MetaxConfig},
-		{metax.MetaxSGPUDevice, metax.MetaxSGPUCommonWord, func(cfg any) (Devices, error) {
-			metaxConfig, ok := cfg.(metax.MetaxConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", metax.MetaxGPUCommonWord)
-			}
-			return metax.InitMetaxSDevice(metaxConfig), nil
-		}, config.MetaxConfig},
-		{kunlun.KunlunGPUDevice, kunlun.KunlunGPUCommonWord, func(cfg any) (Devices, error) {
-			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", kunlun.KunlunGPUCommonWord)
-			}
-			return kunlun.InitKunlunDevice(kunlunConfig), nil
-		}, config.KunlunConfig},
-		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (Devices, error) {
-			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", awsneuron.AWSNeuronCommonWord)
-			}
-			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
-		}, config.AWSNeuronConfig},
-	}
-
-	// Initialize all devices using the wrapped functions
-	for _, initializer := range deviceInitializers {
-		initializeDevice(initializer.deviceType, initializer.commonWord, initializer.initFunc, initializer.config)
-	}
-
-	// Initialize Ascend devices
-	for _, dev := range ascend.InitDevices(config.VNPUs) {
-		commonWord := dev.CommonWord()
-		devicesMap[commonWord] = dev
-		DevicesToHandle = append(DevicesToHandle, commonWord)
-		klog.Infof("Ascend device %s initialized", commonWord)
-	}
-
-	if len(initErrors) > 0 {
-		return fmt.Errorf("errors occurred during initialization: %v", initErrors)
-	}
-
-	klog.Info("All devices initialized successfully")
-	return nil
-}
-
-func InitDevices() {
-	if len(devicesMap) > 0 {
-		klog.Info("Devices are already initialized, skipping initialization")
-		return
-	}
-	klog.Infof("Loading device configuration from file: %s", configFile)
-	config, err := LoadConfig(configFile)
-	if err != nil {
-		klog.Fatalf("Failed to load device config file %s: %v", configFile, err)
-	}
-	klog.Infof("Loaded config: %v", config)
-	err = InitDevicesWithConfig(config)
-	if err != nil {
-		klog.Fatalf("Failed to initialize devices: %v", err)
-	}
-}
-
-func InitDefaultDevices() {
-	configMapdata := `
-nvidia:
-  resourceCountName: "nvidia.com/gpu"
-  resourceMemoryName: "nvidia.com/gpumem"
-  resourceMemoryPercentageName: "nvidia.com/gpumem-percentage"
-  resourceCoreName: "nvidia.com/gpucores"
-  resourcePriorityName: "nvidia.com/priority"
-  overwriteEnv: false
-  defaultMemory: 0
-  defaultCores: 0
-  defaultGPUNum: 1
-cambricon:
-  resourceCountName: "cambricon.com/vmlu"
-  resourceMemoryName: "cambricon.com/mlu.smlu.vmemory"
-  resourceCoreName: "cambricon.com/mlu.smlu.vcore"
-hygon:
-  resourceCountName: "hygon.com/dcunum"
-  resourceMemoryName: "hygon.com/dcumem"
-  resourceCoreName: "hygon.com/dcucores"
-metax:
-  resourceCountName: "metax-tech.com/gpu"
-mthreads:
-  resourceCountName: "mthreads.com/vgpu"
-  resourceMemoryName: "mthreads.com/sgpu-memory"
-  resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
-  resourceCountName: "iluvatar.ai/vgpu"
-  resourceMemoryName: "iluvatar.ai/vcuda-memory"
-  resourceCoreName: "iluvatar.ai/vcuda-core"
-kunlun:
-  resourceCountName: "kunlunxin.com/xpu"
-awsneuron:
-  resourceCountName: "aws.amazon.com/neuron"
-  resourceCoreName: "aws.amazon.com/neuroncore"
-vnpus:
-  - chipName: "910B"
-    commonWord: "Ascend910A"
-    resourceName: "huawei.com/Ascend910A"
-    resourceMemoryName: "huawei.com/Ascend910A-memory"
-    memoryAllocatable: 32768
-    memoryCapacity: 32768
-    aiCore: 30
-    templates:
-      - name: "vir02"
-        memory: 2184
-        aiCore: 2
-      - name: "vir04"
-        memory: 4369
-        aiCore: 4
-      - name: "vir08"
-        memory: 8738
-        aiCore: 8
-      - name: "vir16"
-        memory: 17476
-        aiCore: 16
-  - chipName: 910B2
-    commonWord: Ascend910B2
-    resourceName: huawei.com/Ascend910B2
-    resourceMemoryName: huawei.com/Ascend910B2-memory
-    memoryAllocatable: 65536
-    memoryCapacity: 65536
-    aiCore: 24
-    aiCPU: 6
-    templates:
-      - name: vir03_1c_8g
-        memory: 8192
-        aiCore: 3
-        aiCPU: 1
-      - name: vir06_1c_16g
-        memory: 16384
-        aiCore: 6
-        aiCPU: 1
-      - name: vir12_3c_32g
-        memory: 32768
-        aiCore: 12
-        aiCPU: 3
-  - chipName: "910B3"
-    commonWord: "Ascend910B"
-    resourceName: "huawei.com/Ascend910B"
-    resourceMemoryName: "huawei.com/Ascend910B-memory"
-    memoryAllocatable: 65536
-    memoryCapacity: 65536
-    aiCore: 20
-    aiCPU: 7
-    templates:
-      - name: "vir05_1c_16g"
-        memory: 16384
-        aiCore: 5
-        aiCPU: 1
-      - name: "vir10_3c_32g"
-        memory: 32768
-        aiCore: 10
-        aiCPU: 3
-  - chipName: 910B4
-    commonWord: Ascend910B4
-    resourceName: huawei.com/Ascend910B4
-    resourceMemoryName: huawei.com/Ascend910B4-memory
-    memoryAllocatable: 32768
-    memoryCapacity: 32768
-    aiCore: 20
-    aiCPU: 7
-    templates:
-      - name: vir05_1c_8g
-        memory: 8192
-        aiCore: 5
-        aiCPU: 1
-      - name: vir10_3c_16g
-        memory: 16384
-        aiCore: 10
-        aiCPU: 3
-  - chipName: "310P3"
-    commonWord: "Ascend310P"
-    resourceName: "huawei.com/Ascend310P"
-    resourceMemoryName: "huawei.com/Ascend310P-memory"
-    memoryAllocatable: 21527
-    memoryCapacity: 24576
-    aiCore: 8
-    aiCPU: 7
-    templates:
-      - name: "vir01"
-        memory: 3072
-        aiCore: 1
-        aiCPU: 1
-      - name: "vir02"
-        memory: 6144
-        aiCore: 2
-        aiCPU: 2
-      - name: "vir04"
-        memory: 12288
-        aiCore: 4
-        aiCPU: 4`
-
-	var yamlData Config
-	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)
-	if err != nil {
-		klog.Fatalf("Failed to unmarshal default config: %v", err)
-		return
-	}
-
-	// Initialize devices with configuration
-	if err := InitDevicesWithConfig(&yamlData); err != nil {
-		klog.Fatalf("Failed to initialize devices with default config: %v", err)
-	}
-}
-
-func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
-	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		return
-	}
-	annos := refreshed.Annotations[util.InRequestDevices[devName]]
-	klog.Infof("Trying allocation success: %s", annos)
-	for _, val := range DevicesToHandle {
-		if strings.Contains(annos, val) {
-			return
 		}
 	}
-	klog.Infof("All devices allocate success, releasing lock")
-	PodAllocationSuccess(nodeName, pod, lockName)
+	return retval, nil
 }
 
-func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockName string, deviceBindPhase string) {
-	newAnnos := map[string]string{util.DeviceBindPhase: deviceBindPhase}
-	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
-		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		return
+func DecodePairScores(pairScores string) (*DevicePairScores, error) {
+	devicePairScores := &DevicePairScores{}
+	if err := json.Unmarshal([]byte(pairScores), devicePairScores); err != nil {
+		return nil, err
 	}
-	if err := nodelock.ReleaseNodeLock(nodeName, lockName, pod, false); err != nil {
-		klog.Errorf("Failed to release node lock for node %s and lock %s: %v", nodeName, lockName, err)
+	return devicePairScores, nil
+}
+
+func EncodeNodeDevices(dlist []*DeviceInfo) string {
+	builder := strings.Builder{}
+	for _, val := range dlist {
+		builder.WriteString(val.ID)
+		builder.WriteString(",")
+		builder.WriteString(strconv.FormatInt(int64(val.Count), 10))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Devmem)))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Devcore)))
+		builder.WriteString(",")
+		builder.WriteString(val.Type)
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(val.Numa))
+		builder.WriteString(",")
+		builder.WriteString(strconv.FormatBool(val.Health))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Index)))
+		builder.WriteString(",")
+		builder.WriteString(val.Mode)
+		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
+		//tmp += val.ID + "," + strconv.FormatInt(int64(val.Count), 10) + "," + strconv.Itoa(int(val.Devmem)) + "," + strconv.Itoa(int(val.Devcore)) + "," + val.Type + "," + strconv.Itoa(val.Numa) + "," + strconv.FormatBool(val.Health) + "," + strconv.Itoa(val.Index) + OneContainerMultiDeviceSplitSymbol
 	}
+	tmp := builder.String()
+	klog.V(5).Infof("Encoded node Devices: %s", tmp)
+	return tmp
 }
 
-func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
-	klog.Infof("Pod allocation successful for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
-}
-
-func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
-	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
-}
-
-func GlobalFlagSet() *flag.FlagSet {
-	fs := flag.NewFlagSet(os.Args[0], flag.ExitOnError)
-	ascend.ParseConfig(fs)
-	cambricon.ParseConfig(fs)
-	hygon.ParseConfig(fs)
-	iluvatar.ParseConfig(fs)
-	nvidia.ParseConfig(fs)
-	mthreads.ParseConfig(fs)
-	enflame.ParseConfig(fs)
-	metax.ParseConfig(fs)
-	kunlun.ParseConfig(fs)
-	fs.BoolVar(&DebugMode, "debug", false, "Enable debug mode")
-	fs.StringVar(&configFile, "device-config-file", "", "Path to the device config file")
-	klog.InitFlags(fs)
-	return fs
-}
-
-func LoadConfig(path string) (*Config, error) {
-	klog.Infof("Reading config file from path: %s", path)
-	data, err := os.ReadFile(path)
+func MarshalNodeDevices(dlist []*DeviceInfo) string {
+	data, err := json.Marshal(dlist)
 	if err != nil {
-		return nil, err
+		return ""
 	}
-
-	var yamlData Config
-	if err := yaml.Unmarshal(data, &yamlData); err != nil {
-		return nil, err
-	}
-	klog.Info("Successfully read and parsed config file")
-	return &yamlData, nil
+	return string(data)
 }
 
-// validateConfig validates the configuration object to ensure it is complete.
-func validateConfig(config *Config) error {
-	var hasAnyConfig bool
+func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
+	var dlist []*DeviceInfo
+	err := json.Unmarshal([]byte(str), &dlist)
+	return dlist, err
+}
 
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.IluvatarConfig, iluvatar.IluvatarConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{})
-	hasAnyConfig = hasAnyConfig || len(config.VNPUs) > 0
-
-	if !hasAnyConfig {
-		return fmt.Errorf("all configurations are empty")
+func EncodeContainerDevices(cd ContainerDevices) string {
+	tmp := ""
+	for _, val := range cd {
+		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + OneContainerMultiDeviceSplitSymbol
 	}
-	return nil
+	klog.Infof("Encoded container Devices: %s", tmp)
+	return tmp
+	//return strings.Join(cd, ",")
+}
+
+func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
+	tmp := ""
+	for _, val := range cd {
+		if strings.Compare(val.Type, t) == 0 {
+			tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+		}
+		tmp += OneContainerMultiDeviceSplitSymbol
+	}
+	klog.Infof("Encoded container Certain Device type: %s->%s", t, tmp)
+	return tmp
+}
+
+func EncodePodSingleDevice(pd PodSingleDevice) string {
+	res := ""
+	for _, ctrdevs := range pd {
+		res = res + EncodeContainerDevices(ctrdevs)
+		res = res + OnePodMultiContainerSplitSymbol
+	}
+	klog.Infof("Encoded pod single devices %s", res)
+	return res
+}
+
+func EncodePodDevices(checklist map[string]string, pd PodDevices) map[string]string {
+	res := map[string]string{}
+	for devType, cd := range pd {
+		klog.Infoln("devtype=", devType)
+		res[checklist[devType]] = EncodePodSingleDevice(cd)
+	}
+	klog.Infof("Encoded pod Devices %s\n", res)
+	return res
+}
+
+func DecodeContainerDevices(str string) (ContainerDevices, error) {
+	if len(str) == 0 {
+		return ContainerDevices{}, nil
+	}
+	cd := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
+	contdev := ContainerDevices{}
+	tmpdev := ContainerDevice{}
+	klog.V(5).Infof("Start to decode container device %s", str)
+	for _, val := range cd {
+		if strings.Contains(val, ",") {
+			//fmt.Println("cd is ", val)
+			tmpstr := strings.Split(val, ",")
+			if len(tmpstr) < 4 {
+				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
+			}
+			tmpdev.UUID = tmpstr[0]
+			tmpdev.Type = tmpstr[1]
+			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
+			tmpdev.Usedmem = int32(devmem)
+			devcores, _ := strconv.ParseInt(tmpstr[3], 10, 32)
+			tmpdev.Usedcores = int32(devcores)
+			contdev = append(contdev, tmpdev)
+		}
+	}
+	klog.V(5).Infof("Finished decoding container devices. Total devices: %d", len(contdev))
+	return contdev, nil
+}
+
+func DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error) {
+	klog.V(5).Infof("checklist is [%+v], annos is [%+v]", checklist, annos)
+	if len(annos) == 0 {
+		return PodDevices{}, nil
+	}
+	pd := make(PodDevices)
+	for devID, devs := range checklist {
+		str, ok := annos[devs]
+		if !ok {
+			continue
+		}
+		pd[devID] = make(PodSingleDevice, 0)
+		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
+			cd, err := DecodeContainerDevices(s)
+			if err != nil {
+				return PodDevices{}, nil
+			}
+			if len(cd) == 0 {
+				continue
+			}
+			pd[devID] = append(pd[devID], cd)
+		}
+	}
+	klog.InfoS("Decoded pod annos", "poddevices", pd)
+	return pd, nil
+}
+
+func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
+	var err error
+	for _, val := range templates[templateIdx] {
+		count := 0
+		for count < int(val.Count) {
+			n.Index, err = safecast.ToInt32(templateIdx)
+			if err != nil {
+				continue
+			}
+			n.UsageList = append(n.UsageList, MigTemplateUsage{
+				Name:   val.Name,
+				Memory: val.Memory,
+				InUse:  false,
+			})
+			count++
+		}
+	}
+}
+
+func GetDevicesUUIDList(infos []*DeviceInfo) []string {
+	uuids := make([]string, 0)
+	for _, info := range infos {
+		uuids = append(uuids, info.ID)
+	}
+	return uuids
+}
+
+func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	handshake := n.Annotations[HandshakeAnnos[devType]]
+	if strings.Contains(handshake, "Requesting") {
+		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
+		return time.Now().Before(formertime.Add(time.Second * 60)), false
+	} else if strings.Contains(handshake, "Deleted") {
+		return true, false
+	} else {
+		return true, true
+	}
+}
+
+// Enhanced ExtractMigTemplatesFromUUID with error handling.
+func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
+	parts := strings.Split(uuid, "[")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '[' delimiter")
+	}
+
+	tmp := parts[1]
+	parts = strings.Split(tmp, "]")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing ']' delimiter")
+	}
+
+	tmp = parts[0]
+	parts = strings.Split(tmp, "-")
+	if len(parts) < 2 {
+		return -1, -1, fmt.Errorf("invalid UUID format: missing '-' delimiter")
+	}
+
+	templateIdx, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid template index: %v", err)
+	}
+
+	pos, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return -1, -1, fmt.Errorf("invalid position: %v", err)
+	}
+
+	return templateIdx, pos, nil
+}
+
+func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
+	counts = make(PodDeviceRequests, len(pod.Spec.Containers))
+	klog.V(4).InfoS("Processing resource requirements",
+		"pod", klog.KObj(pod),
+		"containerCount", len(pod.Spec.Containers))
+	//Count Nvidia GPU
+	cnt := int32(0)
+	for i := range pod.Spec.Containers {
+		devices := GetDevices()
+		counts[i] = make(ContainerDeviceRequests)
+		klog.V(5).InfoS("Processing container resources",
+			"pod", klog.KObj(pod),
+			"containerIndex", i,
+			"containerName", pod.Spec.Containers[i].Name)
+		for idx, val := range devices {
+			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if request.Nums > 0 {
+				cnt += request.Nums
+				counts[i][idx] = request
+			}
+		}
+	}
+	if cnt == 0 {
+		klog.V(4).InfoS("No device requests found", "pod", klog.KObj(pod))
+	} else {
+		klog.V(4).InfoS("Resource requirements collected", "pod", klog.KObj(pod), "requests", counts)
+	}
+	return counts
 }

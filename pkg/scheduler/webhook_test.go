@@ -29,7 +29,6 @@ import (
 	"k8s.io/klog/v2"
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
@@ -96,7 +95,7 @@ func TestHandle(t *testing.T) {
 func TestPodHasNodeName(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
 	config.ForceOverwriteDefaultScheduler = true
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -108,7 +107,7 @@ func TestPodHasNodeName(t *testing.T) {
 		},
 	}
 
-	if err := device.InitDevicesWithConfig(config); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 	// create a Pod object
@@ -173,7 +172,7 @@ func TestPodHasNodeName(t *testing.T) {
 func TestPodHasDifferentScheduler(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
 
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -185,7 +184,7 @@ func TestPodHasDifferentScheduler(t *testing.T) {
 		},
 	}
 
-	if err := device.InitDevicesWithConfig(config); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 

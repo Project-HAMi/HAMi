@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -32,43 +32,43 @@ func Test_addNode_ListNodes(t *testing.T) {
 		name string
 		args struct {
 			nodeID   string
-			nodeInfo util.NodeInfo
+			nodeInfo device.NodeInfo
 		}
-		want map[string]*util.NodeInfo
+		want map[string]*device.NodeInfo
 		err  error
 	}{
 		{
 			name: "node info is empty",
 			args: struct {
 				nodeID   string
-				nodeInfo util.NodeInfo
+				nodeInfo device.NodeInfo
 			}{
 				nodeID:   "node-01",
-				nodeInfo: util.NodeInfo{},
+				nodeInfo: device.NodeInfo{},
 			},
 		},
 		{
 			name: "test vaild info",
 			args: struct {
 				nodeID   string
-				nodeInfo util.NodeInfo
+				nodeInfo device.NodeInfo
 			}{
 				nodeID: "node-01",
-				nodeInfo: util.NodeInfo{
+				nodeInfo: device.NodeInfo{
 					ID:   "node-01",
 					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
+					Devices: []device.DeviceInfo{
 						{
 							ID: "node-01",
 						},
 					},
 				},
 			},
-			want: map[string]*util.NodeInfo{
+			want: map[string]*device.NodeInfo{
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
+					Devices: []device.DeviceInfo{
 						{
 							ID: "node-01",
 						},
@@ -81,13 +81,13 @@ func Test_addNode_ListNodes(t *testing.T) {
 			name: "test the different node id",
 			args: struct {
 				nodeID   string
-				nodeInfo util.NodeInfo
+				nodeInfo device.NodeInfo
 			}{
 				nodeID: "node-02",
-				nodeInfo: util.NodeInfo{
+				nodeInfo: device.NodeInfo{
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
+					Devices: []device.DeviceInfo{
 						{
 							ID:      "node-02",
 							Count:   int32(1),
@@ -97,11 +97,11 @@ func Test_addNode_ListNodes(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]*util.NodeInfo{
+			want: map[string]*device.NodeInfo{
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
+					Devices: []device.DeviceInfo{
 						{
 							ID:      "GPU-0",
 							Count:   int32(1),
@@ -113,7 +113,7 @@ func Test_addNode_ListNodes(t *testing.T) {
 				"node-02": {
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []util.DeviceInfo{
+					Devices: []device.DeviceInfo{
 						{
 							ID:      "node-02",
 							Count:   int32(1),
@@ -126,15 +126,15 @@ func Test_addNode_ListNodes(t *testing.T) {
 			err: nil,
 		},
 	}
-	device.InitDefaultDevices()
+	config.InitDefaultDevices()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := nodeManager{
-				nodes: map[string]*util.NodeInfo{
+				nodes: map[string]*device.NodeInfo{
 					"node-01": {
 						ID:   "test123",
 						Node: &corev1.Node{},
-						Devices: []util.DeviceInfo{
+						Devices: []device.DeviceInfo{
 							{
 								ID:      "GPU-0",
 								Count:   int32(1),
@@ -160,22 +160,22 @@ func Test_GetNode(t *testing.T) {
 	tests := []struct {
 		name string
 		args string
-		want *util.NodeInfo
+		want *device.NodeInfo
 		err  error
 	}{
 		{
 			name: "node not found",
 			args: "node-1111",
-			want: &util.NodeInfo{},
+			want: &device.NodeInfo{},
 			err:  fmt.Errorf("node %v not found", "node-111"),
 		},
 		{
 			name: "test vaild info",
 			args: "node-04",
-			want: &util.NodeInfo{
+			want: &device.NodeInfo{
 				ID:   "node-04",
 				Node: &corev1.Node{},
-				Devices: []util.DeviceInfo{
+				Devices: []device.DeviceInfo{
 					{
 						ID:      "GPU-0",
 						Count:   int32(1),
@@ -190,11 +190,11 @@ func Test_GetNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := nodeManager{
-				nodes: map[string]*util.NodeInfo{
+				nodes: map[string]*device.NodeInfo{
 					"node-04": {
 						ID:   "node-04",
 						Node: &corev1.Node{},
-						Devices: []util.DeviceInfo{
+						Devices: []device.DeviceInfo{
 							{
 								ID:      "GPU-0",
 								Count:   int32(1),
@@ -264,11 +264,11 @@ func Test_rmNodeDevices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := nodeManager{
-				nodes: map[string]*util.NodeInfo{
+				nodes: map[string]*device.NodeInfo{
 					"node-05": {
 						ID:   "node-05",
 						Node: &corev1.Node{},
-						Devices: []util.DeviceInfo{
+						Devices: []device.DeviceInfo{
 							{
 								ID:           "GPU-0",
 								Count:        int32(1),
@@ -281,12 +281,12 @@ func Test_rmNodeDevices(t *testing.T) {
 					"node-06": {
 						ID:      "node-06",
 						Node:    &corev1.Node{},
-						Devices: []util.DeviceInfo{},
+						Devices: []device.DeviceInfo{},
 					},
 					"node-07": {
 						ID:   "node-17",
 						Node: &corev1.Node{},
-						Devices: []util.DeviceInfo{
+						Devices: []device.DeviceInfo{
 							{
 								ID:           "GPU-0",
 								Count:        int32(1),
@@ -299,7 +299,7 @@ func Test_rmNodeDevices(t *testing.T) {
 					"node-08": {
 						ID:   "node-08",
 						Node: &corev1.Node{},
-						Devices: []util.DeviceInfo{
+						Devices: []device.DeviceInfo{
 							{
 								ID:           "GPU-0",
 								Count:        int32(1),
