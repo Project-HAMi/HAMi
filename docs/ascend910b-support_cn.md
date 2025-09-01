@@ -189,7 +189,7 @@ Ascend310P 设备（Atlas 推理系列产品）支持多种粒度的切分，包
 
 ## 运行 NPU 任务
 
-可通过使用 `huawei.com/ascend910B` 和 `huawei.com/ascend910B-memory` 资源类型，来请求 Ascend 910B：
+可通过使用 `huawei.com/ascend910Bx` 和 `huawei.com/ascend910Bx-memory` 资源类型，来请求 Ascend 910B 系列设备：
 
 ```yaml
 apiVersion: v1
@@ -330,11 +330,11 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          huawei.com/Ascend910B: 1
-          huawei.com/Ascend910B-memory: 2000
+          huawei.com/Ascend910B3: 1
+          huawei.com/Ascend910B3-memory: 2000
 ```
 
-在这个示例中，Pod 将只在 UUID 为 `device-uuid-1` 或 `device-uuid-2` 的 Ascend910B 设备上运行。
+在这个示例中，Pod 将只在 UUID 为 `device-uuid-1` 或 `device-uuid-2` 的 Ascend910B3 设备上运行。
 
 #### 查找设备 UUID
 
@@ -357,5 +357,5 @@ kubectl get node <node-name> -o yaml | grep -A 10 "annotations:"
 ## 注意事项
 
 - 在 init container 中无法使用 NPU 复用功能；
-- `huawei.com/Ascend910B-memory` 仅在 `huawei.com/Ascend910B=1` 时有效；
-- 多设备请求（`huawei.com/Ascend910B > 1`）不支持 vNPU 模式。
+- `huawei.com/Ascend910Bx-memory` 仅在 `huawei.com/Ascend910Bx=1` 时有效；
+- 多设备请求（`huawei.com/Ascend910Bx > 1`）不支持 vNPU 模式。

@@ -355,5 +355,5 @@ In the node annotations, look for `hami.io/node-register-Ascend910B` or similar 
 ## Notes
 
 - NPU sharing is not supported in init containers.
-- `huawei.com/Ascend910B3-memory` is only effective when `huawei.com/Ascend910B3=1`.
-- Multi-device requests (`huawei.com/Ascend910B3 > 1`) do not support vNPU mode.
+- `huawei.com/Ascend910Bx-memory` is only effective when `huawei.com/Ascend910Bx=1`.
+- Multi-device requests (`huawei.com/Ascend910Bx > 1`) do not support vNPU mode.

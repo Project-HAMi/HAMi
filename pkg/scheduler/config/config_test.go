@@ -73,7 +73,7 @@ iluvatar:
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
 vnpus:
-- chipName: 910B
+- chipName: 910A
   commonWord: Ascend910A
   resourceName: huawei.com/Ascend910A
   resourceMemoryName: huawei.com/Ascend910A-memory
@@ -115,9 +115,9 @@ vnpus:
       aiCore: 12
       aiCPU: 3
 - chipName: 910B3
-  commonWord: Ascend910B
-  resourceName: huawei.com/Ascend910B
-  resourceMemoryName: huawei.com/Ascend910B-memory
+  commonWord: Ascend910B3
+  resourceName: huawei.com/Ascend910B3
+  resourceMemoryName: huawei.com/Ascend910B3-memory
   memoryAllocatable: 65536
   memoryCapacity: 65536
   aiCore: 20
@@ -261,7 +261,7 @@ func createKunlunConfig() kunlun.KunlunConfig {
 func createVNPUConfigs() []ascend.VNPUConfig {
 	return []ascend.VNPUConfig{
 		{
-			ChipName:           "910B",
+			ChipName:           "910A",
 			CommonWord:         "Ascend910A",
 			ResourceName:       "huawei.com/Ascend910A",
 			ResourceMemoryName: "huawei.com/Ascend910A-memory",
@@ -292,9 +292,9 @@ func createVNPUConfigs() []ascend.VNPUConfig {
 		},
 		{
 			ChipName:           "910B3",
-			CommonWord:         "Ascend910B",
-			ResourceName:       "huawei.com/Ascend910B",
-			ResourceMemoryName: "huawei.com/Ascend910B-memory",
+			CommonWord:         "Ascend910B3",
+			ResourceName:       "huawei.com/Ascend910B3",
+			ResourceMemoryName: "huawei.com/Ascend910B3-memory",
 			MemoryAllocatable:  65536,
 			MemoryCapacity:     65536,
 			AICore:             20,
