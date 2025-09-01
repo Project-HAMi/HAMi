@@ -1139,7 +1139,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod two container, the second container use device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1150,7 +1150,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.NodeSchedulerPolicyBinpack.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1168,10 +1168,10 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{},
 					{
-						nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 							Nums:             1,
 							Type:             nvidia.NvidiaGPUDevice,
 							Memreq:           1000,
@@ -1219,8 +1219,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{},
 									{
 										{

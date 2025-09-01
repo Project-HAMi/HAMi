@@ -160,7 +160,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 
 				// container need no device and we have got certain deviceType
 				if sums == 0 && deviceType != "" {
-					score.Devices[deviceType] = append(score.Devices[deviceType], util.ContainerDevices{})
+					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
@@ -169,8 +169,8 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				for idx := range score.Devices {
 					deviceType = idx
 					for len(score.Devices[idx]) <= ctrid {
-						emptyContainerDevices := util.ContainerDevices{}
-						emptyPodSingleDevice := util.PodSingleDevice{}
+						emptyContainerDevices := device.ContainerDevices{}
+						emptyPodSingleDevice := device.PodSingleDevice{}
 						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
 						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
 					}
