@@ -734,7 +734,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: device unhealthy",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -747,7 +747,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 				Health:    false,
 				Type:      MetaxSGPUDevice,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             MetaxSGPUDevice,
 				Memreq:           512,
