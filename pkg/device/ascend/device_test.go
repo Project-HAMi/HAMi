@@ -31,6 +31,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -156,8 +157,8 @@ func Test_InitDevices(t *testing.T) {
 				for k, v := range devices {
 					assert.Equal(t, v, devices[k], "load ascend vnpu config %s: %v", devices[k].config.CommonWord, devices[k].config)
 				}
-				assert.Equal(t, "hami.io/Ascend910A-devices-to-allocate", util.InRequestDevices[test.args[0].CommonWord])
-				assert.Equal(t, "hami.io/Ascend910A-devices-allocated", util.SupportDevices[test.args[0].CommonWord])
+				assert.Equal(t, "hami.io/Ascend910A-devices-to-allocate", device.InRequestDevices[test.args[0].CommonWord])
+				assert.Equal(t, "hami.io/Ascend910A-devices-allocated", device.SupportDevices[test.args[0].CommonWord])
 				assert.Equal(t, test.want[0].handshakeAnno, util.HandshakeAnnos[test.args[0].CommonWord])
 			}
 		})
@@ -169,7 +170,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Node
-		want []*util.DeviceInfo
+		want []*device.DeviceInfo
 		err  error
 	}{
 		{
@@ -182,7 +183,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{
+			want: []*device.DeviceInfo{
 				{
 					ID:      "GPU-0",
 					Count:   int32(4),
@@ -205,7 +206,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  errors.New("no device found on node"),
 		},
 		{
@@ -215,7 +216,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Name: "node-03",
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  fmt.Errorf("annos not found"),
 		},
 		{
@@ -228,7 +229,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			want: []*util.DeviceInfo{},
+			want: []*device.DeviceInfo{},
 			err:  fmt.Errorf("failed to unmarshal node devices"),
 		},
 	}
@@ -288,7 +289,7 @@ func Test_PatchAnnotations(t *testing.T) {
 		name string
 		args struct {
 			annoinput map[string]string
-			pd        util.PodDevices
+			pd        device.PodDevices
 		}
 		want map[string]string
 	}{
@@ -296,12 +297,12 @@ func Test_PatchAnnotations(t *testing.T) {
 			name: "exist device",
 			args: struct {
 				annoinput map[string]string
-				pd        util.PodDevices
+				pd        device.PodDevices
 			}{
 				annoinput: map[string]string{},
-				pd: util.PodDevices{
-					dev.config.CommonWord: util.PodSingleDevice{
-						[]util.ContainerDevice{
+				pd: device.PodDevices{
+					dev.config.CommonWord: device.PodSingleDevice{
+						[]device.ContainerDevice{
 							{
 								Idx:       0,
 								UUID:      "device-0",
@@ -314,8 +315,8 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				util.InRequestDevices[dev.config.CommonWord]: "device-0,Ascend,8738,1:;",
-				util.SupportDevices[dev.config.CommonWord]:   "device-0,Ascend,8738,1:;",
+				device.InRequestDevices[dev.config.CommonWord]: "device-0,Ascend,8738,1:;",
+				device.SupportDevices[dev.config.CommonWord]:   "device-0,Ascend,8738,1:;",
 				"predicate-time":        strconv.FormatInt(time.Now().Unix(), 10),
 				"huawei.com/Ascend910A": "[{\"UUID\":\"device-0\",\"temp\":\"vir08\"}]",
 			},
@@ -324,10 +325,10 @@ func Test_PatchAnnotations(t *testing.T) {
 			name: "no device",
 			args: struct {
 				annoinput map[string]string
-				pd        util.PodDevices
+				pd        device.PodDevices
 			}{
 				annoinput: map[string]string{},
-				pd:        util.PodDevices{},
+				pd:        device.PodDevices{},
 			},
 			want: map[string]string{},
 		},
@@ -354,8 +355,8 @@ func Test_checkType(t *testing.T) {
 		name string
 		args struct {
 			annos map[string]string
-			d     util.DeviceUsage
-			n     util.ContainerDeviceRequest
+			d     device.DeviceUsage
+			n     device.ContainerDeviceRequest
 		}
 		want bool
 	}{
@@ -363,12 +364,12 @@ func Test_checkType(t *testing.T) {
 			name: "the same type",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n: util.ContainerDeviceRequest{
+				d:     device.DeviceUsage{},
+				n: device.ContainerDeviceRequest{
 					Type: "Ascend910A",
 				},
 			},
@@ -378,12 +379,12 @@ func Test_checkType(t *testing.T) {
 			name: "the different type",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n: util.ContainerDeviceRequest{
+				d:     device.DeviceUsage{},
+				n: device.ContainerDeviceRequest{
 					Type: "Ascend910B",
 				},
 			},
@@ -407,7 +408,7 @@ func Test_checkUUID(t *testing.T) {
 		name string
 		args struct {
 			annos map[string]string
-			d     util.DeviceUsage
+			d     device.DeviceUsage
 		}
 		want bool
 	}{
@@ -415,10 +416,10 @@ func Test_checkUUID(t *testing.T) {
 			name: "don't set GPUUseUUID,GPUNoUseUUID and annotation",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{},
-				d:     util.DeviceUsage{},
+				d:     device.DeviceUsage{},
 			},
 			want: true,
 		},
@@ -426,12 +427,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "set GPUUseUUID,don't set GPUNoUseUUID,annotation and device match",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					dev.useUUIDAnno: "test123,111",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "test123",
 				},
 			},
@@ -441,12 +442,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "don't set GPUUseUUID, set GPUNoUseUUID,annotation and device match",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					dev.noUseUUIDAnno: "test123,222",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "test123",
 				},
 			},
@@ -456,12 +457,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "set GPUUseUUID, don't set GPUNoUseUUID,annotation and device not match",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					dev.useUUIDAnno: "test123,222",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "test456",
 				},
 			},
@@ -471,12 +472,12 @@ func Test_checkUUID(t *testing.T) {
 			name: "don't set GPUUseUUID, set GPUNoUseUUID,annotation and device not match",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
+				d     device.DeviceUsage
 			}{
 				annos: map[string]string{
 					dev.noUseUUIDAnno: "test123,222",
 				},
-				d: util.DeviceUsage{
+				d: device.DeviceUsage{
 					ID: "test456",
 				},
 			},
@@ -709,7 +710,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
 		args corev1.Container
-		want util.ContainerDeviceRequest
+		want device.ContainerDeviceRequest
 	}{
 		{
 			name: "don't set to limits and request",
@@ -719,7 +720,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Requests: corev1.ResourceList{},
 				},
 			},
-			want: util.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "resourcename and resourcememoryname set to limits and request",
@@ -735,7 +736,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(2),
 				Type:             "Ascend910A",
 				Memreq:           int32(8738),
@@ -755,7 +756,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(2),
 				Type:             "Ascend910A",
 				Memreq:           int32(0),
@@ -1024,8 +1025,8 @@ func TestDevices_Fit(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		devices    []*util.DeviceUsage
-		request    util.ContainerDeviceRequest
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
 		annos      map[string]string
 		wantFit    bool
 		wantLen    int
@@ -1034,7 +1035,7 @@ func TestDevices_Fit(t *testing.T) {
 	}{
 		{
 			name: "fit success",
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					ID:        "dev-0",
 					Index:     0,
@@ -1060,7 +1061,7 @@ func TestDevices_Fit(t *testing.T) {
 					Health:    true,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           64,
 				MemPercentagereq: 0,
@@ -1074,7 +1075,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: memory not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1086,7 +1087,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1100,7 +1101,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: core not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1112,7 +1113,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1126,7 +1127,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: type mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1138,7 +1139,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             "OtherType",
 				Memreq:           512,
@@ -1153,7 +1154,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign use uuid mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-1",
 				Index:     0,
 				Used:      0,
@@ -1165,7 +1166,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1179,7 +1180,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign no use uuid match",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1191,7 +1192,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1205,7 +1206,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: card overused",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      100,
@@ -1217,7 +1218,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1231,7 +1232,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success: but core limit can't exceed 100",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -1243,7 +1244,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1257,7 +1258,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  card exclusively",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1269,7 +1270,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1283,7 +1284,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  CardComputeUnitsExhausted",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1295,7 +1296,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1309,7 +1310,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  AllocatedCardsInsufficientRequest",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1321,7 +1322,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -1335,7 +1336,7 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success:  memory percentage",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -1347,7 +1348,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa:      0,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
 				MemPercentagereq: 10,
@@ -1377,8 +1378,8 @@ func TestDevices_Fit(t *testing.T) {
 			}
 
 			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
-				allocated := &util.PodDevices{}
-				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+				allocated := &device.PodDevices{}
+				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
 				if fit != test.wantFit {
 					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 				}
@@ -1404,25 +1405,25 @@ func TestDevices_Fit(t *testing.T) {
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
-		deviceUsage *util.DeviceUsage
-		ctr         *util.ContainerDevice
+		deviceUsage *device.DeviceUsage
+		ctr         *device.ContainerDevice
 		wantErr     bool
-		wantUsage   *util.DeviceUsage
+		wantUsage   *device.DeviceUsage
 	}{
 		{
 			name: "test add resource usage",
-			deviceUsage: &util.DeviceUsage{
+			deviceUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      0,
 				Usedcores: 15,
 				Usedmem:   2000,
 			},
-			ctr: &util.ContainerDevice{
+			ctr: &device.ContainerDevice{
 				UUID:      "dev-0",
 				Usedcores: 50,
 				Usedmem:   1024,
 			},
-			wantUsage: &util.DeviceUsage{
+			wantUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      1,
 				Usedcores: 65,

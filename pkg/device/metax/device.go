@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -45,8 +46,8 @@ var (
 
 func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 	MetaxResourceCount = config.ResourceCountName
-	util.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
-	util.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
+	device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
 	return &MetaxDevices{}
 }
 
@@ -59,15 +60,15 @@ func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (
 	return ok, nil
 }
 
-func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
-	nodedevices := []*util.DeviceInfo{}
+func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	nodedevices := []*device.DeviceInfo{}
 	i := 0
 	count, ok := n.Status.Capacity.Name(corev1.ResourceName(MetaxResourceCount), resource.DecimalSI).AsInt64()
 	if !ok || count == 0 {
-		return []*util.DeviceInfo{}, fmt.Errorf("device not found %s", MetaxResourceCount)
+		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", MetaxResourceCount)
 	}
 	for int64(i) < count {
-		nodedevices = append(nodedevices, &util.DeviceInfo{
+		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:   uint(i),
 			ID:      n.Name + "-metax-" + fmt.Sprint(i),
 			Count:   1,
@@ -82,15 +83,15 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, erro
 	return nodedevices, nil
 }
 
-func (dev *MetaxDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *MetaxDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[MetaxGPUDevice]
 	if ok && len(devlist) > 0 {
-		deviceStr := util.EncodePodSingleDevice(devlist)
+		deviceStr := device.EncodePodSingleDevice(devlist)
 
-		(*annoinput)[util.InRequestDevices[MetaxGPUDevice]] = deviceStr
-		(*annoinput)[util.SupportDevices[MetaxGPUDevice]] = deviceStr
+		(*annoinput)[device.InRequestDevices[MetaxGPUDevice]] = deviceStr
+		(*annoinput)[device.SupportDevices[MetaxGPUDevice]] = deviceStr
 		klog.Infof("pod add annotation key [%s, %s], values is [%s]",
-			util.InRequestDevices[MetaxGPUDevice], util.SupportDevices[MetaxGPUDevice], deviceStr)
+			device.InRequestDevices[MetaxGPUDevice], device.SupportDevices[MetaxGPUDevice], deviceStr)
 	}
 
 	return *annoinput
@@ -108,14 +109,14 @@ func (dev *MetaxDevices) NodeCleanUp(nn string) error {
 	return nil
 }
 
-func (dev *MetaxDevices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *MetaxDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, MetaxGPUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *MetaxDevices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *MetaxDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	return true
 }
 
@@ -125,7 +126,7 @@ func (dev *MetaxDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool
 	return count > 0, true
 }
 
-func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count metax devices for container ", ctr.Name)
 	metaxResourceCount := corev1.ResourceName(MetaxResourceCount)
 	v, ok := ctr.Resources.Limits[metaxResourceCount]
@@ -135,7 +136,7 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) util.Co
 	if ok {
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found metax devices")
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             MetaxGPUDevice,
 				Memreq:           0,
@@ -144,10 +145,10 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) util.Co
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
-func (dev *MetaxDevices) customFilterRule(allocated *util.PodDevices, request util.ContainerDeviceRequest, toAllocate util.ContainerDevices, device *util.DeviceUsage) bool {
+func (dev *MetaxDevices) customFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, device *device.DeviceUsage) bool {
 	for _, ctrs := range (*allocated)[device.Type] {
 		for _, ctrdev := range ctrs {
 			if strings.Compare(ctrdev.UUID, device.ID) != 0 {
@@ -176,7 +177,7 @@ func parseMetaxAnnos(annos string, index int) float32 {
 	return float32(res)
 }
 
-func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	sum := 0
 	for _, dev := range podDevices {
 		sum += len(dev)
@@ -207,20 +208,20 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices util.PodSingleD
 	return res
 }
 
-func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (mat *MetaxDevices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -239,7 +240,7 @@ func (mat *MetaxDevices) Fit(devices []*util.DeviceUsage, request util.Container
 			}
 			k.Nums = originReq
 			prevnuma = dev.Numa
-			tmpDevs = make(map[string]util.ContainerDevices)
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !mat.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
@@ -297,7 +298,7 @@ func (mat *MetaxDevices) Fit(devices []*util.DeviceUsage, request util.Container
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,

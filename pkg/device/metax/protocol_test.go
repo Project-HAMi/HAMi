@@ -20,7 +20,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
@@ -28,7 +28,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 		name  string
 		metax []*MetaxSDeviceInfo
 
-		expected []*util.DeviceInfo
+		expected []*device.DeviceInfo
 	}{
 		{
 			name: "base test",
@@ -64,7 +64,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					LinkZone:          2,
 				},
 			},
-			expected: []*util.DeviceInfo{
+			expected: []*device.DeviceInfo{
 				{
 					ID:           "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a9",
 					Index:        0,
@@ -74,7 +74,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					Type:         MetaxSGPUDevice,
 					Numa:         0,
 					Mode:         "",
-					MIGTemplate:  []util.Geometry{},
+					MIGTemplate:  []device.Geometry{},
 					Health:       true,
 					DeviceVendor: MetaxSGPUDevice,
 					CustomInfo: map[string]any{
@@ -92,7 +92,7 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 					Type:         MetaxSGPUDevice,
 					Numa:         -1,
 					Mode:         "",
-					MIGTemplate:  []util.Geometry{},
+					MIGTemplate:  []device.Geometry{},
 					Health:       false,
 					DeviceVendor: MetaxSGPUDevice,
 					CustomInfo: map[string]any{
@@ -118,13 +118,13 @@ func TestConvertMetaxSDeviceToHAMIDevice(t *testing.T) {
 func TestConvertHAMIPodDeviceToMetaxPodDevice(t *testing.T) {
 	for _, ts := range []struct {
 		name string
-		hami util.PodSingleDevice
+		hami device.PodSingleDevice
 
 		expected PodMetaxSDevice
 	}{
 		{
 			name: "base test",
-			hami: util.PodSingleDevice{
+			hami: device.PodSingleDevice{
 				{
 					{
 						Idx:       0,

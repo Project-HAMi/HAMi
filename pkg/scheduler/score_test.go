@@ -32,12 +32,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestMain(m *testing.M) {
-	config := &device.Config{
+	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
 			ResourceCountName:            "hami.io/gpu",
 			ResourceMemoryName:           "hami.io/gpumem",
@@ -49,7 +50,7 @@ func TestMain(m *testing.M) {
 		},
 	}
 
-	if err := device.InitDevicesWithConfig(config); err != nil {
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 	m.Run()
@@ -83,7 +84,7 @@ func Test_calcScore(t *testing.T) {
 		name string
 		args struct {
 			nodes *map[string]*NodeUsage
-			nums  util.PodDeviceRequests
+			nums  device.PodDeviceRequests
 			annos map[string]string
 			task  *corev1.Pod
 		}
@@ -97,7 +98,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod one container use one device.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -108,7 +109,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -127,9 +128,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -170,8 +171,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -194,7 +195,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod one container use one device,but this device before having use.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -205,7 +206,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      5,
@@ -224,9 +225,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -267,8 +268,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -291,7 +292,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod one container use one device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -302,7 +303,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -318,7 +319,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -337,9 +338,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -380,8 +381,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -404,7 +405,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod one container use one device,but having use 50%",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -415,7 +416,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -431,7 +432,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      5,
@@ -450,9 +451,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -493,8 +494,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -517,7 +518,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod one container use two device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -528,7 +529,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -544,7 +545,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -563,9 +564,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     2,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -606,8 +607,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -637,7 +638,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod one container use two device,but this two device before having use.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -648,7 +649,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      5,
@@ -664,7 +665,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      5,
@@ -683,9 +684,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     2,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -726,8 +727,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -757,7 +758,7 @@ func Test_calcScore(t *testing.T) {
 			name: "two node per node having one device one pod one container use one device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -768,7 +769,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -792,7 +793,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -811,9 +812,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -854,8 +855,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -871,8 +872,8 @@ func Test_calcScore(t *testing.T) {
 						},
 						{
 							NodeID: "node2",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -895,7 +896,7 @@ func Test_calcScore(t *testing.T) {
 			name: "two node per node having one device one pod one container use one device,one device having use 50%",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -906,7 +907,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      5,
@@ -930,7 +931,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -949,9 +950,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -992,8 +993,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -1009,8 +1010,8 @@ func Test_calcScore(t *testing.T) {
 						},
 						{
 							NodeID: "node2",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -1033,7 +1034,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod two container use two device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1044,7 +1045,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.NodeSchedulerPolicyBinpack.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1062,9 +1063,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 							Nums:             1,
 							Type:             nvidia.NvidiaGPUDevice,
 							Memreq:           1000,
@@ -1113,8 +1114,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -1243,7 +1244,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod with three containers, middle container uses one device.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1254,7 +1255,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1273,10 +1274,10 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{},
 					{
-						nvidia.NvidiaGPUDevice: util.ContainerDeviceRequest{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
 							Nums:             1,
 							Type:             nvidia.NvidiaGPUDevice,
 							Memreq:           1000,
@@ -1331,8 +1332,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{},
 									{
 										{
@@ -1357,7 +1358,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node two device one pod two containers use two device with spread,should not in same device.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1368,7 +1369,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1384,7 +1385,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     1,
 										Used:      0,
@@ -1403,9 +1404,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   8000,
@@ -1413,7 +1414,7 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -1466,8 +1467,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       1,
@@ -1499,7 +1500,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod one container use one device and not enough resource,node should be failed.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1510,7 +1511,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1529,9 +1530,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -1581,7 +1582,7 @@ func Test_calcScore(t *testing.T) {
 			name: "race condition test for failedNodes map with two nodes failing",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1592,7 +1593,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1616,7 +1617,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -1635,9 +1636,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -1688,7 +1689,7 @@ func Test_calcScore(t *testing.T) {
 			name: "one node one device one pod one container use one device for kunlun.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -1699,7 +1700,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1715,7 +1716,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     1,
 										Used:      0,
@@ -1731,7 +1732,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid3",
 										Index:     2,
 										Used:      0,
@@ -1747,7 +1748,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid4",
 										Index:     3,
 										Used:      0,
@@ -1763,7 +1764,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid5",
 										Index:     4,
 										Used:      0,
@@ -1779,7 +1780,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid6",
 										Index:     5,
 										Used:      0,
@@ -1795,7 +1796,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid7",
 										Index:     6,
 										Used:      0,
@@ -1811,7 +1812,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid8",
 										Index:     7,
 										Used:      0,
@@ -1835,7 +1836,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -1851,7 +1852,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     1,
 										Used:      0,
@@ -1867,7 +1868,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid3",
 										Index:     2,
 										Used:      0,
@@ -1883,7 +1884,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid4",
 										Index:     3,
 										Used:      1,
@@ -1899,7 +1900,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid5",
 										Index:     4,
 										Used:      1,
@@ -1915,7 +1916,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid6",
 										Index:     5,
 										Used:      1,
@@ -1931,7 +1932,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid7",
 										Index:     6,
 										Used:      1,
@@ -1947,7 +1948,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid8",
 										Index:     7,
 										Used:      1,
@@ -1966,9 +1967,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     kunlun.KunlunGPUDevice,
 							Memreq:   0,
@@ -2007,8 +2008,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"kunlun": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"kunlun": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2024,8 +2025,8 @@ func Test_calcScore(t *testing.T) {
 						},
 						{
 							NodeID: "node2",
-							Devices: util.PodDevices{
-								"kunlun": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"kunlun": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2049,7 +2050,7 @@ func Test_calcScore(t *testing.T) {
 			name: "two node eight device one pod two container use one device for kunlun.",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -2060,7 +2061,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -2076,7 +2077,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     1,
 										Used:      0,
@@ -2092,7 +2093,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid3",
 										Index:     2,
 										Used:      0,
@@ -2108,7 +2109,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid4",
 										Index:     3,
 										Used:      0,
@@ -2124,7 +2125,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid5",
 										Index:     4,
 										Used:      0,
@@ -2140,7 +2141,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid6",
 										Index:     5,
 										Used:      0,
@@ -2156,7 +2157,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid7",
 										Index:     6,
 										Used:      0,
@@ -2172,7 +2173,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid8",
 										Index:     7,
 										Used:      0,
@@ -2196,7 +2197,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -2212,7 +2213,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     1,
 										Used:      0,
@@ -2228,7 +2229,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid3",
 										Index:     2,
 										Used:      0,
@@ -2244,7 +2245,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid4",
 										Index:     3,
 										Used:      1,
@@ -2260,7 +2261,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid5",
 										Index:     4,
 										Used:      1,
@@ -2276,7 +2277,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid6",
 										Index:     5,
 										Used:      1,
@@ -2292,7 +2293,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid7",
 										Index:     6,
 										Used:      1,
@@ -2308,7 +2309,7 @@ func Test_calcScore(t *testing.T) {
 									Score: 0,
 								},
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid8",
 										Index:     7,
 										Used:      1,
@@ -2327,9 +2328,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     kunlun.KunlunGPUDevice,
 							Memreq:   0,
@@ -2337,7 +2338,7 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     kunlun.KunlunGPUDevice,
 							Memreq:   0,
@@ -2386,8 +2387,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"kunlun": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"kunlun": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2412,8 +2413,8 @@ func Test_calcScore(t *testing.T) {
 						},
 						{
 							NodeID: "node2",
-							Devices: util.PodDevices{
-								"kunlun": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"kunlun": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2446,7 +2447,7 @@ func Test_calcScore(t *testing.T) {
 			name: "two node per node having one device one pod two container use one device",
 			args: struct {
 				nodes *map[string]*NodeUsage
-				nums  util.PodDeviceRequests
+				nums  device.PodDeviceRequests
 				annos map[string]string
 				task  *corev1.Pod
 			}{
@@ -2457,7 +2458,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid1",
 										Index:     0,
 										Used:      0,
@@ -2481,7 +2482,7 @@ func Test_calcScore(t *testing.T) {
 							Policy: util.GPUSchedulerPolicySpread.String(),
 							DeviceLists: []*policy.DeviceListsScore{
 								{
-									Device: &util.DeviceUsage{
+									Device: &device.DeviceUsage{
 										ID:        "uuid2",
 										Index:     0,
 										Used:      0,
@@ -2500,9 +2501,9 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 				},
-				nums: util.PodDeviceRequests{
+				nums: device.PodDeviceRequests{
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -2510,7 +2511,7 @@ func Test_calcScore(t *testing.T) {
 						},
 					},
 					{
-						"hami.io/vgpu-devices-to-allocate": util.ContainerDeviceRequest{
+						"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
 							Nums:     1,
 							Type:     nvidia.NvidiaGPUDevice,
 							Memreq:   1000,
@@ -2563,8 +2564,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{
 						{
 							NodeID: "node1",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2589,8 +2590,8 @@ func Test_calcScore(t *testing.T) {
 						},
 						{
 							NodeID: "node2",
-							Devices: util.PodDevices{
-								"NVIDIA": util.PodSingleDevice{
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
 									{
 										{
 											Idx:       0,
@@ -2623,13 +2624,13 @@ func Test_calcScore(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			for nodeName, nodeUsage := range *(test.args.nodes) {
-				devices := []util.DeviceInfo{}
-				for _, device := range nodeUsage.Devices.DeviceLists {
-					devices = append(devices, util.DeviceInfo{
-						ID: device.Device.ID,
+				devices := []device.DeviceInfo{}
+				for _, devinstance := range nodeUsage.Devices.DeviceLists {
+					devices = append(devices, device.DeviceInfo{
+						ID: devinstance.Device.ID,
 					})
 				}
-				s.addNode(nodeName, &util.NodeInfo{nodeName, nodeUsage.Node, devices})
+				s.addNode(nodeName, &device.NodeInfo{ID: nodeName, Node: nodeUsage.Node, Devices: devices})
 			}
 			failedNodes := map[string]string{}
 			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task, failedNodes)
@@ -2661,30 +2662,30 @@ func Test_fitInCertainDevice(t *testing.T) {
 		name string
 		args struct {
 			node      *NodeUsage
-			request   util.ContainerDeviceRequest
+			request   device.ContainerDeviceRequest
 			annos     map[string]string
 			pod       *corev1.Pod
-			allocated *util.PodDevices
+			allocated *device.PodDevices
 		}
 		want1 bool
-		want2 map[string]util.ContainerDevices
+		want2 map[string]device.ContainerDevices
 		want3 map[string]int
 	}{
 		{
 			name: "allocated device",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2699,7 +2700,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -2708,10 +2709,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: true,
-			want2: map[string]util.ContainerDevices{
+			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{
 						Usedcores: int32(1),
@@ -2726,17 +2727,17 @@ func Test_fitInCertainDevice(t *testing.T) {
 			name: "card type don't match",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2751,7 +2752,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             "test",
 					Memreq:           int32(1024),
@@ -2760,27 +2761,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardTypeMismatch: 1},
 		},
 		{
 			name: "device count less than device used",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2795,7 +2796,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -2804,27 +2805,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardTimeSlicingExhausted: 1},
 		},
 		{
 			name: "core limit exceed 100",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2839,7 +2840,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -2848,27 +2849,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardInsufficientCore: 1},
 		},
 		{
 			name: "card insufficient remaining memory",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2883,7 +2884,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(0),
@@ -2892,27 +2893,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardInsufficientMemory: 1},
 		},
 		{
 			name: "the container wants exclusive access to an entire card, but the card is already in use",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2927,7 +2928,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(100),
@@ -2936,27 +2937,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{exclusiveDeviceAllocateConflict: 1},
 		},
 		{
 			name: "can't allocate core=0 job to an already full GPU",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -2971,7 +2972,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -2980,27 +2981,27 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardComputeUnitsExhausted: 1},
 		},
 		{
 			name: "mode is mig",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3011,9 +3012,9 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedcores: int32(1),
 									Totalcore: int32(4),
 									Mode:      "mig",
-									MigUsage: util.MigInUse{
+									MigUsage: device.MigInUse{
 										Index: int32(1),
-										UsageList: util.MIGS{
+										UsageList: device.MIGS{
 											{
 												Name:   "test6",
 												Memory: int32(2048),
@@ -3026,7 +3027,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(2),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3035,10 +3036,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{
+			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{
 						UUID:      "test-0",
@@ -3054,17 +3055,17 @@ func Test_fitInCertainDevice(t *testing.T) {
 			name: "card uuid don't match",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-0",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3079,7 +3080,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3090,20 +3091,20 @@ func Test_fitInCertainDevice(t *testing.T) {
 					nvidia.GPUUseUUID: "abc",
 				},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardUUIDMismatch: 1},
 		},
 		{
 			name: "numa not fit",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
@@ -3114,7 +3115,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(2),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3126,10 +3127,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 					nvidia.NumaBind: "true",
 				},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{
+			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{
 						UUID:      "test-0",
@@ -3145,10 +3146,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 			name: "test device kind of not fit reason",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				allocated *util.PodDevices
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
@@ -3174,7 +3175,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(2),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3183,10 +3184,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 				},
 				annos:     map[string]string{nvidia.GPUUseUUID: "a,f,c,d,e,g,h,j,l,u,m"},
 				pod:       &corev1.Pod{},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: false,
-			want2: map[string]util.ContainerDevices{},
+			want2: map[string]device.ContainerDevices{},
 			want3: map[string]int{cardUUIDMismatch: 3, cardTimeSlicingExhausted: 4,
 				cardInsufficientMemory: 2, cardInsufficientCore: 1},
 		},
@@ -3196,7 +3197,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &nvidia.NvidiaGPUDevices{}
 
-			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, &util.NodeInfo{}, test.args.allocated)
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, &device.NodeInfo{}, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
@@ -3204,8 +3205,8 @@ func Test_fitInCertainDevice(t *testing.T) {
 	}
 }
 
-func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem, usedcores, totalcore int) *util.DeviceUsage {
-	return &util.DeviceUsage{
+func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem, usedcores, totalcore int) *device.DeviceUsage {
+	return &device.DeviceUsage{
 		ID:        id,
 		Numa:      numa,
 		Type:      Type,
@@ -3249,10 +3250,10 @@ func Test_fitInDevices(t *testing.T) {
 		name string
 		args struct {
 			node     NodeUsage
-			requests util.ContainerDeviceRequests
+			requests device.ContainerDeviceRequests
 			annos    map[string]string
 			pod      *corev1.Pod
-			devinput *util.PodDevices
+			devinput *device.PodDevices
 		}
 		want1 bool
 		want2 string
@@ -3261,17 +3262,17 @@ func Test_fitInDevices(t *testing.T) {
 			name: "all device score for one node",
 			args: struct {
 				node     NodeUsage
-				requests util.ContainerDeviceRequests
+				requests device.ContainerDeviceRequests
 				annos    map[string]string
 				pod      *corev1.Pod
-				devinput *util.PodDevices
+				devinput *device.PodDevices
 			}{
 				node: NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-1",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3284,7 +3285,7 @@ func Test_fitInDevices(t *testing.T) {
 								},
 							},
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-2",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3299,7 +3300,7 @@ func Test_fitInDevices(t *testing.T) {
 						},
 					},
 				},
-				requests: util.ContainerDeviceRequests{
+				requests: device.ContainerDeviceRequests{
 					"test-2": {
 						Nums:             int32(1),
 						Type:             nvidia.NvidiaGPUDevice,
@@ -3310,7 +3311,7 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				annos:    map[string]string{},
 				pod:      &corev1.Pod{},
-				devinput: &util.PodDevices{},
+				devinput: &device.PodDevices{},
 			},
 			want1: true,
 			want2: "",
@@ -3319,17 +3320,17 @@ func Test_fitInDevices(t *testing.T) {
 			name: "request devices nums cannot exceed the total number of devices on the node",
 			args: struct {
 				node     NodeUsage
-				requests util.ContainerDeviceRequests
+				requests device.ContainerDeviceRequests
 				annos    map[string]string
 				pod      *corev1.Pod
-				devinput *util.PodDevices
+				devinput *device.PodDevices
 			}{
 				node: NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-1",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3344,7 +3345,7 @@ func Test_fitInDevices(t *testing.T) {
 						},
 					},
 				},
-				requests: util.ContainerDeviceRequests{
+				requests: device.ContainerDeviceRequests{
 					"test-1": {
 						Nums:             int32(2),
 						Type:             nvidia.NvidiaGPUDevice,
@@ -3355,7 +3356,7 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				annos:    map[string]string{},
 				pod:      &corev1.Pod{},
-				devinput: &util.PodDevices{},
+				devinput: &device.PodDevices{},
 			},
 			want1: false,
 			want2: "NodeInsufficientDevice",
@@ -3364,17 +3365,17 @@ func Test_fitInDevices(t *testing.T) {
 			name: "device type the different from request type",
 			args: struct {
 				node     NodeUsage
-				requests util.ContainerDeviceRequests
+				requests device.ContainerDeviceRequests
 				annos    map[string]string
 				pod      *corev1.Pod
-				devinput *util.PodDevices
+				devinput *device.PodDevices
 			}{
 				node: NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
 					Devices: policy.DeviceUsageList{
 						DeviceLists: []*policy.DeviceListsScore{
 							{
-								Device: &util.DeviceUsage{
+								Device: &device.DeviceUsage{
 									ID:        "test-2",
 									Numa:      int(1),
 									Type:      nvidia.NvidiaGPUDevice,
@@ -3389,7 +3390,7 @@ func Test_fitInDevices(t *testing.T) {
 						},
 					},
 				},
-				requests: util.ContainerDeviceRequests{
+				requests: device.ContainerDeviceRequests{
 					"test-1": {
 						Nums:             int32(1),
 						Type:             "test",
@@ -3400,7 +3401,7 @@ func Test_fitInDevices(t *testing.T) {
 				},
 				annos:    map[string]string{},
 				pod:      &corev1.Pod{},
-				devinput: &util.PodDevices{},
+				devinput: &device.PodDevices{},
 			},
 			want1: false,
 			want2: "Device type not found",
@@ -3421,25 +3422,25 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 		name string
 		args struct {
 			node      *NodeUsage
-			request   util.ContainerDeviceRequest
+			request   device.ContainerDeviceRequest
 			annos     map[string]string
 			pod       *corev1.Pod
-			nodeInfo  *util.NodeInfo
-			allocated *util.PodDevices
+			nodeInfo  *device.NodeInfo
+			allocated *device.PodDevices
 		}
 		want1 bool
-		want2 map[string]util.ContainerDevices
+		want2 map[string]device.ContainerDevices
 		want3 string
 	}{
 		{
 			name: "test nvidia gpu topology-aware",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				nodeInfo  *util.NodeInfo
-				allocated *util.PodDevices
+				nodeInfo  *device.NodeInfo
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
@@ -3454,7 +3455,7 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(3),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3469,21 +3470,21 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 						},
 					},
 				},
-				nodeInfo: &util.NodeInfo{
+				nodeInfo: &device.NodeInfo{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
-					Devices: []util.DeviceInfo{
-						{ID: "a", DevicePairScore: util.DevicePairScore{ID: "a", Scores: map[string]int{"b": 1, "c": 1, "d": 1, "e": 1, "f": 100}}},
-						{ID: "b", DevicePairScore: util.DevicePairScore{ID: "b", Scores: map[string]int{"a": 1, "c": 1, "d": 1, "e": 1, "f": 1}}},
-						{ID: "c", DevicePairScore: util.DevicePairScore{ID: "c", Scores: map[string]int{"a": 1, "b": 1, "d": 1, "e": 1, "f": 100}}},
-						{ID: "d", DevicePairScore: util.DevicePairScore{ID: "d", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "e": 1, "f": 1}}},
-						{ID: "e", DevicePairScore: util.DevicePairScore{ID: "e", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "f": 1}}},
-						{ID: "f", DevicePairScore: util.DevicePairScore{ID: "f", Scores: map[string]int{"a": 100, "b": 1, "c": 100, "d": 1, "e": 1}}},
+					Devices: []device.DeviceInfo{
+						{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 1, "c": 1, "d": 1, "e": 1, "f": 100}}},
+						{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 1, "c": 1, "d": 1, "e": 1, "f": 1}}},
+						{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 1, "b": 1, "d": 1, "e": 1, "f": 100}}},
+						{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "e": 1, "f": 1}}},
+						{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "f": 1}}},
+						{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 100, "b": 1, "c": 100, "d": 1, "e": 1}}},
 					},
 				},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: true,
-			want2: map[string]util.ContainerDevices{
+			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{UUID: "f", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
 					{UUID: "c", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
@@ -3496,11 +3497,11 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 			name: "test Single Card Topology ",
 			args: struct {
 				node      *NodeUsage
-				request   util.ContainerDeviceRequest
+				request   device.ContainerDeviceRequest
 				annos     map[string]string
 				pod       *corev1.Pod
-				nodeInfo  *util.NodeInfo
-				allocated *util.PodDevices
+				nodeInfo  *device.NodeInfo
+				allocated *device.PodDevices
 			}{
 				node: &NodeUsage{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
@@ -3515,7 +3516,7 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 						},
 					},
 				},
-				request: util.ContainerDeviceRequest{
+				request: device.ContainerDeviceRequest{
 					Nums:             int32(1),
 					Type:             nvidia.NvidiaGPUDevice,
 					Memreq:           int32(1024),
@@ -3530,21 +3531,21 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 						},
 					},
 				},
-				nodeInfo: &util.NodeInfo{
+				nodeInfo: &device.NodeInfo{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
-					Devices: []util.DeviceInfo{
-						{ID: "a", DevicePairScore: util.DevicePairScore{ID: "a", Scores: map[string]int{"b": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "b", DevicePairScore: util.DevicePairScore{ID: "b", Scores: map[string]int{"a": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "c", DevicePairScore: util.DevicePairScore{ID: "c", Scores: map[string]int{"a": 100, "b": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "d", DevicePairScore: util.DevicePairScore{ID: "d", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "e": 100, "f": 1}}},
-						{ID: "e", DevicePairScore: util.DevicePairScore{ID: "e", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "d": 100, "f": 1}}},
-						{ID: "f", DevicePairScore: util.DevicePairScore{ID: "f", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}},
+					Devices: []device.DeviceInfo{
+						{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 100, "b": 100, "d": 100, "e": 100, "f": 1}}},
+						{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "e": 100, "f": 1}}},
+						{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "d": 100, "f": 1}}},
+						{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}},
 					},
 				},
-				allocated: &util.PodDevices{},
+				allocated: &device.PodDevices{},
 			},
 			want1: true,
-			want2: map[string]util.ContainerDevices{
+			want2: map[string]device.ContainerDevices{
 				"NVIDIA": {
 					{UUID: "f", Type: "NVIDIA", Usedmem: 1024, Usedcores: 20},
 				},

@@ -21,9 +21,9 @@ import (
 	"os"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -111,7 +111,7 @@ func generateDeviceConfigFromNvidia(cfg *spec.Config, c *cli.Context, flags []cl
 		}
 	}
 
-	config, err := device.LoadConfig(*plugin.ConfigFile)
+	config, err := config.LoadConfig(*plugin.ConfigFile)
 	if err != nil {
 		klog.Fatalf("failed to load ascend vnpu config file %s: %v", *plugin.ConfigFile, err)
 	}
