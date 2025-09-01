@@ -17,13 +17,14 @@ limitations under the License.
 package policy
 
 import (
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"k8s.io/klog/v2"
 )
 
 type DeviceListsScore struct {
-	Device *util.DeviceUsage
+	Device *device.DeviceUsage
 	// Score recode every device user/allocate score
 	Score float32
 }
@@ -55,7 +56,7 @@ func (l DeviceUsageList) Less(i, j int) bool {
 	return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
 }
 
-func (ds *DeviceListsScore) ComputeScore(requests util.ContainerDeviceRequests) {
+func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
 	request, core, mem := int32(0), int32(0), int32(0)
 	// Here we are required to use the same type device
 	for _, container := range requests {

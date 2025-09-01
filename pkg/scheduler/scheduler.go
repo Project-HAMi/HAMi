@@ -37,7 +37,6 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/k8sutil"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -92,11 +91,11 @@ func (s *Scheduler) onAddPod(obj any) {
 	if !ok {
 		return
 	}
-	if k8sutil.IsPodInTerminatedState(pod) {
+	if util.IsPodInTerminatedState(pod) {
 		s.delPod(pod)
 		return
 	}
-	podDev, _ := util.DecodePodDevices(util.SupportDevices, pod.Annotations)
+	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	s.addPod(pod, nodeID, podDev)
 }
 
@@ -215,11 +214,11 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 						klog.ErrorS(err, "Failed to patch node annotations", "nodeName", val.Name)
 					}
 				}
-				nodeInfo := &util.NodeInfo{}
+				nodeInfo := &device.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodeInfo.Devices = make([]util.DeviceInfo, 0)
+				nodeInfo.Devices = make([]device.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
 					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
 				}
@@ -259,7 +258,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
-		userGPUPolicy := util.GetGPUSchedulerPolicyByPod(config.GPUSchedulerPolicy, task)
+		userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
@@ -268,7 +267,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		for _, d := range node.Devices {
 			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
-				Device: &util.DeviceUsage{
+				Device: &device.DeviceUsage{
 					ID:        d.ID,
 					Index:     d.Index,
 					Used:      0,
@@ -277,9 +276,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Totalmem:  d.Devmem,
 					Totalcore: d.Devcore,
 					Usedcores: 0,
-					MigUsage: util.MigInUse{
+					MigUsage: device.MigInUse{
 						Index:     0,
-						UsageList: make(util.MIGS, 0),
+						UsageList: make(device.MIGS, 0),
 					},
 					MigTemplate: d.MIGTemplate,
 					Mode:        d.Mode,
@@ -319,9 +318,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 									d.Device.Health = false
 									continue
 								}
-								tmpIdx, Instance, _ := util.ExtractMigTemplatesFromUUID(udevice.UUID)
+								tmpIdx, Instance, _ := device.ExtractMigTemplatesFromUUID(udevice.UUID)
 								if len(d.Device.MigUsage.UsageList) == 0 {
-									util.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
+									device.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
 								}
 								d.Device.MigUsage.UsageList[Instance].InUse = true
 								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
@@ -441,7 +440,7 @@ ReleaseNodeLocks:
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
-	resourceReqs := k8sutil.Resourcereqs(args.Pod)
+	resourceReqs := device.Resourcereqs(args.Pod)
 	resourceReqTotal := 0
 	for _, n := range resourceReqs {
 		for _, k := range n {

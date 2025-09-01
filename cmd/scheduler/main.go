@@ -66,7 +66,7 @@ func init() {
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
-	rootCmd.Flags().StringVar(&config.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
+	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
 	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
 	rootCmd.Flags().StringToStringVar(&config.NodeLabelSelector, "node-label-selector", nil, "key=value pairs separated by commas")
 
@@ -77,10 +77,9 @@ func init() {
 	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
 
-	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
+	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
-
 }
 
 // injectProfilingRoute injects pprof routes into the router.
@@ -112,7 +111,7 @@ func start() error {
 		client.WithTimeout(config.Timeout),
 	)
 
-	device.InitDevices()
+	config.InitDevices()
 	sher = scheduler.NewScheduler()
 	sher.Start()
 	defer sher.Stop()
