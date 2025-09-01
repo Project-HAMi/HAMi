@@ -19,7 +19,7 @@ package metax
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 const (
@@ -91,11 +91,11 @@ func (sdev *PodMetaxSDevice) String() string {
 	return str
 }
 
-func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*util.DeviceInfo {
-	hamiDevices := make([]*util.DeviceInfo, len(metaxSDevices))
+func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*device.DeviceInfo {
+	hamiDevices := make([]*device.DeviceInfo, len(metaxSDevices))
 
 	for idx, sdevice := range metaxSDevices {
-		hamiDevices[idx] = &util.DeviceInfo{
+		hamiDevices[idx] = &device.DeviceInfo{
 			ID:           sdevice.UUID,
 			Index:        uint(idx),
 			Count:        sdevice.TotalDevCount,
@@ -104,7 +104,7 @@ func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*util.
 			Type:         MetaxSGPUDevice,
 			Numa:         int(sdevice.Numa),
 			Mode:         "",
-			MIGTemplate:  []util.Geometry{},
+			MIGTemplate:  []device.Geometry{},
 			Health:       sdevice.Healthy,
 			DeviceVendor: MetaxSGPUDevice,
 			CustomInfo: map[string]any{
@@ -118,7 +118,7 @@ func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*util.
 	return hamiDevices
 }
 
-func convertHAMIPodDeviceToMetaxPodDevice(hamiPodDevices util.PodSingleDevice) PodMetaxSDevice {
+func convertHAMIPodDeviceToMetaxPodDevice(hamiPodDevices device.PodSingleDevice) PodMetaxSDevice {
 	metaxDevices := make(PodMetaxSDevice, len(hamiPodDevices))
 
 	for ctrIdx, ctrDevices := range hamiPodDevices {

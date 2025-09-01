@@ -27,6 +27,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -87,8 +88,8 @@ func InitDevices(config []VNPUConfig) []*Devices {
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
 		})
-		util.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
-		util.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
 		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
 		devs = append(devs, dev)
 		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
@@ -127,29 +128,29 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	return true, nil
 }
 
-func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*util.DeviceInfo, error) {
+func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
 	anno, ok := n.Annotations[dev.nodeRegisterAnno]
 	if !ok {
-		return []*util.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
+		return []*device.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
 	}
-	nodeDevices, err := util.UnMarshalNodeDevices(anno)
+	nodeDevices, err := device.UnMarshalNodeDevices(anno)
 	if err != nil {
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
-		return []*util.DeviceInfo{}, err
+		return []*device.DeviceInfo{}, err
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
-		return []*util.DeviceInfo{}, errors.New("no device found on node")
+		return []*device.DeviceInfo{}, errors.New("no device found on node")
 	}
 	return nodeDevices, nil
 }
 
-func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]string, pd util.PodDevices) map[string]string {
+func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]string, pd device.PodDevices) map[string]string {
 	commonWord := dev.CommonWord()
 	devList, ok := pd[commonWord]
 	if ok && len(devList) > 0 {
-		(*annoInput)[util.InRequestDevices[commonWord]] = util.EncodePodSingleDevice(devList)
-		(*annoInput)[util.SupportDevices[commonWord]] = util.EncodePodSingleDevice(devList)
+		(*annoInput)[device.InRequestDevices[commonWord]] = device.EncodePodSingleDevice(devList)
+		(*annoInput)[device.SupportDevices[commonWord]] = device.EncodePodSingleDevice(devList)
 		(*annoInput)["predicate-time"] = strconv.FormatInt(time.Now().Unix(), 10)
 		allocateStr := fmt.Sprintf("huawei.com/%s", dev.CommonWord())
 		var rtInfo []RuntimeInfo
@@ -205,14 +206,14 @@ func (dev *Devices) NodeCleanUp(nn string) error {
 	return util.MarkAnnotationsToDelete(dev.handshakeAnno, nn)
 }
 
-func (dev *Devices) checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool, bool) {
+func (dev *Devices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, dev.CommonWord()) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *Devices) checkUUID(annos map[string]string, d util.DeviceUsage) bool {
+func (dev *Devices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[dev.useUUIDAnno]
 	if ok {
 		klog.V(5).Infof("check uuid for ascend user uuid [%s], device id is %s", userUUID, d.ID)
@@ -232,10 +233,10 @@ func (dev *Devices) checkUUID(annos map[string]string, d util.DeviceUsage) bool 
 }
 
 func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return util.CheckHealth(devType, n)
+	return device.CheckHealth(devType, n)
 }
 
-func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Infof("Counting %s devices", dev.config.CommonWord)
 	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
 	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
@@ -265,7 +266,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 				mempnum = 100
 			}
 
-			return util.ContainerDeviceRequest{
+			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
 				Type:             dev.CommonWord(),
 				Memreq:           int32(memnum),
@@ -274,27 +275,27 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) util.Contain
 			}
 		}
 	}
-	return util.ContainerDeviceRequest{}
+	return device.ContainerDeviceRequest{}
 }
 
-func (dev *Devices) ScoreNode(node *corev1.Node, podDevices util.PodSingleDevice, previous []*util.DeviceUsage, policy string) float32 {
+func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *util.DeviceUsage, ctr *util.ContainerDevice) error {
+func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
 }
 
-func (npu *Devices) Fit(devices []*util.DeviceUsage, request util.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *util.NodeInfo, allocated *util.PodDevices) (bool, map[string]util.ContainerDevices, string) {
+func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]util.ContainerDevices
-	tmpDevs = make(map[string]util.ContainerDevices)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
@@ -313,7 +314,7 @@ func (npu *Devices) Fit(devices []*util.DeviceUsage, request util.ContainerDevic
 			}
 			k.Nums = originReq
 			prevnuma = dev.Numa
-			tmpDevs = make(map[string]util.ContainerDevices)
+			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !npu.checkUUID(annos, *dev) {
 			reason[common.CardUUIDMismatch]++
@@ -364,7 +365,7 @@ func (npu *Devices) Fit(devices []*util.DeviceUsage, request util.ContainerDevic
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--
-			tmpDevs[k.Type] = append(tmpDevs[k.Type], util.ContainerDevice{
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
 				Type:      k.Type,

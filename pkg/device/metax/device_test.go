@@ -25,7 +25,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -34,7 +34,7 @@ func TestGetNodeDevices(t *testing.T) {
 	tests := []struct {
 		name     string
 		node     corev1.Node
-		expected []*util.DeviceInfo
+		expected []*device.DeviceInfo
 		err      error
 	}{
 		{
@@ -49,7 +49,7 @@ func TestGetNodeDevices(t *testing.T) {
 					},
 				},
 			},
-			expected: []*util.DeviceInfo{
+			expected: []*device.DeviceInfo{
 				{
 					Index:   0,
 					ID:      "test-metax-0",
@@ -214,8 +214,8 @@ func Test_checkType(t *testing.T) {
 		name string
 		args struct {
 			annos map[string]string
-			d     util.DeviceUsage
-			n     util.ContainerDeviceRequest
+			d     device.DeviceUsage
+			n     device.ContainerDeviceRequest
 		}
 		want1 bool
 		want2 bool
@@ -225,12 +225,12 @@ func Test_checkType(t *testing.T) {
 			name: "node type the same as device",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n: util.ContainerDeviceRequest{
+				d:     device.DeviceUsage{},
+				n: device.ContainerDeviceRequest{
 					Type: MetaxGPUDevice,
 				},
 			},
@@ -242,12 +242,12 @@ func Test_checkType(t *testing.T) {
 			name: "node type the different from device",
 			args: struct {
 				annos map[string]string
-				d     util.DeviceUsage
-				n     util.ContainerDeviceRequest
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
 			}{
 				annos: map[string]string{},
-				d:     util.DeviceUsage{},
-				n: util.ContainerDeviceRequest{
+				d:     device.DeviceUsage{},
+				n: device.ContainerDeviceRequest{
 					Type: "test",
 				},
 			},
@@ -271,7 +271,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
 		args *corev1.Container
-		want util.ContainerDeviceRequest
+		want device.ContainerDeviceRequest
 	}{
 		{
 			name: "resource set to limit and request",
@@ -285,7 +285,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: util.ContainerDeviceRequest{
+			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             MetaxGPUDevice,
 				Memreq:           0,
@@ -301,7 +301,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Requests: corev1.ResourceList{},
 				},
 			},
-			want: util.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {
@@ -319,24 +319,24 @@ func Test_CustomFilterRule(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
-			allocated  *util.PodDevices
-			request    util.ContainerDeviceRequest
-			toAllocate util.ContainerDevices
-			device     *util.DeviceUsage
+			allocated  *device.PodDevices
+			request    device.ContainerDeviceRequest
+			toAllocate device.ContainerDevices
+			device     *device.DeviceUsage
 		}
 		want bool
 	}{
 		{
 			name: "allocated id is same as device id",
 			args: struct {
-				allocated  *util.PodDevices
-				request    util.ContainerDeviceRequest
-				toAllocate util.ContainerDevices
-				device     *util.DeviceUsage
+				allocated  *device.PodDevices
+				request    device.ContainerDeviceRequest
+				toAllocate device.ContainerDevices
+				device     *device.DeviceUsage
 			}{
-				allocated: &util.PodDevices{
-					MetaxGPUDevice: util.PodSingleDevice{
-						util.ContainerDevices{
+				allocated: &device.PodDevices{
+					MetaxGPUDevice: device.PodSingleDevice{
+						device.ContainerDevices{
 							{
 								Idx:       int(0),
 								Type:      MetaxGPUDevice,
@@ -347,9 +347,9 @@ func Test_CustomFilterRule(t *testing.T) {
 						},
 					},
 				},
-				request:    util.ContainerDeviceRequest{},
-				toAllocate: util.ContainerDevices{},
-				device: &util.DeviceUsage{
+				request:    device.ContainerDeviceRequest{},
+				toAllocate: device.ContainerDevices{},
+				device: &device.DeviceUsage{
 					Type: MetaxGPUDevice,
 					ID:   "test-0000",
 				},
@@ -359,14 +359,14 @@ func Test_CustomFilterRule(t *testing.T) {
 		{
 			name: "allocated id is different from device id",
 			args: struct {
-				allocated  *util.PodDevices
-				request    util.ContainerDeviceRequest
-				toAllocate util.ContainerDevices
-				device     *util.DeviceUsage
+				allocated  *device.PodDevices
+				request    device.ContainerDeviceRequest
+				toAllocate device.ContainerDevices
+				device     *device.DeviceUsage
 			}{
-				allocated: &util.PodDevices{
-					MetaxGPUDevice: util.PodSingleDevice{
-						util.ContainerDevices{
+				allocated: &device.PodDevices{
+					MetaxGPUDevice: device.PodSingleDevice{
+						device.ContainerDevices{
 							{
 								Idx:       int(0),
 								Type:      MetaxGPUDevice,
@@ -377,9 +377,9 @@ func Test_CustomFilterRule(t *testing.T) {
 						},
 					},
 				},
-				request:    util.ContainerDeviceRequest{},
-				toAllocate: util.ContainerDevices{},
-				device: &util.DeviceUsage{
+				request:    device.ContainerDeviceRequest{},
+				toAllocate: device.ContainerDevices{},
+				device: &device.DeviceUsage{
 					Type: MetaxGPUDevice,
 					ID:   "test-1111",
 				},
@@ -401,7 +401,7 @@ func Test_ScoreNode(t *testing.T) {
 		name string
 		args struct {
 			node       *corev1.Node
-			podDevices util.PodSingleDevice
+			podDevices device.PodSingleDevice
 			policy     string
 		}
 		want float32
@@ -410,7 +410,7 @@ func Test_ScoreNode(t *testing.T) {
 			name: "policy is binpack",
 			args: struct {
 				node       *corev1.Node
-				podDevices util.PodSingleDevice
+				podDevices device.PodSingleDevice
 				policy     string
 			}{
 				node: &corev1.Node{
@@ -420,8 +420,8 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				podDevices: util.PodSingleDevice{
-					util.ContainerDevices{
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
 						{
 							Idx:       int(0),
 							UUID:      "test-0",
@@ -446,7 +446,7 @@ func Test_ScoreNode(t *testing.T) {
 			name: "policy is spread",
 			args: struct {
 				node       *corev1.Node
-				podDevices util.PodSingleDevice
+				podDevices device.PodSingleDevice
 				policy     string
 			}{
 				node: &corev1.Node{
@@ -456,8 +456,8 @@ func Test_ScoreNode(t *testing.T) {
 						},
 					},
 				},
-				podDevices: util.PodSingleDevice{
-					util.ContainerDevices{
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
 						{
 							Idx:       int(0),
 							UUID:      "test-0",
@@ -475,7 +475,7 @@ func Test_ScoreNode(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*util.DeviceUsage{}, test.args.policy)
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*device.DeviceUsage{}, test.args.policy)
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
@@ -489,8 +489,8 @@ func TestMetaxDevices_Fit(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		devices    []*util.DeviceUsage
-		request    util.ContainerDeviceRequest
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
 		annos      map[string]string
 		wantFit    bool
 		wantLen    int
@@ -499,7 +499,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 	}{
 		{
 			name: "fit success",
-			devices: []*util.DeviceUsage{
+			devices: []*device.DeviceUsage{
 				{
 					ID:        "dev-0",
 					Index:     0,
@@ -527,7 +527,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 					Health:    true,
 				},
 			},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           64,
 				MemPercentagereq: 0,
@@ -542,7 +542,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: memory not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -555,7 +555,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -570,7 +570,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: core not enough",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -583,7 +583,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -598,7 +598,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: type mismatch",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -611,7 +611,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Health:    true,
 				Type:      MetaxGPUDevice,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             "OtherType",
 				Memreq:           512,
@@ -626,7 +626,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: card overused",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      100,
@@ -639,7 +639,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -654,7 +654,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success: but core limit can't exceed 100",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      0,
@@ -667,7 +667,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -682,7 +682,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  card exclusively",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -695,7 +695,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -710,7 +710,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  CardComputeUnitsExhausted",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -723,7 +723,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -738,7 +738,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail:  AllocatedCardsInsufficientRequest",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -751,7 +751,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           512,
 				MemPercentagereq: 0,
@@ -766,7 +766,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit success:  memory percentage",
-			devices: []*util.DeviceUsage{{
+			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
 				Used:      20,
@@ -779,7 +779,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 				Type:      MetaxGPUDevice,
 				Health:    true,
 			}},
-			request: util.ContainerDeviceRequest{
+			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
 				MemPercentagereq: 10,
@@ -796,8 +796,8 @@ func TestMetaxDevices_Fit(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			allocated := &util.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &util.NodeInfo{}, allocated)
+			allocated := &device.PodDevices{}
+			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
@@ -822,25 +822,25 @@ func TestMetaxDevices_Fit(t *testing.T) {
 func TestMetaxDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
-		deviceUsage *util.DeviceUsage
-		ctr         *util.ContainerDevice
+		deviceUsage *device.DeviceUsage
+		ctr         *device.ContainerDevice
 		wantErr     bool
-		wantUsage   *util.DeviceUsage
+		wantUsage   *device.DeviceUsage
 	}{
 		{
 			name: "test add resource usage",
-			deviceUsage: &util.DeviceUsage{
+			deviceUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      0,
 				Usedcores: 15,
 				Usedmem:   2000,
 			},
-			ctr: &util.ContainerDevice{
+			ctr: &device.ContainerDevice{
 				UUID:      "dev-0",
 				Usedcores: 50,
 				Usedmem:   1024,
 			},
-			wantUsage: &util.DeviceUsage{
+			wantUsage: &device.DeviceUsage{
 				ID:        "dev-0",
 				Used:      1,
 				Usedcores: 65,
