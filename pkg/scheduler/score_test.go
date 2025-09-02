@@ -1136,6 +1136,111 @@ func Test_calcScore(t *testing.T) {
 			},
 		},
 		{
+			name: "one node one device one pod two container, the second container use device",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  device.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.NodeSchedulerPolicyBinpack.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &device.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+								},
+							},
+						},
+					},
+				},
+				nums: device.PodDeviceRequests{
+					{},
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums:             1,
+							Type:             nvidia.NvidiaGPUDevice,
+							Memreq:           1000,
+							MemPercentagereq: 101,
+							Coresreq:         30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test1",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:      "gpu-burn2",
+								Image:     "chrstnhntschl/gpu_burn",
+								Args:      []string{"6000"},
+								Resources: corev1.ResourceRequirements{},
+							},
+							{
+								Name:  "gpu-burn1",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
+									{},
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid1",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+					},
+				},
+				err: nil,
+			},
+		},
+		{
 			name: "one node one device one pod with three containers, middle container uses one device.",
 			args: struct {
 				nodes *map[string]*NodeUsage

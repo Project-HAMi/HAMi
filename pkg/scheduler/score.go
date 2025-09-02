@@ -151,26 +151,30 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 
 			//This loop is for different container request
 			ctrfit := false
+			deviceType := ""
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
 					sums += int(k.Nums)
 				}
 
-				if sums == 0 {
-					for idx := range score.Devices {
-						for len(score.Devices[idx]) < ctrid {
-							defaultContainerDevices := device.ContainerDevices{}
-							defaultPodSingleDevice := device.PodSingleDevice{}
-							defaultPodSingleDevice = append(defaultPodSingleDevice, defaultContainerDevices)
-							score.Devices[idx] = append(defaultPodSingleDevice, score.Devices[idx]...)
-						}
-						defaultContainerDevices := device.ContainerDevices{}
-						score.Devices[idx] = append(score.Devices[idx], defaultContainerDevices)
-					}
+				// container need no device and we have got certain deviceType
+				if sums == 0 && deviceType != "" {
+					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
+					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 				fit, reason := fitInDevices(node, n, annos, task, nodeInfo, &score.Devices)
+				// found certain deviceType, fill missing empty allocation for containers before this
+				for idx := range score.Devices {
+					deviceType = idx
+					for len(score.Devices[idx]) <= ctrid {
+						emptyContainerDevices := device.ContainerDevices{}
+						emptyPodSingleDevice := device.PodSingleDevice{}
+						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
+						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+					}
+				}
 				ctrfit = fit
 				if !fit {
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
