@@ -23,7 +23,7 @@ jobs:
 #          - device: nvidia
 #            type: rtx-4090
 #          - device: huawei
-#            type: ascend-910b
+#            type: ascend-910b3
     runs-on: [ "${{ matrix.device }}", "${{ matrix.type }}" ]
     environment: ${{ matrix.device }}
     env:

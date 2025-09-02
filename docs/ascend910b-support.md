@@ -1,6 +1,6 @@
 # Introduction to huawei.com/Ascend910A, Ascend910B Series, and Ascend310P Support
 
-HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B, 910B2, 910B3, 910B4), and 310P devices, providing several features similar to vGPU, including:
+HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B2, 910B3, 910B4), and 310P devices, providing several features similar to vGPU, including:
 
 * **_NPU sharing_**: Each task can allocate a portion of Ascend NPU instead of a whole NLU card, thus NPU can be shared among multiple tasks.
 
@@ -12,13 +12,13 @@ HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B, 9
 
 * Ascend docker runtime
 * Driver version > 24.1.rc1
-* Ascend device type: 910B, 910B2, 910B3, 910B4, 310P
+* Ascend device type: 910A, 910B2, 910B3, 910B4, 310P
 
 ## Enabling NPU Sharing
 
 * Install the chart using helm, See 'enabling vGPU support in kubernetes' section [here](https://github.com/Project-HAMi/HAMi#enabling-vgpu-support-in-kubernetes)
 
-* Label the Ascend 910B node with the following command:
+* Label the Ascend 910 node with the following command:
 
 ```bash
 kubectl label node {ascend-node} accelerator=huawei-Ascend910
@@ -56,7 +56,7 @@ HAMi also supports customizing virtualization parameters through the following m
 
   ```yaml
   vnpus:
-  - chipName: 910B
+  - chipName: 910A
     commonWord: Ascend910A
     resourceName: huawei.com/Ascend910A
     resourceMemoryName: huawei.com/Ascend910A-memory
@@ -98,9 +98,9 @@ HAMi also supports customizing virtualization parameters through the following m
         aiCore: 12
         aiCPU: 3  
   - chipName: 910B3
-    commonWord: Ascend910B
-    resourceName: huawei.com/Ascend910B
-    resourceMemoryName: huawei.com/Ascend910B-memory
+    commonWord: Ascend910B3
+    resourceName: huawei.com/Ascend910B3
+    resourceMemoryName: huawei.com/Ascend910B3-memory
     memoryAllocatable: 65536
     memoryCapacity: 65536
     aiCore: 20
@@ -189,7 +189,7 @@ Ascend310P devices (Atlas inference series products) support multiple granularit
 
 ## Running NPU Workloads
 
-You can request Ascend 910B resources using the `huawei.com/ascend910B` and `huawei.com/ascend910B-memory` resource types:
+You can request Ascend 910B series resources using the `huawei.com/ascend910Bx` and `huawei.com/ascend910Bx-memory` resource types:
 
 ```yaml
 apiVersion: v1
@@ -223,7 +223,7 @@ spec:
 apiVersion: v1
 kind: Pod
 metadata:
-  name: ascend910B-pod
+  name: ascend910B3-pod
 spec:
   containers:
     - name: ubuntu-container
@@ -231,8 +231,8 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          huawei.com/Ascend910B: 1 # requesting 1 vGPUs
-          huawei.com/Ascend910B-memory: 2000 # requesting 2000m device memory
+          huawei.com/Ascend910B3: 1 # requesting 1 vGPUs
+          huawei.com/Ascend910B3-memory: 2000 # requesting 2000m device memory
 ---
 apiVersion: v1
 kind: Pod
@@ -328,11 +328,11 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
-          huawei.com/Ascend910B: 1
-          huawei.com/Ascend910B-memory: 2000
+          huawei.com/Ascend910B3: 1
+          huawei.com/Ascend910B3-memory: 2000
 ```
 
-In this example, the Pod will only run on Ascend910B devices with UUIDs `device-uuid-1` or `device-uuid-2`.
+In this example, the Pod will only run on Ascend910B3 devices with UUIDs `device-uuid-1` or `device-uuid-2`.
 
 #### Finding Device UUIDs
 
@@ -355,5 +355,5 @@ In the node annotations, look for `hami.io/node-register-Ascend910B` or similar 
 ## Notes
 
 - NPU sharing is not supported in init containers.
-- `huawei.com/Ascend910B-memory` is only effective when `huawei.com/Ascend910B=1`.
-- Multi-device requests (`huawei.com/Ascend910B > 1`) do not support vNPU mode.
+- `huawei.com/Ascend910Bx-memory` is only effective when `huawei.com/Ascend910Bx=1`.
+- Multi-device requests (`huawei.com/Ascend910Bx > 1`) do not support vNPU mode.
