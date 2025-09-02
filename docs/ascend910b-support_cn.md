@@ -24,7 +24,7 @@ HAMi 支持复用华为昇腾 910A、910B 系列设备（910B、910B2、910B3、
 kubectl label node {ascend-node} accelerator=huawei-Ascend910
 ```
 
-* 部署[Ascend docker runtime](https://gitcode.com/Ascend/mind-cluster/tree/master/component/ascend-docker-runtime)
+* 部署 [Ascend docker runtime](https://gitcode.com/Ascend/mind-cluster/tree/master/component/ascend-docker-runtime)
 
 * 部署 [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin)
 
