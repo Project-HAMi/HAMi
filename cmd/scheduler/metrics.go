@@ -75,7 +75,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryAllocated",
-		"Device memory allocated for a certain GPU",
+		"Device memory allocated for a certain GPU. The label devicecores will be deprecated in 2.8.0",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
@@ -91,7 +91,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"nodeGPUOverview",
-		"GPU overview on a certain node",
+		"GPU overview on a certain node. The label devicecores will be deprecated in 2.8.0",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
