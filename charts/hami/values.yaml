@@ -371,8 +371,8 @@ devices:
       - huawei.com/Ascend910A-memory
       - huawei.com/Ascend910B2
       - huawei.com/Ascend910B2-memory
-      - huawei.com/Ascend910B
-      - huawei.com/Ascend910B-memory
+      - huawei.com/Ascend910B3
+      - huawei.com/Ascend910B3-memory
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
       - huawei.com/Ascend310P

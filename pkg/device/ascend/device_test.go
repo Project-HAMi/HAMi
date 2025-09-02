@@ -47,7 +47,7 @@ func Test_InitDevices(t *testing.T) {
 			enableAscend: true,
 			args: []VNPUConfig{
 				{
-					ChipName:           "910B",
+					ChipName:           "910A",
 					CommonWord:         "Ascend910A",
 					ResourceName:       "huawei.com/Ascend910A",
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
@@ -78,7 +78,7 @@ func Test_InitDevices(t *testing.T) {
 			want: []*Devices{
 				{
 					config: VNPUConfig{
-						ChipName:           "910B",
+						ChipName:           "910A",
 						CommonWord:         "Ascend910A",
 						ResourceName:       "huawei.com/Ascend910A",
 						ResourceMemoryName: "huawei.com/Ascend910A-memory",
@@ -117,7 +117,7 @@ func Test_InitDevices(t *testing.T) {
 			enableAscend: false,
 			args: []VNPUConfig{
 				{
-					ChipName:           "910B",
+					ChipName:           "910A",
 					CommonWord:         "Ascend910A",
 					ResourceName:       "huawei.com/Ascend910A",
 					ResourceMemoryName: "huawei.com/Ascend910A-memory",
@@ -883,7 +883,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 }
 
 func TestDevices_Fit(t *testing.T) {
-	configStr := `- chipName: 910B
+	configStr := `- chipName: 910A
   commonWord: Ascend910A
   resourceName: huawei.com/Ascend910A
   resourceMemoryName: huawei.com/Ascend910A-memory
@@ -934,9 +934,9 @@ func TestDevices_Fit(t *testing.T) {
       aiCore: 12
       aiCPU: 3
 - chipName: 910B3
-  commonWord: Ascend910B
-  resourceName: huawei.com/Ascend910B
-  resourceMemoryName: huawei.com/Ascend910B-memory
+  commonWord: Ascend910B3
+  resourceName: huawei.com/Ascend910B3
+  resourceMemoryName: huawei.com/Ascend910B3-memory
   memoryAllocatable: 65536
   memoryCapacity: 65536
   aiCore: 20
