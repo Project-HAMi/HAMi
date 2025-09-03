@@ -24,7 +24,7 @@ HAMi supports virtualization of Huawei Ascend 910A, 910B series devices (910B2, 
 kubectl label node {ascend-node} accelerator=huawei-Ascend910
 ```
 
-* Deploy [Ascend docker runtime](https://gitee.com/ascend/ascend-docker-runtime)
+* Deploy [Ascend docker runtime](https://gitcode.com/Ascend/mind-cluster/tree/master/component/ascend-docker-runtime)
 
 * Deploy [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin)
 
