@@ -2,8 +2,12 @@ github.com/NVIDIA/go-gpuallocator v0.6.0 h1:2PA2swx59gJYREPkZNTGtyCP6Pnz3WEgnYsX
 github.com/NVIDIA/go-gpuallocator v0.6.0/go.mod h1:c+Yspg+/QxWOmoSQeuI48Z/7nS+mMPtxyj1NYUTwewY=
 github.com/NVIDIA/go-nvlib v0.7.4 h1:qnXK8qhm45YfxalhZ76XwKdAMmxz1GIgzE0e/Hhhshs=
 github.com/NVIDIA/go-nvlib v0.7.4/go.mod h1:i95Je7GinMy/+BDs++DAdbPmT2TubjNP8i8joC7DD7I=
+github.com/NVIDIA/go-nvlib v0.8.0 h1:vorMvnsJYvZaxiluSXFd+fIFeQFPWSiSjNPiJyvDs0c=
+github.com/NVIDIA/go-nvlib v0.8.0/go.mod h1:bV+OEgjJCbFXf5T8c082mVPFuiF+gKwf9CMT7DWGUBI=
 github.com/NVIDIA/go-nvml v0.12.9-0 h1:e344UK8ZkeMeeLkdQtRhmXRxNf+u532LDZPGMtkdus0=
 github.com/NVIDIA/go-nvml v0.12.9-0/go.mod h1:+KNA7c7gIBH7SKSJ1ntlwkfN80zdx8ovl4hrK3LmPt4=
+github.com/NVIDIA/go-nvml v0.13.0-0 h1:ZbPDoheBQGF9WHNb3qIXvhgNGqc/p7OsUPvRzuI9qGE=
+github.com/NVIDIA/go-nvml v0.13.0-0/go.mod h1:+KNA7c7gIBH7SKSJ1ntlwkfN80zdx8ovl4hrK3LmPt4=
 github.com/NVIDIA/k8s-device-plugin v0.17.3 h1:s6fN2/WqF0e6dxMfcjMXrN38fStLHkZJ3+9ErDY6DRw=
 github.com/NVIDIA/k8s-device-plugin v0.17.3/go.mod h1:pRr/ZiwAqgP3XGiQOcA2rSM0jbSDpQEPnnNyxwDFz1w=
 github.com/NVIDIA/nvidia-container-toolkit v1.18.0-rc.2 h1:vjEJpEpiGhGqca+JK9p0RqmCIBZPnOpPyT1nPj4nsEM=
