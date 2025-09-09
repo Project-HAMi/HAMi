@@ -21,7 +21,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -327,7 +326,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	needTopology := strings.HasPrefix(dev.CommonWord(), Ascend910Prefix)
+	needTopology := strings.HasPrefix(npu.CommonWord(), Ascend910Prefix)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -434,10 +433,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevices device.ContainerDevices) device.ContainerDevices {
+func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
 	deviceMap := make(map[string]*device.DeviceInfo)
 	for _, dev := range nodeInfo.Devices {
-		deviceScoreMap[dev.ID] = &dev
+		deviceMap[dev.ID] = &dev
 	}
 	numa0Devices := device.ContainerDevices{}
 	numa1Devices := device.ContainerDevices{}
@@ -451,7 +450,7 @@ func computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevi
 		}
 	}
 	result := device.ContainerDevices{}
-	selectBestCombination := func(first device.ContainerDevices, second device.ContainerDevices) device.ContainerDevices {
+	selectBestCombination := func(first device.ContainerDevices, second device.ContainerDevices) {
 		if len(first) >= reqNum {
 			result = append(result, first[:reqNum]...)
 		} else if len(second) >= reqNum {
