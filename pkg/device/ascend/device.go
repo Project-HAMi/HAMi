@@ -434,7 +434,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-fun computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevices device.ContainerDevices) device.ContainerDevices {
+func computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevices device.ContainerDevices) device.ContainerDevices {
 	deviceMap := make(map[string]*device.DeviceInfo)
 	for _, dev := range nodeInfo.Devices {
 		deviceScoreMap[dev.ID] = &dev
@@ -451,14 +451,14 @@ fun computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevic
 		}
 	}
 	result := device.ContainerDevices{}
-	selectBestCombination := fun(first device.ContainerDevices, second device.ContainerDevices) device.ContainerDevices {
+	selectBestCombination := func(first device.ContainerDevices, second device.ContainerDevices) device.ContainerDevices {
 		if len(first) >= reqNum {
 			result = append(result, first[:reqNum]...)
 		} else if len(second) >= reqNum {
 			result = append(result, second[:reqNum]...)
 		} else {
 			result = append(result, second...)
-			result = append(result, first[:(reqNum - len(second))]...)
+			result = append(result, first[:(reqNum-len(second))]...)
 		}
 	}
 	if len(numa0Devices) <= len(numa1Devices) {
