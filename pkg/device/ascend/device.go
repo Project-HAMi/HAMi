@@ -305,7 +305,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		if numa0Cnt == 0 && numa1Cnt == 0 {
 			continue
 		}
-		score += float32(max(numa0Cnt, numa1Cnt)) / float32(numa0Cnt + numa1Cnt)
+		score += float32(max(numa0Cnt, numa1Cnt)) / float32(numa0Cnt+numa1Cnt)
 	}
 	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NumaWeight)
 	return score * Ascend910NumaWeight
