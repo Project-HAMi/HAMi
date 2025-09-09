@@ -305,7 +305,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		if numa0Cnt == 0 && numa1Cnt == 0 {
 			continue
 		}
-		score += float32(max(numa0Cnt, numa1Cnt)) / (numa0Cnt*numa0Cnt + numa1Cnt*numa1Cnt)
+		score += float32(max(numa0Cnt, numa1Cnt)) / float32(numa0Cnt + numa1Cnt)
 	}
 	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NumaWeight)
 	return score * Ascend910NumaWeight
@@ -419,7 +419,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			return true, tmpDevs, ""
 		} else if len(tmpDevs[k.Type]) > int(originReq) {
 			// If requesting multiple devices, select the best combination of cards.
-			combination := computeBestCombination(nodeInfo, originReq, tmpDevs[k.Type])
+			combination := computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
 			tmpDevs[k.Type] = combination
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
