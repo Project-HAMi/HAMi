@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -38,7 +39,9 @@ import (
 )
 
 const (
-	NodeLockAscend = "hami.io/mutex.lock"
+	NodeLockAscend      = "hami.io/mutex.lock"
+	Ascend910Prefix     = "Ascend910"
+	Ascend910NumaWeight = 10
 )
 
 type Devices struct {
@@ -279,7 +282,34 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 }
 
 func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
-	return 0
+	if !strings.HasPrefix(dev.CommonWord(), Ascend910Prefix) {
+		return 0
+	}
+	score := float32(0)
+	for _, containerDevices := range podDevices {
+		if len(containerDevices) == 0 {
+			continue
+		}
+		numa0Cnt, numa1Cnt := 0, 0
+		for _, device := range containerDevices {
+			for _, deviceUsage := range previous {
+				if deviceUsage.ID == device.UUID {
+					if deviceUsage.Numa == 0 {
+						numa0Cnt++
+					} else {
+						numa1Cnt++
+					}
+					break
+				}
+			}
+		}
+		if numa0Cnt == 0 && numa1Cnt == 0 {
+			continue
+		}
+		score += float32(max(numa0Cnt, numa1Cnt)) / (numa0Cnt*numa0Cnt + numa1Cnt*numa1Cnt)
+	}
+	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NumaWeight)
+	return score * Ascend910NumaWeight
 }
 
 func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
@@ -297,6 +327,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	needTopology := strings.HasPrefix(dev.CommonWord(), Ascend910Prefix)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -364,7 +395,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Nums--
+			if !needTopology {
+				k.Nums--
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:       int(dev.Index),
 				UUID:      dev.ID,
@@ -374,13 +407,64 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			})
 		}
 		if k.Nums == 0 {
-			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			if !needTopology || int(originReq) == 1 {
+				klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+				return true, tmpDevs, ""
+			}
+		}
+	}
+
+	if needTopology {
+		if len(tmpDevs[k.Type]) == int(originReq) {
+			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
+		} else if len(tmpDevs[k.Type]) > int(originReq) {
+			// If requesting multiple devices, select the best combination of cards.
+			combination := computeBestCombination(nodeInfo, originReq, tmpDevs[k.Type])
+			tmpDevs[k.Type] = combination
+			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
 		}
 	}
+
 	if len(tmpDevs) > 0 {
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+fun computeBestCombination(nodeInfo *device.NodeInfo, int reqNum, containerDevices device.ContainerDevices) device.ContainerDevices {
+	deviceMap := make(map[string]*device.DeviceInfo)
+	for _, dev := range nodeInfo.Devices {
+		deviceScoreMap[dev.ID] = &dev
+	}
+	numa0Devices := device.ContainerDevices{}
+	numa1Devices := device.ContainerDevices{}
+	for _, containerDevice := range containerDevices {
+		if dev, ok := deviceMap[containerDevice.UUID]; !ok {
+			if dev.Numa == 0 {
+				numa0Devices = append(numa0Devices, containerDevice)
+			} else {
+				numa1Devices = append(numa1Devices, containerDevice)
+			}
+		}
+	}
+	result := device.ContainerDevices{}
+	selectBestCombination := fun(first device.ContainerDevices, second device.ContainerDevices) device.ContainerDevices {
+		if len(first) >= reqNum {
+			result = append(result, first[:reqNum]...)
+		} else if len(second) >= reqNum {
+			result = append(result, second[:reqNum]...)
+		} else {
+			result = append(result, second...)
+			result = append(result, first[:(reqNum - len(second))]...)
+		}
+	}
+	if len(numa0Devices) <= len(numa1Devices) {
+		selectBestCombination(numa0Devices, numa1Devices)
+	} else {
+		selectBestCombination(numa1Devices, numa0Devices)
+	}
+	return result
 }
