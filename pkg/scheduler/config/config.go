@@ -146,6 +146,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
 		}, config.IluvatarConfig},
+		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
+			enflameConfig, ok := cfg.(enflame.EnflameConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGCUCommonWord)
+			}
+			return enflame.InitGCUDevice(enflameConfig), nil
+		}, config.EnflameConfig},
 		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {

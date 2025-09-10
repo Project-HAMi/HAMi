@@ -1,0 +1,40 @@
+# request 1 vgcu device
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vgcu-pod-1
+  namespace: kube-system
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: pod-gcu-example1
+      image: ubuntu:18.04
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - '100000'
+      resources:
+        limits:
+          enflame.com/vgcu: 1
+---
+# request 22% vgcu devices
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vgcu-pod-2
+  namespace: kube-system
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: pod-gcu-example1
+      image: ubuntu:18.04
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - '100000'
+      resources:
+        limits:
+          enflame.com/vgcu: 1
+          enflame.com/vgcu-percentage: 22 # The GCU is divided into N portions, each as a percentage tier, and the requested percentage is rounded up to the nearest tier.
