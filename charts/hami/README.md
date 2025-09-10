@@ -62,7 +62,7 @@ This document provides detailed descriptions of all configurable values paramete
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `enflameResourceNameVGCU` | vGCU resource name | `"enflame.com/vgcu"` |
-| `enflameResourceNameVGCUPercentage` | vGCU percentenge resource name | `"enflame.com/vgcu-percentage"` |
+| `enflameResourceNameVGCUPercentage` | vGCU percentage resource name | `"enflame.com/vgcu-percentage"` |
 
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |
