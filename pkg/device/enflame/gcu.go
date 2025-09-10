@@ -18,7 +18,6 @@ package enflame
 
 import (
 	"fmt"
-	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -184,8 +183,5 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 }
 
 func (dev *GCUDevices) checkType(n device.ContainerDeviceRequest) bool {
-	if strings.Compare(n.Type, EnflameGPUDevice) == 0 {
-		return true
-	}
-	return false
+	return n.Type == EnflameGCUDevice
 }
