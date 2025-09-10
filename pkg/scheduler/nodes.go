@@ -94,7 +94,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	m.nodes[nodeID].Devices = rmDeviceByNodeAnnotation(m.nodes[nodeID])
 }
 
-func rmDeviceByNodeAnnotation(nodeInfo *util.NodeInfo) []util.DeviceInfo {
+func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) []device.DeviceInfo {
 	vendorWithDisableGPUUUIDMap := make(map[string]map[string]bool)
 	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
 		for annoKey, vendors := range vendorNoUseAnnoKeyMap {
