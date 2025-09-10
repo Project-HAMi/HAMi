@@ -51,6 +51,8 @@ metaxsGPUTopologyAware: "false"
 
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
+kunlunResourceVCountName: "kunlunxin.com/vxpu"
+kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
 schedulerName: "hami-scheduler"
 
@@ -346,6 +348,8 @@ devices:
     enabled: true
     customresources:
       - kunlunxin.com/xpu
+      - kunlunxin.com/vxpu
+      - kunlunxin.com/vxpu-memory
   enflame:
     enabled: true
     customresources:

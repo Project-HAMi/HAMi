@@ -30,7 +30,7 @@ func Test_graphSelect(t *testing.T) {
 		name string
 		args struct {
 			d []*device.DeviceUsage
-			c int
+			c device.ContainerDeviceRequest
 		}
 		want1 []int
 	}{
@@ -38,7 +38,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "full allocate",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -50,7 +50,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 0},
 					{Index: 7, Used: 0},
 				},
-				c: 8,
+				c: device.ContainerDeviceRequest{Nums: 8},
 			},
 			want1: []int{0, 1, 2, 3, 4, 5, 6, 7},
 		},
@@ -58,7 +58,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "full allocate not success",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -70,7 +70,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 0},
 					{Index: 7, Used: 0},
 				},
-				c: 8,
+				c: device.ContainerDeviceRequest{Nums: 8},
 			},
 			want1: []int{},
 		},
@@ -78,7 +78,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 2 cards",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -90,7 +90,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 0},
 					{Index: 7, Used: 0},
 				},
-				c: 2,
+				c: device.ContainerDeviceRequest{Nums: 2},
 			},
 			want1: []int{4, 6},
 		},
@@ -98,7 +98,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 1 card",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -110,7 +110,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 0},
 					{Index: 7, Used: 0},
 				},
-				c: 1,
+				c: device.ContainerDeviceRequest{Nums: 1},
 			},
 			want1: []int{4},
 		},
@@ -118,7 +118,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 1 card",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -130,7 +130,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 1},
 					{Index: 7, Used: 1},
 				},
-				c: 1,
+				c: device.ContainerDeviceRequest{Nums: 1},
 			},
 			want1: []int{4},
 		},
@@ -138,7 +138,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 2 card according to interconnect",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 1},
@@ -150,7 +150,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 1},
 					{Index: 7, Used: 0},
 				},
-				c: 2,
+				c: device.ContainerDeviceRequest{Nums: 2},
 			},
 			want1: []int{3, 7},
 		},
@@ -158,7 +158,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 4 cards according to interconnect when have 5 cards",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -170,7 +170,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 0},
 					{Index: 7, Used: 1},
 				},
-				c: 4,
+				c: device.ContainerDeviceRequest{Nums: 4},
 			},
 			want1: []int{0, 1, 4, 5},
 		},
@@ -178,7 +178,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards unconnected",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -190,7 +190,7 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 1},
 					{Index: 7, Used: 0},
 				},
-				c: 4,
+				c: device.ContainerDeviceRequest{Nums: 4},
 			},
 			want1: []int{0, 1, 4, 5},
 		},
@@ -198,7 +198,7 @@ func Test_graphSelect(t *testing.T) {
 			name: "allocate 4 cards according to interconnect when have 6 cards, leave 2 cards connected",
 			args: struct {
 				d []*device.DeviceUsage
-				c int
+				c device.ContainerDeviceRequest
 			}{
 				d: []*device.DeviceUsage{
 					{Index: 0, Used: 0},
@@ -210,14 +210,152 @@ func Test_graphSelect(t *testing.T) {
 					{Index: 6, Used: 1},
 					{Index: 7, Used: 0},
 				},
-				c: 4,
+				c: device.ContainerDeviceRequest{Nums: 4},
 			},
 			want1: []int{0, 1, 4, 5},
 		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1 := graghSelect(test.args.d, test.args.c)
+			result1 := graghSelect(test.args.d, test.args.c, FitXPU)
+			assert.DeepEqual(t, result1, test.want1)
+		})
+	}
+}
+
+func Test_graphSelectVXPU(t *testing.T) {
+	tests := []struct {
+		name string
+		args struct {
+			d []*device.DeviceUsage
+			c device.ContainerDeviceRequest
+		}
+		want1 []int
+	}{
+		{
+			name: "full allocate with unused devices",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 0, Usedmem: 0},
+					{Index: 1, Used: 0, Usedmem: 0},
+					{Index: 2, Used: 0, Usedmem: 0},
+					{Index: 3, Used: 0, Usedmem: 0},
+					{Index: 4, Used: 0, Usedmem: 0},
+					{Index: 5, Used: 0, Usedmem: 0},
+					{Index: 6, Used: 0, Usedmem: 0},
+					{Index: 7, Used: 0, Usedmem: 0},
+				},
+				c: device.ContainerDeviceRequest{Nums: 8, Memreq: 24576},
+			},
+			want1: []int{0, 1, 2, 3, 4, 5, 6, 7},
+		},
+		{
+			name: "allocate with matching memory requirements",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 0, Usedmem: 0},
+					{Index: 1, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 2, Used: 0, Usedmem: 0},
+					{Index: 3, Used: 2, Usedmem: 49152}, // avgMem = 24576, matches request
+					{Index: 4, Used: 0, Usedmem: 0},
+					{Index: 5, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 6, Used: 0, Usedmem: 0},
+					{Index: 7, Used: 0, Usedmem: 0},
+				},
+				c: device.ContainerDeviceRequest{Nums: 4, Memreq: 24576},
+			},
+			want1: []int{0, 1, 2, 3},
+		},
+		{
+			name: "allocate with mixed memory requirements",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 0, Usedmem: 0},
+					{Index: 1, Used: 2, Usedmem: 49152}, // avgMem = 24576, matches request
+					{Index: 2, Used: 0, Usedmem: 0},
+					{Index: 3, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 4, Used: 0, Usedmem: 0},
+					{Index: 5, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 6, Used: 0, Usedmem: 0},
+					{Index: 7, Used: 0, Usedmem: 0},
+				},
+				c: device.ContainerDeviceRequest{Nums: 4, Memreq: 24576},
+			},
+			want1: []int{4, 5, 6, 7}, // 从索引4开始选择4个设备
+		},
+		{
+			name: "no suitable devices due to memory mismatch",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 1, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 2, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 3, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 4, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 5, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 6, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 7, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+				},
+				c: device.ContainerDeviceRequest{Nums: 2, Memreq: 24576},
+			},
+			want1: []int{},
+		},
+		{
+			name: "allocate 1 card with matching memory",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 1, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 2, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 3, Used: 0, Usedmem: 0},
+					{Index: 4, Used: 0, Usedmem: 0},
+					{Index: 5, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 6, Used: 0, Usedmem: 0},
+					{Index: 7, Used: 0, Usedmem: 0},
+				},
+				c: device.ContainerDeviceRequest{Nums: 1, Memreq: 24576},
+			},
+			want1: []int{0},
+		},
+		{
+			name: "allocate 2 cards with different memory requirements",
+			args: struct {
+				d []*device.DeviceUsage
+				c device.ContainerDeviceRequest
+			}{
+				d: []*device.DeviceUsage{
+					{Index: 0, Used: 0, Usedmem: 0},
+					{Index: 1, Used: 2, Usedmem: 49152}, // avgMem = 24576, matches request
+					{Index: 2, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 3, Used: 1, Usedmem: 49152}, // avgMem = 49152, doesn't match request
+					{Index: 4, Used: 0, Usedmem: 0},
+					{Index: 5, Used: 0, Usedmem: 0},
+					{Index: 6, Used: 1, Usedmem: 24576}, // avgMem = 24576, matches request
+					{Index: 7, Used: 0, Usedmem: 0},
+				},
+				c: device.ContainerDeviceRequest{Nums: 2, Memreq: 24576},
+			},
+			want1: []int{0, 1},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result1 := graghSelect(test.args.d, test.args.c, FitVXPU)
 			assert.DeepEqual(t, result1, test.want1)
 		})
 	}

@@ -111,6 +111,8 @@ data:
       resourceCoreName: {{ .Values.iluvatarResourceCore }}
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
+      resourceVCountName: {{ .Values.kunlunResourceVCountName }}
+      resourceVMemoryName: {{ .Values.kunlunResourceVMemoryName }}
     awsneuron:
       resourceCountName: "aws.amazon.com/neuron"
       resourceCoreName: "aws.amazon.com/neuroncore"
