@@ -292,7 +292,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		cntMap := make(map[string]int)
 		for _, device := range containerDevices {
 			if device.CustomInfo != nil {
-				if NetworkID, ok := device.CustomInfo["NetworkID"]; ok {
+				if networkID, ok := device.CustomInfo["NetworkID"]; ok {
 					if id, ok := networkID.(int); ok {
 						cntMap[id]++
 					}
@@ -311,7 +311,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		}
 		score += float32(maxCnt) / float32(totalCnt)
 	}
-	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NetworkWeightt)
+	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NetworkWeight)
 	return score * Ascend910NetworkWeight
 }
 
@@ -442,11 +442,11 @@ func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevi
 	for _, dev := range nodeInfo.Devices {
 		deviceMap[dev.ID] = &dev
 	}
-	networkDeviceMap := make(map[int]device.ContainerDevices{})
+	networkDeviceMap := make(map[int]device.ContainerDevices)
 	for _, containerDevice := range containerDevices {
 		if dev, ok := deviceMap[containerDevice.UUID]; ok {
 			if dev.CustomInfo != nil {
-				if NetworkID, ok := dev.CustomInfo["NetworkID"]; ok {
+				if networkID, ok := dev.CustomInfo["NetworkID"]; ok {
 					if id, ok := networkID.(int); ok {
 						networkDeviceMap[id] = append(networkDeviceMap[id], containerDevice)
 					}
