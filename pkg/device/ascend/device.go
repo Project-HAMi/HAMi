@@ -38,9 +38,9 @@ import (
 )
 
 const (
-	NodeLockAscend      = "hami.io/mutex.lock"
-	Ascend910Prefix     = "Ascend910"
-	Ascend910NumaWeight = 10
+	NodeLockAscend         = "hami.io/mutex.lock"
+	Ascend910Prefix        = "Ascend910"
+	Ascend910NetworkWeight = 10
 )
 
 type Devices struct {
@@ -289,26 +289,30 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		if len(containerDevices) == 0 {
 			continue
 		}
-		numa0Cnt, numa1Cnt := 0, 0
+		cntMap := make(map[string]int)
 		for _, device := range containerDevices {
-			for _, deviceUsage := range previous {
-				if deviceUsage.ID == device.UUID {
-					if deviceUsage.Numa == 0 {
-						numa0Cnt++
-					} else {
-						numa1Cnt++
+			if device.CustomInfo != nil {
+				if NetworkID, ok := device.CustomInfo["NetworkID"]; ok {
+					if id, ok := networkID.(int); ok {
+						cntMap[id]++
 					}
-					break
 				}
 			}
 		}
-		if numa0Cnt == 0 && numa1Cnt == 0 {
+		maxCnt, totalCnt := 0, 0
+		for _, cnt := range cntMap {
+			if cnt > maxCnt {
+				maxCnt = cnt
+			}
+			totalCnt += cnt
+		}
+		if totalCnt == 0 {
 			continue
 		}
-		score += float32(max(numa0Cnt, numa1Cnt)) / float32(numa0Cnt+numa1Cnt)
+		score += float32(maxCnt) / float32(totalCnt)
 	}
-	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NumaWeight)
-	return score * Ascend910NumaWeight
+	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NetworkWeightt)
+	return score * Ascend910NetworkWeight
 }
 
 func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
@@ -438,32 +442,44 @@ func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevi
 	for _, dev := range nodeInfo.Devices {
 		deviceMap[dev.ID] = &dev
 	}
-	numa0Devices := device.ContainerDevices{}
-	numa1Devices := device.ContainerDevices{}
+	networkDeviceMap := make(map[int]device.ContainerDevices{})
 	for _, containerDevice := range containerDevices {
-		if dev, ok := deviceMap[containerDevice.UUID]; !ok {
-			if dev.Numa == 0 {
-				numa0Devices = append(numa0Devices, containerDevice)
-			} else {
-				numa1Devices = append(numa1Devices, containerDevice)
+		if dev, ok := deviceMap[containerDevice.UUID]; ok {
+			if dev.CustomInfo != nil {
+				if NetworkID, ok := dev.CustomInfo["NetworkID"]; ok {
+					if id, ok := networkID.(int); ok {
+						networkDeviceMap[id] = append(networkDeviceMap[id], containerDevice)
+					}
+				}
 			}
 		}
 	}
-	result := device.ContainerDevices{}
-	selectBestCombination := func(first device.ContainerDevices, second device.ContainerDevices) {
-		if len(first) >= reqNum {
-			result = append(result, first[:reqNum]...)
-		} else if len(second) >= reqNum {
-			result = append(result, second[:reqNum]...)
-		} else {
-			result = append(result, second...)
-			result = append(result, first[:(reqNum-len(second))]...)
-		}
+
+	type NetworkDeviceCount struct {
+		NetworkID int
+		Count     int
 	}
-	if len(numa0Devices) <= len(numa1Devices) {
-		selectBestCombination(numa0Devices, numa1Devices)
-	} else {
-		selectBestCombination(numa1Devices, numa0Devices)
+	var sortedNetworks []NetworkDeviceCount
+	for networkID, devices := range networkDeviceMap {
+		sortedNetworks = append(sortedNetworks, NetworkDeviceCount{
+			NetworkID: networkID,
+			Count:     len(devices),
+		})
+	}
+
+	sort.Slice(sortedNetworks, func(i, j int) bool {
+		return sortedNetworks[i].Count > sortedNetworks[j].Count
+	})
+
+	result := device.ContainerDevices{}
+	for _, item := range sortedNetworks {
+		devices := networkDeviceMap[item.NetworkID]
+		for _, dev := range devices {
+			result = append(result, dev)
+			if len(result) == reqNum {
+				return result
+			}
+		}
 	}
 	return result
 }
