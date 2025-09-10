@@ -289,7 +289,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		if len(containerDevices) == 0 {
 			continue
 		}
-		cntMap := make(map[string]int)
+		cntMap := make(map[int]int)
 		for _, device := range containerDevices {
 			if device.CustomInfo != nil {
 				if networkID, ok := device.CustomInfo["NetworkID"]; ok {
