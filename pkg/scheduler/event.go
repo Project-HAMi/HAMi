@@ -66,7 +66,7 @@ func (s *Scheduler) recordScheduleBindingResultEvent(pod *corev1.Pod, eventReaso
 }
 
 func (s *Scheduler) recordScheduleFilterResultEvent(pod *corev1.Pod, eventReason string, successMsg string, schedulerErr error) {
-	if pod == nil {
+	if pod == nil || s.eventRecorder == nil {
 		return
 	}
 	if schedulerErr == nil {

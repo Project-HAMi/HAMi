@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -51,6 +52,20 @@ const (
 	nodeUnfitPod                      = "NodeUnfitPod"
 	nodeFitPod                        = "NodeFitPod"
 )
+
+var scheduleFailureReasons = []string{
+	cardTypeMismatch,
+	cardUUIDMismatch,
+	cardTimeSlicingExhausted,
+	cardComputeUnitsExhausted,
+	cardInsufficientMemory,
+	cardInsufficientCore,
+	numaNotFit,
+	exclusiveDeviceAllocateConflict,
+	cardNotFoundCustomFilterRule,
+	nodeInsufficientDevice,
+	allocatedCardsInsufficientRequest,
+}
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
@@ -131,6 +146,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
+	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
 	for nodeID, node := range *nodes {
 		wg.Add(1)
@@ -180,6 +196,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
 					failedNodes[nodeID] = nodeUnfitPod
+					for _, reasonType := range parseNodeReason(reason) {
+						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+					}
 					failedNodesMutex.Unlock()
 					break
 				}
@@ -197,9 +216,27 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg.Wait()
 	close(errCh)
 
+	// only pod scheduler failure will record failure event
+	if len(res.NodeList) == 0 {
+		for reasonType, failureNodes := range failureReason {
+			reason := fmt.Errorf("%d nodes %s(%s)", len(failureNodes), reasonType, strings.Join(failureNodes, ","))
+			s.recordScheduleFilterResultEvent(task, EventReasonFilteringFailed, "", reason)
+		}
+	}
+
 	var errorsSlice []error
 	for e := range errCh {
 		errorsSlice = append(errorsSlice, e)
 	}
 	return &res, utilerrors.NewAggregate(errorsSlice)
+}
+
+func parseNodeReason(nodeReason string) []string {
+	var res []string
+	for _, reason := range scheduleFailureReasons {
+		if strings.Contains(nodeReason, reason) {
+			res = append(res, reason)
+		}
+	}
+	return res
 }
