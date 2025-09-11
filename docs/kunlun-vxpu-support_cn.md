@@ -18,7 +18,7 @@
 
 * 获取[vxpu-device-plugin](https://hub.docker.com/r/riseunion/vxpu-device-plugin)
 
-* 部署[vxpu-device-plugin]
+* 部署`vxpu-device-plugin`，清单如下:
 ```
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -73,7 +73,7 @@ spec:
       priorityClassName: "system-node-critical"
       serviceAccountName: vxpu-device-plugin
       containers:
-        - image: vxpu-device-plugin:v1.0.0
+        - image: riseunion/vxpu-device-plugin:v1.0.0
           name: device-plugin
           resources:
             requests:
@@ -149,9 +149,9 @@ spec:
       resources:
         limits:
           kunlunxin.com/vxpu: 1 # requesting a VXPU
-          kunlunxin.com/vxpu-memory: 24576 # each xpu require 24576 MiB device memory
+          kunlunxin.com/vxpu-memory: 24576 # requesting a virtual XPU that requires 24576 MiB of device memorymemory
 ```
-
+n
 > **注意2:** *查看更多的[用例](../examples/kunlun/).*
 
 ## 设备 UUID 选择
@@ -193,6 +193,20 @@ kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-register-xpu"
 
 ## 注意事项
 
-1. P800-OAM当前最大支持32个设备，除去原本的8个XPU设备，还剩下24，如果一个设备按4份切，最多能支持6张XPU设备切分
+当前昆仑芯驱动最多支持32个句柄，8张XPU设备占8个句柄，无法支持8个设备都切成4个。
+```yaml
+# valid
+kunlunxin.com/vxpu: 8
 
-2. 共享模式支持申请多个XPU设备，如果申请的是1/4卡，最多能申请6个1/4的卡。
+# valid
+kunlunxin.com/vxpu: 6
+kunlunxin.com/vxpu-memory: 24576
+
+# valid
+kunlunxin.com/vxpu: 8
+kunlunxin.com/vxpu-memory: 49152
+
+# invalid
+kunlunxin.com/vxpu: 8 # not support
+kunlunxin.com/vxpu-memory: 24576
+```

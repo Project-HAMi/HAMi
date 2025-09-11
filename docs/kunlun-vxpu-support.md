@@ -73,7 +73,7 @@ spec:
       priorityClassName: "system-node-critical"
       serviceAccountName: vxpu-device-plugin
       containers:
-        - image: vxpu-device-plugin:v1.0.0
+        - image: riseunion/vxpu-device-plugin:v1.0.0
           name: device-plugin
           resources:
             requests:
@@ -149,7 +149,7 @@ spec:
       resources:
         limits:
           kunlunxin.com/vxpu: 1 # requesting a VXPU
-          kunlunxin.com/vxpu-memory: 24576 # each xpu require 24576 MiB device memory
+          kunlunxin.com/vxpu-memory: 24576 # requesting a virtual XPU that requires 24576 MiB of device memorymemory
 ```
 
 > **Note:** *See more [examples](../examples/kunlun/).*
@@ -193,6 +193,20 @@ Look for annotations containing device information in the node annotations.
 
 ## Important Notes
 
-1. P800-OAM currently supports a maximum of 32 devices. Excluding the original 8 XPU devices, 24 remain. If one device is partitioned into 4 parts, a maximum of 6 XPU devices can support partitioning.
+The current Kunlun chip driver supports a maximum of 32 handles. Eight XPU devices occupy 8 handles, so it is not possible to split all 8 devices into 4 each.
+```yaml
+# valid
+kunlunxin.com/vxpu: 8
 
-2. Shared mode supports requesting multiple XPU devices. If requesting 1/4 cards, a maximum of 6 quarter cards can be requested.
+# valid
+kunlunxin.com/vxpu: 6
+kunlunxin.com/vxpu-memory: 24576
+
+# valid
+kunlunxin.com/vxpu: 8
+kunlunxin.com/vxpu-memory: 49152
+
+# invalid
+kunlunxin.com/vxpu: 8 # not support
+kunlunxin.com/vxpu-memory: 24576
+```
