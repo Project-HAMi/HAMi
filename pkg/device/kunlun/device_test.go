@@ -290,7 +290,7 @@ func Test_graphSelectVXPU(t *testing.T) {
 				},
 				c: device.ContainerDeviceRequest{Nums: 4, Memreq: 24576},
 			},
-			want1: []int{4, 5, 6, 7}, // 从索引4开始选择4个设备
+			want1: []int{4, 5, 6, 7}, // select 4 devices starting from index 4
 		},
 		{
 			name: "no suitable devices due to memory mismatch",

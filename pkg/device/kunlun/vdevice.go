@@ -19,6 +19,7 @@ package kunlun
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -42,9 +43,8 @@ const (
 	NoUseUUIDAnno  = "hami.io/no-use-xpu-uuid"
 )
 
-var (
-	XpuResourceCount  string
-	XpuResourceMemory string
+const (
+	KunlunMaxMemory = 98304
 )
 
 type KunlunVDevices struct {
@@ -66,7 +66,7 @@ func (dev *KunlunVDevices) trimMemory(m int64) int64 {
 			return temp
 		}
 	}
-	return 98304
+	return KunlunMaxMemory
 }
 
 func (dev *KunlunVDevices) CommonWord() string {
@@ -154,19 +154,11 @@ func (dev *KunlunVDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error 
 	return nodelock.ReleaseNodeLock(n.Name, NodeLock, p, false)
 }
 
-func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, dev.CommonWord()) == 0 {
-		if d.Used == 0 {
-			return true, true, false
-		}
-		avgMem := d.Usedmem / d.Used
-		if avgMem == n.Memreq {
-			return true, true, false
-		}
-		klog.V(5).Infof("split not match %v", d)
-		return true, false, false
+func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool) {
+	if n.Type == dev.CommonWord() {
+		return true, false
 	}
-	return false, false, false
+	return false, false
 }
 
 func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsage) bool {
@@ -175,12 +167,7 @@ func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsa
 		klog.V(5).Infof("check uuid for xpu user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		userUUIDs := strings.Split(userUUID, ",")
-		for _, uuid := range userUUIDs {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[NoUseUUIDAnno]
@@ -188,12 +175,7 @@ func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsa
 		klog.V(5).Infof("check uuid for xpu not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
-		for _, uuid := range noUserUUIDs {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }
@@ -220,12 +202,12 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 					memnum = int(m)
 				}
 			}
-			cores := memnum * 100 / 98304
+			cores := memnum * 100 / KunlunMaxMemory
 			mempnum := 0
 			if memnum == 0 {
 				mempnum = 100
 				cores = 100
-				memnum = 98304
+				memnum = KunlunMaxMemory
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),

@@ -19,10 +19,8 @@ package kunlun
 import "flag"
 
 var (
-	// XPU
 	KunlunResourceCount string
 
-	// VXPU
 	KunlunResourceVCount  string
 	KunlunResourceVMemory string
 )

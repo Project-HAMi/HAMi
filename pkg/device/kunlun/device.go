@@ -225,8 +225,5 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 }
 
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
-	if device.Used == 0 {
-		return true
-	}
-	return false
+	return device.Used == 0
 }

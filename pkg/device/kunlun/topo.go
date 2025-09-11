@@ -27,7 +27,6 @@ import (
 
 type FitFn func(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool
 
-// Done
 func parseUsage(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	usage := []int{}
 	for _, val := range devices {
@@ -38,7 +37,6 @@ func parseUsage(devices []*device.DeviceUsage, request device.ContainerDeviceReq
 	return usage
 }
 
-// Node
 func addidx(temp []int, value int) []int {
 	for _, val := range temp {
 		if val == value {
@@ -49,7 +47,6 @@ func addidx(temp []int, value int) []int {
 	return temp
 }
 
-// Node
 func getvalue(t int) int {
 	if t == 4 {
 		return 0
@@ -60,7 +57,6 @@ func getvalue(t int) int {
 	return 1
 }
 
-// Node
 func countbubble(t []int) int {
 	left := 0
 	right := 0
@@ -77,7 +73,6 @@ func countbubble(t []int) int {
 	return getvalue(left) + getvalue(right)
 }
 
-// Node
 func calcscore(p []int, c []int) float32 {
 	sort.Slice(p, func(i, j int) bool {
 		return i < j
@@ -101,7 +96,6 @@ func calcscore(p []int, c []int) float32 {
 	return 1000
 }
 
-// Done
 func parseInterconnection() [][]int {
 	var interconnection [][]int
 	pairs := strings.Split(InterGroupConnection, ",")
@@ -119,7 +113,6 @@ func parseInterconnection() [][]int {
 	return interconnection
 }
 
-// Done
 func parseInterconnection2() [][]int {
 	var interconnection2 [][]int
 	for group := range strings.SplitSeq(InterGroupConnection2, ",") {
@@ -134,7 +127,6 @@ func parseInterconnection2() [][]int {
 	return interconnection2
 }
 
-// Done
 func interconnect(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	count := int(request.Nums)
 	if count == 2 {
@@ -186,7 +178,6 @@ func interconnect(devices []*device.DeviceUsage, request device.ContainerDeviceR
 	return []int{}
 }
 
-// Done
 func canMeet(have, want []int) bool {
 	mp := make(map[int]bool)
 	for _, v := range have {
@@ -200,7 +191,6 @@ func canMeet(have, want []int) bool {
 	return true
 }
 
-// Done
 func delta(have, want []int) []int {
 	var ret []int
 	mp := make(map[int]bool)
@@ -215,7 +205,6 @@ func delta(have, want []int) []int {
 	return ret
 }
 
-// Done
 func devicepick(devices []*device.DeviceUsage, start int, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	count := int(request.Nums)
 	res := []int{}
@@ -230,7 +219,6 @@ func devicepick(devices []*device.DeviceUsage, start int, request device.Contain
 	return res
 }
 
-// Done
 func graghSelect(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	count := int(request.Nums)
 	leftwing := 0
