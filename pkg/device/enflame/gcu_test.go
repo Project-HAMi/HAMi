@@ -19,12 +19,12 @@ package enflame
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 func TestInitGCUDevice(t *testing.T) {
@@ -458,7 +458,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 					Totalcore: 100,
 					Usedcores: 0,
 					Numa:      0,
-					Type:      EnflameGPUDevice,
+					Type:      EnflameGCUDevice,
 					Health:    true,
 				},
 				{
@@ -471,7 +471,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 					Totalcore: 100,
 					Usedcores: 0,
 					Numa:      0,
-					Type:      EnflameGPUDevice,
+					Type:      EnflameGCUDevice,
 					Health:    true,
 				},
 			},
@@ -480,7 +480,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 				Memreq:           100,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    true,
@@ -528,7 +528,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -536,7 +536,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 				Memreq:           100,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -556,7 +556,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -564,7 +564,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 				Memreq:           100,
 				MemPercentagereq: 100,
 				Coresreq:         100,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -582,12 +582,12 @@ func TestGCUDevices_Fit(t *testing.T) {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
 			if test.wantFit {
-				if len(result[EnflameGPUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameGPUDevice]))
+				if len(result[EnflameGCUDevice]) != test.wantLen {
+					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameGCUDevice]))
 				}
 				for idx, id := range test.wantDevIDs {
-					if id != result[EnflameGPUDevice][idx].UUID {
-						t.Errorf("expected device id: %s, got device id %s", id, result[EnflameGPUDevice][idx].UUID)
+					if id != result[EnflameGCUDevice][idx].UUID {
+						t.Errorf("expected device id: %s, got device id %s", id, result[EnflameGCUDevice][idx].UUID)
 					}
 				}
 			}

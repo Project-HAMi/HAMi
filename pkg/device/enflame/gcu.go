@@ -19,11 +19,12 @@ package enflame
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 const (
@@ -139,8 +140,7 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]device.ContainerDevices
-	tmpDevs = make(map[string]device.ContainerDevices)
+	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
