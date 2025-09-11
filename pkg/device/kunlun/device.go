@@ -447,7 +447,7 @@ func graghSelect(devices []*device.DeviceUsage, count int) []int {
 	return []int{}
 }
 
-func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)

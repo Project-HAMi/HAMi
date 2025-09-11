@@ -316,7 +316,7 @@ func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
-func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.Infof("pod[%v] container request[%v] devices fit", klog.KObj(pod), request)
 
 	reason := make(map[string]int)
@@ -325,13 +325,13 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 
-		if !mats.checkType(annos, *dev, request) {
+		if !mats.checkType(pod.GetAnnotations(), *dev, request) {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, request.Type)
 			continue
 		}
 
-		if !mats.checkUUID(annos, *dev) {
+		if !mats.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

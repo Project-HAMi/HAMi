@@ -274,7 +274,7 @@ mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
   resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
+iluvatar:
   resourceCountName: "iluvatar.ai/vgpu"
   resourceMemoryName: "iluvatar.ai/vcuda-memory"
   resourceCoreName: "iluvatar.ai/vcuda-core"

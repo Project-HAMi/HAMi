@@ -42,7 +42,7 @@ type Devices interface {
 	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
 	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32
 	AddResourceUsage(pod *corev1.Pod, n *DeviceUsage, ctr *ContainerDevice) error
-	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
+	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
 type MigTemplate struct {
