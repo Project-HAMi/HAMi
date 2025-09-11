@@ -21,8 +21,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 type FitFn func(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool
