@@ -225,6 +225,7 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			if memnum == 0 {
 				mempnum = 100
 				cores = 100
+				memnum = 98304
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
