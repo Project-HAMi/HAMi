@@ -1,0 +1,39 @@
+# request 1 gcu device
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gcu-pod-1
+  namespace: kube-system
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: pod-gcu-example1
+      image: ubuntu:18.04
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - '100000'
+      resources:
+        limits:
+          enflame.com/gcu: 1
+---
+# request 2 gcu devices
+apiVersion: v1
+kind: Pod
+metadata:
+  name: gcu-pod-2
+  namespace: kube-system
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: pod-gcu-example1
+      image: ubuntu:18.04
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - '100000'
+      resources:
+        limits:
+          enflame.com/gcu: 2
