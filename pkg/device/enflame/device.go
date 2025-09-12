@@ -17,7 +17,6 @@ limitations under the License.
 package enflame
 
 import (
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -52,21 +51,9 @@ const (
 	CountNoSharedName  = "enflame.com/gcu-count"
 )
 
-var (
-	EnflameResourceCount      string
-	EnflameResourcePercentage string
-)
-
-type EnflameConfig struct {
-	ResourceCountName      string `yaml:"resourceCountName"`
-	ResourcePercentageName string `yaml:"resourcePercentageName"`
-	ResourceMemoryName     string `yaml:"resourceMemoryName"`
-	ResourceCoreName       string `yaml:"resourceCoreName"`
-}
-
 func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
-	EnflameResourceCount = config.ResourceCountName
-	EnflameResourcePercentage = config.ResourcePercentageName
+	EnflameResourceNameVGCU = config.ResourceNameVGCU
+	EnflameResourceNameVGCUPercentage = config.ResourceNameVGCUPercentage
 	device.SupportDevices[EnflameGPUDevice] = "hami.io/enflame-vgpu-devices-allocated"
 	return &EnflameDevices{
 		factor: 0,
@@ -77,19 +64,14 @@ func (dev *EnflameDevices) CommonWord() string {
 	return EnflameGPUCommonWord
 }
 
-func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&EnflameResourceCount, "enflame-name", "enflame.com/vgcu", "enflame resource count name")
-	fs.StringVar(&EnflameResourcePercentage, "enflame-resource-percentage-name", "enflame.com/vgcu-percentage", "enflame resource percentage name")
-}
-
 func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	count, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceCount)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCU)]
 	if ok {
 		if count.Value() > 1 {
-			ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(int64(100), resource.DecimalSI)
+			ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(int64(100), resource.DecimalSI)
 			ctr.Resources.Limits[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(dev.factor*int(count.Value())), resource.DecimalSI)
 		} else {
-			percentageResource, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)]
+			percentageResource, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)]
 			percentage := percentageResource.Value()
 			if !ok {
 				percentage = 100
@@ -101,9 +83,9 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 			for i := 0; i < dev.factor; i++ {
 				if slice*float64(i) < float64(percentage) && float64(percentage) <= slice*float64((i+1)) {
 					percentage = int64(slice * float64(i+1))
-					ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
+					ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
 					ctr.Resources.Limits[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
-					ctr.Resources.Requests[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
+					ctr.Resources.Requests[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
 					ctr.Resources.Requests[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
 					break
 				}
@@ -208,8 +190,8 @@ func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 
 func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
-	resourceCount := corev1.ResourceName(EnflameResourceCount)
-	resourcePercentage := corev1.ResourceName(EnflameResourcePercentage)
+	resourceCount := corev1.ResourceName(EnflameResourceNameVGCU)
+	resourcePercentage := corev1.ResourceName(EnflameResourceNameVGCUPercentage)
 	v, ok := ctr.Resources.Limits[resourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[resourceCount]

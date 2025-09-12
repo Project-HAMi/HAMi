@@ -49,6 +49,10 @@ metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
 metaxsGPUTopologyAware: "false"
 
+#Enflame VGCU Parameters
+enflameResourceNameVGCU: "enflame.com/vgcu"
+enflameResourceNameVGCUPercentage: "enflame.com/vgcu-percentage"
+
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
 
@@ -351,6 +355,7 @@ devices:
     customresources:
       - enflame.com/vgcu
       - enflame.com/vgcu-percentage
+      - enflame.com/gcu
   mthreads:
     enabled: true
     customresources:
