@@ -1,5 +1,5 @@
 /*
-Copyright 2024 The HAMi Authors.
+Copyright 2025 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,11 +17,8 @@ limitations under the License.
 package kunlun
 
 import (
-	"flag"
 	"fmt"
 	"slices"
-	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -31,9 +28,6 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
-
-type KunlunDevices struct {
-}
 
 const (
 	KunlunGPUDevice       = "kunlun"
@@ -46,12 +40,7 @@ const (
 	GroupConnection       = "0-1,0-2,0-3,1-2,1-3,2-3,4-5,4-6,4-7,5-6,5-7,6-7"
 )
 
-var (
-	KunlunResourceCount string
-)
-
-type KunlunConfig struct {
-	ResourceCountName string `yaml:"resourceCountName"`
+type KunlunDevices struct {
 }
 
 func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
@@ -62,10 +51,6 @@ func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
 
 func (dev *KunlunDevices) CommonWord() string {
 	return KunlunGPUCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&KunlunResourceCount, "kunlun-name", "kunlunxin.com/xpu", "kunlunxin resource count")
 }
 
 func (dev *KunlunDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
@@ -182,183 +167,6 @@ func (dev *KunlunDevices) GenerateResourceRequests(ctr *corev1.Container) device
 	return device.ContainerDeviceRequest{}
 }
 
-func addidx(temp []int, value int) []int {
-	for _, val := range temp {
-		if val == value {
-			return temp
-		}
-	}
-	temp = append(temp, value)
-	return temp
-}
-
-func getvalue(t int) int {
-	if t == 4 {
-		return 0
-	}
-	if t == 1 {
-		return 2
-	}
-	return 1
-}
-
-func countbubble(t []int) int {
-	left := 0
-	right := 0
-	for _, val := range t {
-		if val < 4 {
-			left++
-		} else {
-			right++
-		}
-	}
-	if left == 0 && right == 0 {
-		return 1
-	}
-	return getvalue(left) + getvalue(right)
-}
-
-func calcscore(p []int, c []int) float32 {
-	sort.Slice(p, func(i, j int) bool {
-		return i < j
-	})
-	sort.Slice(c, func(i, j int) bool {
-		return i < j
-	})
-	prev := countbubble(p)
-	cur := countbubble(c)
-	klog.V(5).Infoln("Score kunlun num prev=", prev, "cur=", cur)
-	switch cur - prev {
-	case -1:
-		return 3000
-	case 0:
-		return 2000
-	case 1:
-		return 1000
-	case 2:
-		return 0
-	}
-	return 1000
-}
-
-func parseUsage(devices []*device.DeviceUsage) []int {
-	usage := []int{}
-	for _, val := range devices {
-		if val.Used == 0 {
-			usage = append(usage, int(val.Index))
-		}
-	}
-	return usage
-}
-
-func parseInterconnection() [][]int {
-	var interconnection [][]int
-	pairs := strings.Split(InterGroupConnection, ",")
-	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
-		interconnection = append(interconnection, []int{lw, rw})
-	}
-	pairs = strings.Split(GroupConnection, ",")
-	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
-		interconnection = append(interconnection, []int{lw, rw})
-	}
-	return interconnection
-}
-
-func parseInterconnection2() [][]int {
-	var interconnection2 [][]int
-	for group := range strings.SplitSeq(InterGroupConnection2, ",") {
-		values := strings.Split(group, "-")
-		connect := make([]int, 4)
-		for i, value := range values {
-			v, _ := strconv.Atoi(value)
-			connect[i] = v
-		}
-		interconnection2 = append(interconnection2, connect)
-	}
-	return interconnection2
-}
-
-func interconnect(devices []*device.DeviceUsage, count int) []int {
-	if count == 2 {
-		for _, val := range devices {
-			if val.Used > 0 {
-				continue
-			}
-			for _, val2 := range devices {
-				if val2.Used > 0 || val2.Index == val.Index {
-					continue
-				}
-				for p := range strings.SplitSeq(InterGroupConnection, ",") {
-					lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
-					rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
-					klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
-					if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
-						return []int{int(val.Index), int(val2.Index)}
-					}
-				}
-			}
-		}
-	}
-	if count == 4 {
-		unused := parseUsage(devices)
-		interconnect2 := parseInterconnection2()
-		if len(unused) == 4 || len(unused) == 5 {
-			for _, c := range interconnect2 {
-				if canMeet(unused, c) {
-					return c
-				}
-			}
-		}
-		if len(unused) == 6 {
-			ret := []int{}
-			for _, c := range interconnect2 {
-				if canMeet(unused, c) {
-					ret = c
-					delta := delta(unused, c)
-					for _, val := range parseInterconnection() {
-						if canMeet(delta, val) {
-							return ret
-						}
-					}
-				}
-			}
-			return ret
-		}
-	}
-	return []int{}
-}
-
-func canMeet(have, want []int) bool {
-	mp := make(map[int]bool)
-	for _, v := range have {
-		mp[v] = true
-	}
-	for _, v := range want {
-		if !mp[v] {
-			return false
-		}
-	}
-	return true
-}
-
-func delta(have, want []int) []int {
-	var ret []int
-	mp := make(map[int]bool)
-	for _, v := range want {
-		mp[v] = true
-	}
-	for _, v := range have {
-		if !mp[v] {
-			ret = append(ret, v)
-		}
-	}
-	return ret
-}
-
 func (dev *KunlunDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	current := []int{}
 	prev := []int{}
@@ -387,72 +195,12 @@ func (dev *KunlunDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsag
 	return nil
 }
 
-func devicepick(devices []*device.DeviceUsage, start int, count int) []int {
-	res := []int{}
-	for t := start; t < 8; t++ {
-		if devices[t].Used == 0 {
-			res = append(res, int(devices[t].Index))
-			if len(res) == count {
-				return res
-			}
-		}
-	}
-	return res
-}
-
-func graghSelect(devices []*device.DeviceUsage, count int) []int {
-	leftwing := 0
-	rightwing := 0
-	for idx, val := range devices {
-		klog.Infoln("graph select val=", *val)
-		if idx < 4 {
-			if val.Used == 0 {
-				leftwing++
-			}
-		} else {
-			if val.Used == 0 {
-				rightwing++
-			}
-		}
-	}
-	oddorder := []int{1, 3, 2, 4}
-	switch count {
-	case 8:
-		{
-			if leftwing+rightwing == count {
-				return []int{0, 1, 2, 3, 4, 5, 6, 7}
-			}
-			return []int{}
-		}
-	case 1, 2, 4:
-		{
-			if leftwing >= count || rightwing >= count {
-				for slots := count; slots <= 4; slots++ {
-					num := slots
-					if count%2 == 1 {
-						num = oddorder[slots-1]
-					}
-					klog.Infoln("slots=", slots, "num=", num, "leftwing=", leftwing, "==", rightwing)
-					if leftwing == num {
-						return devicepick(devices, 0, count)
-					}
-					if rightwing == num {
-						return devicepick(devices, 4, count)
-					}
-				}
-			}
-			return interconnect(devices, count)
-		}
-	}
-	return []int{}
-}
-
 func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
-	alloc := graghSelect(devices, int(request.Nums))
+	alloc := graghSelect(devices, request, FitXPU)
 	if len(alloc) == 0 {
 		reason[common.NumaNotFit]++
 		klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
@@ -474,4 +222,8 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		}
 	}
 	return true, tmpDevs, ""
+}
+
+func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
+	return device.Used == 0
 }
