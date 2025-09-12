@@ -577,7 +577,7 @@ func TestGCUDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			fit, result, reason := dev.Fit(test.devices, test.request, &corev1.Pod{}, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
