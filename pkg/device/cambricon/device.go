@@ -325,7 +325,7 @@ func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -337,7 +337,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := cam.checkType(annos, *dev, k)
+		_, found, numa := cam.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -352,7 +352,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !cam.checkUUID(annos, *dev) {
+		if !cam.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

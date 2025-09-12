@@ -370,7 +370,7 @@ func graphSelect(devices []*device.DeviceUsage, count int) []int {
 	return []int{}
 }
 
-func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
@@ -421,7 +421,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if !neuron.checkUUID(annos, *dev) {
+		if !neuron.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
