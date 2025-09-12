@@ -372,6 +372,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		enflame.EnflameGCUDevice:     enflame.EnflameGCUCommonWord,
 		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
 		kunlun.KunlunGPUDevice:       kunlun.KunlunGPUCommonWord,
+		kunlun.XPUDevice:             kunlun.XPUCommonWord,
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 	}
 

@@ -188,6 +188,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return kunlun.InitKunlunDevice(kunlunConfig), nil
 		}, config.KunlunConfig},
+		{kunlun.XPUDevice, kunlun.XPUCommonWord, func(cfg interface{}) (device.Devices, error) {
+			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", kunlun.XPUDevice)
+			}
+			return kunlun.InitKunlunVDevice(kunlunConfig), nil
+		}, config.KunlunConfig},
 		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (device.Devices, error) {
 			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
 			if !ok {
@@ -287,6 +294,8 @@ iluvatar:
   resourceCoreName: "iluvatar.ai/vcuda-core"
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
+  resourceVCountName: "kunlunxin.com/vxpu"
+  resourceVMemoryName: "kunlunxin.com/vxpu-memory"
 awsneuron:
   resourceCountName: "aws.amazon.com/neuron"
   resourceCoreName: "aws.amazon.com/neuroncore"
