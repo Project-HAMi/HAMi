@@ -279,7 +279,7 @@ func (dev *MthreadsDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUs
 	return nil
 }
 
-func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -297,7 +297,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			continue
 		}
 
-		_, found, numa := mth.checkType(annos, *dev, k)
+		_, found, numa := mth.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -312,7 +312,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !mth.checkUUID(annos, *dev) {
+		if !mth.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

@@ -581,7 +581,12 @@ func Test_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			ok, result, _ := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			ok, result, _ := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if test.wantOK {
 				if len(result[IluvatarGPUDevice]) != test.wantLen {
 					t.Errorf("expected %d, got %d", test.wantLen, len(result[IluvatarGPUDevice]))
