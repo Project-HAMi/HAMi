@@ -136,7 +136,7 @@ func (dev *GCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
-func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
