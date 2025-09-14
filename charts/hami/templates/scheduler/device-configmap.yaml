@@ -176,6 +176,23 @@ data:
           memory: 32768
           aiCore: 10
           aiCPU: 3
+    - chipName: 910B4-1
+      commonWord: Ascend910B4-1
+      resourceName: huawei.com/Ascend910B4-1
+      resourceMemoryName: huawei.com/Ascend910B4-1-memory
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        - name: vir05_1c_8g
+          memory: 8192
+          aiCore: 5
+          aiCPU: 1
+        - name: vir10_3c_16g
+          memory: 16384
+          aiCore: 10
+          aiCPU: 3
     - chipName: 910B4
       commonWord: Ascend910B4
       resourceName: huawei.com/Ascend910B4
