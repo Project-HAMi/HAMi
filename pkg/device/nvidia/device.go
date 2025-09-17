@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -774,7 +773,7 @@ func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DeviceP
 }
 
 func computeWorstSignleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
-	worstScore := math.MaxInt
+	worstScore := -1
 	worstDevices := device.ContainerDevices{}
 	deviceScoreMap := getDevicePairScoreMap(nodeInfo)
 	// Iterate through all devices to find the one with the lowest score
@@ -789,7 +788,7 @@ func computeWorstSignleCard(nodeInfo *device.NodeInfo, request device.ContainerD
 			}
 			totalScore += scoreMapDev1.Scores[dev2.UUID]
 		}
-		if totalScore < worstScore {
+		if totalScore < worstScore || worstScore == -1 {
 			worstScore = totalScore
 			worstDevices = device.ContainerDevices{dev1}
 		}
