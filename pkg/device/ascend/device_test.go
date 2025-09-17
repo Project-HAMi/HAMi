@@ -1360,6 +1360,61 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{"dev-0"},
 			wantReason: "",
 		},
+		{
+			name: "fit success. schedule by NetworkID",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Health:    true,
+					CustomInfo: map[string]any{"NetworkID": 0},
+				},
+				{
+					ID:        "dev-1",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Health:    true,
+					CustomInfo: map[string]any{"NetworkID": 1},
+				},
+				{
+					ID:        "dev-2",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Health:    true,
+					CustomInfo: map[string]any{"NetworkID": 1},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    2,
+			wantDevIDs: []string{"dev-2", "dev-1"},
+			wantReason: "",
+		},
 	}
 
 	for _, dev := range devs {
@@ -1384,7 +1439,31 @@ func TestDevices_Fit(t *testing.T) {
 						Annotations: test.annos,
 					},
 				}
-				fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
+				nodeInfo := &device.NodeInfo{
+					ID: "node1",
+					Devices: []device.DeviceInfo {
+						{
+							ID:        "dev-0",
+							Index:     0,
+							Health:    true,
+							CustomInfo: map[string]any{"NetworkID": 0},
+						},
+						{
+							ID:        "dev-1",
+							Index:     0,
+							Numa:      0,
+							Health:    true,
+							CustomInfo: map[string]any{"NetworkID": 1},
+						},
+						{
+							ID:        "dev-2",
+							Index:     0,
+							Health:    true,
+							CustomInfo: map[string]any{"NetworkID": 1},
+						},
+					},
+				}
+				fit, result, reason := dev.Fit(test.devices, test.request, pod, nodeInfo, allocated)
 				if fit != test.wantFit {
 					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 				}
