@@ -291,12 +291,15 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		}
 		cntMap := make(map[int]int)
 		for _, device := range containerDevices {
-			if device.CustomInfo != nil {
-				if networkID, ok := device.CustomInfo["NetworkID"]; ok {
-					if id, ok := networkID.(int); ok {
-						cntMap[id]++
-					}
+			if device.CustomInfo == nil {
+				return 0
+			}
+			if networkID, ok := device.CustomInfo["NetworkID"]; ok {
+				if id, ok := networkID.(int); ok {
+					cntMap[id]++
 				}
+			} else {
+				return 0
 			}
 		}
 		maxCnt, totalCnt := 0, 0
@@ -330,7 +333,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	needTopology := strings.HasPrefix(npu.CommonWord(), Ascend910Prefix)
+	needTopology := false
+	if strings.HasPrefix(npu.CommonWord(), Ascend910Prefix) && HasNetworkID(devices) {
+		klog.Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
+		needTopology = true
+	}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -435,6 +442,18 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func HasNetworkID(devices []*device.DeviceUsage) bool {
+	for _, dev := range devices {
+		if dev.CustomInfo == nil {
+			return false
+		}
+		if _, ok := dev.CustomInfo["NetworkID"]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
