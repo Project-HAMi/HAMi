@@ -2633,7 +2633,7 @@ func Test_calcScore(t *testing.T) {
 				s.addNode(nodeName, &device.NodeInfo{ID: nodeName, Node: nodeUsage.Node, Devices: devices})
 			}
 			failedNodes := map[string]string{}
-			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.annos, test.args.task, failedNodes)
+			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.task, failedNodes)
 			assert.DeepEqual(t, test.wants.err, gotErr)
 			wantMap := make(map[string]*policy.NodeScore)
 			for index, node := range (*(test.wants.want)).NodeList {
@@ -2663,7 +2663,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 		args struct {
 			node      *NodeUsage
 			request   device.ContainerDeviceRequest
-			annos     map[string]string
 			pod       *corev1.Pod
 			allocated *device.PodDevices
 		}
@@ -2676,7 +2675,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2695,6 +2693,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -2707,7 +2706,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2728,7 +2726,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2747,6 +2744,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -2759,7 +2757,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2772,7 +2769,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2791,6 +2787,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -2803,7 +2800,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2816,7 +2812,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2835,6 +2830,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -2847,7 +2843,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(200),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2860,7 +2855,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2879,6 +2873,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(8000),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -2891,7 +2886,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(100),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2904,7 +2898,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2923,6 +2916,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(0),
 									Totalcore: int32(100),
+									Health:    true,
 								},
 							},
 						},
@@ -2935,7 +2929,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(100),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2948,7 +2941,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -2967,6 +2959,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(1),
+									Health:    true,
 								},
 							},
 						},
@@ -2979,7 +2972,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(0),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -2992,7 +2984,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -3022,6 +3013,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 											},
 										},
 									},
+									Health: true,
 								},
 							},
 						},
@@ -3034,7 +3026,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos:     map[string]string{},
 				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
@@ -3056,7 +3047,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -3075,6 +3065,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -3087,10 +3078,13 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos: map[string]string{
-					nvidia.GPUUseUUID: "abc",
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							nvidia.GPUUseUUID: "abc",
+						},
+					},
 				},
-				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
 			want1: false,
@@ -3102,7 +3096,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -3122,11 +3115,14 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(1),
 				},
-				annos: map[string]string{
-					nvidia.GPUInUse: "NVIDIA",
-					nvidia.NumaBind: "true",
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							nvidia.GPUInUse: "NVIDIA",
+							nvidia.NumaBind: "true",
+						},
+					},
 				},
-				pod:       &corev1.Pod{},
 				allocated: &device.PodDevices{},
 			},
 			want1: false,
@@ -3147,7 +3143,6 @@ func Test_fitInCertainDevice(t *testing.T) {
 			args: struct {
 				node      *NodeUsage
 				request   device.ContainerDeviceRequest
-				annos     map[string]string
 				pod       *corev1.Pod
 				allocated *device.PodDevices
 			}{
@@ -3182,8 +3177,11 @@ func Test_fitInCertainDevice(t *testing.T) {
 					MemPercentagereq: int32(100),
 					Coresreq:         int32(20),
 				},
-				annos:     map[string]string{nvidia.GPUUseUUID: "a,f,c,d,e,g,h,j,l,u,m"},
-				pod:       &corev1.Pod{},
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{nvidia.GPUUseUUID: "a,f,c,d,e,g,h,j,l,u,m"},
+					},
+				},
 				allocated: &device.PodDevices{},
 			},
 			want1: false,
@@ -3197,7 +3195,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &nvidia.NvidiaGPUDevices{}
 
-			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, &device.NodeInfo{}, test.args.allocated)
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.pod, &device.NodeInfo{}, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, convertReasonToMap(result3), test.want3)
@@ -3216,6 +3214,7 @@ func makeDevice(id string, numa int, Type string, used, count, totalmem, usedmem
 		Usedmem:   int32(usedmem),
 		Usedcores: int32(usedcores),
 		Totalcore: int32(totalcore),
+		Health:    true,
 	}
 }
 
@@ -3282,6 +3281,7 @@ func Test_fitInDevices(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 							{
@@ -3295,6 +3295,7 @@ func Test_fitInDevices(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -3340,6 +3341,7 @@ func Test_fitInDevices(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -3385,6 +3387,7 @@ func Test_fitInDevices(t *testing.T) {
 									Usedmem:   int32(2048),
 									Usedcores: int32(1),
 									Totalcore: int32(4),
+									Health:    true,
 								},
 							},
 						},
@@ -3410,7 +3413,7 @@ func Test_fitInDevices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			viewStatus(test.args.node)
-			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.annos, test.args.pod, nil, test.args.devinput)
+			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.pod, nil, test.args.devinput)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 		})
@@ -3558,7 +3561,7 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			gpuDevices := &nvidia.NvidiaGPUDevices{}
 
-			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.annos, test.args.pod, test.args.nodeInfo, test.args.allocated)
+			result1, result2, result3 := gpuDevices.Fit(getNodeResources(*test.args.node, nvidia.NvidiaGPUDevice), test.args.request, test.args.pod, test.args.nodeInfo, test.args.allocated)
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 			assert.DeepEqual(t, result3, test.want3)

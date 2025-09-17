@@ -146,6 +146,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
 		}, config.IluvatarConfig},
+		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
+			enflameConfig, ok := cfg.(enflame.EnflameConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGCUCommonWord)
+			}
+			return enflame.InitGCUDevice(enflameConfig), nil
+		}, config.EnflameConfig},
 		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {
@@ -180,6 +187,13 @@ func InitDevicesWithConfig(config *Config) error {
 				return nil, fmt.Errorf("invalid configuration for %s", kunlun.KunlunGPUCommonWord)
 			}
 			return kunlun.InitKunlunDevice(kunlunConfig), nil
+		}, config.KunlunConfig},
+		{kunlun.XPUDevice, kunlun.XPUCommonWord, func(cfg interface{}) (device.Devices, error) {
+			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", kunlun.XPUDevice)
+			}
+			return kunlun.InitKunlunVDevice(kunlunConfig), nil
 		}, config.KunlunConfig},
 		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (device.Devices, error) {
 			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
@@ -274,12 +288,14 @@ mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
   resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
+iluvatar:
   resourceCountName: "iluvatar.ai/vgpu"
   resourceMemoryName: "iluvatar.ai/vcuda-memory"
   resourceCoreName: "iluvatar.ai/vcuda-core"
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
+  resourceVCountName: "kunlunxin.com/vxpu"
+  resourceVMemoryName: "kunlunxin.com/vxpu-memory"
 awsneuron:
   resourceCountName: "aws.amazon.com/neuron"
   resourceCoreName: "aws.amazon.com/neuroncore"

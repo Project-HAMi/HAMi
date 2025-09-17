@@ -325,7 +325,7 @@ func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr
 	return nil
 }
 
-func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -342,7 +342,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := npu.checkType(annos, *dev, k)
+		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -357,7 +357,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !npu.checkUUID(annos, *dev) {
+		if !npu.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

@@ -986,12 +986,45 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{"dev-0"},
 			wantReason: "",
 		},
+		{
+			name: "fit fail:  CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      20,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Type:      NvidiaGPUDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 10,
+				Coresreq:         20,
+				Type:             NvidiaGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}

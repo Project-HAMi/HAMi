@@ -62,6 +62,10 @@ hygon:
   resourceCoreName: hygon.com/dcucores
 metax:
   resourceCountName: "metax-tech.com/gpu"
+enflame:
+  resourceNameGCU: "enflame.com/gcu"
+  resourceNameVGCU: "enflame.com/vgcu"
+  resourceNameVGCUPercentage: "enflame.com/vgcu-percentage"
 mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
@@ -187,6 +191,7 @@ func Test_LoadConfig(t *testing.T) {
 		{"Iluvatar Config", createIluvatarConfig(), configData.IluvatarConfig},
 		{"Mthreads Config", createMthreadsConfig(), configData.MthreadsConfig},
 		{"Metax Config", createMetaxConfig(), configData.MetaxConfig},
+		{"Enflame Config", createEnflameConfig(), configData.EnflameConfig},
 		{"Kunlun Config", createKunlunConfig(), configData.KunlunConfig},
 	}
 
@@ -249,6 +254,14 @@ func createMthreadsConfig() mthreads.MthreadsConfig {
 func createMetaxConfig() metax.MetaxConfig {
 	return metax.MetaxConfig{
 		ResourceCountName: "metax-tech.com/gpu",
+	}
+}
+
+func createEnflameConfig() enflame.EnflameConfig {
+	return enflame.EnflameConfig{
+		ResourceNameGCU:            "enflame.com/gcu",
+		ResourceNameVGCU:           "enflame.com/vgcu",
+		ResourceNameVGCUPercentage: "enflame.com/vgcu-percentage",
 	}
 }
 
@@ -356,8 +369,10 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
+		enflame.EnflameGCUDevice:     enflame.EnflameGCUCommonWord,
 		enflame.EnflameGPUDevice:     enflame.EnflameGPUCommonWord,
 		kunlun.KunlunGPUDevice:       kunlun.KunlunGPUCommonWord,
+		kunlun.XPUDevice:             kunlun.XPUCommonWord,
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 	}
 

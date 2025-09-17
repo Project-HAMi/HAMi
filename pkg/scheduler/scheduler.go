@@ -457,7 +457,6 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-	annos := args.Pod.Annotations
 	s.delPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
@@ -468,7 +467,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		klog.V(5).InfoS("Nodes failed during usage retrieval",
 			"nodes", failedNodes)
 	}
-	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, annos, args.Pod, failedNodes)
+	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)

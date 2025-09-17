@@ -201,8 +201,8 @@ func Test_MutateAdmission(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := EnflameConfig{
-				ResourceCountName:      "enflame.com/vgcu",
-				ResourcePercentageName: "enflame.com/vgcu-percentage",
+				ResourceNameVGCU:           "enflame.com/vgcu",
+				ResourceNameVGCUPercentage: "enflame.com/vgcu-percentage",
 			}
 			InitEnflameDevice(config)
 			dev := EnflameDevices{
@@ -210,7 +210,7 @@ func Test_MutateAdmission(t *testing.T) {
 			}
 			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
-			limits := test.args.ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)]
+			limits := test.args.ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)]
 			number, _ := limits.AsInt64()
 			assert.Equal(t, number, int64(25))
 		})
@@ -439,8 +439,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 
 func TestDevices_Fit(t *testing.T) {
 	config := EnflameConfig{
-		ResourceCountName:      "enflame.com/vgcu",
-		ResourcePercentageName: "enflame.com/vgcu-percentage",
+		ResourceNameVGCU:           "enflame.com/vgcu",
+		ResourceNameVGCUPercentage: "enflame.com/vgcu-percentage",
 	}
 	dev := InitEnflameDevice(config)
 
@@ -810,7 +810,12 @@ func TestDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}

@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -52,6 +53,20 @@ const (
 	nodeFitPod                        = "NodeFitPod"
 )
 
+var scheduleFailureReasons = []string{
+	cardTypeMismatch,
+	cardUUIDMismatch,
+	cardTimeSlicingExhausted,
+	cardComputeUnitsExhausted,
+	cardInsufficientMemory,
+	cardInsufficientCore,
+	numaNotFit,
+	exclusiveDeviceAllocateConflict,
+	cardNotFoundCustomFilterRule,
+	nodeInsufficientDevice,
+	allocatedCardsInsufficientRequest,
+}
+
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
@@ -62,7 +77,7 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	return l
 }
 
-func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
+func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
 	//devmap := make(map[string]device.ContainerDevices)
 	devs := device.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
@@ -84,7 +99,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, anno
 		if !ok {
 			return false, "Device type not found"
 		}
-		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, nodeInfo, devinput)
+		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
 		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
@@ -116,10 +131,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, anno
 	return true, ""
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
-	if annos != nil {
-		if value, ok := annos[policy.NodeSchedulerPolicyAnnotationKey]; ok {
+	if task.GetAnnotations() != nil {
+		if value, ok := task.GetAnnotations()[policy.NodeSchedulerPolicyAnnotationKey]; ok {
 			userNodePolicy = value
 		}
 	}
@@ -131,6 +146,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
+	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
 	for nodeID, node := range *nodes {
 		wg.Add(1)
@@ -164,7 +180,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, annos, task, nodeInfo, &score.Devices)
+				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
 				// found certain deviceType, fill missing empty allocation for containers before this
 				for idx := range score.Devices {
 					deviceType = idx
@@ -180,6 +196,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
 					failedNodes[nodeID] = nodeUnfitPod
+					for _, reasonType := range parseNodeReason(reason) {
+						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+					}
 					failedNodesMutex.Unlock()
 					break
 				}
@@ -197,9 +216,27 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg.Wait()
 	close(errCh)
 
+	// only pod scheduler failure will record failure event
+	if len(res.NodeList) == 0 {
+		for reasonType, failureNodes := range failureReason {
+			reason := fmt.Errorf("%d nodes %s(%s)", len(failureNodes), reasonType, strings.Join(failureNodes, ","))
+			s.recordScheduleFilterResultEvent(task, EventReasonFilteringFailed, "", reason)
+		}
+	}
+
 	var errorsSlice []error
 	for e := range errCh {
 		errorsSlice = append(errorsSlice, e)
 	}
 	return &res, utilerrors.NewAggregate(errorsSlice)
+}
+
+func parseNodeReason(nodeReason string) []string {
+	var res []string
+	for _, reason := range scheduleFailureReasons {
+		if strings.Contains(nodeReason, reason) {
+			res = append(res, reason)
+		}
+	}
+	return res
 }

@@ -58,6 +58,12 @@ This document provides detailed descriptions of all configurable values paramete
 | `metaxResourceMem` | GPU memory resource name | `"metax-tech.com/vmemory"` |
 | `metaxsGPUTopologyAware` | GPU topology awareness | `"false"` |
 
+### Enflame GCU Resources
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `enflameResourceNameVGCU` | vGCU resource name | `"enflame.com/vgcu"` |
+| `enflameResourceNameVGCUPercentage` | vGCU percentage resource name | `"enflame.com/vgcu-percentage"` |
+
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|

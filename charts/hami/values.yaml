@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.6.0"
+  imageTag: "v2.6.1"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -49,8 +49,14 @@ metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
 metaxsGPUTopologyAware: "false"
 
+#Enflame VGCU Parameters
+enflameResourceNameVGCU: "enflame.com/vgcu"
+enflameResourceNameVGCUPercentage: "enflame.com/vgcu-percentage"
+
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
+kunlunResourceVCountName: "kunlunxin.com/vxpu"
+kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
 schedulerName: "hami-scheduler"
 
@@ -346,11 +352,14 @@ devices:
     enabled: true
     customresources:
       - kunlunxin.com/xpu
+      - kunlunxin.com/vxpu
+      - kunlunxin.com/vxpu-memory
   enflame:
     enabled: true
     customresources:
       - enflame.com/vgcu
       - enflame.com/vgcu-percentage
+      - enflame.com/gcu
   mthreads:
     enabled: true
     customresources:
@@ -375,6 +384,8 @@ devices:
       - huawei.com/Ascend910B3-memory
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
+      - huawei.com/Ascend910B4-1
+      - huawei.com/Ascend910B4-1-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
 
