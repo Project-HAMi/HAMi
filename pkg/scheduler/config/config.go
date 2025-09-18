@@ -52,6 +52,11 @@ var (
 	DefaultCores       int32
 	DefaultResourceNum int32
 
+	NvidiaResourceCountName            = "nvidia.com/gpu"
+	NvidiaResourceMemoryName           = "nvidia.com/gpumem"
+	NvidiaResourceMemoryPercentageName = "nvidia.com/gpumem-percentage"
+	NvidiaResourceCoreName             = "nvidia.com/gpucores"
+
 	// NodeSchedulerPolicy is config this scheduler node to use `binpack` or `spread`. default value is binpack.
 	NodeSchedulerPolicy = util.NodeSchedulerPolicyBinpack.String()
 
@@ -90,6 +95,8 @@ func InitDevicesWithConfig(config *Config) error {
 		klog.Errorf("Invalid configuration: %v", err)
 		return err
 	}
+
+	updateNvidiaResourceNames(config.NvidiaConfig)
 
 	klog.Info("Initializing devices with configuration")
 
@@ -223,6 +230,21 @@ func InitDevicesWithConfig(config *Config) error {
 
 	klog.Info("All devices initialized successfully")
 	return nil
+}
+
+func updateNvidiaResourceNames(cfg nvidia.NvidiaConfig) {
+	if cfg.ResourceCountName != "" {
+		NvidiaResourceCountName = cfg.ResourceCountName
+	}
+	if cfg.ResourceMemoryName != "" {
+		NvidiaResourceMemoryName = cfg.ResourceMemoryName
+	}
+	if cfg.ResourceMemoryPercentageName != "" {
+		NvidiaResourceMemoryPercentageName = cfg.ResourceMemoryPercentageName
+	}
+	if cfg.ResourceCoreName != "" {
+		NvidiaResourceCoreName = cfg.ResourceCoreName
+	}
 }
 
 // validateConfig validates the configuration object to ensure it is complete.

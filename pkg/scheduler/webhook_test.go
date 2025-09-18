@@ -169,6 +169,116 @@ func TestPodHasNodeName(t *testing.T) {
 
 }
 
+func TestEnsureNvidiaExclusiveCoreDefault(t *testing.T) {
+	config.NvidiaResourceCountName = "nvidia.com/gpu"
+	config.NvidiaResourceMemoryName = "nvidia.com/gpumem"
+	config.NvidiaResourceMemoryPercentageName = "nvidia.com/gpumem-percentage"
+	config.NvidiaResourceCoreName = "nvidia.com/gpucores"
+
+	tests := []struct {
+		name        string
+		limits      corev1.ResourceList
+		requests    corev1.ResourceList
+		wantCores   bool
+		expectValue int64
+	}{
+		{
+			name: "exclusive via percentage",
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("100"),
+			},
+			wantCores:   true,
+			expectValue: 100,
+		},
+		{
+			name: "non-exclusive percentage",
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			},
+			wantCores: false,
+		},
+		{
+			name: "no memory fields defaults to exclusive",
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1"),
+			},
+			wantCores:   true,
+			expectValue: 100,
+		},
+		{
+			name: "explicit cores remains unchanged",
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":      resource.MustParse("1"),
+				"nvidia.com/gpucores": resource.MustParse("70"),
+			},
+			wantCores:   true,
+			expectValue: 70,
+		},
+		{
+			name: "memory size present treated as shareable",
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":    resource.MustParse("1"),
+				"nvidia.com/gpumem": resource.MustParse("8192"),
+			},
+			wantCores: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   tt.limits,
+					Requests: tt.requests,
+				},
+			}
+
+			ensureNvidiaExclusiveCoreDefault(ctr)
+
+			qty, exists := ctr.Resources.Limits[corev1.ResourceName(config.NvidiaResourceCoreName)]
+			if tt.wantCores != exists {
+				t.Fatalf("expected cores presence %v, got %v", tt.wantCores, exists)
+			}
+			if tt.wantCores && qty.Value() != tt.expectValue {
+				t.Fatalf("expected cores value %d, got %d", tt.expectValue, qty.Value())
+			}
+		})
+	}
+
+	t.Run("custom resource names", func(t *testing.T) {
+		config.NvidiaResourceCountName = "hami.io/gpu"
+		config.NvidiaResourceMemoryPercentageName = "hami.io/gpumem-percentage"
+		config.NvidiaResourceMemoryName = "hami.io/gpumem"
+		config.NvidiaResourceCoreName = "hami.io/gpucores"
+
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"hami.io/gpu":               resource.MustParse("1"),
+					"hami.io/gpumem-percentage": resource.MustParse("100"),
+				},
+			},
+		}
+
+		ensureNvidiaExclusiveCoreDefault(ctr)
+
+		qty, exists := ctr.Resources.Limits[corev1.ResourceName(config.NvidiaResourceCoreName)]
+		if !exists {
+			t.Fatalf("expected cores presence true, got false")
+		}
+		if qty.Value() != 100 {
+			t.Fatalf("expected cores value 100, got %d", qty.Value())
+		}
+	})
+
+	config.NvidiaResourceCountName = "nvidia.com/gpu"
+	config.NvidiaResourceMemoryName = "nvidia.com/gpumem"
+	config.NvidiaResourceMemoryPercentageName = "nvidia.com/gpumem-percentage"
+	config.NvidiaResourceCoreName = "nvidia.com/gpucores"
+}
+
 func TestPodHasDifferentScheduler(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
 
