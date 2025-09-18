@@ -335,7 +335,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	reason := make(map[string]int)
 	needTopology := false
 	if strings.HasPrefix(npu.CommonWord(), Ascend910Prefix) && hasNetworkID(devices) {
-		klog.Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
+		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
 		needTopology = true
 	}
 	for i := len(devices) - 1; i >= 0; i-- {
