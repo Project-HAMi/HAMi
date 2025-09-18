@@ -22,6 +22,7 @@ import (
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	"k8s.io/klog/v2"
@@ -84,6 +85,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 			hasResource = hasResource || found
 		}
+		ensureNvidiaExclusiveCoreDefault(c)
 	}
 
 	if !hasResource {
@@ -102,4 +104,74 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+func ensureNvidiaExclusiveCoreDefault(ctr *corev1.Container) {
+	if ctr == nil {
+		return
+	}
+
+	gpuResourceName := config.NvidiaResourceCountName
+	if gpuResourceName == "" {
+		return
+	}
+
+	gpuResource := corev1.ResourceName(gpuResourceName)
+	if !resourcePresent(ctr, gpuResource) {
+		return
+	}
+
+	coreResourceName := config.NvidiaResourceCoreName
+	if coreResourceName == "" {
+		return
+	}
+
+	coreResource := corev1.ResourceName(coreResourceName)
+	if resourcePresent(ctr, coreResource) {
+		return
+	}
+
+	exclusive := false
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(config.NvidiaResourceMemoryPercentageName)); ok {
+		exclusive = pct == 100
+	} else if config.NvidiaResourceMemoryName == "" {
+		exclusive = true
+	} else if _, ok := resourceValue(ctr, corev1.ResourceName(config.NvidiaResourceMemoryName)); !ok {
+		exclusive = true
+	}
+
+	if !exclusive {
+		return
+	}
+
+	if ctr.Resources.Limits == nil {
+		ctr.Resources.Limits = corev1.ResourceList{}
+	}
+	ctr.Resources.Limits[coreResource] = *resource.NewQuantity(100, resource.BinarySI)
+}
+
+func resourceValue(ctr *corev1.Container, name corev1.ResourceName) (int64, bool) {
+	if name == "" {
+		return 0, false
+	}
+	if qty, ok := ctr.Resources.Limits[name]; ok {
+		return qty.Value(), true
+	}
+	if qty, ok := ctr.Resources.Requests[name]; ok {
+		return qty.Value(), true
+	}
+	return 0, false
+}
+
+func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
+	if ctr == nil || name == "" {
+		return false
+	}
+	if _, ok := ctr.Resources.Limits[name]; ok {
+		return true
+	}
+	if _, ok := ctr.Resources.Requests[name]; ok {
+		return true
+	}
+	return false
 }
