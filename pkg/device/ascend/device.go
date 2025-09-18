@@ -295,8 +295,8 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 				return 0
 			}
 			if networkID, ok := device.CustomInfo["NetworkID"]; ok {
-				if id, ok := networkID.(int); ok {
-					cntMap[id]++
+				if id, ok := networkID.(float64); ok {
+					cntMap[int(id)]++
 				}
 			} else {
 				return 0
@@ -314,7 +314,7 @@ func (dev *Devices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevi
 		}
 		score += float32(maxCnt) / float32(totalCnt)
 	}
-	klog.V(4).InfoS("node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NetworkWeight)
+	klog.V(4).InfoS("ScoreNode", "node", node.Name, "deviceType", dev.CommonWord(), "topology score", score, "weight", Ascend910NetworkWeight)
 	return score * Ascend910NetworkWeight
 }
 
@@ -409,18 +409,17 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				k.Nums--
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
-				Idx:       int(dev.Index),
-				UUID:      dev.ID,
-				Type:      k.Type,
-				Usedmem:   memreq,
-				Usedcores: k.Coresreq,
+				Idx:        int(dev.Index),
+				UUID:       dev.ID,
+				Type:       k.Type,
+				Usedmem:    memreq,
+				Usedcores:  k.Coresreq,
+				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 {
-			if !needTopology || int(originReq) == 1 {
-				klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
-				return true, tmpDevs, ""
-			}
+		if k.Nums == 0 && !needTopology {
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
 		}
 	}
 
@@ -429,9 +428,13 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		} else if len(tmpDevs[k.Type]) > int(originReq) {
-			// If requesting multiple devices, select the best combination of cards.
-			combination := computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
-			tmpDevs[k.Type] = combination
+			if originReq == 1 {
+				tmpDevs[k.Type] = device.ContainerDevices{tmpDevs[k.Type][0]}
+			} else {
+				// If requesting multiple devices, select the best combination of cards.
+				combination := computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
+				tmpDevs[k.Type] = combination
+			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
 		}
@@ -466,8 +469,8 @@ func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevi
 		if dev, ok := deviceMap[containerDevice.UUID]; ok {
 			if dev.CustomInfo != nil {
 				if networkID, ok := dev.CustomInfo["NetworkID"]; ok {
-					if id, ok := networkID.(int); ok {
-						networkDeviceMap[id] = append(networkDeviceMap[id], containerDevice)
+					if id, ok := networkID.(float64); ok {
+						networkDeviceMap[int(id)] = append(networkDeviceMap[int(id)], containerDevice)
 					}
 				}
 			}
@@ -489,7 +492,6 @@ func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevi
 	sort.Slice(sortedNetworks, func(i, j int) bool {
 		return sortedNetworks[i].Count > sortedNetworks[j].Count
 	})
-
 	result := device.ContainerDevices{}
 	for _, item := range sortedNetworks {
 		devices := networkDeviceMap[item.NetworkID]
