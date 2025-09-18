@@ -1374,7 +1374,7 @@ func TestDevices_Fit(t *testing.T) {
 					Usedcores:  0,
 					Numa:       0,
 					Health:     true,
-					CustomInfo: map[string]any{"NetworkID": 0},
+					CustomInfo: map[string]any{"NetworkID": float64(0)},
 				},
 				{
 					ID:         "dev-1",
@@ -1387,7 +1387,7 @@ func TestDevices_Fit(t *testing.T) {
 					Usedcores:  0,
 					Numa:       0,
 					Health:     true,
-					CustomInfo: map[string]any{"NetworkID": 1},
+					CustomInfo: map[string]any{"NetworkID": float64(1)},
 				},
 				{
 					ID:         "dev-2",
@@ -1400,7 +1400,7 @@ func TestDevices_Fit(t *testing.T) {
 					Usedcores:  0,
 					Numa:       0,
 					Health:     true,
-					CustomInfo: map[string]any{"NetworkID": 1},
+					CustomInfo: map[string]any{"NetworkID": float64(1)},
 				},
 			},
 			request: device.ContainerDeviceRequest{
@@ -1446,20 +1446,20 @@ func TestDevices_Fit(t *testing.T) {
 							ID:         "dev-0",
 							Index:      0,
 							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": 0},
+							CustomInfo: map[string]any{"NetworkID": float64(0)},
 						},
 						{
 							ID:         "dev-1",
 							Index:      0,
 							Numa:       0,
 							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": 1},
+							CustomInfo: map[string]any{"NetworkID": float64(1)},
 						},
 						{
 							ID:         "dev-2",
 							Index:      0,
 							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": 1},
+							CustomInfo: map[string]any{"NetworkID": float64(1)},
 						},
 					},
 				}
