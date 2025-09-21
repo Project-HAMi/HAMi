@@ -933,19 +933,19 @@ func Test_ResourceQuota(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                      string
-		args                      extenderv1.ExtenderArgs
-		quota                     corev1.ResourceQuota
-		want                      *extenderv1.ExtenderFilterResult
-		wantErr                   error
+		name    string
+		args    extenderv1.ExtenderArgs
+		quota   corev1.ResourceQuota
+		want    *extenderv1.ExtenderFilterResult
+		wantErr error
 	}{
 		{
 			name: "multi device Resourcequota pass",
 			args: extenderv1.ExtenderArgs{
 				Pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test1",
-						UID:  "test1-uid1",
+						Name:      "test1",
+						UID:       "test1-uid1",
 						Namespace: "default",
 					},
 					Spec: corev1.PodSpec{
@@ -989,8 +989,8 @@ func Test_ResourceQuota(t *testing.T) {
 			args: extenderv1.ExtenderArgs{
 				Pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test2",
-						UID:  "test2-uid2",
+						Name:      "test2",
+						UID:       "test2-uid2",
 						Namespace: "default",
 					},
 					Spec: corev1.PodSpec{
@@ -1034,8 +1034,8 @@ func Test_ResourceQuota(t *testing.T) {
 			args: extenderv1.ExtenderArgs{
 				Pod: &corev1.Pod{
 					ObjectMeta: metav1.ObjectMeta{
-						Name: "test3",
-						UID:  "test3-uid3",
+						Name:      "test3",
+						UID:       "test3-uid3",
 						Namespace: "default",
 					},
 					Spec: corev1.PodSpec{
@@ -1046,7 +1046,7 @@ func Test_ResourceQuota(t *testing.T) {
 								Args:  []string{"6000"},
 								Resources: corev1.ResourceRequirements{
 									Limits: corev1.ResourceList{
-										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
 									},
 								},
 							},
@@ -1092,7 +1092,7 @@ func Test_ResourceQuota(t *testing.T) {
 								Args:  []string{"6000"},
 								Resources: corev1.ResourceRequirements{
 									Limits: corev1.ResourceList{
-										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
 									},
 								},
 							},
