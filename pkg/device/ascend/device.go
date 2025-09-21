@@ -289,6 +289,14 @@ func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr
 	return nil
 }
 
+func (dev *Devices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  dev.config.ResourceName,
+		ResourceMemoryName: dev.config.ResourceMemoryName,
+		ResourceCoreName:   "",
+	}
+}
+
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums

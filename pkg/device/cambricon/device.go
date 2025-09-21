@@ -421,3 +421,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
+
+func (dev *CambriconDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  MLUResourceCount,
+		ResourceMemoryName: MLUResourceMemory,
+		ResourceCoreName:   MLUResourceCores,
+	}
+}

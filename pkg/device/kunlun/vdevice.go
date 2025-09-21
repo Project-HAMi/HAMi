@@ -232,6 +232,14 @@ func (dev *KunlunVDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
+func (dev *KunlunVDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  KunlunResourceVCount,
+		ResourceMemoryName: KunlunResourceVMemory,
+		ResourceCoreName:   "",
+	}
+}
+
 func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
 	tmpDevs := make(map[string]device.ContainerDevices)

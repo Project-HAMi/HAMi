@@ -211,6 +211,14 @@ func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	return true, true
 }
 
+func (dev *AWSNeuronDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  dev.resourceCountName,
+		ResourceMemoryName: "",
+		ResourceCoreName:   dev.resourceCoreName,
+	}
+}
+
 func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count awsNeuron devices for container ", ctr.Name)
 	awsResourceCount := corev1.ResourceName(dev.resourceCountName)

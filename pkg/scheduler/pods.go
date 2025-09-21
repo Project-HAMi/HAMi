@@ -55,7 +55,7 @@ func newPodManager() *podManager {
 	return pm
 }
 
-func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDevices) {
+func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -81,6 +81,8 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDe
 			"devices", devices,
 		)
 	}
+
+	return !exists
 }
 
 func (m *podManager) delPod(pod *corev1.Pod) {
