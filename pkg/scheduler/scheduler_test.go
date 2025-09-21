@@ -835,3 +835,298 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 		})
 	}
 }
+
+func Test_ResourceQuota(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	informer := informerFactory.Core().V1().Pods().Informer()
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddPod,
+		UpdateFunc: s.onUpdatePod,
+		DeleteFunc: s.onDelPod,
+	})
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+	s.addAllEventHandlers()
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	initNode := func() {
+		nodes, _ := s.ListNodes()
+		for index := range nodes {
+			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
+		}
+		pods, _ := s.ListPodsUID()
+		for index := range pods {
+			s.delPod(pods[index])
+		}
+
+		s.addNode("node1", &device.NodeInfo{
+			ID:   "node1",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			Devices: []device.DeviceInfo{
+				{
+					ID:           "device1",
+					Index:        0,
+					Count:        10,
+					Devmem:       2000,
+					Devcore:      100,
+					Numa:         0,
+					Mode:         "hami",
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
+				},
+				{
+					ID:           "device2",
+					Index:        1,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Mode:         "hami",
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
+				},
+				{
+					ID:      "device3",
+					Index:   0,
+					Count:   10,
+					Devmem:  4000,
+					Devcore: 100,
+					Numa:    0,
+					Mode:    "hami",
+					Type:    nvidia.NvidiaGPUDevice,
+					Health:  true,
+				},
+				{
+					ID:      "device4",
+					Index:   1,
+					Count:   10,
+					Devmem:  6000,
+					Devcore: 100,
+					Numa:    0,
+					Type:    nvidia.NvidiaGPUDevice,
+					Health:  true,
+				},
+			},
+		})
+	}
+
+	tests := []struct {
+		name    string
+		args    extenderv1.ExtenderArgs
+		quota   corev1.ResourceQuota
+		want    *extenderv1.ExtenderFilterResult
+		wantErr error
+	}{
+		{
+			name: "multi device Resourcequota pass",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test1",
+						UID:       "test1-uid1",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(2, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(2000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(200, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{"node1"},
+			},
+		},
+		{
+			name: "multi device Resourcequota deny",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test2",
+						UID:       "test2-uid2",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(2, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(60, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(3000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(200, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				FailedNodes: map[string]string{
+					"node1": "NodeUnfitPod",
+				},
+			},
+		},
+		{
+			name: "unspecified device Resourcequota pass",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test3",
+						UID:       "test3-uid3",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(2000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{"node1"},
+			},
+		},
+		{
+			name: "unspecified device Resourcequota deny",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test4",
+						UID:       "test4-uid4",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(1500, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				FailedNodes: map[string]string{
+					"node1": "NodeUnfitPod",
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s.onAddQuota(&test.quota)
+			initNode()
+			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Create(context.Background(), test.args.Pod, metav1.CreateOptions{})
+			got, gotErr := s.Filter(test.args)
+			assert.DeepEqual(t, test.wantErr, gotErr)
+			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}

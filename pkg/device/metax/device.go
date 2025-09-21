@@ -317,3 +317,11 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
+
+func (dev *MetaxDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  MetaxResourceCount,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
+}

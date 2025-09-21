@@ -387,3 +387,11 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
+
+func (dev *MthreadsDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  MthreadsResourceCount,
+		ResourceMemoryName: MthreadsResourceMemory,
+		ResourceCoreName:   MthreadsResourceCores,
+	}
+}

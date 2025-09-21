@@ -332,3 +332,11 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
+
+func (dev *IluvatarDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  IluvatarResourceCount,
+		ResourceMemoryName: IluvatarResourceMemory,
+		ResourceCoreName:   IluvatarResourceCores,
+	}
+}

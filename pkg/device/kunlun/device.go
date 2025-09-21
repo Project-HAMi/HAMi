@@ -224,6 +224,14 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	return true, tmpDevs, ""
 }
 
+func (dev *KunlunDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  KunlunResourceCount,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
+}
+
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
 	return device.Used == 0
 }

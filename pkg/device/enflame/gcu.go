@@ -182,6 +182,14 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
+func (dev *GCUDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  EnflameResourceNameGCU,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
+}
+
 func (dev *GCUDevices) checkType(n device.ContainerDeviceRequest) bool {
 	return n.Type == EnflameGCUDevice
 }

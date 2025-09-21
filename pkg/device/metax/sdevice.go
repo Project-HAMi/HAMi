@@ -414,6 +414,14 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	return true, map[string]device.ContainerDevices{request.Type: bestDevices}, ""
 }
 
+func (dev *MetaxSDevices) GetResourceNames() device.ResoureNames {
+	return device.ResoureNames{
+		ResourceCountName:  MetaxResourceNameVCount,
+		ResourceMemoryName: MetaxResourceNameVMemory,
+		ResourceCoreName:   MetaxResourceNameVCore,
+	}
+}
+
 func (sdev *MetaxSDevices) getMetaxSDevices(n corev1.Node) ([]*MetaxSDeviceInfo, error) {
 	anno, ok := n.Annotations[MetaxSDeviceAnno]
 	if !ok {
