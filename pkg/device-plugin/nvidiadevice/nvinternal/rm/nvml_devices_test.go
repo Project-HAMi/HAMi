@@ -144,7 +144,7 @@ func TestNvmlDevice_GetNumaNode(t *testing.T) {
 			description: "No NUMA node",
 			nvmlDevice: &mock.Device{
 				GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
-					return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0', 0, 0, 0, 0}}, nvml.SUCCESS
+					return nvml.PciInfo{BusId: [32]uint8{'0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0', 0, 0, 0, 0}}, nvml.SUCCESS
 				},
 			},
 			expectedHasNode: false,
