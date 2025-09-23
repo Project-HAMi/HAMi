@@ -27,15 +27,6 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type podInfo struct {
-	Namespace string
-	Name      string
-	UID       k8stypes.UID
-	NodeID    string
-	Devices   device.PodDevices
-	CtrIDs    []string
-}
-
 // PodUseDeviceStat counts pod use device info.
 type PodUseDeviceStat struct {
 	TotalPod     int // Count of all running pods on the current node
@@ -43,13 +34,13 @@ type PodUseDeviceStat struct {
 }
 
 type podManager struct {
-	pods  map[k8stypes.UID]*podInfo
+	pods  map[k8stypes.UID]*device.PodInfo
 	mutex sync.RWMutex
 }
 
 func newPodManager() *podManager {
 	pm := &podManager{
-		pods: make(map[k8stypes.UID]*podInfo),
+		pods: make(map[k8stypes.UID]*device.PodInfo),
 	}
 	klog.InfoS("Pod manager initialized", "podCount", len(pm.pods))
 	return pm
@@ -61,12 +52,10 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDe
 
 	_, exists := m.pods[pod.UID]
 	if !exists {
-		pi := &podInfo{
-			Name:      pod.Name,
-			UID:       pod.UID,
-			Namespace: pod.Namespace,
-			NodeID:    nodeID,
-			Devices:   devices,
+		pi := &device.PodInfo{
+			Pod:     pod,
+			NodeID:  nodeID,
+			Devices: devices,
 		}
 		m.pods[pod.UID] = pi
 		klog.InfoS("Pod added",
@@ -119,11 +108,11 @@ func (m *podManager) ListPodsUID() ([]*corev1.Pod, error) {
 	return pods, nil
 }
 
-func (m *podManager) ListPodsInfo() []*podInfo {
+func (m *podManager) ListPodsInfo() []*device.PodInfo {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	pods := make([]*podInfo, 0, len(m.pods))
+	pods := make([]*device.PodInfo, 0, len(m.pods))
 	for _, pod := range m.pods {
 		pods = append(pods, pod)
 		klog.V(5).InfoS("Pod info",
@@ -138,7 +127,7 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 	return pods
 }
 
-func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*device.PodInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
