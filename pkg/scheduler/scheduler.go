@@ -45,7 +45,7 @@ import (
 
 type Scheduler struct {
 	*nodeManager
-	*podManager
+	*device.PodManager
 
 	stopCh      chan struct{}
 	kubeClient  kubernetes.Interface
@@ -69,7 +69,7 @@ func NewScheduler() *Scheduler {
 		nodeNotify:   make(chan struct{}, 1),
 	}
 	s.nodeManager = newNodeManager()
-	s.podManager = newPodManager()
+	s.PodManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
@@ -98,11 +98,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
-		s.delPod(pod)
+		s.DelPod(pod)
 		return
 	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
-	if s.addPod(pod, nodeID, podDev) {
+	if s.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
 }
@@ -121,10 +121,10 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
-	pi, ok := s.pods[pod.UID]
+	pi, ok := s.GetPod(pod)
 	if ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
-		s.delPod(pod)
+		s.DelPod(pod)
 	}
 }
 
@@ -325,6 +325,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					Type:        d.Type,
 					Numa:        d.Numa,
 					Health:      d.Health,
+					PodInfos:    make([]*device.PodInfo, 0),
 					CustomInfo:  maps.Clone(d.CustomInfo),
 				},
 			})
@@ -352,6 +353,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
+							d.Device.PodInfos = append(d.Device.PodInfos, p)
+
 							if strings.Contains(udevice.UUID, "[") {
 								if strings.Compare(d.Device.Mode, "hami-core") == 0 {
 									klog.Errorf("found a mig task running on a hami-core GPU\n")
@@ -387,8 +390,8 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	return &cachenodeMap, failedNodes, nil
 }
 
-func (s *Scheduler) getPodUsage() (map[string]PodUseDeviceStat, error) {
-	podUsageStat := make(map[string]PodUseDeviceStat)
+func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
+	podUsageStat := make(map[string]device.PodUseDeviceStat)
 	pods, err := s.podLister.List(labels.NewSelector())
 	if err != nil {
 		return nil, err
@@ -403,13 +406,13 @@ func (s *Scheduler) getPodUsage() (map[string]PodUseDeviceStat, error) {
 		}
 		nodeName := pod.Spec.NodeName
 		if _, ok := podUsageStat[nodeName]; !ok {
-			podUsageStat[nodeName] = PodUseDeviceStat{
+			podUsageStat[nodeName] = device.PodUseDeviceStat{
 				TotalPod:     1,
 				UseDevicePod: podUseDeviceNum,
 			}
 		} else {
 			exist := podUsageStat[nodeName]
-			podUsageStat[nodeName] = PodUseDeviceStat{
+			podUsageStat[nodeName] = device.PodUseDeviceStat{
 				TotalPod:     exist.TotalPod + 1,
 				UseDevicePod: exist.UseDevicePod + podUseDeviceNum,
 			}
@@ -497,7 +500,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-	s.delPod(args.Pod)
+	s.DelPod(args.Pod)
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
@@ -537,13 +540,13 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	if s.addPod(args.Pod, m.NodeID, m.Devices) {
+	if s.AddPod(args.Pod, m.NodeID, m.Devices) {
 		s.quotaManager.AddUsage(args.Pod, m.Devices)
 	}
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		s.delPod(args.Pod)
+		s.DelPod(args.Pod)
 		return nil, err
 	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
