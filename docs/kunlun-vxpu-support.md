@@ -8,6 +8,7 @@ This component supports multiplexing Kunlunxin XPU devices (P800-OAM) and provid
 
 ***Device UUID Selection***: You can specify to use or exclude specific XPU devices through annotations
 
+Special thanks to the contributors from riseunion and kunlunxin.
 
 ## Prerequisites
 * driver version >= 5.0.21.16
@@ -15,8 +16,6 @@ This component supports multiplexing Kunlunxin XPU devices (P800-OAM) and provid
 * XPU device type: P800-OAM
 
 ## Enable XPU-sharing Support
-
-* Obtain [vxpu-device-plugin](https://hub.docker.com/r/riseunion/vxpu-device-plugin)
 
 * Deploy [vxpu-device-plugin]
 ```
@@ -73,7 +72,7 @@ spec:
       priorityClassName: "system-node-critical"
       serviceAccountName: vxpu-device-plugin
       containers:
-        - image: riseunion/vxpu-device-plugin:v1.0.0
+        - image: projecthami/vxpu-device-plugin:v1.0.0
           name: device-plugin
           resources:
             requests:
