@@ -224,8 +224,8 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	return true, tmpDevs, ""
 }
 
-func (dev *KunlunDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *KunlunDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  KunlunResourceCount,
 		ResourceMemoryName: "",
 		ResourceCoreName:   "",

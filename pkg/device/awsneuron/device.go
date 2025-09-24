@@ -211,8 +211,8 @@ func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	return true, true
 }
 
-func (dev *AWSNeuronDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  dev.resourceCountName,
 		ResourceMemoryName: "",
 		ResourceCoreName:   dev.resourceCoreName,

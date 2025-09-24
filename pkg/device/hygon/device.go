@@ -374,8 +374,8 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func (dev *DCUDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  HygonResourceCount,
 		ResourceMemoryName: HygonResourceMemory,
 		ResourceCoreName:   HygonResourceCores,

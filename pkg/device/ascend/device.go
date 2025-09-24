@@ -289,8 +289,8 @@ func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr
 	return nil
 }
 
-func (dev *Devices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *Devices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  dev.config.ResourceName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   "",

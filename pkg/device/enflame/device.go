@@ -328,8 +328,8 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func (dev *EnflameDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *EnflameDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  EnflameResourceNameVGCU,
 		ResourceMemoryName: EnflameResourceNameVGCUPercentage,
 		ResourceCoreName:   "",

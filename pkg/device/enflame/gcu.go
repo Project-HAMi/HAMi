@@ -182,8 +182,8 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func (dev *GCUDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *GCUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  EnflameResourceNameGCU,
 		ResourceMemoryName: "",
 		ResourceCoreName:   "",

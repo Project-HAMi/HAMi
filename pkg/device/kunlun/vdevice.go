@@ -232,8 +232,8 @@ func (dev *KunlunVDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
-func (dev *KunlunVDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *KunlunVDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  KunlunResourceVCount,
 		ResourceMemoryName: KunlunResourceVMemory,
 		ResourceCoreName:   "",

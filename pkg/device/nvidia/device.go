@@ -752,8 +752,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
 
-func (dev *NvidiaGPUDevices) GetResourceNames() device.ResoureNames {
-	return device.ResoureNames{
+func (dev *NvidiaGPUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
