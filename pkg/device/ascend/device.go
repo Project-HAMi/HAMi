@@ -237,7 +237,6 @@ func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 }
 
 func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Infof("Counting %s devices", dev.config.CommonWord)
 	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
 	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	v, ok := ctr.Resources.Limits[ascendResourceCount]
@@ -245,6 +244,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 		v, ok = ctr.Resources.Requests[ascendResourceCount]
 	}
 	if ok {
+		klog.V(3).Infof("Counting %s devices", dev.config.CommonWord)
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found AscendDevices devices")
 			memnum := 0

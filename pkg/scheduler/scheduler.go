@@ -166,7 +166,6 @@ func (s *Scheduler) Start() {
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
-		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
 		DeleteFunc: func(_ any) { s.doNodeNotify() },
 	})
 	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
@@ -198,7 +197,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
 		case <-ticker.C:
-			klog.InfoS("Ticker triggered")
+			klog.V(5).InfoS("Ticker triggered")
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
@@ -244,7 +243,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format(time.DateTime)
-					klog.InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
+					klog.V(5).InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.ErrorS(err, "Failed to get node", "nodeName", val.Name)

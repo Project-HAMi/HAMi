@@ -275,7 +275,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 	pairScores, ok := n.Annotations[RegisterGPUPairScore]
 	if !ok {
-		klog.Warning("no topology score found", "node", n.Name)
+		klog.V(5).InfoS("no topology score found", "node", n.Name)
 	} else {
 		devicePairScores, err := device.DecodePairScores(pairScores)
 		if err != nil {

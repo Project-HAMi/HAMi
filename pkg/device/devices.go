@@ -375,7 +375,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			pd[devID] = append(pd[devID], cd)
 		}
 	}
-	klog.InfoS("Decoded pod annos", "poddevices", pd)
+	klog.V(5).InfoS("Decoded pod annos", "poddevices", pd)
 	return pd, nil
 }
 

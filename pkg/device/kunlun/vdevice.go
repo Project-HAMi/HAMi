@@ -181,7 +181,6 @@ func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsa
 }
 
 func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Infof("Counting %s devices", dev.CommonWord())
 	xpuResourceCount := corev1.ResourceName(KunlunResourceVCount)
 	xpuResourceMem := corev1.ResourceName(KunlunResourceVMemory)
 	v, ok := ctr.Resources.Limits[xpuResourceCount]
@@ -189,6 +188,7 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		v, ok = ctr.Resources.Requests[xpuResourceCount]
 	}
 	if ok {
+		klog.V(3).Infof("Counting %s devices", dev.CommonWord())
 		if n, ok := v.AsInt64(); ok {
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[xpuResourceMem]
