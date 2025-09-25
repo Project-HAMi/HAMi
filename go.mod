@@ -4,10 +4,10 @@ go 1.24.6
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
-	github.com/NVIDIA/go-nvlib v0.7.4
-	github.com/NVIDIA/go-nvml v0.12.9-0
+	github.com/NVIDIA/go-nvlib v0.8.0
+	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/NVIDIA/k8s-device-plugin v0.17.3
-	github.com/NVIDIA/nvidia-container-toolkit v1.18.0-rc.2
+	github.com/NVIDIA/nvidia-container-toolkit v1.18.0-rc.4
 	github.com/ccoveille/go-safecast v1.6.1
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
@@ -77,7 +77,7 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect
-	golang.org/x/mod v0.27.0 // indirect
+	golang.org/x/mod v0.28.0 // indirect
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.36.0 // indirect
