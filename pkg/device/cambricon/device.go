@@ -80,8 +80,11 @@ func InitMLUDevice(config CambriconConfig) *CambriconDevices {
 	MLUResourceCount = config.ResourceCountName
 	MLUResourceMemory = config.ResourceMemoryName
 	MLUResourceCores = config.ResourceCoreName
-	device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
-	device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	_, ok := device.InRequestDevices[CambriconMLUDevice]
+	if !ok {
+		device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
+		device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	}
 	return &CambriconDevices{}
 }
 

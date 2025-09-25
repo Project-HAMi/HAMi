@@ -88,9 +88,12 @@ func InitDevices(config []VNPUConfig) []*Devices {
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
 		})
-		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
-		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
-		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		_, ok := device.InRequestDevices[commonWord]
+		if !ok {
+			device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+			device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+			util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		}
 		devs = append(devs, dev)
 		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
 	}

@@ -61,7 +61,10 @@ type AWSNeuronConfig struct {
 }
 
 func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
-	device.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
+	_, ok := device.SupportDevices[AWSNeuronDevice]
+	if !ok {
+		device.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
+	}
 	return &AWSNeuronDevices{
 		resourceCountName: config.ResourceCountName,
 		resourceCoreName:  config.ResourceCoreName,

@@ -68,9 +68,12 @@ func InitDCUDevice(config HygonConfig) *DCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
-	device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
-	device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
-	util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	_, ok := device.InRequestDevices[HygonDCUDevice]
+	if !ok {
+		device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
+		device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
+		util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	}
 	return &DCUDevices{}
 }
 

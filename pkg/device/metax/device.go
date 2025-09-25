@@ -46,8 +46,11 @@ var (
 
 func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 	MetaxResourceCount = config.ResourceCountName
-	device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
-	device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	_, ok := device.InRequestDevices[MetaxGPUDevice]
+	if !ok {
+		device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
+		device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	}
 	return &MetaxDevices{}
 }
 

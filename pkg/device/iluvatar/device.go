@@ -61,8 +61,11 @@ func InitIluvatarDevice(config IluvatarConfig) *IluvatarDevices {
 	IluvatarResourceCount = config.ResourceCountName
 	IluvatarResourceMemory = config.ResourceMemoryName
 	IluvatarResourceCores = config.ResourceCoreName
-	device.InRequestDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-to-allocate"
-	device.SupportDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-allocated"
+	_, ok := device.InRequestDevices[IluvatarGPUDevice]
+	if !ok {
+		device.InRequestDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-to-allocate"
+		device.SupportDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-allocated"
+	}
 	return &IluvatarDevices{}
 }
 

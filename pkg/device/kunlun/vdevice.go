@@ -53,9 +53,12 @@ type KunlunVDevices struct {
 func InitKunlunVDevice(config KunlunConfig) *KunlunVDevices {
 	KunlunResourceVCount = config.ResourceVCountName
 	KunlunResourceVMemory = config.ResourceVMemoryName
-	device.InRequestDevices[XPUDevice] = "hami.io/xpu-devices-to-allocate"
-	device.SupportDevices[XPUDevice] = "hami.io/xpu-devices-allocated"
-	util.HandshakeAnnos[XPUDevice] = HandshakeAnnos
+	_, ok := device.InRequestDevices[XPUDevice]
+	if !ok {
+		device.InRequestDevices[XPUDevice] = "hami.io/xpu-devices-to-allocate"
+		device.SupportDevices[XPUDevice] = "hami.io/xpu-devices-allocated"
+		util.HandshakeAnnos[XPUDevice] = HandshakeAnnos
+	}
 	return &KunlunVDevices{}
 }
 

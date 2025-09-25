@@ -60,8 +60,11 @@ func InitMetaxSDevice(config MetaxConfig) *MetaxSDevices {
 	MetaxResourceNameVMemory = config.ResourceVMemoryName
 	MetaxTopologyAware = config.TopologyAware
 
-	device.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
-	device.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
+	_, ok := device.InRequestDevices[MetaxSGPUDevice]
+	if !ok {
+		device.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
+		device.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
+	}
 
 	return &MetaxSDevices{
 		jqCache: NewJitteryQosCache(),

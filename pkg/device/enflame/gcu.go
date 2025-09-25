@@ -37,8 +37,11 @@ type GCUDevices struct {
 
 func InitGCUDevice(config EnflameConfig) *GCUDevices {
 	EnflameResourceNameGCU = config.ResourceNameGCU
-	device.InRequestDevices[EnflameGCUDevice] = "hami.io/enflame-gcu-devices-to-allocate"
-	device.SupportDevices[EnflameGCUDevice] = "hami.io/enflame-gcu-devices-allocated"
+	_, ok := device.InRequestDevices[EnflameGCUDevice]
+	if !ok {
+		device.InRequestDevices[EnflameGCUDevice] = "hami.io/enflame-gcu-devices-to-allocate"
+		device.SupportDevices[EnflameGCUDevice] = "hami.io/enflame-gcu-devices-allocated"
+	}
 	return &GCUDevices{}
 }
 

@@ -35,8 +35,8 @@ type EnflameDevices struct {
 }
 
 const (
-	EnflameGPUDevice     = "Enflame"
-	EnflameGPUCommonWord = "Enflame"
+	EnflameVGCUDevice     = "Enflame"
+	EnflameVGCUCommonWord = "Enflame"
 	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
 	EnflameUseUUID = "enflame.com/use-gpuuuid"
 	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
@@ -54,14 +54,17 @@ const (
 func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
 	EnflameResourceNameVGCU = config.ResourceNameVGCU
 	EnflameResourceNameVGCUPercentage = config.ResourceNameVGCUPercentage
-	device.SupportDevices[EnflameGPUDevice] = "hami.io/enflame-vgpu-devices-allocated"
+	_, ok := device.SupportDevices[EnflameVGCUDevice]
+	if !ok {
+		device.SupportDevices[EnflameVGCUDevice] = "hami.io/enflame-vgpu-devices-allocated"
+	}
 	return &EnflameDevices{
 		factor: 0,
 	}
 }
 
 func (dev *EnflameDevices) CommonWord() string {
-	return EnflameGPUCommonWord
+	return EnflameVGCUCommonWord
 }
 
 func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
@@ -111,7 +114,7 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 			Count:   100,
 			Devmem:  100,
 			Devcore: 100,
-			Type:    EnflameGPUDevice,
+			Type:    EnflameVGCUDevice,
 			Numa:    0,
 			Health:  true,
 		})
@@ -121,9 +124,9 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 }
 
 func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
-	devlist, ok := pd[EnflameGPUDevice]
+	devlist, ok := pd[EnflameVGCUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[device.SupportDevices[EnflameGPUDevice]] = device.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.SupportDevices[EnflameVGCUDevice]] = device.EncodePodSingleDevice(devlist)
 		(*annoinput)[PodHasAssignedGCU] = "false"
 		(*annoinput)[PodAssignedGCUTime] = strconv.FormatInt(time.Now().UnixNano(), 10)
 		annoKey := PodAssignedGCUID
@@ -151,7 +154,7 @@ func (dev *EnflameDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, EnflameGPUDevice) == 0 {
+	if strings.Compare(n.Type, EnflameVGCUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
@@ -209,7 +212,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 				Memreq:           int32(memnum),
 				MemPercentagereq: 0,
 				Coresreq:         0,

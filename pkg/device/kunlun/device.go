@@ -45,7 +45,10 @@ type KunlunDevices struct {
 
 func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
 	KunlunResourceCount = config.ResourceCountName
-	device.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
+	_, ok := device.SupportDevices[KunlunGPUDevice]
+	if !ok {
+		device.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
+	}
 	return &KunlunDevices{}
 }
 
