@@ -28,6 +28,7 @@
   整数类型，预设值为 0，表示不配置显存时使用的默认显存大小，单位为 MB。当值为 0 时，代表使用全部的显存。
 * `nvidia.defaultCores`：
   整数类型 (0-100)，默认为 0，表示默认为每个任务预留的百分比算力。若设置为 0，则代表任务可能会被分配到任一满足显存需求的 GPU 中，若设置为 100，代表该任务独享整张显卡
+  说明：当容器仅声明 `nvidia.com/gpu` 且显存为独占场景（例如显式设置 `nvidia.com/gpumem-percentage: 100`，或显存字段都未配置且 `nvidia.defaultMem` 保持默认 0，从而回退为 100% 显存）并且未显式设置 `nvidia.com/gpucores` 时，HAMi 会在准入阶段将该容器的 `nvidia.com/gpucores` 默认为 100。对于非独占显存（如 `gpumem-percentage: 50`）或已经声明 `nvidia.com/gpucores` 的情况，不会自动调整。
 * `nvidia.defaultGPUNum`：
   整数类型，默认为 1，如果配置为 0，则配置不会生效。当用户在 Pod 资源中没有设置 nvidia.com/gpu 这个 key 时，webhook 会检查 nvidia.com/gpumem、
   resource-mem-percentage、nvidia.com/gpucores 这三个 key 中的任何一个 key 有值，webhook 都会添加 nvidia.com/gpu 键和此默认值到 resources limit 中。

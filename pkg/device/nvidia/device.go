@@ -320,6 +320,9 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	}
 
 	hasResource := dev.mutateContainerResource(ctr)
+	if dev.defaultExclusiveCoreIfNeeded(ctr) {
+		hasResource = true
+	}
 
 	if hasResource {
 		// Set runtime class name if it is not set by user and the runtime class name is configured
@@ -352,6 +355,67 @@ func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool
 			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
 			return true
 		}
+	}
+	return false
+}
+
+func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container) bool {
+	if ctr == nil {
+		return false
+	}
+
+	countName := corev1.ResourceName(dev.config.ResourceCountName)
+	if countName == "" || !resourcePresent(ctr, countName) {
+		return false
+	}
+
+	coreName := corev1.ResourceName(dev.config.ResourceCoreName)
+	if coreName == "" || resourcePresent(ctr, coreName) {
+		return false
+	}
+
+	exclusive := false
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		exclusive = pct == 100
+	} else if dev.config.ResourceMemoryName == "" {
+		exclusive = true
+	} else if _, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryName)); !ok {
+		exclusive = true
+	}
+
+	if !exclusive {
+		return false
+	}
+
+	if ctr.Resources.Limits == nil {
+		ctr.Resources.Limits = corev1.ResourceList{}
+	}
+	ctr.Resources.Limits[coreName] = *resource.NewQuantity(100, resource.BinarySI)
+	return true
+}
+
+func resourceValue(ctr *corev1.Container, name corev1.ResourceName) (int64, bool) {
+	if name == "" || ctr == nil {
+		return 0, false
+	}
+	if qty, ok := ctr.Resources.Limits[name]; ok {
+		return qty.Value(), true
+	}
+	if qty, ok := ctr.Resources.Requests[name]; ok {
+		return qty.Value(), true
+	}
+	return 0, false
+}
+
+func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
+	if ctr == nil || name == "" {
+		return false
+	}
+	if _, ok := ctr.Resources.Limits[name]; ok {
+		return true
+	}
+	if _, ok := ctr.Resources.Requests[name]; ok {
+		return true
 	}
 	return false
 }
