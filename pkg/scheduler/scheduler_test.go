@@ -1125,6 +1125,8 @@ func Test_ResourceQuota(t *testing.T) {
 			initNode()
 			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Create(context.Background(), test.args.Pod, metav1.CreateOptions{})
 			got, gotErr := s.Filter(test.args)
+			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Delete(context.Background(), test.args.Pod.Name, metav1.DeleteOptions{})
+			s.onDelQuota(&test.quota)
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
 		})
