@@ -86,9 +86,6 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceN
 func countPodDevices(podDev PodDevices) map[string]int64 {
 	res := make(map[string]int64)
 	for deviceName, podSingle := range podDev {
-		if !strings.Contains(deviceName, "NVIDIA") {
-			continue
-		}
 		devs, ok := GetDevices()[deviceName]
 		if !ok {
 			continue

@@ -353,7 +353,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 }
 
 func DecodePodDevices(checklist map[string]string, annos map[string]string) (PodDevices, error) {
-	klog.Infof("=-=-=-=-=---=-=-=-=checklist is [%+v], annos is [%+v]", checklist, annos)
+	klog.V(5).Infof("checklist is [%+v], annos is [%+v]", checklist, annos)
 	if len(annos) == 0 {
 		return PodDevices{}, nil
 	}
