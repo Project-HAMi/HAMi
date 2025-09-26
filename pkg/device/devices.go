@@ -35,6 +35,7 @@ type Devices interface {
 	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
+	GetResourceNames() ResourceNames
 	GetNodeDevices(n corev1.Node) ([]*DeviceInfo, error)
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
@@ -117,7 +118,7 @@ type NodeInfo struct {
 	Devices []DeviceInfo
 }
 
-type ResoureNames struct {
+type ResourceNames struct {
 	ResourceCountName  string
 	ResourceMemoryName string
 	ResourceCoreName   string
@@ -374,7 +375,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			pd[devID] = append(pd[devID], cd)
 		}
 	}
-	klog.InfoS("Decoded pod annos", "poddevices", pd)
+	klog.V(5).InfoS("Decoded pod annos", "poddevices", pd)
 	return pd, nil
 }
 
