@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -30,21 +32,25 @@ import (
 func TestPodInfo(t *testing.T) {
 	tests := []struct {
 		name     string
-		podInfo  podInfo
-		expected podInfo
+		podInfo  device.PodInfo
+		expected device.PodInfo
 	}{
 		{
 			name:     "Empty podInfo",
-			podInfo:  podInfo{},
-			expected: podInfo{},
+			podInfo:  device.PodInfo{},
+			expected: device.PodInfo{},
 		},
 		{
 			name: "Filled podInfo",
-			podInfo: podInfo{
-				Namespace: "default",
-				Name:      "my-pod",
-				UID:       k8stypes.UID("12345678"),
-				NodeID:    "node1",
+			podInfo: device.PodInfo{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+						Name:      "my-pod",
+						UID:       k8stypes.UID("12345678"),
+					},
+				},
+				NodeID: "node1",
 				Devices: device.PodDevices{
 					"device1": {
 						{
@@ -56,11 +62,15 @@ func TestPodInfo(t *testing.T) {
 				},
 				CtrIDs: []string{"ctr1", "ctr2"},
 			},
-			expected: podInfo{
-				Namespace: "default",
-				Name:      "my-pod",
-				UID:       k8stypes.UID("12345678"),
-				NodeID:    "node1",
+			expected: device.PodInfo{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Namespace: "default",
+						Name:      "my-pod",
+						UID:       k8stypes.UID("12345678"),
+					},
+				},
+				NodeID: "node1",
 				Devices: device.PodDevices{
 					"device1": {
 						{
@@ -118,25 +128,34 @@ func TestPodUseDeviceStat(t *testing.T) {
 }
 func TestGetScheduledPods(t *testing.T) {
 	podManager := &podManager{
-		pods:  make(map[k8stypes.UID]*podInfo),
+		pods:  make(map[k8stypes.UID]*device.PodInfo),
 		mutex: sync.RWMutex{},
 	}
 
-	pod1 := &podInfo{
-		Namespace: "default",
-		Name:      "pod1",
-		UID:       k8stypes.UID("uid1"),
-		NodeID:    "node1",
-		Devices:   device.PodDevices{"device1": {{}}},
-		CtrIDs:    []string{"ctr1"},
+	pod1 := &device.PodInfo{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Name:      "pod1",
+				UID:       k8stypes.UID("uid1"),
+			},
+		},
+		NodeID:  "node1",
+		Devices: device.PodDevices{"device1": {{}}},
+		CtrIDs:  []string{"ctr1"},
 	}
-	pod2 := &podInfo{
-		Namespace: "default",
-		Name:      "pod2",
-		UID:       k8stypes.UID("uid2"),
-		NodeID:    "node2",
-		Devices:   device.PodDevices{"device2": {{}}},
-		CtrIDs:    []string{"ctr2"},
+	pod2 := &device.PodInfo{
+		Pod: &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Namespace: "default",
+				Name:      "pod2",
+				UID:       k8stypes.UID("uid2"),
+			},
+		},
+
+		NodeID:  "node2",
+		Devices: device.PodDevices{"device2": {{}}},
+		CtrIDs:  []string{"ctr2"},
 	}
 	podManager.pods[pod1.UID] = pod1
 	podManager.pods[pod2.UID] = pod2
@@ -147,7 +166,7 @@ func TestGetScheduledPods(t *testing.T) {
 	assert.NotNil(t, scheduledPods, "The result should not be nil")
 	assert.Equal(t, 2, len(scheduledPods), "The number of scheduled pods should be 2")
 
-	expectedPods := map[k8stypes.UID]*podInfo{
+	expectedPods := map[k8stypes.UID]*device.PodInfo{
 		pod1.UID: pod1,
 		pod2.UID: pod2,
 	}

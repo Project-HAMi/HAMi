@@ -66,6 +66,19 @@ func Test_getNodesUsage(t *testing.T) {
 				Mode:    "hami",
 				Health:  true,
 			},
+			{
+				ID:      "GPU2",
+				Index:   2,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "hami",
+				Health:  true,
+				CustomInfo: map[string]any{
+					"PodInfos": []string{},
+				},
+			},
 		},
 	})
 	podDevces := device.PodDevices{
@@ -108,7 +121,7 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, len(*cachenodeMap), 1)
 	v, ok := (*cachenodeMap)["node1"]
 	assert.Equal(t, ok, true)
-	assert.Equal(t, len(v.Devices.DeviceLists), 2)
+	assert.Equal(t, len(v.Devices.DeviceLists), 3)
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))

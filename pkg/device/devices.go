@@ -72,6 +72,13 @@ type AllowedMigGeometries struct {
 	Geometries []Geometry `yaml:"allowedGeometries"`
 }
 
+type PodInfo struct {
+	*corev1.Pod
+	NodeID  string
+	Devices PodDevices
+	CtrIDs  []string
+}
+
 type DeviceUsage struct {
 	ID          string
 	Index       uint
