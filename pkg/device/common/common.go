@@ -36,6 +36,7 @@ const (
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"
 	NodeFitPod                        = "NodeFitPod"
+	ResourceQuotaNotFit               = "ResourceQuotaNotFit"
 )
 
 func GenReason(reasons map[string]int, cards int) string {

@@ -68,9 +68,12 @@ func InitDCUDevice(config HygonConfig) *DCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
-	device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
-	device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
-	util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	_, ok := device.InRequestDevices[HygonDCUDevice]
+	if !ok {
+		device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
+		device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
+		util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	}
 	return &DCUDevices{}
 }
 
@@ -372,4 +375,12 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  HygonResourceCount,
+		ResourceMemoryName: HygonResourceMemory,
+		ResourceCoreName:   HygonResourceCores,
+	}
 }

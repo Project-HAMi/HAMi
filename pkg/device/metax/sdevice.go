@@ -60,8 +60,11 @@ func InitMetaxSDevice(config MetaxConfig) *MetaxSDevices {
 	MetaxResourceNameVMemory = config.ResourceVMemoryName
 	MetaxTopologyAware = config.TopologyAware
 
-	device.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
-	device.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
+	_, ok := device.InRequestDevices[MetaxSGPUDevice]
+	if !ok {
+		device.InRequestDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-to-allocate"
+		device.SupportDevices[MetaxSGPUDevice] = "hami.io/metax-sgpu-devices-allocated"
+	}
 
 	return &MetaxSDevices{
 		jqCache: NewJitteryQosCache(),
@@ -412,6 +415,14 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 
 	klog.Infof("pod[%v] devices fit success, fit devices[%v]", klog.KObj(pod), bestDevices)
 	return true, map[string]device.ContainerDevices{request.Type: bestDevices}, ""
+}
+
+func (dev *MetaxSDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MetaxResourceNameVCount,
+		ResourceMemoryName: MetaxResourceNameVMemory,
+		ResourceCoreName:   MetaxResourceNameVCore,
+	}
 }
 
 func (sdev *MetaxSDevices) getMetaxSDevices(n corev1.Node) ([]*MetaxSDeviceInfo, error) {
