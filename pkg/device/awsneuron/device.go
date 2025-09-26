@@ -61,7 +61,10 @@ type AWSNeuronConfig struct {
 }
 
 func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
-	device.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
+	_, ok := device.SupportDevices[AWSNeuronDevice]
+	if !ok {
+		device.SupportDevices[AWSNeuronDevice] = "hami.io/aws-neuron-devices-allocated"
+	}
 	return &AWSNeuronDevices{
 		resourceCountName: config.ResourceCountName,
 		resourceCoreName:  config.ResourceCoreName,
@@ -209,6 +212,14 @@ func (dev *AWSNeuronDevices) checkUUID(annos map[string]string, d device.DeviceU
 
 func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
+}
+
+func (dev *AWSNeuronDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  dev.resourceCountName,
+		ResourceMemoryName: "",
+		ResourceCoreName:   dev.resourceCoreName,
+	}
 }
 
 func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {

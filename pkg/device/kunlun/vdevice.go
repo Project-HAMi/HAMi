@@ -53,9 +53,12 @@ type KunlunVDevices struct {
 func InitKunlunVDevice(config KunlunConfig) *KunlunVDevices {
 	KunlunResourceVCount = config.ResourceVCountName
 	KunlunResourceVMemory = config.ResourceVMemoryName
-	device.InRequestDevices[XPUDevice] = "hami.io/xpu-devices-to-allocate"
-	device.SupportDevices[XPUDevice] = "hami.io/xpu-devices-allocated"
-	util.HandshakeAnnos[XPUDevice] = HandshakeAnnos
+	_, ok := device.InRequestDevices[XPUDevice]
+	if !ok {
+		device.InRequestDevices[XPUDevice] = "hami.io/xpu-devices-to-allocate"
+		device.SupportDevices[XPUDevice] = "hami.io/xpu-devices-allocated"
+		util.HandshakeAnnos[XPUDevice] = HandshakeAnnos
+	}
 	return &KunlunVDevices{}
 }
 
@@ -181,7 +184,6 @@ func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsa
 }
 
 func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Infof("Counting %s devices", dev.CommonWord())
 	xpuResourceCount := corev1.ResourceName(KunlunResourceVCount)
 	xpuResourceMem := corev1.ResourceName(KunlunResourceVMemory)
 	v, ok := ctr.Resources.Limits[xpuResourceCount]
@@ -189,6 +191,7 @@ func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		v, ok = ctr.Resources.Requests[xpuResourceCount]
 	}
 	if ok {
+		klog.V(3).Infof("Counting %s devices", dev.CommonWord())
 		if n, ok := v.AsInt64(); ok {
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[xpuResourceMem]
@@ -230,6 +233,14 @@ func (dev *KunlunVDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
+}
+
+func (dev *KunlunVDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  KunlunResourceVCount,
+		ResourceMemoryName: KunlunResourceVMemory,
+		ResourceCoreName:   "",
+	}
 }
 
 func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {

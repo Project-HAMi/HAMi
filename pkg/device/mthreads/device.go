@@ -69,8 +69,11 @@ func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 	MthreadsResourceCount = config.ResourceCountName
 	MthreadsResourceCores = config.ResourceCoreName
 	MthreadsResourceMemory = config.ResourceMemoryName
-	device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
-	device.SupportDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-allocated"
+	_, ok := device.InRequestDevices[MthreadsGPUDevice]
+	if !ok {
+		device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
+		device.SupportDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-allocated"
+	}
 	return &MthreadsDevices{}
 }
 
@@ -386,4 +389,12 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *MthreadsDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MthreadsResourceCount,
+		ResourceMemoryName: MthreadsResourceMemory,
+		ResourceCoreName:   MthreadsResourceCores,
+	}
 }

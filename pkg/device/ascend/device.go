@@ -90,9 +90,12 @@ func InitDevices(config []VNPUConfig) []*Devices {
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
 		})
-		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
-		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
-		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		_, ok := device.InRequestDevices[commonWord]
+		if !ok {
+			device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+			device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+			util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		}
 		devs = append(devs, dev)
 		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
 	}
@@ -239,7 +242,6 @@ func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 }
 
 func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Infof("Counting %s devices", dev.config.CommonWord)
 	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
 	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	v, ok := ctr.Resources.Limits[ascendResourceCount]
@@ -247,6 +249,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 		v, ok = ctr.Resources.Requests[ascendResourceCount]
 	}
 	if ok {
+		klog.V(3).Infof("Counting %s devices", dev.config.CommonWord)
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found AscendDevices devices")
 			memnum := 0
@@ -323,6 +326,14 @@ func (dev *Devices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
+}
+
+func (dev *Devices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  dev.config.ResourceName,
+		ResourceMemoryName: dev.config.ResourceMemoryName,
+		ResourceCoreName:   "",
+	}
 }
 
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
