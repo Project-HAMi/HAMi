@@ -48,7 +48,7 @@ func GetNode(nodename string) (*corev1.Node, error) {
 		return nil, fmt.Errorf("nodename is empty")
 	}
 
-	klog.InfoS("Fetching node", "nodeName", nodename)
+	klog.V(5).InfoS("Fetching node", "nodeName", nodename)
 	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	if err != nil {
 		switch {
@@ -64,7 +64,7 @@ func GetNode(nodename string) (*corev1.Node, error) {
 		}
 	}
 
-	klog.InfoS("Successfully fetched node", "nodeName", nodename)
+	klog.V(5).InfoS("Successfully fetched node", "nodeName", nodename)
 	return n, nil
 }
 

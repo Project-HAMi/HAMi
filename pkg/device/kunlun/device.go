@@ -45,7 +45,10 @@ type KunlunDevices struct {
 
 func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
 	KunlunResourceCount = config.ResourceCountName
-	device.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
+	_, ok := device.SupportDevices[KunlunGPUDevice]
+	if !ok {
+		device.SupportDevices[KunlunGPUDevice] = "hami.io/kunlun-allocated"
+	}
 	return &KunlunDevices{}
 }
 
@@ -222,6 +225,14 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		}
 	}
 	return true, tmpDevs, ""
+}
+
+func (dev *KunlunDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  KunlunResourceCount,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
 }
 
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {

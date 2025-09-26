@@ -47,17 +47,18 @@ type Scheduler struct {
 	*nodeManager
 	*podManager
 
-	stopCh     chan struct{}
-	kubeClient kubernetes.Interface
-	podLister  listerscorev1.PodLister
-	nodeLister listerscorev1.NodeLister
+	stopCh      chan struct{}
+	kubeClient  kubernetes.Interface
+	podLister   listerscorev1.PodLister
+	nodeLister  listerscorev1.NodeLister
+	quotaLister listerscorev1.ResourceQuotaLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
 	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
-
-	eventRecorder record.EventRecorder
+	eventRecorder  record.EventRecorder
+	quotaManager   *device.QuotaManager
 }
 
 func NewScheduler() *Scheduler {
@@ -69,8 +70,13 @@ func NewScheduler() *Scheduler {
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = newPodManager()
+	s.quotaManager = device.NewQuotaManager()
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
+}
+
+func (s *Scheduler) GetQuotas() *device.QuotaManager {
+	return s.quotaManager
 }
 
 func (s *Scheduler) doNodeNotify() {
@@ -96,7 +102,9 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
-	s.addPod(pod, nodeID, podDev)
+	if s.addPod(pod, nodeID, podDev) {
+		s.quotaManager.AddUsage(pod, podDev)
+	}
 }
 
 func (s *Scheduler) onUpdatePod(_, newObj any) {
@@ -113,7 +121,34 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
-	s.delPod(pod)
+	pi, ok := s.pods[pod.UID]
+	if ok {
+		s.quotaManager.RmUsage(pod, pi.Devices)
+		s.delPod(pod)
+	}
+}
+
+func (s *Scheduler) onAddQuota(obj interface{}) {
+	quota, ok := obj.(*corev1.ResourceQuota)
+	if !ok {
+		klog.Errorf("unknown add object type")
+		return
+	}
+	s.quotaManager.AddQuota(quota)
+}
+
+func (s *Scheduler) onUpdateQuota(_, newObj interface{}) {
+	s.onDelQuota(newObj)
+	s.onAddQuota(newObj)
+}
+
+func (s *Scheduler) onDelQuota(obj interface{}) {
+	quota, ok := obj.(*corev1.ResourceQuota)
+	if !ok {
+		klog.Errorf("unknown add object type")
+		return
+	}
+	s.quotaManager.DelQuota(quota)
 }
 
 func (s *Scheduler) Start() {
@@ -122,6 +157,7 @@ func (s *Scheduler) Start() {
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
 
 	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
@@ -130,8 +166,12 @@ func (s *Scheduler) Start() {
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
-		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
 		DeleteFunc: func(_ any) { s.doNodeNotify() },
+	})
+	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddQuota,
+		UpdateFunc: s.onUpdateQuota,
+		DeleteFunc: s.onDelQuota,
 	})
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
@@ -157,7 +197,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
 		case <-ticker.C:
-			klog.InfoS("Ticker triggered")
+			klog.V(5).InfoS("Ticker triggered")
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
@@ -203,7 +243,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 				if ok {
 					tmppat := make(map[string]string)
 					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format(time.DateTime)
-					klog.InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
+					klog.V(5).InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.ErrorS(err, "Failed to get node", "nodeName", val.Name)
@@ -497,7 +537,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	s.addPod(args.Pod, m.NodeID, m.Devices)
+	if s.addPod(args.Pod, m.NodeID, m.Devices) {
+		s.quotaManager.AddUsage(args.Pod, m.Devices)
+	}
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)

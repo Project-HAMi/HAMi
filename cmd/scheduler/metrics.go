@@ -194,6 +194,22 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"vGPU core allocated from a container",
 		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
+	quotaUsedDesc := prometheus.NewDesc(
+		"QuotaUsed",
+		"resourcequota usage for a certain device",
+		[]string{"quotanamespace", "quotaName", "limit"}, nil,
+	)
+	quotas := sher.GetQuotas()
+	for ns, val := range quotas.Quotas {
+		for quotaname, q := range *val {
+			ch <- prometheus.MustNewConstMetric(
+				quotaUsedDesc,
+				prometheus.GaugeValue,
+				float64(q.Used),
+				ns, quotaname, fmt.Sprint(q.Limit),
+			)
+		}
+	}
 	schedpods, _ := sher.GetScheduledPods()
 	for _, val := range schedpods {
 		for _, podSingleDevice := range val.Devices {

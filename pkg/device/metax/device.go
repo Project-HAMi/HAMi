@@ -46,8 +46,11 @@ var (
 
 func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 	MetaxResourceCount = config.ResourceCountName
-	device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
-	device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	_, ok := device.InRequestDevices[MetaxGPUDevice]
+	if !ok {
+		device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
+		device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	}
 	return &MetaxDevices{}
 }
 
@@ -316,4 +319,12 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *MetaxDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MetaxResourceCount,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
 }
