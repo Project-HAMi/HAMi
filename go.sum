@@ -4,6 +4,8 @@ github.com/NVIDIA/go-nvlib v0.7.4 h1:qnXK8qhm45YfxalhZ76XwKdAMmxz1GIgzE0e/Hhhshs
 github.com/NVIDIA/go-nvlib v0.7.4/go.mod h1:i95Je7GinMy/+BDs++DAdbPmT2TubjNP8i8joC7DD7I=
 github.com/NVIDIA/go-nvlib v0.8.0 h1:vorMvnsJYvZaxiluSXFd+fIFeQFPWSiSjNPiJyvDs0c=
 github.com/NVIDIA/go-nvlib v0.8.0/go.mod h1:bV+OEgjJCbFXf5T8c082mVPFuiF+gKwf9CMT7DWGUBI=
+github.com/NVIDIA/go-nvlib v0.8.1 h1:OPEHVvn3zcV5OXB68A7WRpeCnYMRSPl7LdeJH/d3gZI=
+github.com/NVIDIA/go-nvlib v0.8.1/go.mod h1:7mzx9FSdO9fXWP9NKuZmWkCwhkEcSWQFe2tmFwtLb9c=
 github.com/NVIDIA/go-nvml v0.12.9-0 h1:e344UK8ZkeMeeLkdQtRhmXRxNf+u532LDZPGMtkdus0=
 github.com/NVIDIA/go-nvml v0.12.9-0/go.mod h1:+KNA7c7gIBH7SKSJ1ntlwkfN80zdx8ovl4hrK3LmPt4=
 github.com/NVIDIA/go-nvml v0.13.0-1 h1:OLX8Jq3dONuPOQPC7rndB6+iDmDakw0XTYgzMxObkEw=
