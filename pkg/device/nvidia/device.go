@@ -393,7 +393,7 @@ func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container)
 	if ctr.Resources.Limits == nil {
 		ctr.Resources.Limits = corev1.ResourceList{}
 	}
-	ctr.Resources.Limits[coreName] = *resource.NewQuantity(100, resource.BinarySI)
+	ctr.Resources.Limits[coreName] = *resource.NewQuantity(100, resource.DecimalSI)
 	return true
 }
 
