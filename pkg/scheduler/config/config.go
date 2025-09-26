@@ -153,10 +153,10 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return enflame.InitGCUDevice(enflameConfig), nil
 		}, config.EnflameConfig},
-		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (device.Devices, error) {
+		{enflame.EnflameVGCUDevice, enflame.EnflameVGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGPUCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameVGCUCommonWord)
 			}
 			return enflame.InitEnflameDevice(enflameConfig), nil
 		}, config.EnflameConfig},

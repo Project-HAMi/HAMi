@@ -8,6 +8,7 @@
 
 ***设备 UUID 选择***: 你可以通过注解指定使用或排除特定的 XPU 设备
 
+感谢来自睿思智联和昆仑芯团队的贡献者
 
 ## 节点需求
 * driver version >= 5.0.21.16
@@ -15,8 +16,6 @@
 * XPU device type: P800-OAM
 
 ## 开启GPU复用
-
-* 获取[vxpu-device-plugin](https://hub.docker.com/r/riseunion/vxpu-device-plugin)
 
 * 部署`vxpu-device-plugin`，清单如下:
 ```
@@ -73,7 +72,7 @@ spec:
       priorityClassName: "system-node-critical"
       serviceAccountName: vxpu-device-plugin
       containers:
-        - image: riseunion/vxpu-device-plugin:v1.0.0
+        - image: projecthami/vxpu-device-plugin:v1.0.0
           name: device-plugin
           resources:
             requests:

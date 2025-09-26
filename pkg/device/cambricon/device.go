@@ -80,8 +80,11 @@ func InitMLUDevice(config CambriconConfig) *CambriconDevices {
 	MLUResourceCount = config.ResourceCountName
 	MLUResourceMemory = config.ResourceMemoryName
 	MLUResourceCores = config.ResourceCoreName
-	device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
-	device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	_, ok := device.InRequestDevices[CambriconMLUDevice]
+	if !ok {
+		device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
+		device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	}
 	return &CambriconDevices{}
 }
 
@@ -420,4 +423,12 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MLUResourceCount,
+		ResourceMemoryName: MLUResourceMemory,
+		ResourceCoreName:   MLUResourceCores,
+	}
 }
