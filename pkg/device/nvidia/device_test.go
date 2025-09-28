@@ -121,6 +121,168 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func TestMutateAdmissionDefaultsExclusiveCore(t *testing.T) {
+	ptr := func(v int64) *int64 { return &v }
+	clone := func(in corev1.ResourceList) corev1.ResourceList {
+		if in == nil {
+			return nil
+		}
+		out := corev1.ResourceList{}
+		for k, v := range in {
+			out[k] = v.DeepCopy()
+		}
+		return out
+	}
+
+	defaultConfig := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultGPUNum:                1,
+	}
+
+	tests := []struct {
+		name             string
+		config           NvidiaConfig
+		limits           corev1.ResourceList
+		requests         corev1.ResourceList
+		wantCore         bool
+		expectCore       int64
+		requestCoreValue *int64
+	}{
+		{
+			name:   "exclusive via percentage",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("100"),
+			},
+			wantCore:   true,
+			expectCore: 100,
+		},
+		{
+			name:   "exclusive via percentage in requests only",
+			config: defaultConfig,
+			requests: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("100"),
+			},
+			wantCore:   true,
+			expectCore: 100,
+		},
+		{
+			name:   "non-exclusive percentage",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			},
+			wantCore: false,
+		},
+		{
+			name:   "no memory fields defaults to exclusive",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1"),
+			},
+			wantCore:   true,
+			expectCore: 100,
+		},
+		{
+			name:   "explicit cores remains unchanged",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":      resource.MustParse("1"),
+				"nvidia.com/gpucores": resource.MustParse("70"),
+			},
+			wantCore:   true,
+			expectCore: 70,
+		},
+		{
+			name:   "explicit cores in requests remains unchanged",
+			config: defaultConfig,
+			requests: corev1.ResourceList{
+				"nvidia.com/gpu":      resource.MustParse("1"),
+				"nvidia.com/gpucores": resource.MustParse("55"),
+			},
+			requestCoreValue: ptr(55),
+		},
+		{
+			name:   "memory size present treated as shareable",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":    resource.MustParse("1"),
+				"nvidia.com/gpumem": resource.MustParse("8192"),
+			},
+			wantCore: false,
+		},
+		{
+			name: "memory name empty treated as exclusive",
+			config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				DefaultGPUNum:                1,
+			},
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1"),
+			},
+			wantCore:   true,
+			expectCore: 100,
+		},
+		{
+			name: "custom resource names",
+			config: NvidiaConfig{
+				ResourceCountName:            "hami.io/gpu",
+				ResourceMemoryName:           "hami.io/gpumem",
+				ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+				ResourceCoreName:             "hami.io/gpucores",
+				DefaultGPUNum:                1,
+			},
+			limits: corev1.ResourceList{
+				"hami.io/gpu":               resource.MustParse("1"),
+				"hami.io/gpumem-percentage": resource.MustParse("100"),
+			},
+			wantCore:   true,
+			expectCore: 100,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   clone(tt.limits),
+					Requests: clone(tt.requests),
+				},
+			}
+			dev := &NvidiaGPUDevices{config: tt.config}
+			dev.MutateAdmission(ctr, &corev1.Pod{})
+
+			coreName := corev1.ResourceName(tt.config.ResourceCoreName)
+			qty, exists := ctr.Resources.Limits[coreName]
+			if tt.wantCore != exists {
+				t.Fatalf("expected core presence %v, got %v", tt.wantCore, exists)
+			}
+			if tt.wantCore && qty.Value() != tt.expectCore {
+				t.Fatalf("expected core value %d, got %d", tt.expectCore, qty.Value())
+			}
+
+			if tt.requestCoreValue != nil {
+				reqQty, reqExists := ctr.Resources.Requests[coreName]
+				if !reqExists {
+					t.Fatalf("expected core request presence true, got false")
+				}
+				if reqQty.Value() != *tt.requestCoreValue {
+					t.Fatalf("expected core request value %d, got %d", *tt.requestCoreValue, reqQty.Value())
+				}
+			}
+		})
+	}
+}
+
 func Test_checkUUID(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{

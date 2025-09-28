@@ -28,6 +28,7 @@ You can update these configurations using one of the following methods:
   Integer type, by default: 0. The default device memory of the current task, in MB.'0' means use 100% device memory
 * `nvidia.defaultCores`: 
   Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
+  Note: When a container requests `nvidia.com/gpu` and its GPU memory reservation is exclusive (for example `nvidia.com/gpumem-percentage` is 100, or memory fields are omitted so `nvidia.defaultMem` remains 0 and defaults to 100%), and the pod spec does not set `nvidia.com/gpucores`, HAMi defaults `nvidia.com/gpucores` to 100 during admission. Non-exclusive memory requests or pods that already set `nvidia.com/gpucores` remain unchanged.
 * `nvidia.defaultGPUNum`: 
   Integer type, by default: equals 1, if configuration value is 0, then the configuration value will not take effect and will be filtered. when a user does not set nvidia.com/gpu this key in pod resource, webhook should check nvidia.com/gpumem、resource-mem-percentage、nvidia.com/gpucores this three key, anyone a key having value, webhook should add nvidia.com/gpu key and this default value to resources limits map.
 * `nvidia.resourceCountName`: 
