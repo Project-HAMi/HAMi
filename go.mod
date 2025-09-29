@@ -4,7 +4,7 @@ go 1.24.6
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
-	github.com/NVIDIA/go-nvlib v0.8.0
+	github.com/NVIDIA/go-nvlib v0.8.1
 	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/NVIDIA/k8s-device-plugin v0.17.3
 	github.com/NVIDIA/nvidia-container-toolkit v1.18.0-rc.4
