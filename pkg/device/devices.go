@@ -87,6 +87,7 @@ type DeviceUsage struct {
 	Numa        int
 	Type        string
 	Health      bool
+	PodInfos    []*PodInfo
 	CustomInfo  map[string]any
 }
 
