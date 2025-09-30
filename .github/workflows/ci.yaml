@@ -28,7 +28,7 @@ jobs:
       - name: checkout code
         uses: actions/checkout@v5
       - name: install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: verify license
@@ -97,7 +97,7 @@ jobs:
           basePath: # optional, default is .
           submodulePath: libvgpu
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: make tidy
