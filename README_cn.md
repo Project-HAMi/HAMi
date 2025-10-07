@@ -172,6 +172,16 @@ HAMi 社区致力于营造开放和友好的环境，提供多种方式与其他
 - [邮件列表](https://groups.google.com/forum/#!forum/hami-project)
 - [Slack](https://cloud-native.slack.com/archives/C07T10BU4R2) | [加入](https://slack.cncf.io/)
 
+## 客户端 API 示例
+
+HAMi 提供了用于以编程方式与 HAMi 管理的资源交互的客户端 API 示例：
+
+- [Python 客户端示例](examples/client/python/) - 使用 Kubernetes Python 客户端库的 Python 客户端
+- [Java 客户端示例](examples/client/java/) - 使用 Kubernetes Java 客户端库的 Java 客户端
+- [API 参考](docs/develop/api-reference.md) - 详细的 REST API 文档
+
+这些示例演示了如何使用标准 Kubernetes API 查询设备信息、创建带有设备请求的 Pod 以及监控 HAMi 调度决策。
+
 ## 演讲和参考资料
 
 |                  | 链接                                                                                                                    |
