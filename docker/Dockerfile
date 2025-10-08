@@ -9,7 +9,7 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
