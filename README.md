@@ -174,6 +174,16 @@ If you have any questions, please feel free to reach out to us through the follo
 - [mailing list](https://groups.google.com/forum/#!forum/hami-project)
 - [slack](https://cloud-native.slack.com/archives/C07T10BU4R2) | [Join](https://slack.cncf.io/)
 
+## Client API Examples
+
+HAMi provides client API examples for interacting with HAMi-managed resources programmatically:
+
+- [Python Client Example](examples/client/python/) - Python client using Kubernetes Python client library
+- [Java Client Example](examples/client/java/) - Java client using Kubernetes Java client library
+- [API Reference](docs/develop/api-reference.md) - Detailed REST API documentation
+
+These examples demonstrate how to query device information, create pods with device requests, and monitor HAMi scheduling decisions using standard Kubernetes APIs.
+
 ## Talks and References
 
 |                  | Link                                                                                                                    |
