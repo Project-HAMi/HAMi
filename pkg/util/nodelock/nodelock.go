@@ -41,7 +41,8 @@ const (
 )
 
 var (
-	lock sync.Mutex
+	// nodeLocks manages per-node locks for fine-grained concurrency control
+	nodeLocks nodeLockManager
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
 
@@ -52,6 +53,49 @@ var (
 		Jitter:   0.1,
 	}
 )
+
+// nodeLockManager manages locks on a per-node basis to allow concurrent
+// operations on different nodes while maintaining mutual exclusion for
+// operations on the same node.
+type nodeLockManager struct {
+	mu    sync.Mutex
+	locks map[string]*sync.Mutex
+}
+
+// getLock returns the mutex for a specific node, creating it if necessary.
+// This method is thread-safe.
+func (m *nodeLockManager) getLock(nodeName string) *sync.Mutex {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.locks == nil {
+		m.locks = make(map[string]*sync.Mutex)
+	}
+
+	if m.locks[nodeName] == nil {
+		m.locks[nodeName] = &sync.Mutex{}
+	}
+	return m.locks[nodeName]
+}
+
+// cleanupLock removes the lock for a node if it's not currently held.
+// This helps prevent unbounded memory growth in long-running processes.
+func (m *nodeLockManager) cleanupLock(nodeName string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	if m.locks != nil {
+		// Only delete if the lock exists and is not currently held
+		if nodeLock, ok := m.locks[nodeName]; ok {
+			// Try to acquire the lock to ensure it's not in use
+			if nodeLock.TryLock() {
+				nodeLock.Unlock()
+				delete(m.locks, nodeName)
+				klog.V(5).InfoS("Cleaned up node lock", "node", nodeName)
+			}
+		}
+	}
+}
 
 func init() {
 	setupNodeLockTimeout()
@@ -72,8 +116,11 @@ func setupNodeLockTimeout() {
 }
 
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
-	lock.Lock()
-	defer lock.Unlock()
+	// Acquire per-node lock instead of global lock
+	nodeLock := nodeLocks.getLock(nodeName)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -108,8 +155,11 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 }
 
 func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
-	lock.Lock()
-	defer lock.Unlock()
+	// Acquire per-node lock instead of global lock
+	nodeLock := nodeLocks.getLock(nodeName)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -147,6 +197,11 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	}
 
 	klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
+
+	// Optional: cleanup the lock from the map to prevent memory growth
+	// This is done in a separate goroutine to avoid blocking the release operation
+	go nodeLocks.cleanupLock(nodeName)
+
 	return nil
 }
 

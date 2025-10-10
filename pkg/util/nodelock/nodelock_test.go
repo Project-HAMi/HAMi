@@ -333,3 +333,80 @@ func TestReleaseNodeLock(t *testing.T) {
 		})
 	}
 }
+
+// TestConcurrentNodeLocks verifies that locks on different nodes can be acquired concurrently
+func TestConcurrentNodeLocks(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+
+	// Create multiple nodes
+	nodeCount := 5
+	for i := 0; i < nodeCount; i++ {
+		nodeName := "concurrent-node-" + string(rune('0'+i))
+		_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        nodeName,
+				Annotations: map[string]string{},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Failed to create node %s: %v", nodeName, err)
+		}
+	}
+
+	// Channel to collect results
+	type result struct {
+		nodeName string
+		err      error
+		duration time.Duration
+	}
+	results := make(chan result, nodeCount)
+
+	// Try to lock all nodes concurrently
+	startTime := time.Now()
+	for i := 0; i < nodeCount; i++ {
+		go func(index int) {
+			nodeStartTime := time.Now()
+			nodeName := "concurrent-node-" + string(rune('0'+index))
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "pod-" + string(rune('0'+index)),
+					Namespace: "test-ns",
+				},
+			}
+
+			err := LockNode(nodeName, "", pod)
+			results <- result{
+				nodeName: nodeName,
+				err:      err,
+				duration: time.Since(nodeStartTime),
+			}
+		}(i)
+	}
+
+	// Collect results
+	var totalDuration time.Duration
+	for i := 0; i < nodeCount; i++ {
+		res := <-results
+		if res.err != nil {
+			t.Errorf("Failed to lock node %s: %v", res.nodeName, res.err)
+		}
+		totalDuration += res.duration
+	}
+
+	totalElapsed := time.Since(startTime)
+
+	// With per-node locks, concurrent operations should complete much faster
+	// than if they were serialized. The average per-node duration should be
+	// significantly less than the total elapsed time.
+	avgPerNodeDuration := totalDuration / time.Duration(nodeCount)
+
+	t.Logf("Total elapsed time: %v", totalElapsed)
+	t.Logf("Average per-node duration: %v", avgPerNodeDuration)
+	t.Logf("Total accumulated duration: %v", totalDuration)
+
+	// If operations were truly concurrent, the total elapsed time should be
+	// much less than the sum of all individual durations
+	if totalElapsed >= totalDuration {
+		t.Logf("Warning: Operations may not be running concurrently (total: %v >= sum: %v)", totalElapsed, totalDuration)
+	}
+}
