@@ -108,6 +108,9 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 }
 
 func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
+	if pod == nil {
+		return fmt.Errorf("cannot release node lock: pod is nil")
+	}
 	lock.Lock()
 	defer lock.Unlock()
 	ctx := context.Background()
