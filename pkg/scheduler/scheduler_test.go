@@ -80,15 +80,15 @@ func Test_getNodesUsage(t *testing.T) {
 			},
 		},
 	}
-	podMap := newPodManager()
-	podMap.addPod(&corev1.Pod{
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "1111",
 			Name:      "test1",
 			Namespace: "default",
 		},
 	}, "node1", podDevces)
-	podMap.addPod(&corev1.Pod{
+	podMap.AddPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "2222",
 			Name:      "test2",
@@ -136,7 +136,7 @@ func Test_getPodUsage(t *testing.T) {
 	tests := []struct {
 		name    string
 		pods    []*corev1.Pod
-		want    map[string]PodUseDeviceStat
+		want    map[string]device.PodUseDeviceStat
 		wantErr error
 	}{
 		{
@@ -154,7 +154,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node12": {
 					TotalPod:     0, // Running pod does not count
 					UseDevicePod: 0,
@@ -176,7 +176,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node13": {
 					TotalPod:     1,
 					UseDevicePod: 0, // No annotation
@@ -199,7 +199,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node11": {
 					TotalPod:     1,
 					UseDevicePod: 1,
@@ -212,7 +212,7 @@ func Test_getPodUsage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for _, pod := range test.pods {
 				client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-				s.addPod(pod, pod.Spec.NodeName, device.PodDevices{})
+				s.podManager.AddPod(pod, pod.Spec.NodeName, device.PodDevices{})
 			}
 
 			result, err := s.getPodUsage()
@@ -354,9 +354,9 @@ func Test_Filter(t *testing.T) {
 		for index := range nodes {
 			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
 		}
-		pods, _ := s.ListPodsUID()
+		pods, _ := s.podManager.ListPodsUID()
 		for index := range pods {
-			s.delPod(pods[index])
+			s.podManager.DelPod(pods[index])
 		}
 
 		s.addNode("node1", &device.NodeInfo{
@@ -415,7 +415,7 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addPod(pod1, "node1", device.PodDevices{
+		s.podManager.AddPod(pod1, "node1", device.PodDevices{
 			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
@@ -428,7 +428,7 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addPod(pod2, "node2", device.PodDevices{
+		s.podManager.AddPod(pod2, "node2", device.PodDevices{
 			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
@@ -872,9 +872,9 @@ func Test_ResourceQuota(t *testing.T) {
 		for index := range nodes {
 			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
 		}
-		pods, _ := s.ListPodsUID()
+		pods, _ := s.podManager.ListPodsUID()
 		for index := range pods {
-			s.delPod(pods[index])
+			s.podManager.DelPod(pods[index])
 		}
 
 		s.addNode("node1", &device.NodeInfo{
