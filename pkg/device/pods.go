@@ -14,12 +14,10 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
-package scheduler
+package device
 
 import (
 	"sync"
-
-	"github.com/Project-HAMi/HAMi/pkg/device"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -27,13 +25,11 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type podInfo struct {
-	Namespace string
-	Name      string
-	UID       k8stypes.UID
-	NodeID    string
-	Devices   device.PodDevices
-	CtrIDs    []string
+type PodInfo struct {
+	*corev1.Pod
+	NodeID  string
+	Devices PodDevices
+	CtrIDs  []string
 }
 
 // PodUseDeviceStat counts pod use device info.
@@ -42,31 +38,29 @@ type PodUseDeviceStat struct {
 	UseDevicePod int // Count of running pods that use devices
 }
 
-type podManager struct {
-	pods  map[k8stypes.UID]*podInfo
+type PodManager struct {
+	pods  map[k8stypes.UID]*PodInfo
 	mutex sync.RWMutex
 }
 
-func newPodManager() *podManager {
-	pm := &podManager{
-		pods: make(map[k8stypes.UID]*podInfo),
+func NewPodManager() *PodManager {
+	pm := &PodManager{
+		pods: make(map[k8stypes.UID]*PodInfo),
 	}
 	klog.InfoS("Pod manager initialized", "podCount", len(pm.pods))
 	return pm
 }
 
-func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDevices) bool {
+func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	_, exists := m.pods[pod.UID]
 	if !exists {
-		pi := &podInfo{
-			Name:      pod.Name,
-			UID:       pod.UID,
-			Namespace: pod.Namespace,
-			NodeID:    nodeID,
-			Devices:   devices,
+		pi := &PodInfo{
+			Pod:     pod,
+			NodeID:  nodeID,
+			Devices: devices,
 		}
 		m.pods[pod.UID] = pi
 		klog.InfoS("Pod added",
@@ -85,7 +79,7 @@ func (m *podManager) addPod(pod *corev1.Pod, nodeID string, devices device.PodDe
 	return !exists
 }
 
-func (m *podManager) delPod(pod *corev1.Pod) {
+func (m *PodManager) DelPod(pod *corev1.Pod) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
@@ -103,7 +97,15 @@ func (m *podManager) delPod(pod *corev1.Pod) {
 	}
 }
 
-func (m *podManager) ListPodsUID() ([]*corev1.Pod, error) {
+func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, ok := m.pods[pod.UID]
+	return pi, ok
+}
+
+func (m *PodManager) ListPodsUID() ([]*corev1.Pod, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
@@ -121,11 +123,11 @@ func (m *podManager) ListPodsUID() ([]*corev1.Pod, error) {
 	return pods, nil
 }
 
-func (m *podManager) ListPodsInfo() []*podInfo {
+func (m *PodManager) ListPodsInfo() []*PodInfo {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	pods := make([]*podInfo, 0, len(m.pods))
+	pods := make([]*PodInfo, 0, len(m.pods))
 	for _, pod := range m.pods {
 		pods = append(pods, pod)
 		klog.V(5).InfoS("Pod info",
@@ -140,7 +142,7 @@ func (m *podManager) ListPodsInfo() []*podInfo {
 	return pods
 }
 
-func (m *podManager) GetScheduledPods() (map[k8stypes.UID]*podInfo, error) {
+func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
