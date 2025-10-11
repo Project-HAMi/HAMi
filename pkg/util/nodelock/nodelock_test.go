@@ -338,7 +338,7 @@ func TestReleaseNodeLock(t *testing.T) {
 // TestConcurrentNodeLocks verifies that locks on different nodes can be acquired concurrently.
 func TestConcurrentNodeLocks(t *testing.T) {
 	client.KubeClient = fake.NewSimpleClientset()
-	nodeLocks = nodeLockManager{}
+	nodeLocks = newNodeLockManager()
 
 	prevProcs := runtime.GOMAXPROCS(0)
 	targetProcs := runtime.NumCPU()

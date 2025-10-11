@@ -42,7 +42,7 @@ const (
 
 var (
 	// nodeLocks manages per-node locks for fine-grained concurrency control.
-	nodeLocks nodeLockManager
+	nodeLocks = newNodeLockManager()
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
 
@@ -62,15 +62,18 @@ type nodeLockManager struct {
 	locks map[string]*sync.Mutex
 }
 
+// newNodeLockManager returns a nodeLockManager with its lock map initialized.
+func newNodeLockManager() nodeLockManager {
+	return nodeLockManager{
+		locks: make(map[string]*sync.Mutex),
+	}
+}
+
 // getLock returns the mutex for a specific node, creating it if necessary.
 // This method is thread-safe.
 func (m *nodeLockManager) getLock(nodeName string) *sync.Mutex {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-
-	if m.locks == nil {
-		m.locks = make(map[string]*sync.Mutex)
-	}
 
 	if _, ok := m.locks[nodeName]; !ok {
 		m.locks[nodeName] = &sync.Mutex{}
