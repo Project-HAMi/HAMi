@@ -43,13 +43,6 @@ This document provides detailed descriptions of all configurable values paramete
 | `dcuResourceMem` | DCU memory resource name | `"hygon.com/dcumem"` |
 | `dcuResourceCores` | DCU core resource name | `"hygon.com/dcucores"` |
 
-### Iluvatar GPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `iluvatarResourceName` | GPU resource name | `"iluvatar.ai/vgpu"` |
-| `iluvatarResourceMem` | GPU memory resource name | `"iluvatar.ai/vcuda-memory"` |
-| `iluvatarResourceCore` | GPU core resource name | `"iluvatar.ai/vcuda-core"` |
-
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -231,3 +224,9 @@ This document provides detailed descriptions of all configurable values paramete
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
 | `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
+
+### Iluvatar
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devices.iluvatar.enabled` | Whether to enable | `false` |
+| `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |

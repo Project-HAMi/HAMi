@@ -1,12 +1,12 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: poddemo
+  name: BI-V100-poddemo
 spec:
   restartPolicy: Never
   containers:
-  - name: poddemo
-    image: harbor.4pd.io/vgpu/corex_transformers@sha256:36a01ec452e6ee63c7aa08bfa1fa16d469ad19cc1e6000cf120ada83e4ceec1e
+  - name: BI-V100-poddemo
+    image: registry.iluvatar.com.cn:10443/saas/bi100-3.2.0-x86-ubuntu20.04-py3.10-poc-llm-finetune:v1.1
     command: 
     - bash
     args:
@@ -20,6 +20,10 @@ spec:
       sleep 360000
     resources:
       requests:
-        iluvatar.ai/vgpu: 2
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
       limits:
-        iluvatar.ai/vgpu: 2
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
