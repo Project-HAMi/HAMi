@@ -171,12 +171,16 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	} else
 	// Check dangling nodeLock
 	if ns != "" && previousPodName != "" && (ns != pods.Namespace || previousPodName != pods.Name) {
-		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
+		previousPod, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{})
+		if err != nil {
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)
 				return err
 			}
 			klog.InfoS("Previous pod of NodeLock not found, releasing lock", "podName", previousPodName, "namespace", ns, "nodeLock", node.Annotations[NodeLockKey])
+			skipOwnerCheck = true
+		} else if previousPod.DeletionTimestamp != nil || previousPod.Status.Phase == corev1.PodSucceeded || previousPod.Status.Phase == corev1.PodFailed {
+			klog.InfoS("Previous pod of NodeLock has terminated, releasing lock", "podName", previousPodName, "namespace", ns)
 			skipOwnerCheck = true
 		}
 	}
