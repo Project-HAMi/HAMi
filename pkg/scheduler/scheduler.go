@@ -102,6 +102,10 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
+		pi, ok := s.podManager.GetPod(pod)
+		if ok {
+			s.quotaManager.RmUsage(pod, pi.Devices)
+		}
 		s.podManager.DelPod(pod)
 		return
 	}
@@ -141,8 +145,8 @@ func (s *Scheduler) onAddQuota(obj interface{}) {
 	s.quotaManager.AddQuota(quota)
 }
 
-func (s *Scheduler) onUpdateQuota(_, newObj interface{}) {
-	s.onDelQuota(newObj)
+func (s *Scheduler) onUpdateQuota(oldObj, newObj interface{}) {
+	s.onDelQuota(oldObj)
 	s.onAddQuota(newObj)
 }
 
