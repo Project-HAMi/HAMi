@@ -215,7 +215,15 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 }
 
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
-	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
+	if pod == nil {
+		return false
+	}
+
+	if pod.DeletionTimestamp != nil {
+		return true
+	}
+
+	return pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed
 }
 
 func AllContainersCreated(pod *corev1.Pod) bool {

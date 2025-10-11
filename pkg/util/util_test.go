@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -396,6 +397,18 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 			args: &corev1.Pod{
 				Status: corev1.PodStatus{
 					Phase: corev1.PodSucceeded,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod with deletion timestamp",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
 				},
 			},
 			want: true,
