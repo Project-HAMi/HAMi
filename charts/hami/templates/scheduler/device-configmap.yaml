@@ -106,10 +106,27 @@ data:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
-    iluvatar:
-      resourceCountName: {{ .Values.iluvatarResourceName }}
-      resourceMemoryName: {{ .Values.iluvatarResourceMem }}
-      resourceCoreName: {{ .Values.iluvatarResourceCore }}
+    iluvatars:
+    - chipName: MR-V100
+      commonWord: MR-V100
+      resourceCountName: iluvatar.ai/MR-V100-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V100.vMem
+      resourceCoreName: iluvatar.ai/MR-V100.vCore
+    - chipName: MR-V50
+      commonWord: MR-V50
+      resourceCountName: iluvatar.ai/MR-V50-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V50.vMem
+      resourceCoreName: iluvatar.ai/MR-V50.vCore
+    - chipName: BI-V150
+      commonWord: BI-V150
+      resourceCountName: iluvatar.ai/BI-V150-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V150.vMem
+      resourceCoreName: iluvatar.ai/BI-V150.vCore
+    - chipName: BI-V100
+      commonWord: BI-V100
+      resourceCountName: iluvatar.ai/BI-V100-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V100.vMem
+      resourceCoreName: iluvatar.ai/BI-V100.vCore
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
       resourceVCountName: {{ .Values.kunlunResourceVCountName }}

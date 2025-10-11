@@ -365,7 +365,6 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		nvidia.NvidiaGPUDevice:       nvidia.NvidiaGPUCommonWord,
 		cambricon.CambriconMLUDevice: cambricon.CambriconMLUCommonWord,
 		hygon.HygonDCUDevice:         hygon.HygonDCUCommonWord,
-		iluvatar.IluvatarGPUDevice:   iluvatar.IluvatarGPUCommonWord,
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,

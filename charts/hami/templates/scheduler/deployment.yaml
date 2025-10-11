@@ -108,6 +108,9 @@ spec:
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}
+            {{- if .Values.devices.iluvatar.enabled }}
+            - --enable-iluvatar=true
+            {{- end }}
             {{- if .Values.scheduler.nodeLabelSelector }}
             - --node-label-selector={{- $first := true -}}
               {{- range $key, $value := .Values.scheduler.nodeLabelSelector -}}

@@ -71,7 +71,7 @@ type Config struct {
 	HygonConfig     hygon.HygonConfig         `yaml:"hygon"`
 	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
-	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	IluvatarConfig  []iluvatar.IluvatarConfig `yaml:"iluvatars"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
@@ -139,13 +139,6 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return hygon.InitDCUDevice(hygonConfig), nil
 		}, config.HygonConfig},
-		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg any) (device.Devices, error) {
-			iluvatarConfig, ok := cfg.(iluvatar.IluvatarConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", iluvatar.IluvatarGPUCommonWord)
-			}
-			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
-		}, config.IluvatarConfig},
 		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {
@@ -215,6 +208,14 @@ func InitDevicesWithConfig(config *Config) error {
 		device.DevicesMap[commonWord] = dev
 		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
 		klog.Infof("Ascend device %s initialized", commonWord)
+	}
+
+	// Initialize Iluvatar devices
+	for _, dev := range iluvatar.InitIluvatarDevice(config.IluvatarConfig) {
+		commonWord := dev.CommonWord()
+		device.DevicesMap[commonWord] = dev
+		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
+		klog.Infof("Iluvatar device %s initialized", commonWord)
 	}
 
 	if len(initErrors) > 0 {
@@ -292,6 +293,27 @@ iluvatar:
   resourceCountName: "iluvatar.ai/vgpu"
   resourceMemoryName: "iluvatar.ai/vcuda-memory"
   resourceCoreName: "iluvatar.ai/vcuda-core"
+iluvatars:
+  - chipName: MR-V100
+    commonWord: MR-V100
+    resourceCountName: iluvatar.ai/MR-V100-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V100.vMem
+    resourceCoreName: iluvatar.ai/MR-V100.vCore
+  - chipName: MR-V50
+    commonWord: MR-V50
+    resourceCountName: iluvatar.ai/MR-V50-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V50.vMem
+    resourceCoreName: iluvatar.ai/MR-V50.vCore
+  - chipName: BI-V150
+    commonWord: BI-V150
+    resourceCountName: iluvatar.ai/BI-V150-vgpu
+    resourceMemoryName: iluvatar.ai/BI-V150.vMem
+    resourceCoreName: iluvatar.ai/BI-V150.vCore
+  - chipName: BI-V100
+    commonWord: BI-V100
+    resourceCountName: iluvatar.ai/BI-V100-vgpu
+    resourceMemoryName: iluvatar.ai/BI-V100.vMem
+    resourceCoreName: iluvatar.ai/BI-V100.vCore
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
   resourceVCountName: "kunlunxin.com/vxpu"

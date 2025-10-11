@@ -389,4 +389,20 @@ devices:
       - huawei.com/Ascend910B4-1-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+  iluvatar:
+    enabled: false
+    customresources:
+      - iluvatar.ai/BI-V100.vCore
+      - iluvatar.ai/BI-V100.vMem
+      - iluvatar.ai/BI-V100-vgpu
+      - iluvatar.ai/BI-V150.vCore
+      - iluvatar.ai/BI-V150.vMem
+      - iluvatar.ai/BI-V150-vgpu
+      - iluvatar.ai/MR-V100.vCore
+      - iluvatar.ai/MR-V100.vMem
+      - iluvatar.ai/MR-V100-vgpu
+      - iluvatar.ai/MR-V50-vgpu
+      - iluvatar.ai/MR-V50.vMem
+      - iluvatar.ai/MR-V50.vCore
+
 
