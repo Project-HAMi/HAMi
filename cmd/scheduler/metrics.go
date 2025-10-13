@@ -210,7 +210,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			)
 		}
 	}
-	schedpods, _ := sher.GetScheduledPods()
+	schedpods, _ := sher.GetPodManager().GetScheduledPods()
 	for _, val := range schedpods {
 		for _, podSingleDevice := range val.Devices {
 			for ctridx, ctrdevs := range podSingleDevice {
