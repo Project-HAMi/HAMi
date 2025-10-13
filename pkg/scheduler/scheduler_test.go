@@ -1126,6 +1126,9 @@ func Test_ResourceQuota(t *testing.T) {
 			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Create(context.Background(), test.args.Pod, metav1.CreateOptions{})
 			got, gotErr := s.Filter(test.args)
 			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Delete(context.Background(), test.args.Pod.Name, metav1.DeleteOptions{})
+			// TODO: potential race condition
+			// wait for sync
+			time.Sleep(100 * time.Millisecond)
 			s.onDelQuota(&test.quota)
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
