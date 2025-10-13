@@ -74,7 +74,7 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
-		return false, 0, nil
+		return false, 0, err
 	}
 	node, err := strconv.Atoi(string(bytes.TrimSpace(b)))
 	if err != nil {
@@ -140,7 +140,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 		ok, numa, err := GetNumaNode(ndev)
 		if !ok {
-			klog.ErrorS(err, "failed to get numa information", "idx", idx)
+			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
+			numa, ret = ndev.GetNumaNodeId()
+			if ret != nvml.SUCCESS {
+				klog.ErrorS(err, "failed to get numa information from nvml", "idx", idx)
+			}
 		}
 		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
