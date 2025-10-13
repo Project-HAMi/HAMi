@@ -141,10 +141,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		ok, numa, err := GetNumaNode(ndev)
 		if !ok {
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
-			numa, ret = ndev.GetNumaNodeId()
-			if ret != nvml.SUCCESS {
-				klog.ErrorS(err, "failed to get numa information from nvml", "idx", idx)
-			}
 		}
 		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
