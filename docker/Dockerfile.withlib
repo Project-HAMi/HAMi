@@ -8,7 +8,7 @@ ARG GOPROXY=https://goproxy.cn,direct
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM nvidia/cuda:12.6.3-base-ubuntu22.04
 RUN rm -rf /usr/local/cuda-12.6/compat/libcuda.so*
