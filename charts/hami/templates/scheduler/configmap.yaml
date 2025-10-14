@@ -63,6 +63,14 @@ data:
                       "ignoredByScheduler": true
                     },
                     {{- end }}
+                    {{- if .Values.devices.iluvatar.enabled }}
+                    {{- range .Values.devices.iluvatar.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
@@ -97,10 +105,6 @@ data:
                     },
                     {
                         "name": "{{ .Values.dcuResourceCores }}",
-                        "ignoredByScheduler": true
-                    },
-                    {
-                        "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
                     },
                     {

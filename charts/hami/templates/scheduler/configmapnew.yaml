@@ -48,8 +48,6 @@ data:
         ignoredByScheduler: true
       - name: {{ .Values.dcuResourceCores }}
         ignoredByScheduler: true
-      - name: {{ .Values.iluvatarResourceName }}
-        ignoredByScheduler: true
       - name: "metax-tech.com/gpu"
         ignoredByScheduler: true
       - name: {{ .Values.metaxResourceName }}
@@ -85,5 +83,11 @@ data:
       {{- range .Values.devices.awsneuron.customresources }}
       - name: {{ . }}
         ignoredByScheduler: true
+      {{- end }}
+      {{- if .Values.devices.iluvatar.enabled }}
+      {{- range .Values.devices.iluvatar.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
       {{- end }}
 {{- end }}

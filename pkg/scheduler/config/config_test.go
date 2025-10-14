@@ -70,10 +70,27 @@ mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
   resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
-  resourceCountName: iluvatar.ai/vgpu
-  resourceMemoryName: iluvatar.ai/vcuda-memory
-  resourceCoreName: iluvatar.ai/vcuda-core
+iluvatars:
+- chipName: MR-V100
+  commonWord: MR-V100
+  resourceCountName: iluvatar.ai/MR-V100-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V100.vMem
+  resourceCoreName: iluvatar.ai/MR-V100.vCore
+- chipName: MR-V50
+  commonWord: MR-V50
+  resourceCountName: iluvatar.ai/MR-V50-vgpu
+  resourceMemoryName: iluvatar.ai/MR-V50.vMem
+  resourceCoreName: iluvatar.ai/MR-V50.vCore
+- chipName: BI-V150
+  commonWord: BI-V150
+  resourceCountName: iluvatar.ai/BI-V150-vgpu
+  resourceMemoryName: iluvatar.ai/BI-V150.vMem
+  resourceCoreName: iluvatar.ai/BI-V150.vCore
+- chipName: BI-V100
+  commonWord: BI-V100
+  resourceCountName: iluvatar.ai/BI-V100-vgpu
+  resourceMemoryName: iluvatar.ai/BI-V100.vMem
+  resourceCoreName: iluvatar.ai/BI-V100.vCore
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
 vnpus:
@@ -188,7 +205,6 @@ func Test_LoadConfig(t *testing.T) {
 		{"NVIDIA Config", createNvidiaConfig(), configData.NvidiaConfig},
 		{"Cambricon Config", createCambriconConfig(), configData.CambriconConfig},
 		{"Hygon Config", createHygonConfig(), configData.HygonConfig},
-		{"Iluvatar Config", createIluvatarConfig(), configData.IluvatarConfig},
 		{"Mthreads Config", createMthreadsConfig(), configData.MthreadsConfig},
 		{"Metax Config", createMetaxConfig(), configData.MetaxConfig},
 		{"Enflame Config", createEnflameConfig(), configData.EnflameConfig},
@@ -203,6 +219,8 @@ func Test_LoadConfig(t *testing.T) {
 
 	expectedVNPUs := createVNPUConfigs()
 	assert.DeepEqual(t, configData.VNPUs, expectedVNPUs)
+	expectedIluvatars := createIluvatarConfigs()
+	assert.DeepEqual(t, configData.IluvatarConfig, expectedIluvatars)
 }
 
 func createNvidiaConfig() nvidia.NvidiaConfig {
@@ -349,6 +367,39 @@ func createVNPUConfigs() []ascend.VNPUConfig {
 	}
 }
 
+func createIluvatarConfigs() []iluvatar.IluvatarConfig {
+	return []iluvatar.IluvatarConfig{
+		{
+			ChipName:           "MR-V100",
+			CommonWord:         "MR-V100",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		},
+		{
+			ChipName:           "MR-V50",
+			CommonWord:         "MR-V50",
+			ResourceCountName:  "iluvatar.ai/MR-V50-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V50.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V50.vCore",
+		},
+		{
+			ChipName:           "BI-V150",
+			CommonWord:         "BI-V150",
+			ResourceCountName:  "iluvatar.ai/BI-V150-vgpu",
+			ResourceMemoryName: "iluvatar.ai/BI-V150.vMem",
+			ResourceCoreName:   "iluvatar.ai/BI-V150.vCore",
+		},
+		{
+			ChipName:           "BI-V100",
+			CommonWord:         "BI-V100",
+			ResourceCountName:  "iluvatar.ai/BI-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/BI-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/BI-V100.vCore",
+		},
+	}
+}
+
 func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 	t.Helper()
 
@@ -365,7 +416,6 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		nvidia.NvidiaGPUDevice:       nvidia.NvidiaGPUCommonWord,
 		cambricon.CambriconMLUDevice: cambricon.CambriconMLUCommonWord,
 		hygon.HygonDCUDevice:         hygon.HygonDCUCommonWord,
-		iluvatar.IluvatarGPUDevice:   iluvatar.IluvatarGPUCommonWord,
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,
 		metax.MetaxGPUDevice:         metax.MetaxGPUCommonWord,
 		metax.MetaxSGPUDevice:        metax.MetaxSGPUCommonWord,
@@ -399,7 +449,9 @@ func Test_InitDevicesWithConfig_Success(t *testing.T) {
 // Test_InitDevicesWithConfig_InvalidConfig tests the behavior of InitDevicesWithConfig with invalid configurations.
 func Test_InitDevicesWithConfig_InvalidConfig(t *testing.T) {
 	// Provide an intentionally constructed invalid configuration
-	configData := Config{}
+	configData := Config{
+		IluvatarConfig: []iluvatar.IluvatarConfig{},
+	}
 
 	err := InitDevicesWithConfig(&configData)
 	assert.ErrorContains(t, err, "all configurations are empty", "Expected initialization to fail with 'NvidiaConfig is empty' error")
@@ -447,7 +499,9 @@ func Test_validateConfig(t *testing.T) {
 			DefaultGPUNum:                1,
 		},
 	}
-	emptyConfig := &Config{}
+	emptyConfig := &Config{
+		IluvatarConfig: []iluvatar.IluvatarConfig{},
+	}
 
 	tests := []struct {
 		name        string

@@ -1,0 +1,51 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: BI-V100-poddemo
+spec:
+  restartPolicy: Never
+  containers:
+  - name: BI-V100-poddemo
+    image: registry.iluvatar.com.cn:10443/saas/bi100-3.2.0-x86-ubuntu20.04-py3.10-poc-llm-finetune:v1.1
+    command: 
+    - bash
+    args:
+    - -c
+    - |
+      set -ex
+      echo "export LD_LIBRARY_PATH=/usr/local/corex/lib64:$LD_LIBRARY_PATH">> /root/.bashrc
+      cp -f /usr/local/iluvatar/lib64/libcuda.* /usr/local/corex/lib64/
+      cp -f /usr/local/iluvatar/lib64/libixml.* /usr/local/corex/lib64/
+      source /root/.bashrc
+      sleep 360000
+    resources:
+      requests:
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
+      limits:
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
+  - name: BI-V100-poddemo1
+    image: registry.iluvatar.com.cn:10443/saas/bi100-3.2.0-x86-ubuntu20.04-py3.10-poc-llm-finetune:v1.1
+    command:
+    - bash
+    args:
+    - -c
+    - |
+      set -ex
+      echo "export LD_LIBRARY_PATH=/usr/local/corex/lib64:$LD_LIBRARY_PATH">> /root/.bashrc
+      cp -f /usr/local/iluvatar/lib64/libcuda.* /usr/local/corex/lib64/
+      cp -f /usr/local/iluvatar/lib64/libixml.* /usr/local/corex/lib64/
+      source /root/.bashrc
+      sleep 360000
+    resources:
+      requests:
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
+      limits:
+        iluvatar.ai/BI-V100-vgpu: 1
+        iluvatar.ai/BI-V100.vCore: 50
+        iluvatar.ai/BI-V100.vMem: 64
