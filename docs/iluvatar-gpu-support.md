@@ -23,20 +23,35 @@
 
 > **NOTICE:** *Install only gpu-manager, don't install gpu-admission package.*
 
-* Identify the resource name about core and memory usage(i.e 'iluvatar.ai/vcuda-core', 'iluvatar.ai/vcuda-memory')
-
-* set the 'iluvatarResourceMem' and 'iluvatarResourceCore' parameters when install hami
-
+* set the devices.iluvatar.enabled=true when install hami
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCore=iluvatar.ai/vcuda-core -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set devices.iluvatar.enabled=true
 ```
 
-> **NOTE:** The default resource names are:
-> - `iluvatar.ai/vgpu` for GPU count
-> - `iluvatar.ai/vcuda-memory` for memory allocation
-> - `iluvatar.ai/vcuda-core` for core allocation
->
-> You can customize these names using the parameters above.
+**Note:** The currently supported GPU models and resource names are defined in (https://github.com/Project-HAMi/HAMi/blob/master/charts/hami/templates/scheduler/device-configmap.yaml):
+```yaml
+    iluvatars:
+    - chipName: MR-V100
+      commonWord: MR-V100
+      resourceCountName: iluvatar.ai/MR-V100-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V100.vMem
+      resourceCoreName: iluvatar.ai/MR-V100.vCore
+    - chipName: MR-V50
+      commonWord: MR-V50
+      resourceCountName: iluvatar.ai/MR-V50-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V50.vMem
+      resourceCoreName: iluvatar.ai/MR-V50.vCore
+    - chipName: BI-V150
+      commonWord: BI-V150
+      resourceCountName: iluvatar.ai/BI-V150-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V150.vMem
+      resourceCoreName: iluvatar.ai/BI-V150.vCore
+    - chipName: BI-V100
+      commonWord: BI-V100
+      resourceCountName: iluvatar.ai/BI-V100-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V100.vMem
+      resourceCoreName: iluvatar.ai/BI-V100.vCore
+```
 
 ## Device Granularity
 
@@ -44,31 +59,31 @@ HAMi divides each Iluvatar GPU into 100 units for resource allocation. When you 
 
 ### Memory Allocation
 
-- Each unit of `iluvatar.ai/vcuda-memory` represents 256MB of device memory
+- Each unit of `iluvatar.ai/<card-type>.vMem` represents 256MB of device memory
 - If you don't specify a memory request, the system will default to using 100% of the available memory
 - Memory allocation is enforced with hard limits to ensure tasks don't exceed their allocated memory
 
 ### Core Allocation
 
-- Each unit of `iluvatar.ai/vcuda-core` represents 1% of the available compute cores
+- Each unit of `iluvatar.ai/<card-type>.vCore` represents 1% of the available compute cores
 - Core allocation is enforced with hard limits to ensure tasks don't exceed their allocated cores
 - When requesting multiple GPUs, the system will automatically set the core resources based on the number of GPUs requested
 
 ## Running Iluvatar jobs
 
 Iluvatar GPUs can now be requested by a container
-using the `iluvatar.ai/vgpu`, `iluvatar.ai/vcuda-memory` and `iluvatar.ai/vcuda-core`  resource type:
+using the `iluvatar.ai/BI-V150-vgpu`, `iluvatar.ai/BI-V150.vMem` and `iluvatar.ai/BI-V150.vCore`  resource type:
 
 ```yaml
 apiVersion: v1
 kind: Pod
 metadata:
-  name: poddemo
+  name: BI-V150-poddemo
 spec:
   restartPolicy: Never
   containers:
-  - name: poddemo
-    image: harbor.4pd.io/vgpu/corex_transformers@sha256:36a01ec452e6ee63c7aa08bfa1fa16d469ad19cc1e6000cf120ada83e4ceec1e
+  - name: BI-V150-poddemo
+    image: registry.iluvatar.com.cn:10443/saas/mr-bi150-4.3.0-x86-ubuntu22.04-py3.10-base-base:v1.0
     command:
     - bash
     args:
@@ -82,13 +97,13 @@ spec:
       sleep 360000
     resources:
       requests:
-        iluvatar.ai/vgpu: 1
-        iluvatar.ai/vcuda-core: 50
-        iluvatar.ai/vcuda-memory: 64
+        iluvatar.ai/BI-V150-vgpu: 1
+        iluvatar.ai/BI-V150.vCore: 50
+        iluvatar.ai/BI-V150.vMem: 64
       limits:
-        iluvatar.ai/vgpu: 1
-        iluvatar.ai/vcuda-core: 50
-        iluvatar.ai/vcuda-memory: 64
+        iluvatar.ai/BI-V150-vgpu: 1
+        iluvatar.ai/BI-V150.vCore: 50
+        iluvatar.ai/BI-V150.vMem: 64
 ```
 
 > **NOTICE1:** *Each unit of vcuda-memory indicates 256M device memory*
@@ -106,14 +121,12 @@ metadata:
   name: poddemo
   annotations:
     # Use specific GPU devices (comma-separated list)
-    iluvatar.ai/use-gpuuuid: "node1-iluvatar-0,node1-iluvatar-1"
+    hami.io/use-<card-type>-uuid: "device-uuid-1,device-uuid-2"
     # Or exclude specific GPU devices (comma-separated list)
-    iluvatar.ai/nouse-gpuuuid: "node1-iluvatar-2,node1-iluvatar-3"
+    hami.io/no-use-<card-type>-uuid: "device-uuid-1,device-uuid-2"
 spec:
   # ... rest of pod spec
 ```
-
-> **NOTE:** The device ID format is `{node-name}-iluvatar-{index}`. You can find the available device IDs in the node status.
 
 ### Finding Device UUIDs
 
@@ -126,7 +139,7 @@ kubectl get pod <pod-name> -o yaml | grep -A 10 "hami.io/<card-type>-devices-all
 Or by examining the node annotations:
 
 ```bash
-kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-register-<card-type>"
+kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-<card-type>-register"
 ```
 
 Look for annotations containing device information in the node status.
@@ -144,6 +157,6 @@ Look for annotations containing device information in the node status.
 
 2. Virtualization takes effect only for containers that apply for one GPU(i.e iluvatar.ai/vgpu=1 ). When requesting multiple GPUs, the system will automatically set the core resources based on the number of GPUs requested.
 
-3. The `iluvatar.ai/vcuda-memory` resource is only effective when `iluvatar.ai/vgpu=1`.
+3. The `iluvatar.ai/<card-type>.vMem` resource is only effective when `iluvatar.ai/<card-type>-vgpu=1`.
 
-4. Multi-device requests (`iluvatar.ai/vgpu > 1`) do not support vGPU mode.
+4. Multi-device requests (`iluvatar.ai/<card-type>-vgpu= > 1`) do not support vGPU mode.
