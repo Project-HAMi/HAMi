@@ -81,6 +81,24 @@ func (m *nodeLockManager) getLock(nodeName string) *sync.Mutex {
 	return m.locks[nodeName]
 }
 
+// deleteLock removes the lock entry for a specific node from the manager.
+// It is safe to call regardless of whether a lock exists. Removing the entry
+// does not affect any goroutine that may still hold or wait on the returned
+// mutex pointer; the mutex object itself is not deallocated by deletion from
+// the map.
+func (m *nodeLockManager) deleteLock(nodeName string) {
+	m.mu.Lock()
+	delete(m.locks, nodeName)
+	m.mu.Unlock()
+}
+
+// CleanupNodeLock deletes in-memory lock bookkeeping for a node. This should
+// be called when a node is removed from the cluster (e.g., by a node
+// autoscaler) to avoid unbounded growth of the internal lock map.
+func CleanupNodeLock(nodeName string) {
+	nodeLocks.deleteLock(nodeName)
+}
+
 func init() {
 	setupNodeLockTimeout()
 }

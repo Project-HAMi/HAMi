@@ -421,3 +421,27 @@ func TestConcurrentNodeLocks(t *testing.T) {
 		t.Fatalf("ReleaseNodeLock for node-a failed: %v", err)
 	}
 }
+
+// TestCleanupNodeLockOnNodeDelete ensures CleanupNodeLock removes the entry
+// and a subsequent getLock allocates a fresh mutex instance.
+func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
+	// Reset manager state for this test
+	nodeLocks = newNodeLockManager()
+
+	first := nodeLocks.getLock("to-be-deleted")
+	if first == nil {
+		t.Fatalf("expected non-nil mutex from getLock")
+	}
+
+	// Trigger cleanup as if node was removed by autoscaler
+	CleanupNodeLock("to-be-deleted")
+
+	second := nodeLocks.getLock("to-be-deleted")
+	if second == nil {
+		t.Fatalf("expected non-nil mutex from getLock after cleanup")
+	}
+
+	if first == second {
+		t.Fatalf("expected a new mutex instance after cleanup, got the same pointer")
+	}
+}
