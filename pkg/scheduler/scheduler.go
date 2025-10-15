@@ -101,7 +101,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	if !ok {
 		return
 	}
-	if util.IsPodInTerminatedState(pod) {
+	if util.IsPodTerminatingOrFinished(pod) {
 		pi, ok := s.podManager.GetPod(pod)
 		if ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
@@ -174,6 +174,7 @@ func (s *Scheduler) Start() {
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: func(_, _ any) { s.doNodeNotify() },
 		DeleteFunc: func(_ any) { s.doNodeNotify() },
 	})
 	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{

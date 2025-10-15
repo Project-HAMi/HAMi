@@ -214,7 +214,15 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	return userGPUPolicy
 }
 
-func IsPodInTerminatedState(pod *corev1.Pod) bool {
+// IsPodTerminatingOrFinished returns true once the pod either finished execution
+// (Succeeded/Failed) or is in the process of terminating (DeletionTimestamp set).
+func IsPodTerminatingOrFinished(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	if pod.DeletionTimestamp != nil {
+		return true
+	}
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 

@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
@@ -112,6 +113,76 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+func Test_onUpdatePodRemovesTerminatingPods(t *testing.T) {
+	s := NewScheduler()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-pod",
+			Namespace:   "default",
+			UID:         types.UID("uid-1"),
+			Annotations: map[string]string{util.AssignedNodeAnnotations: "node1"},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	s.onAddPod(pod)
+
+	if _, ok := s.podManager.GetPod(pod); !ok {
+		t.Fatalf("expected pod to be tracked after add")
+	}
+
+	terminating := pod.DeepCopy()
+	ts := metav1.Now()
+	terminating.DeletionTimestamp = &ts
+
+	s.onUpdatePod(nil, terminating)
+
+	if _, ok := s.podManager.GetPod(pod); ok {
+		t.Fatalf("expected terminating pod to be removed from podManager")
+	}
+}
+
+func Test_NodeUpdateTriggersNodeNotify(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+
+	s.Start()
+	t.Cleanup(func() {
+		s.Stop()
+	})
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-update"}}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatalf("node add did not trigger notification")
+	}
+
+	stored, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "node-update", metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	if stored.Annotations == nil {
+		stored.Annotations = map[string]string{}
+	}
+	stored.Annotations["hami.io/test"] = "notify"
+
+	if _, err = client.KubeClient.CoreV1().Nodes().Update(context.Background(), stored, metav1.UpdateOptions{}); err != nil {
+		t.Fatalf("failed to update node: %v", err)
+	}
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatalf("node update did not trigger notification")
+	}
 }
 
 // test case matrix

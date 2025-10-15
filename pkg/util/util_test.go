@@ -19,6 +19,7 @@ package util
 import (
 	"context"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -376,7 +377,7 @@ func TestPatchPodAnnotations(t *testing.T) {
 	}
 }
 
-func Test_IsPodInTerminatedState(t *testing.T) {
+func Test_IsPodTerminatingOrFinished(t *testing.T) {
 	tests := []struct {
 		name string
 		args *corev1.Pod
@@ -396,6 +397,18 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 			args: &corev1.Pod{
 				Status: corev1.PodStatus{
 					Phase: corev1.PodSucceeded,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod terminating",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &metav1.Time{Time: time.Now()},
+				},
+				Status: corev1.PodStatus{
+					Phase: corev1.PodRunning,
 				},
 			},
 			want: true,
@@ -431,7 +444,7 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got := IsPodInTerminatedState(test.args)
+			got := IsPodTerminatingOrFinished(test.args)
 			assert.Equal(t, test.want, got)
 		})
 	}
