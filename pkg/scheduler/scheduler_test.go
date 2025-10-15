@@ -40,6 +40,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func Test_getNodesUsage(t *testing.T) {
@@ -613,6 +614,75 @@ func Test_Filter(t *testing.T) {
 			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
 		})
 	}
+}
+
+func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	const nodeName = "node-direct"
+	nodelockutil.EnsureNodeLockForTest(nodeName)
+	require.Equal(t, 1, nodelockutil.NodeLockCountForTest())
+
+	s := NewScheduler()
+	select {
+	case <-s.nodeNotify:
+	default:
+	}
+
+	s.onDelNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected node notification on delete")
+	}
+
+	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
+}
+
+func TestSchedulerOnDelNodeCleansLockFromTombstone(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	const nodeName = "node-tomb"
+	nodelockutil.EnsureNodeLockForTest(nodeName)
+	require.Equal(t, 1, nodelockutil.NodeLockCountForTest())
+
+	s := NewScheduler()
+
+	s.onDelNode(cache.DeletedFinalStateUnknown{Obj: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}})
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected node notification from tombstone delete")
+	}
+
+	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
+}
+
+func TestSchedulerOnDelNodeIgnoresNonNodeObjects(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	nodelockutil.EnsureNodeLockForTest("keep-node")
+	initial := nodelockutil.NodeLockCountForTest()
+
+	s := NewScheduler()
+
+	s.onDelNode(cache.DeletedFinalStateUnknown{Obj: struct{}{}})
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected notification for tombstone with non-node")
+	}
+
+	s.onDelNode(struct{}{})
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected notification for unknown object delete")
+	}
+
+	require.Equal(t, initial, nodelockutil.NodeLockCountForTest())
 }
 
 func Test_RegisterFromNodeAnnotations(t *testing.T) {

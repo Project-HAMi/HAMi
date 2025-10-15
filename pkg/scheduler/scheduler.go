@@ -41,6 +41,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 type Scheduler struct {
@@ -136,6 +137,29 @@ func (s *Scheduler) onDelPod(obj any) {
 	}
 }
 
+// onDelNode handles node delete events. It removes any in-memory per-node
+// lock bookkeeping to avoid unbounded growth when nodes are removed by
+// autoscalers or administratively.
+func (s *Scheduler) onDelNode(obj any) {
+	// Ensure downstream consumers are notified regardless of decoding success
+	defer s.doNodeNotify()
+
+	switch t := obj.(type) {
+	case *corev1.Node:
+		klog.V(4).InfoS("Node deleted, cleaning up nodelock", "node", t.Name)
+		nodelockutil.CleanupNodeLock(t.Name)
+	case cache.DeletedFinalStateUnknown:
+		if n, ok := t.Obj.(*corev1.Node); ok {
+			klog.V(4).InfoS("Node tombstone deleted, cleaning up nodelock", "node", n.Name)
+			nodelockutil.CleanupNodeLock(n.Name)
+		} else {
+			klog.V(5).InfoS("Received tombstone for non-node object on delete")
+		}
+	default:
+		klog.V(5).InfoS("Received unknown object type on node delete")
+	}
+}
+
 func (s *Scheduler) onAddQuota(obj interface{}) {
 	quota, ok := obj.(*corev1.ResourceQuota)
 	if !ok {
@@ -174,7 +198,7 @@ func (s *Scheduler) Start() {
 	})
 	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
-		DeleteFunc: func(_ any) { s.doNodeNotify() },
+		DeleteFunc: s.onDelNode,
 	})
 	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
