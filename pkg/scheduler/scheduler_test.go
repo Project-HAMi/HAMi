@@ -27,6 +27,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
@@ -1126,6 +1127,14 @@ func Test_ResourceQuota(t *testing.T) {
 			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Create(context.Background(), test.args.Pod, metav1.CreateOptions{})
 			got, gotErr := s.Filter(test.args)
 			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Delete(context.Background(), test.args.Pod.Name, metav1.DeleteOptions{})
+			// wait for pod deletion to be processed by the informer
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+				_, ok := s.podManager.GetPod(test.args.Pod)
+				return !ok, nil
+			})
+			require.NoError(t, err, "timed out waiting for pod to be deleted from pod manager")
 			s.onDelQuota(&test.quota)
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
