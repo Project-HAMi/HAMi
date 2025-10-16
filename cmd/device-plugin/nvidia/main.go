@@ -186,10 +186,10 @@ func start(c *cli.Context, flags []cli.Flag) error {
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	client.InitGlobalClient()
 	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
+	defer watcher.Close()
 	if err != nil {
 		return fmt.Errorf("failed to create FS watcher: %v", err)
 	}
-	defer watcher.Close()
 	//device.InitDevices()
 
 	/*Loading config files*/
