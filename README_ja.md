@@ -63,13 +63,13 @@ HAMiは、デバイス共有とデバイスリソース分離をサポートす�
 
 ### サポートされているデバイス
 
-[NVIDIA GPU](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)
-[Cambricon MLU](docs/cambricon-mlu-support.md)
-[HYGON DCU](docs/hygon-dcu-support.md)
-[Iluvatar CoreX GPU](docs/iluvatar-gpu-support.md)
-[Moore Threads GPU](docs/mthreads-support.md)
-[HUAWEI Ascend NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)
-[MetaX GPU](docs/metax-support.md)
+[NVIDIA GPU](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)   
+[Cambricon MLU](docs/cambricon-mlu-support.md)   
+[HYGON DCU](docs/hygon-dcu-support.md)   
+[Iluvatar CoreX GPU](docs/iluvatar-gpu-support.md)   
+[Moore Threads GPU](docs/mthreads-support.md)   
+[HUAWEI Ascend NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)   
+[MetaX GPU](docs/metax-support.md)   
 
 ## アーキテクチャ
 
