@@ -15,7 +15,7 @@
 [![website](https://img.shields.io/badge/website-blue)](http://project-hami.io)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
 
-## Project-HAMi: ヘテロジニアスAIコンピューティング仮想化ミドルウェア
+## Project-HAMi: 異種AIコンピューティング仮想化ミドルウェア
 
 ## はじめに
 
