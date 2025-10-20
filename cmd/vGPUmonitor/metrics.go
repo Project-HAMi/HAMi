@@ -276,6 +276,8 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
 	}
 
+	deviceName = "NVIDIA-" + deviceName
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUdesc,
 		prometheus.GaugeValue,
@@ -301,6 +303,8 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
 	}
+
+	deviceName = "NVIDIA-" + deviceName
 
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUUtilizationdesc,
