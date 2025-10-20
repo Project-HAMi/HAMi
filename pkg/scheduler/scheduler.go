@@ -460,7 +460,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	releaseNodeLocks := func() (*extenderv1.ExtenderBindingResult, error) {
 		klog.InfoS("Release node locks", "node", args.Node)
 		for _, val := range device.GetDevices() {
-			val.ReleaseNodeLock(node, current)
+			if releaseErr := val.ReleaseNodeLock(node, current); releaseErr != nil {
+				klog.ErrorS(releaseErr, "Failed to release node lock", "node", args.Node, "device", val)
+			}
 		}
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
