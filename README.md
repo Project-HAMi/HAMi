@@ -72,7 +72,7 @@ A task with the following resources will see 3000M device memory inside containe
 [HUAWEI Ascend NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)   
 [MetaX GPU](docs/metax-support.md)   
 
-## Architect
+## Architecture
 
 <img src="./imgs/hami-arch.png" width = "600" /> 
 
