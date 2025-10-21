@@ -219,6 +219,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	// only pod scheduler failure will record failure event
 	if len(res.NodeList) == 0 {
 		for reasonType, failureNodes := range failureReason {
+			sort.Strings(failureNodes)
 			reason := fmt.Errorf("%d nodes %s(%s)", len(failureNodes), reasonType, strings.Join(failureNodes, ","))
 			s.recordScheduleFilterResultEvent(task, EventReasonFilteringFailed, "", reason)
 		}
