@@ -52,8 +52,8 @@ A task with the following resources will see 3000M device memory inside containe
 ```yaml
       resources:
         limits:
-          nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 3000 # identifies 3G GPU memory each physical GPU allocates to the pod
+          nvidia.com/gpu: 1 # declares how many physical GPUs the pod needs
+          nvidia.com/gpumem: 3000 # identifies 3G GPU memory each physical GPU allocated to the pod
 ```
 
 ![img](./imgs/hard_limit.jpg)
@@ -174,7 +174,7 @@ If you have any questions, please feel free to reach out to us through the follo
 - [mailing list](https://groups.google.com/forum/#!forum/hami-project)
 - [slack](https://cloud-native.slack.com/archives/C07T10BU4R2) | [Join](https://slack.cncf.io/)
 
-## Talks and References
+## Talks and Presentations
 
 |                  | Link                                                                                                                    |
 |------------------|-------------------------------------------------------------------------------------------------------------------------|
