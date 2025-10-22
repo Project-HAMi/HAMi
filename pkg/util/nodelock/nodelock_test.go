@@ -18,6 +18,7 @@ package nodelock
 
 import (
 	"context"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -331,5 +332,116 @@ func TestReleaseNodeLock(t *testing.T) {
 				t.Errorf("ReleaseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
+	}
+}
+
+// TestConcurrentNodeLocks verifies that locks on different nodes can be acquired concurrently.
+func TestConcurrentNodeLocks(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	nodeLocks = newNodeLockManager()
+
+	prevProcs := runtime.GOMAXPROCS(0)
+	targetProcs := runtime.NumCPU()
+	if targetProcs < 2 {
+		targetProcs = 2
+	}
+	runtime.GOMAXPROCS(targetProcs)
+	defer runtime.GOMAXPROCS(prevProcs)
+
+	makePod := func(name string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "test-ns",
+			},
+		}
+	}
+
+	for _, nodeName := range []string{"node-a", "node-b"} {
+		_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:        nodeName,
+				Annotations: map[string]string{},
+			},
+		}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("Failed to create node %s: %v", nodeName, err)
+		}
+	}
+
+	// Holding node-a's lock must not block locking node-b.
+	nodeALock := nodeLocks.getLock("node-a")
+	nodeALock.Lock()
+
+	podB := makePod("pod-b")
+	nodeBResult := make(chan error, 1)
+	go func() {
+		nodeBResult <- LockNode("node-b", "", podB)
+	}()
+
+	select {
+	case err := <-nodeBResult:
+		if err != nil {
+			t.Fatalf("LockNode for node-b failed: %v", err)
+		}
+	case <-time.After(200 * time.Millisecond):
+		t.Fatal("LockNode for node-b blocked by unrelated node lock")
+	}
+
+	nodeALock.Unlock()
+
+	// Clean up node-b lock to avoid leaking state for subsequent checks.
+	if err := ReleaseNodeLock("node-b", "", podB, false); err != nil {
+		t.Fatalf("ReleaseNodeLock for node-b failed: %v", err)
+	}
+
+	// Holding node-a's lock should block another lock attempt on the same node until released.
+	nodeALock.Lock()
+
+	podA := makePod("pod-a")
+	nodeAResult := make(chan error, 1)
+	go func() {
+		nodeAResult <- LockNode("node-a", "", podA)
+	}()
+
+	select {
+	case err := <-nodeAResult:
+		t.Fatalf("LockNode for node-a should block while mutex held, got err=%v", err)
+	case <-time.After(100 * time.Millisecond):
+		// Expected path: still waiting for the per-node lock.
+	}
+
+	nodeALock.Unlock()
+
+	if err := <-nodeAResult; err != nil {
+		t.Fatalf("LockNode for node-a failed after releasing lock: %v", err)
+	}
+
+	if err := ReleaseNodeLock("node-a", "", podA, false); err != nil {
+		t.Fatalf("ReleaseNodeLock for node-a failed: %v", err)
+	}
+}
+
+// TestCleanupNodeLockOnNodeDelete ensures CleanupNodeLock removes the entry
+// and a subsequent getLock allocates a fresh mutex instance.
+func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
+	// Reset manager state for this test
+	nodeLocks = newNodeLockManager()
+
+	first := nodeLocks.getLock("to-be-deleted")
+	if first == nil {
+		t.Fatalf("expected non-nil mutex from getLock")
+	}
+
+	// Trigger cleanup as if node was removed by autoscaler
+	CleanupNodeLock("to-be-deleted")
+
+	second := nodeLocks.getLock("to-be-deleted")
+	if second == nil {
+		t.Fatalf("expected non-nil mutex from getLock after cleanup")
+	}
+
+	if first == second {
+		t.Fatalf("expected a new mutex instance after cleanup, got the same pointer")
 	}
 }
