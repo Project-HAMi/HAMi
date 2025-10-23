@@ -41,12 +41,14 @@ import (
 )
 
 var (
-	QPS                float32
-	Burst              int
-	Timeout            int
-	HTTPBind           string
-	SchedulerName      string
-	MetricsBindAddress string
+	QPS                          float32
+	Burst                        int
+	Timeout                      int
+	HTTPBind                     string
+	LeaderElectResourceName      string
+	LeaderElectResourceNamespace string
+	SchedulerName                string
+	MetricsBindAddress           string
 
 	DefaultMem         int32
 	DefaultCores       int32
