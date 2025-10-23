@@ -17,13 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -61,6 +64,8 @@ func init() {
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 0, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
@@ -101,6 +106,12 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
+func isLeader() bool {
+	lease, _ := client.GetClient().CoordinationV1().Leases(config.LeaderElectResourceNamespace).
+		Get(context.Background(), config.LeaderElectResourceName, metav1.GetOptions{})
+	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == os.Getenv("HOSTNAME")
+}
+
 func start() error {
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
@@ -113,11 +124,26 @@ func start() error {
 
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
-	sher.Start()
-	defer sher.Stop()
 
-	// start monitor metrics
-	go sher.RegisterFromNodeAnnotations()
+	var running bool
+
+	go func() {
+		if isLeader() && !running {
+			klog.InfoS("Became leader, starting metrics/watch logic")
+			running = true
+			sher.Start()
+			// start monitor metrics
+			go sher.RegisterFromNodeAnnotations()
+		}
+		if !isLeader() && running {
+			klog.InfoS("Lost leadership, stopping metrics/watch logic")
+			running = false
+			sher.Stop()
+		}
+
+		time.Sleep(5 * time.Second)
+	}()
+
 	go initMetrics(config.MetricsBindAddress)
 
 	// start http server
