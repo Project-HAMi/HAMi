@@ -27,7 +27,7 @@ Prior than v1.0.1.3, nvidia.com/gpucores will not limit utilization inside conta
 
 ## v1.0.1.4
 
-**Add nvidia.com/gpumem-percentage resoure name**
+**Add nvidia.com/gpumem-percentage resource name**
 This resource indicates the device memory percentage of GPU, can not be used with "nvidia.com/gpumem". If you want an exclusive GPU, specify both the "nvidia.com/gpucores" and "nvidia.com/gpumem-percentage" to 100
 
 **Add GPU type specification**
@@ -42,9 +42,9 @@ Add "devicePlugin.sockPath" parameter to set the location of vgpu.sock
 ## v1.1.0.0
 
 **Major Update: Device Memory will be counted more accurately**
-serveral device memory usage, including cuda context, modules, parameters, reserved addresses will be counted in v1.1.0.0
+several device memory usage, including cuda context, modules, parameters, reserved addresses will be counted in v1.1.0.0
 
-**Update to be compatable with CUDA 11.6 and Driver 500+**
+**Update to be compatible with CUDA 11.6 and Driver 500+**
 
 **Rework monitor strategy**
 Monitor will mmap control file into address space instead of reading it in each query.
@@ -56,7 +56,7 @@ Monitor will mmap control file into address space instead of reading it in each 
 **Core Utilization Oversubscribe and priority-base scheduling**
 Currently we have two priority, 0 for high and 1 for low. The core utilization of high priority task won't be limited to resourceCores unless sharing GPU node with other high priority tasks.
 The core utilization of low priority task won't be limited to resourceCores if no other tasks sharing its GPU.
-See exmaple.yaml for more details
+See example.yaml for more details
 
 **Add Container Core Utilization policy**
 See details in docs/config.md(docs/config_cn.md)
@@ -106,7 +106,7 @@ scheduler will read from this annotation and acknowledge this registration. So, 
 
 **Optimization in code**
 
-Put nvidia-device-plugin related code in a seperate directory "nvidiadevice"
+Put nvidia-device-plugin related code in a separate directory "nvidiadevice"
 
 **Libvgpu log adjusting**
 
@@ -127,7 +127,7 @@ fix env CUDA_VISIBLE_DEVICES not working properly sometimes.
 
 **BUG fix**
 
-fix initialization failed with non-root uers
+fix initialization failed with non-root users
 
 fix core limitation not working properly on A30
 
