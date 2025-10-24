@@ -270,7 +270,7 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
 	}
-	
+
 	deviceName, nvret := hdev.GetName()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
