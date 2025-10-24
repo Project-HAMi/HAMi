@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
@@ -37,34 +38,20 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
-const (
-	cardTypeMismatch                  = "CardTypeMismatch"
-	cardUUIDMismatch                  = "CardUuidMismatch"
-	cardTimeSlicingExhausted          = "CardTimeSlicingExhausted"
-	cardComputeUnitsExhausted         = "CardComputeUnitsExhausted"
-	cardInsufficientMemory            = "CardInsufficientMemory"
-	cardInsufficientCore              = "CardInsufficientCore"
-	numaNotFit                        = "NumaNotFit"
-	exclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
-	cardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
-	nodeInsufficientDevice            = "NodeInsufficientDevice"
-	allocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
-	nodeUnfitPod                      = "NodeUnfitPod"
-	nodeFitPod                        = "NodeFitPod"
-)
-
 var scheduleFailureReasons = []string{
-	cardTypeMismatch,
-	cardUUIDMismatch,
-	cardTimeSlicingExhausted,
-	cardComputeUnitsExhausted,
-	cardInsufficientMemory,
-	cardInsufficientCore,
-	numaNotFit,
-	exclusiveDeviceAllocateConflict,
-	cardNotFoundCustomFilterRule,
-	nodeInsufficientDevice,
-	allocatedCardsInsufficientRequest,
+	common.CardTypeMismatch,
+	common.CardUUIDMismatch,
+	common.CardTimeSlicingExhausted,
+	common.CardComputeUnitsExhausted,
+	common.CardInsufficientMemory,
+	common.CardInsufficientCore,
+	common.NumaNotFit,
+	common.ExclusiveDeviceAllocateConflict,
+	common.CardNotFoundCustomFilterRule,
+	common.NodeInsufficientDevice,
+	common.AllocatedCardsInsufficientRequest,
+	common.ResourceQuotaNotFit,
+	common.CardNotHealth,
 }
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
@@ -91,8 +78,8 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	for _, k := range requests {
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
-			klog.V(5).InfoS(nodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
-			return false, nodeInsufficientDevice
+			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
+			return false, common.NodeInsufficientDevice
 		}
 		sort.Sort(node.Devices)
 		_, ok := device.GetDevices()[k.Type]
@@ -100,7 +87,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 			return false, "Device type not found"
 		}
 		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
-		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
+		reason := fmt.Sprintf("node: %s reason: %s", node.Node.Name, devreason)
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
@@ -193,9 +180,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 				ctrfit = fit
 				if !fit {
-					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
-					failedNodes[nodeID] = nodeUnfitPod
+					failedNodes[nodeID] = common.NodeUnfitPod
 					for _, reasonType := range parseNodeReason(reason) {
 						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 					}
@@ -209,7 +196,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				res.NodeList = append(res.NodeList, &score)
 				fitNodesMutex.Unlock()
 				score.OverrideScore(snapshot, userNodePolicy)
-				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
+				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
 	}
