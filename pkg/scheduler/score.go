@@ -100,7 +100,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 			return false, "Device type not found"
 		}
 		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
-		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
+		reason := "node:" + node.Node.Name + " " + "reason:" + devreason
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
