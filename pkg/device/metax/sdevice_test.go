@@ -167,6 +167,120 @@ func TestMutateAdmission(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "app class task must allocate single device",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("2"),
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass: Online,
+					},
+				},
+			},
+
+			expectedFound: true,
+			expectedError: "app-class pod must request single device",
+			expectedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass: Online,
+					},
+				},
+			},
+		},
+		{
+			name: "app class task verify error",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass: "oNLine",
+					},
+				},
+			},
+
+			expectedFound: true,
+			expectedError: fmt.Sprintf("%s must be set one of [%s, %s]",
+				MetaxSGPUAppClass, Online, Offline),
+			expectedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass: "oNLine",
+					},
+				},
+			},
+		},
+		{
+			name: "offline task with qos",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass:  Offline,
+						MetaxSGPUQosPolicy: "best-effortx",
+					},
+				},
+			},
+
+			expectedFound: true,
+			expectedError: fmt.Sprintf("%s must be set one of [%s, %s, %s]",
+				MetaxSGPUQosPolicy, BestEffort, FixedShare, BurstShare),
+			expectedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass:  Offline,
+						MetaxSGPUQosPolicy: "best-effortx",
+					},
+				},
+			},
+		},
+		{
+			name: "online task with qos",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					},
+				},
+			},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass:  Online,
+						MetaxSGPUQosPolicy: "best-effortx",
+					},
+				},
+			},
+
+			expectedFound: true,
+			expectedError: "",
+			expectedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxSGPUAppClass:  Online,
+						MetaxSGPUQosPolicy: "best-effortx",
+					},
+				},
+			},
+		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
 			metaxSDevice := &MetaxSDevices{}
@@ -733,6 +847,84 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 			wantReason: "1/1 CardTypeMismatch",
 		},
 		{
+			name: "fit fail: online task, app class unfit",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      1,
+				Count:     100,
+				Usedmem:   64,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Health:    true,
+				Type:      MetaxSGPUDevice,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{},
+							},
+						},
+					},
+				},
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos: map[string]string{
+				MetaxSGPUAppClass: Online,
+			},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardAppClassMismatch",
+		},
+		{
+			name: "fit fail: normal task, app class unfit",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      1,
+				Count:     100,
+				Usedmem:   64,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 10,
+				Numa:      0,
+				Health:    true,
+				Type:      MetaxSGPUDevice,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Online,
+								},
+							},
+						},
+					},
+				},
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardAppClassMismatch",
+		},
+		{
 			name: "fit fail: device unhealthy",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
@@ -758,7 +950,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 			wantFit:    false,
 			wantLen:    0,
 			wantDevIDs: []string{},
-			wantReason: "1/1 CardTypeMismatch",
+			wantReason: "1/1 CardUnhealthy",
 		},
 		{
 			name: "fit fail: card overused",
@@ -1070,270 +1262,270 @@ func TestMetaxSDevices_AddResourceUsage(t *testing.T) {
 func TestPrioritizeExclusiveDevices(t *testing.T) {
 	for _, ts := range []struct {
 		name             string
-		candidateDevices device.ContainerDevices
+		candidateDevices []*device.DeviceUsage
 		require          int
 
-		expectedDevices device.ContainerDevices
+		expectedDevices []*device.DeviceUsage
 	}{
 		{
 			name: "require one device",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 			require: 1,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 		},
 		{
 			name: "require two device",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 			require: 2,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 			},
 		},
 		{
 			name: "require four device, best result",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 			require: 4,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 		},
 		{
 			name: "require four device, general result",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 			require: 4,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-1",
+					ID:         "GPU-1",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-2",
+					ID:         "GPU-2",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(2)},
 				},
 			},
 		},
 		{
 			name: "no metalink, require two device",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 			},
 			require: 2,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-5",
+					ID:         "GPU-5",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 			},
 		},
 		{
 			name: "part metalink, require two device, best result",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-3",
+					ID:         "GPU-3",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-4",
+					ID:         "GPU-4",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 			},
 			require: 2,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 			},
 		},
 		{
 			name: "part metalink, require four device, bad result",
-			candidateDevices: device.ContainerDevices{
+			candidateDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-3",
+					ID:         "GPU-3",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-4",
+					ID:         "GPU-4",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 			},
 			require: 4,
 
-			expectedDevices: device.ContainerDevices{
+			expectedDevices: []*device.DeviceUsage{
 				{
-					UUID:       "GPU-6",
+					ID:         "GPU-6",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-7",
+					ID:         "GPU-7",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-8",
+					ID:         "GPU-8",
 					CustomInfo: map[string]any{"LinkZone": int32(1)},
 				},
 				{
-					UUID:       "GPU-3",
+					ID:         "GPU-3",
 					CustomInfo: map[string]any{"LinkZone": int32(0)},
 				},
 			},
@@ -1437,7 +1629,7 @@ func TestNeedScore(t *testing.T) {
 		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
-			result := needScore(ts.podDevices)
+			result := topologyAwareEnable(ts.podDevices)
 
 			if result != ts.expected {
 				t.Errorf("needScore failed: result %v, expected %v",
@@ -1838,6 +2030,845 @@ func TestScoreExclusiveDevices(t *testing.T) {
 
 			if result != ts.expectedScore {
 				t.Errorf("scoreExclusiveDevices failed: result %v, expected %v",
+					result, ts.expectedScore)
+			}
+		})
+	}
+}
+
+func TestCheckAppClass(t *testing.T) {
+	for _, ts := range []struct {
+		name     string
+		reqClass string
+		usage    device.DeviceUsage
+
+		expected bool
+	}{
+		{
+			name:     "idle device fit",
+			reqClass: Online,
+			usage: device.DeviceUsage{
+				ID:       "GPU-123",
+				Used:     0,
+				PodInfos: []*device.PodInfo{},
+			},
+
+			expected: true,
+		},
+		{
+			name:     "normal task unfit online device",
+			reqClass: "",
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 1,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Online,
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+		{
+			name:     "normal task unfit offline device",
+			reqClass: "",
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 1,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Offline,
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+		{
+			name:     "normal task fit normal device",
+			reqClass: "",
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 1,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{},
+							},
+						},
+					},
+				},
+			},
+
+			expected: true,
+		},
+		{
+			name:     "online task unfit normal device",
+			reqClass: Online,
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 1,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{},
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+		{
+			name:     "online task fit online/offline device",
+			reqClass: Online,
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 2,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Online,
+								},
+							},
+						},
+					},
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Offline,
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected: true,
+		},
+		{
+			name:     "offline task unfit online device",
+			reqClass: Offline,
+			usage: device.DeviceUsage{
+				ID:   "GPU-123",
+				Used: 2,
+				PodInfos: []*device.PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Online,
+								},
+							},
+						},
+					},
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Annotations: map[string]string{
+									MetaxSGPUAppClass: Offline,
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expected: false,
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			res := checkAppClass(ts.reqClass, ts.usage)
+
+			if res != ts.expected {
+				t.Errorf("checkAppClass failed: result %v, expected %v",
+					res, ts.expected)
+			}
+		})
+	}
+}
+
+func TestPrioritizeOnlineDevices(t *testing.T) {
+	for _, ts := range []struct {
+		name             string
+		candidateDevices []*device.DeviceUsage
+
+		expectedDevices []*device.DeviceUsage
+	}{
+		{
+			name: "prioritize idle device",
+			candidateDevices: []*device.DeviceUsage{
+				{
+					ID:       "GPU-1",
+					PodInfos: []*device.PodInfo{},
+				},
+				{
+					ID: "GPU-2",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-3",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-4",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-5",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-6",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-7",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedDevices: []*device.DeviceUsage{
+				{
+					ID:       "GPU-1",
+					PodInfos: []*device.PodInfo{},
+				},
+			},
+		},
+		{
+			name: "prioritize onlyOnline device",
+			candidateDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-1",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-2",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-3",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-4",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-1",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "prioritize online&offline device",
+			candidateDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-1",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-2",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-3",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-4",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-5",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-2",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "prioritize onlyOffline device",
+			candidateDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-1",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+				{
+					ID: "GPU-2",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedDevices: []*device.DeviceUsage{
+				{
+					ID: "GPU-1",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			result := prioritizeOnlineDevices(ts.candidateDevices, 1)
+
+			if !reflect.DeepEqual(result, ts.expectedDevices) {
+				t.Errorf("prioritizeOnlineDevices failed: result %v, expected %v",
+					result, ts.expectedDevices)
+			}
+		})
+	}
+}
+
+func TestScoreOnlineDevices(t *testing.T) {
+	for _, ts := range []struct {
+		name     string
+		pickDevs device.PodSingleDevice
+		devs     []*device.DeviceUsage
+
+		expectedScore int
+	}{
+		{
+			name: "test idle device",
+			pickDevs: device.PodSingleDevice{
+				{
+					{
+						UUID: "GPU-123",
+					},
+				},
+			},
+			devs: []*device.DeviceUsage{
+				{
+					ID:       "GPU-123",
+					PodInfos: []*device.PodInfo{},
+				},
+			},
+
+			expectedScore: 0,
+		},
+		{
+			name: "test only online device",
+			pickDevs: device.PodSingleDevice{
+				{
+					{
+						UUID: "GPU-123",
+					},
+				},
+			},
+			devs: []*device.DeviceUsage{
+				{
+					ID: "GPU-123",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedScore: -40,
+		},
+		{
+			name: "test only offline device",
+			pickDevs: device.PodSingleDevice{
+				{
+					{
+						UUID: "GPU-123",
+					},
+				},
+			},
+			devs: []*device.DeviceUsage{
+				{
+					ID: "GPU-123",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedScore: -200,
+		},
+		{
+			name: "test online/offline device",
+			pickDevs: device.PodSingleDevice{
+				{
+					{
+						UUID: "GPU-123",
+					},
+				},
+			},
+			devs: []*device.DeviceUsage{
+				{
+					ID: "GPU-123",
+					PodInfos: []*device.PodInfo{
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Offline,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+						{
+							Pod: &corev1.Pod{
+								ObjectMeta: metav1.ObjectMeta{
+									Annotations: map[string]string{
+										MetaxSGPUAppClass: Online,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+
+			expectedScore: -44,
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			result := scoreOnlineDevices(ts.pickDevs, ts.devs)
+
+			if !reflect.DeepEqual(result, ts.expectedScore) {
+				t.Errorf("scoreOnlineDevices failed: result %v, expected %v",
 					result, ts.expectedScore)
 			}
 		})

@@ -32,12 +32,18 @@ const (
 
 	MetaxSGPUQosPolicy     = "metax-tech.com/sgpu-qos-policy"
 	MetaxSGPUTopologyAware = "metax-tech.com/sgpu-topology-aware"
+	MetaxSGPUAppClass      = "metax-tech.com/sgpu-app-class"
 )
 
 const (
 	BestEffort = "best-effort"
 	FixedShare = "fixed-share"
 	BurstShare = "burst-share"
+)
+
+const (
+	Online  = "online"
+	Offline = "offline"
 )
 
 type MetaxSDeviceInfo struct {
