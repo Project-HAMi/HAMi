@@ -24,6 +24,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/ccoveille/go-safecast"
 
 	corev1 "k8s.io/api/core/v1"
@@ -160,10 +161,6 @@ const (
 )
 
 var (
-	HandshakeAnnos     = map[string]string{}
-	RegisterAnnos      = map[string]string{}
-	configFile         string
-	DebugMode          bool
 	GPUSchedulerPolicy string
 	InRequestDevices   map[string]string
 	SupportDevices     map[string]string
@@ -408,7 +405,7 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 }
 
 func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	handshake := n.Annotations[HandshakeAnnos[devType]]
+	handshake := n.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
