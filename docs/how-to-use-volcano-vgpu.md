@@ -109,7 +109,7 @@ spec:
       resources:
         limits:
           volcano.sh/vgpu-number: 2 # requesting 2 gpu cards
-          volcano.sh/vgpu-memory: 3000 # (optinal)each vGPU uses 3G device memory
+          volcano.sh/vgpu-memory: 3000 # (optional)each vGPU uses 3G device memory
           volcano.sh/vgpu-cores: 50 # (optional)each vGPU uses 50% core  
 EOF
 ```
