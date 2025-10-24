@@ -19,7 +19,7 @@
   整数类型，预设值是 10。GPU 的分割数，每一张 GPU 都不能分配超过其配置数目的任务。若其配置为 N 的话，每个 GPU 上最多可以同时存在 N 个任务。
 * `nvidia.deviceMemoryScaling`：
   浮点数类型，预设值是 1。NVIDIA 装置显存使用比例，可以大于 1（启用虚拟显存，实验功能）。对于有 *M* 显存大小的 NVIDIA GPU，
-  如果我们配置`nvidia.deviceMemoryScaling`参数为 *S*，在部署了我们装置插件的 Kubenetes 集群中，这张 GPU 分出的 vGPU 将总共包含 `S * M` 显存。
+  如果我们配置`nvidia.deviceMemoryScaling`参数为 *S*，在部署了我们装置插件的 Kubernetes 集群中，这张 GPU 分出的 vGPU 将总共包含 `S * M` 显存。
 * `nvidia.migStrategy`：
   字符串类型，目前支持 "none“ 与 “mixed“ 两种工作方式，前者忽略 MIG 设备，后者使用专门的资源名称指定 MIG 设备，使用详情请参考 mix_example.yaml，默认为 "none"
 * `nvidia.disablecorelimit`：

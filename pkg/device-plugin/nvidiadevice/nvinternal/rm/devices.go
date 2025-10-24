@@ -199,7 +199,7 @@ func (ds Devices) GetPaths() []string {
 	return res
 }
 
-// AlignedAllocationSupported checks whether all devices support an alligned allocation
+// AlignedAllocationSupported checks whether all devices support an aligned allocation
 func (ds Devices) AlignedAllocationSupported() bool {
 	for _, d := range ds {
 		if !d.AlignedAllocationSupported() {
@@ -209,7 +209,7 @@ func (ds Devices) AlignedAllocationSupported() bool {
 	return true
 }
 
-// AlignedAllocationSupported checks whether the device supports an alligned allocation
+// AlignedAllocationSupported checks whether the device supports an aligned allocation
 func (d Device) AlignedAllocationSupported() bool {
 	if d.IsMigDevice() {
 		return false

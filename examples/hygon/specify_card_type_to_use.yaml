@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: alexnet-tf-gpu-pod-mem
   annotations:
-    hygon.com/use-dcutype: "Z100" # Specify the card type for this job, use comma to seperate, will not launch job on non-specified card
+    hygon.com/use-dcutype: "Z100" # Specify the card type for this job, use comma to separate, will not launch job on non-specified card
     #In this example, we want to run this job on Z100
   labels:
     purpose: demo-tf-amdgpu

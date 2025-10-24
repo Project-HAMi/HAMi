@@ -23,7 +23,7 @@ device-sharing features include the following:
 
 ### Enabling GPU-sharing Support
 
-* Deploy Metax GPU Operator on metax nodes (Please consult your device provider to aquire its package and document)
+* Deploy Metax GPU Operator on metax nodes (Please consult your device provider to acquire its package and document)
 
 * Deploy HAMi according to README.md
 
@@ -59,7 +59,7 @@ When multiple GPUs are configured on a single server, the GPU cards are connecte
 
 ![img](../imgs/metax_topo.png)
 
-A user job requests a certain number of metax-tech.com/gpu resources, Kubernetes schedule pods to the appropriate node. gpu-device further processes the logic of allocating the remaining resources on the resource node following criterias below:
+A user job requests a certain number of metax-tech.com/gpu resources, Kubernetes schedule pods to the appropriate node. gpu-device further processes the logic of allocating the remaining resources on the resource node following criteria below:
 1. MetaXLink takes precedence over PCIe Switch in two way:
 – A connection is considered a MetaXLink connection when there is a MetaXLink connection and a PCIe Switch connection between the two cards.
 – When both the MetaXLink and the PCIe Switch can meet the job request
@@ -86,7 +86,7 @@ Equipped with MetaXLink interconnected resources.
 
 ### Enabling topo-awareness scheduling
 
-* Deploy Metax GPU Extensions on metax nodes (Please consult your device provider to aquire its package and document)
+* Deploy Metax GPU Extensions on metax nodes (Please consult your device provider to acquire its package and document)
 
 * Deploy HAMi according to README.md
 
