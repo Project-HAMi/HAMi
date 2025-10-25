@@ -755,7 +755,10 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 		{
 			name: "Test with non-zero resource requests",
 			node: &corev1.Node{},
-			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "nozerorr",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
 			hasLock:     false,
@@ -770,7 +773,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values,default,nozerorr"},
 				},
 			}
 

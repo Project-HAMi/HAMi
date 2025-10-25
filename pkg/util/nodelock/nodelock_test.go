@@ -445,3 +445,61 @@ func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
 		t.Fatalf("expected a new mutex instance after cleanup, got the same pointer")
 	}
 }
+
+func TestGeneratePodNamespaceName(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		sep      string
+		expected string
+	}{
+		{
+			name: "Test with valid pod and separator",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "test-namespace",
+				},
+			},
+			sep:      "-",
+			expected: "test-namespace-test-pod",
+		},
+		{
+			name: "Test with empty separator",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "test-namespace",
+				},
+			},
+			sep:      "",
+			expected: "test-namespacetest-pod",
+		},
+		{
+			name: "Test with special characters in separator",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "test-namespace",
+				},
+			},
+			sep:      "@@@",
+			expected: "test-namespace@@@test-pod",
+		},
+		{
+			name:     "Test with nil pod",
+			pod:      nil,
+			sep:      "",
+			expected: "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := GeneratePodNamespaceName(tt.pod, tt.sep)
+			if result != tt.expected {
+				t.Errorf("GeneratePodNamespaceName() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
