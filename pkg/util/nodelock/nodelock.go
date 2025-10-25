@@ -175,8 +175,8 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	if !ok {
 		return nil
 	}
-	if !skipNodeLockOwnerCheck && !strings.Contains(lockStr, pod.Name) {
-		klog.InfoS("NodeLock is not set by this pod", lockStr, "pod", pod.Name)
+	if !skipNodeLockOwnerCheck && !strings.Contains(lockStr, fmt.Sprintf("%s%s", NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))) {
+		klog.InfoS("NodeLock is not set by this pod", lockStr, "name", pod.Name, "namespace", pod.Namespace)
 		return nil
 	}
 
@@ -262,10 +262,16 @@ func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error
 	return lockTime, s[1], s[2], err
 }
 
-func GenerateNodeLockKeyByPod(pods *corev1.Pod) string {
-	if pods == nil {
+func GenerateNodeLockKeyByPod(pod *corev1.Pod) string {
+	if pod == nil {
 		return time.Now().Format(time.RFC3339)
 	}
-	ns, name := pods.Namespace, pods.Name
-	return fmt.Sprintf("%s%s%s%s%s", time.Now().Format(time.RFC3339), NodeLockSep, ns, NodeLockSep, name)
+	return fmt.Sprintf("%s%s%s", time.Now().Format(time.RFC3339), NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))
+}
+
+func GeneratePodNamespaceName(pod *corev1.Pod, sep string) string {
+	if pod == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s%s%s", pod.Namespace, sep, pod.Name)
 }
