@@ -175,7 +175,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	if !ok {
 		return nil
 	}
-if !skipNodeLockOwnerCheck && !strings.HasSuffix(lockStr, fmt.Sprintf("%s%s", NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))) {
+	if !skipNodeLockOwnerCheck && !strings.HasSuffix(lockStr, fmt.Sprintf("%s%s", NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))) {
 		klog.InfoS("NodeLock is not set by this pod", lockStr, "name", pod.Name, "namespace", pod.Namespace)
 		return nil
 	}
