@@ -228,22 +228,17 @@ func InitDevicesWithConfig(config *Config) error {
 
 // validateConfig validates the configuration object to ensure it is complete.
 func validateConfig(config *Config) error {
-	allNeedToBeValidatedConfigs := []bool{
-		!reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}),
-		!reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{}),
-		!reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{}),
-		!reflect.DeepEqual(config.IluvatarConfig, []iluvatar.IluvatarConfig{}),
-		!reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{}),
-		!reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{}),
-		!reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{}),
-		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}),
-		len(config.VNPUs) > 0,
-	}
-
-	for _, needToBeValidated := range allNeedToBeValidatedConfigs {
-		if needToBeValidated {
-			return nil
-		}
+	if !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}) ||
+		!reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{}) ||
+		!reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{}) ||
+		len(config.IluvatarConfig) > 0 ||
+		!reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{}) ||
+		!reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{}) ||
+		!reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{}) ||
+		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
+		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
+		len(config.VNPUs) > 0 {
+		return nil
 	}
 	return fmt.Errorf("all configurations are empty")
 }
