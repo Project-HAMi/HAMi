@@ -150,5 +150,12 @@ func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 	klog.InfoS("Retrieved scheduled pods",
 		"podCount", podCount,
 	)
-	return m.pods, nil
+
+	// We should always use the ectypal map outside to avoid
+	// concurrent map iteration and map write fatal error.
+	podsCopy := make(map[k8stypes.UID]*PodInfo, podCount)
+	for uid, info := range m.pods {
+		podsCopy[uid] = info
+	}
+	return podsCopy, nil
 }
