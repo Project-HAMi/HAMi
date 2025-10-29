@@ -6,9 +6,9 @@ require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
 	github.com/NVIDIA/go-nvlib v0.8.1
 	github.com/NVIDIA/go-nvml v0.13.0-1
-	github.com/NVIDIA/k8s-device-plugin v0.17.3
-	github.com/NVIDIA/nvidia-container-toolkit v1.18.0-rc.4
-	github.com/ccoveille/go-safecast v1.6.1
+	github.com/NVIDIA/k8s-device-plugin v0.18.0
+	github.com/NVIDIA/nvidia-container-toolkit v1.18.0
+	github.com/ccoveille/go-safecast v1.7.0
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/imdario/mergo v0.3.16
@@ -34,7 +34,7 @@ require (
 	k8s.io/client-go v0.33.0
 	k8s.io/klog/v2 v2.130.1
 	k8s.io/kube-scheduler v0.28.3
-	k8s.io/kubelet v0.31.3
+	k8s.io/kubelet v0.32.3
 	sigs.k8s.io/controller-runtime v0.21.0
 	tags.cncf.io/container-device-interface v1.0.1
 )
@@ -71,7 +71,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.65.0 // indirect
-	github.com/prometheus/procfs v0.16.1 // indirect
+	github.com/prometheus/procfs v0.17.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/syndtr/gocapability v0.0.0-20200815063812-42c35b437635 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
@@ -81,6 +81,7 @@ require (
 	golang.org/x/oauth2 v0.30.0 // indirect
 	golang.org/x/sync v0.17.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
+	golang.org/x/telemetry v0.0.0-20251008203120-078029d740a8 // indirect
 	golang.org/x/text v0.30.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
