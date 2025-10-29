@@ -43,6 +43,12 @@ const (
 	MetaxNodeLock = "hami.io/mutex.lock"
 )
 
+const (
+	CardUnhealthy         = "CardUnhealthy"
+	CardQosPolicyMismatch = "CardQosPolicyMismatch"
+	CardAppClassMismatch  = "CardAppClassMismatch"
+)
+
 var (
 	MetaxResourceNameVCount  string
 	MetaxResourceNameVCore   string
@@ -76,29 +82,45 @@ func (sdev *MetaxSDevices) CommonWord() string {
 }
 
 func (sdev *MetaxSDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCount)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCount)]
 	if !ok {
 		return false, nil
 	}
 
-	qos, ok := p.Annotations[MetaxSGPUQosPolicy]
-	if !ok {
-		if p.Annotations == nil {
-			p.Annotations = make(map[string]string)
+	appClass, ok := p.GetAnnotations()[MetaxSGPUAppClass]
+	if ok {
+		if appClass != Online && appClass != Offline {
+			return true, fmt.Errorf("%s must be set one of [%s, %s]",
+				MetaxSGPUAppClass, Online, Offline)
 		}
 
-		p.Annotations[MetaxSGPUQosPolicy] = BestEffort
-		return true, nil
+		if count.Value() != 1 {
+			return true, fmt.Errorf("app-class pod must request single device")
+		}
 	}
 
-	if qos == BestEffort ||
-		qos == FixedShare ||
-		qos == BurstShare {
-		return true, nil
-	} else {
-		return true, fmt.Errorf("%s must be set one of [%s, %s, %s]",
-			MetaxSGPUQosPolicy, BestEffort, FixedShare, BurstShare)
+	if appClass != Online {
+		qos, ok := p.Annotations[MetaxSGPUQosPolicy]
+		if !ok {
+			if p.Annotations == nil {
+				p.Annotations = make(map[string]string)
+			}
+
+			p.Annotations[MetaxSGPUQosPolicy] = BestEffort
+			return true, nil
+		}
+
+		if qos == BestEffort ||
+			qos == FixedShare ||
+			qos == BurstShare {
+			return true, nil
+		} else {
+			return true, fmt.Errorf("%s must be set one of [%s, %s, %s]",
+				MetaxSGPUQosPolicy, BestEffort, FixedShare, BurstShare)
+		}
 	}
+
+	return true, nil
 }
 
 func (sdev *MetaxSDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -135,7 +157,9 @@ func (sdev *MetaxSDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 		(*annoinput)[MetaxAllocatedSDevices] = string(byte)
 		(*annoinput)[MetaxPredicateTime] = strconv.FormatInt(time.Now().UnixNano(), 10)
 
-		sdev.addJitteryQos(pod.Annotations[MetaxSGPUQosPolicy], devlist)
+		if pod.Annotations[MetaxSGPUAppClass] != Online {
+			sdev.addJitteryQos(pod.Annotations[MetaxSGPUQosPolicy], devlist)
+		}
 	}
 
 	return *annoinput
@@ -180,20 +204,7 @@ func (sdev *MetaxSDevices) NodeCleanUp(nn string) error {
 }
 
 func (sdev *MetaxSDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) bool {
-	if strings.Compare(n.Type, MetaxSGPUDevice) == 0 {
-		if !d.Health {
-			klog.Infof("device[%s] unhealthy, check failed", d.ID)
-			return false
-		}
-
-		if sdev.checkDeviceQos(annos[MetaxSGPUQosPolicy], d, n) {
-			return true
-		} else {
-			return false
-		}
-	}
-
-	return false
+	return strings.Compare(n.Type, MetaxSGPUDevice) == 0
 }
 
 func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
@@ -285,10 +296,6 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 }
 
 func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
-	if !needScore(podDevices) {
-		return 0
-	}
-
 	// TODO: score should not depend on policy
 	// we have to give it a smaller value because of Spread policy
 	weight := 10000
@@ -296,7 +303,13 @@ func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 		weight = -10000
 	}
 
-	return float32(weight * scoreExclusiveDevices(podDevices, previous))
+	if appClassOnlineEnable(podDevices) {
+		return float32(weight * scoreOnlineDevices(podDevices, previous))
+	} else if topologyAwareEnable(podDevices) {
+		return float32(weight * scoreExclusiveDevices(podDevices, previous))
+	}
+
+	return 0
 }
 
 func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
@@ -304,15 +317,17 @@ func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 
-	if value, ok := n.CustomInfo["QosPolicy"]; ok {
-		if qos, ok := value.(string); ok {
-			expectedQos := pod.Annotations[MetaxSGPUQosPolicy]
-			if ctr.Usedcores == 100 {
-				expectedQos = ""
-			}
+	if pod.Annotations[MetaxSGPUAppClass] != Online {
+		if value, ok := n.CustomInfo["QosPolicy"]; ok {
+			if qos, ok := value.(string); ok {
+				expectedQos := pod.Annotations[MetaxSGPUQosPolicy]
+				if ctr.Usedcores == 100 {
+					expectedQos = ""
+				}
 
-			n.CustomInfo["QosPolicy"] = expectedQos
-			klog.Infof("device[%s] temp changed qos [%s] to [%s]", n.ID, qos, expectedQos)
+				n.CustomInfo["QosPolicy"] = expectedQos
+				klog.Infof("device[%s] temp changed qos [%s] to [%s]", n.ID, qos, expectedQos)
+			}
 		}
 	}
 
@@ -322,9 +337,9 @@ func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	klog.Infof("pod[%v] container request[%v] devices fit", klog.KObj(pod), request)
 
+	// filter device
 	reason := make(map[string]int)
-	candidateDevices := device.ContainerDevices{}
-
+	candidateDevices := []*device.DeviceUsage{}
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 
@@ -332,6 +347,27 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, request.Type)
 			continue
+		}
+
+		if !dev.Health {
+			reason[CardUnhealthy]++
+			klog.V(5).InfoS(CardUnhealthy, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+
+		appClass := pod.GetAnnotations()[MetaxSGPUAppClass]
+		if !checkAppClass(appClass, *dev) {
+			reason[CardAppClassMismatch]++
+			klog.V(5).InfoS(CardAppClassMismatch, "pod", klog.KObj(pod), "device", dev.ID, "appClass request", appClass)
+			continue
+		}
+
+		if appClass != Online {
+			if !mats.checkDeviceQos(pod.GetAnnotations()[MetaxSGPUQosPolicy], *dev, request) {
+				reason[CardQosPolicyMismatch]++
+				klog.V(5).InfoS(CardQosPolicyMismatch, "pod", klog.KObj(pod), "device", dev.ID, "qos request", pod.GetAnnotations()[MetaxSGPUQosPolicy])
+				continue
+			}
 		}
 
 		if !mats.checkUUID(pod.GetAnnotations(), *dev) {
@@ -359,24 +395,80 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		if dev.Totalcore-dev.Usedcores < request.Coresreq {
-			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", request.Coresreq)
-			continue
+		if appClass != Online {
+			if dev.Totalcore-dev.Usedcores < request.Coresreq {
+				reason[common.CardInsufficientCore]++
+				klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", request.Coresreq)
+				continue
+			}
+
+			// Coresreq=100 indicates it want this card exclusively
+			if dev.Totalcore == 100 && request.Coresreq == 100 && dev.Used > 0 {
+				reason[common.ExclusiveDeviceAllocateConflict]++
+				klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+				continue
+			}
+
+			// You can't allocate core=0 job to an already full GPU
+			if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && request.Coresreq == 0 {
+				reason[common.CardComputeUnitsExhausted]++
+				klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
+				continue
+			}
 		}
 
-		// Coresreq=100 indicates it want this card exclusively
-		if dev.Totalcore == 100 && request.Coresreq == 100 && dev.Used > 0 {
-			reason[common.ExclusiveDeviceAllocateConflict]++
-			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
-			continue
+		candidateDevices = append(candidateDevices, dev)
+	}
+
+	printDevs := []string{}
+	for _, dev := range candidateDevices {
+		printDevs = append(printDevs, dev.ID)
+	}
+	klog.V(5).Infof("pod[%v] candidate devices: %v", klog.KObj(pod), printDevs)
+
+	if len(candidateDevices) < int(request.Nums) {
+		if len(candidateDevices) > 0 {
+			reason[common.AllocatedCardsInsufficientRequest] = len(candidateDevices)
 		}
 
-		// You can't allocate core=0 job to an already full GPU
-		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && request.Coresreq == 0 {
-			reason[common.CardComputeUnitsExhausted]++
-			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
-			continue
+		klog.V(5).Infof("pod[%v] fit devices Insufficient: request[%d], fit[%d]", klog.KObj(pod), request.Nums, len(candidateDevices))
+		return false, map[string]device.ContainerDevices{}, common.GenReason(reason, len(devices))
+	}
+
+	// prioritize device
+	bestDevices := candidateDevices[0:request.Nums]
+	if len(candidateDevices) > int(request.Nums) {
+		if appClass, ok := pod.GetAnnotations()[MetaxSGPUAppClass]; ok {
+			// online Pod need additional logic to prioritize devices,
+			// offline Pod follow hami gpu scheduling policy
+			if appClass == Online {
+				bestDevices = prioritizeOnlineDevices(candidateDevices, int(request.Nums))
+			}
+		} else if request.Coresreq == 100 {
+			bestDevices = prioritizeExclusiveDevices(candidateDevices, int(request.Nums))
+		}
+	}
+
+	printDevs = []string{}
+	for _, dev := range bestDevices {
+		printDevs = append(printDevs, dev.ID)
+	}
+	klog.V(5).Infof("pod[%v] prioritize devices: %v", klog.KObj(pod), printDevs)
+
+	// generate containerDevice
+	containerDevices := device.ContainerDevices{}
+
+	coreReq := request.Coresreq
+	if pod.GetAnnotations()[MetaxSGPUAppClass] == Online {
+		coreReq = 0
+	}
+
+	for _, dev := range bestDevices {
+		memreq := int32(0)
+		if request.Memreq > 0 {
+			memreq = request.Memreq
+		} else {
+			memreq = dev.Totalmem * request.MemPercentagereq / 100
 		}
 
 		ctrDevice := device.ContainerDevice{
@@ -384,7 +476,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			UUID:       dev.ID,
 			Type:       dev.Type,
 			Usedmem:    memreq,
-			Usedcores:  request.Coresreq,
+			Usedcores:  coreReq,
 			CustomInfo: maps.Clone(dev.CustomInfo),
 		}
 
@@ -394,27 +486,11 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		}
 		ctrDevice.CustomInfo["Pod.Annotations"] = pod.Annotations
 
-		candidateDevices = append(candidateDevices, ctrDevice)
+		containerDevices = append(containerDevices, ctrDevice)
 	}
 
-	klog.V(5).Infof("pod[%v] candidate devices: %v", klog.KObj(pod), candidateDevices)
-
-	if len(candidateDevices) < int(request.Nums) {
-		if len(candidateDevices) > 0 {
-			reason[common.AllocatedCardsInsufficientRequest] = len(candidateDevices)
-		}
-
-		klog.V(5).Infof("pod[%v] fit devices Insufficient: request[%d], fit[%d]", klog.KObj(pod), request.Nums, len(candidateDevices))
-		return false, map[string]device.ContainerDevices{request.Type: candidateDevices}, common.GenReason(reason, len(devices))
-	}
-
-	bestDevices := candidateDevices[0:request.Nums]
-	if request.Coresreq == 100 {
-		bestDevices = prioritizeExclusiveDevices(candidateDevices, int(request.Nums))
-	}
-
-	klog.Infof("pod[%v] devices fit success, fit devices[%v]", klog.KObj(pod), bestDevices)
-	return true, map[string]device.ContainerDevices{request.Type: bestDevices}, ""
+	klog.Infof("pod[%v] devices fit success, fit devices[%v]", klog.KObj(pod), containerDevices)
+	return true, map[string]device.ContainerDevices{request.Type: containerDevices}, ""
 }
 
 func (dev *MetaxSDevices) GetResourceNames() device.ResourceNames {
@@ -498,12 +574,12 @@ func (sdev *MetaxSDevices) addJitteryQos(reqQos string, devs device.PodSingleDev
 	}
 }
 
-func prioritizeExclusiveDevices(candidateDevices device.ContainerDevices, require int) device.ContainerDevices {
+func prioritizeExclusiveDevices(candidateDevices []*device.DeviceUsage, require int) []*device.DeviceUsage {
 	if len(candidateDevices) <= require {
 		return candidateDevices
 	}
 
-	linkDevicesMap := map[int32]device.ContainerDevices{}
+	linkDevicesMap := map[int32][]*device.DeviceUsage{}
 	for _, device := range candidateDevices {
 		linkZone := int32(0)
 		if v, ok := device.CustomInfo["LinkZone"]; ok {
@@ -515,8 +591,8 @@ func prioritizeExclusiveDevices(candidateDevices device.ContainerDevices, requir
 		linkDevicesMap[linkZone] = append(linkDevicesMap[linkZone], device)
 	}
 
-	linkDevices := []device.ContainerDevices{}
-	otherDevices := device.ContainerDevices{}
+	linkDevices := [][]*device.DeviceUsage{}
+	otherDevices := []*device.DeviceUsage{}
 	for link, devices := range linkDevicesMap {
 		if link <= 0 {
 			otherDevices = append(otherDevices, devices...)
@@ -539,7 +615,7 @@ func prioritizeExclusiveDevices(candidateDevices device.ContainerDevices, requir
 		}
 	}
 
-	prioritizeDevices := device.ContainerDevices{}
+	prioritizeDevices := []*device.DeviceUsage{}
 
 	// 2. pickup devices cross MetaLink
 	for _, devices := range linkDevices {
@@ -566,7 +642,7 @@ func prioritizeExclusiveDevices(candidateDevices device.ContainerDevices, requir
 	return candidateDevices[0:require]
 }
 
-func needScore(podDevices device.PodSingleDevice) bool {
+func topologyAwareEnable(podDevices device.PodSingleDevice) bool {
 	enableTopoAware := MetaxTopologyAware
 
 	for _, ctrDevices := range podDevices {
@@ -651,8 +727,153 @@ func scoreExclusiveDevices(podDevices device.PodSingleDevice, previous []*device
 	lossScore := availableScore - allocatedScore - restScore
 
 	result := 10*allocatedScore - lossScore
-	klog.V(5).Infof("calcScore result[%d] >>> availableScore[%d], allocatedScore[%d], restScore[%d], lossScore[%d]",
+	klog.V(5).Infof("calcScore[topo-aware] result[%d] >>> availableScore[%d], allocatedScore[%d], restScore[%d], lossScore[%d]",
 		result, availableScore, allocatedScore, restScore, lossScore)
+
+	return result
+}
+
+func checkAppClass(requestClass string, dev device.DeviceUsage) bool {
+	if dev.Used == 0 {
+		klog.Infof("device[%s] not use, it can fit to any job", dev.ID)
+		return true
+	}
+
+	devOffline := false
+	devOnline := false
+	for idx, podinfo := range dev.PodInfos {
+		appClass := podinfo.GetAnnotations()[MetaxSGPUAppClass]
+		switch appClass {
+		case Online:
+			devOnline = true
+		case Offline:
+			devOffline = true
+		}
+
+		klog.V(5).Infof("device[%s], Pod[%d]: name[%s] AppClass[%s]",
+			dev.ID, idx, podinfo.Name, appClass)
+	}
+
+	klog.Infof("device[%s]: devClass [online: %v, offline: %v], requestClass [%s]",
+		dev.ID, devOnline, devOffline, requestClass)
+
+	// Online/Offline Pod can't scheduled to normal device
+	// normal Pod can't scheduled to device that runs Online/Offline Pod
+	// once device start to running Online Pod, Offline Pod in device will be suspended
+	// there is no need to schedule Offline Pod to device that runs Online Pod
+	if (devOffline || devOnline) == (requestClass == Offline || requestClass == Online) {
+		if devOnline && requestClass == Offline {
+			return false
+		}
+
+		return true
+	}
+
+	return false
+}
+
+func appClassOnlineEnable(podDevices device.PodSingleDevice) bool {
+	for _, ctrDevices := range podDevices {
+		for _, device := range ctrDevices {
+			if annotations, ok := device.CustomInfo["Pod.Annotations"].(map[string]string); ok {
+				if annotations[MetaxSGPUAppClass] == Online {
+					return true
+				}
+			}
+		}
+	}
+
+	return false
+}
+
+func prioritizeOnlineDevices(candidateDevices []*device.DeviceUsage, require int) []*device.DeviceUsage {
+	if len(candidateDevices) <= require {
+		return candidateDevices
+	}
+
+	sort.Slice(candidateDevices, func(i, j int) bool {
+		iOnlineCount, iOfflineCount := 0, 0
+		for _, pi := range candidateDevices[i].PodInfos {
+			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
+			switch appClass {
+			case Online:
+				iOnlineCount++
+			case Offline:
+				iOfflineCount++
+			}
+		}
+
+		jOnlineCount, jOfflineCount := 0, 0
+		for _, pi := range candidateDevices[j].PodInfos {
+			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
+			switch appClass {
+			case Online:
+				jOnlineCount++
+			case Offline:
+				jOfflineCount++
+			}
+		}
+
+		// try choose device with fewer online tasks,
+		// and try not to choose device that only have offline tasks
+		iOnlyOffline := iOnlineCount == 0 && iOfflineCount > 0
+		jOnlyOffline := jOnlineCount == 0 && jOfflineCount > 0
+
+		if iOnlyOffline && jOnlyOffline {
+			return iOfflineCount < jOfflineCount
+		} else if iOnlyOffline {
+			return false
+		} else if jOnlyOffline {
+			return true
+		} else {
+			if iOnlineCount == jOnlineCount {
+				return iOfflineCount < jOfflineCount
+			}
+			return iOnlineCount < jOnlineCount
+		}
+	})
+
+	return candidateDevices[0:require]
+}
+
+func scoreOnlineDevices(podDevices device.PodSingleDevice, previous []*device.DeviceUsage) int {
+	deviceSet := map[string]struct{}{}
+	for _, ctrDevs := range podDevices {
+		for _, dev := range ctrDevs {
+			deviceSet[dev.UUID] = struct{}{}
+		}
+	}
+
+	result := 0
+	for _, dev := range previous {
+		if _, ok := deviceSet[dev.ID]; !ok {
+			continue
+		}
+
+		onlineCount, offlineCount := 0, 0
+		for _, pi := range dev.PodInfos {
+			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
+			switch appClass {
+			case Online:
+				onlineCount++
+			case Offline:
+				offlineCount++
+			}
+		}
+
+		devScore := 0
+		if offlineCount > 0 && onlineCount == 0 {
+			devScore += -100 * offlineCount
+		} else {
+			devScore += -20 * onlineCount
+			devScore += -2 * offlineCount
+		}
+
+		result += devScore
+
+		klog.V(5).Infof("calcScore[online] dev[%s] result[%d] >>> onlineCount[%d], offlineCount[%d], devScore[%d]",
+			dev.ID, result, onlineCount, offlineCount, devScore)
+	}
 
 	return result
 }
