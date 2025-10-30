@@ -39,6 +39,7 @@ spec:
         {{- toYaml .Values.scheduler.podAnnotations | nindent 8 }}
       {{- end }}
     spec:
+      restartPolicy: Always
       serviceAccountName: {{ include "hami-vgpu.scheduler" . }}
       priorityClassName: system-node-critical
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
