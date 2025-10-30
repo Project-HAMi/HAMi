@@ -100,7 +100,7 @@ const (
 )
 
 type NvidiaConfig struct {
-	// These configs are shared and can be overritten by Nodeconfig.
+	// These configs are shared and can be overwritten by Nodeconfig.
 	NodeDefaultConfig            `yaml:",inline"`
 	ResourceCountName            string `yaml:"resourceCountName"`
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
@@ -120,7 +120,7 @@ type NvidiaConfig struct {
 	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
-// These configs can be sepecified for each node by using Nodeconfig.
+// These configs can be specified for each node by using Nodeconfig.
 type NodeDefaultConfig struct {
 	DeviceSplitCount    *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
 	DeviceMemoryScaling *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
@@ -138,7 +138,7 @@ type FilterDevice struct {
 
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
-		// These configs is shared and will overrite those in NvidiaConfig.
+		// These configs is shared and will overwrite those in NvidiaConfig.
 		NodeDefaultConfig `json:",inline"`
 		Name              string        `json:"name"`
 		OperatingMode     string        `json:"operatingmode"`
@@ -799,7 +799,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if len(tmpDevs[k.Type]) > int(originReq) {
 			if originReq == 1 {
 				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSignleCard(nodeInfo, request, tmpDevs)
+				lowestDevices := computeWorstSingleCard(nodeInfo, request, tmpDevs)
 				tmpDevs[k.Type] = lowestDevices
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
 			} else {
@@ -867,7 +867,7 @@ func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DeviceP
 	return deviceScoreMap
 }
 
-func computeWorstSignleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
+func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
 	worstScore := -1
 	worstDevices := device.ContainerDevices{}
 	deviceScoreMap := getDevicePairScoreMap(nodeInfo)

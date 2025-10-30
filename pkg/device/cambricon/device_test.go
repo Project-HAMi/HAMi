@@ -45,7 +45,7 @@ func Test_GetNodeDevices(t *testing.T) {
 		want []*device.DeviceInfo
 	}{
 		{
-			name: "test with vaild configuration",
+			name: "test with valid configuration",
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
@@ -422,7 +422,7 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				"CAMBRICON_DSMLU_ASSIGHED":                  "false",
+				"CAMBRICON_DSMLU_ASSIGNED":                  "false",
 				"CAMBRICON_DSMLU_PROFILE":                   "0_1_1000",
 				"hami.io/cambricon-mlu-devices-to-allocate": "device-0,MLU,256000,1:;",
 				"hami.io/cambricon-mlu-devices-allocated":   "device-0,MLU,256000,1:;",

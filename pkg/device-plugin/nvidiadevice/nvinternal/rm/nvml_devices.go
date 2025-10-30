@@ -163,7 +163,7 @@ func (d nvmlDevice) GetNumaNode() (bool, int, error) {
 
 	node, err := strconv.Atoi(string(bytes.TrimSpace(b)))
 	if err != nil {
-		return false, 0, fmt.Errorf("eror parsing value for NUMA node: %v", err)
+		return false, 0, fmt.Errorf("error parsing value for NUMA node: %v", err)
 	}
 
 	if node < 0 {

@@ -19,7 +19,7 @@
 
 ## Enabling GCU-sharing Support
 
-* Deploy gcushare-device-plugin on enflame nodes (Please consult your device provider to aquire its package and document)
+* Deploy gcushare-device-plugin on enflame nodes (Please consult your device provider to acquire its package and document)
 
 > **NOTICE:** *Install only gpushare-device-plugin, don't install gpu-scheduler-plugin package.*
 

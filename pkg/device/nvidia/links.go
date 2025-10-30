@@ -125,7 +125,7 @@ func (l P2PLinkType) String() string {
 func GetP2PLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 	level, ret := dev1.GetTopologyCommonAncestor(dev2)
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return P2PLinkUnknown, fmt.Errorf("failed to get commmon anscestor: %v", ret)
+		return P2PLinkUnknown, fmt.Errorf("failed to get common ancestor: %v", ret)
 	}
 
 	switch level {

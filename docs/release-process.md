@@ -101,7 +101,7 @@ For the detail, refer to <https://github.com/Project-HAMi/HAMi/blob/master/.gith
 
 ***Although AI is smart enough, the HAMi maintainer team needs to ensure that the version is released reliably. This is why we need to do it manually at the end.***
 
-🔥🔥🔥 Finally, if the github action release runs successfully, the version rlease is complete and has passed the e2e test (including images, charts, release-notes, etc.)
+🔥🔥🔥 Finally, if the github action release runs successfully, the version release is complete and has passed the e2e test (including images, charts, release-notes, etc.)
 
 Finally, we need to make sure that the GITHUB release information is what we expected (release-note content, Assets, etc.). If it is confirmed, modify the version to the official version instead of the pre-release version.
 

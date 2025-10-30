@@ -26,7 +26,7 @@ import (
 
 // SyscallExecRuntime wraps the path that a binary and defines the semantics for how to exec into it.
 // This can be used to wrap an OCI-compliant low-level runtime binary, allowing it to be used through the
-// Runtime internface.
+// Runtime interface.
 type SyscallExecRuntime struct {
 	logger *log.Logger
 	path   string

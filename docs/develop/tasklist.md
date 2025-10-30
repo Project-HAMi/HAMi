@@ -84,11 +84,11 @@ with the following command
 kubectl create -f ./compute-resources.yaml --namespace=myspace
 ```
 
-will limit the maxinum device memory allocated to namespace 'myspace' to 30G
+will limit the maximum device memory allocated to namespace 'myspace' to 30G
 
 ## Support multiple schedule policies
 
-Description: HAMi needs to support multiple schedule policies, to provide meets the need in complex senarios, a pod can select a schedule policy in annotations field.
+Description: HAMi needs to support multiple schedule policies, to provide meets the need in complex scenarios, a pod can select a schedule policy in annotations field.
 
 The effect of each schedule policy is shown in the table below
 

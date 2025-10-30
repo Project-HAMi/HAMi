@@ -21,8 +21,8 @@ Please note that, the DP used here is a customized version, you need to install 
 
 - InContainer Control
 
-The implementation of in-container hard limit is different for diffent devices. For example, HAMi-Core is responsible for NVIDIA devices. libvgpu-control.so is responsible for iluvatar devices, etc. HAMi needs to pass the correct environment variables in order for it to operate.
+The implementation of in-container hard limit is different for different devices. For example, HAMi-Core is responsible for NVIDIA devices. libvgpu-control.so is responsible for iluvatar devices, etc. HAMi needs to pass the correct environment variables in order for it to operate.
 
 <img src="./imgs/flowchart.jpeg" width = "600" /> 
 
-In summary, The flowchart of pod is descirbed as the figure above.
+In summary, The flowchart of pod is described as the figure above.
