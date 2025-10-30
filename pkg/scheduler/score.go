@@ -26,6 +26,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
@@ -35,36 +36,6 @@ func viewStatus(usage NodeUsage) {
 	for _, val := range usage.Devices.DeviceLists {
 		klog.V(5).InfoS("device status", "device id", val.Device.ID, "device detail", val)
 	}
-}
-
-const (
-	cardTypeMismatch                  = "CardTypeMismatch"
-	cardUUIDMismatch                  = "CardUuidMismatch"
-	cardTimeSlicingExhausted          = "CardTimeSlicingExhausted"
-	cardComputeUnitsExhausted         = "CardComputeUnitsExhausted"
-	cardInsufficientMemory            = "CardInsufficientMemory"
-	cardInsufficientCore              = "CardInsufficientCore"
-	numaNotFit                        = "NumaNotFit"
-	exclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
-	cardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
-	nodeInsufficientDevice            = "NodeInsufficientDevice"
-	allocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
-	nodeUnfitPod                      = "NodeUnfitPod"
-	nodeFitPod                        = "NodeFitPod"
-)
-
-var scheduleFailureReasons = []string{
-	cardTypeMismatch,
-	cardUUIDMismatch,
-	cardTimeSlicingExhausted,
-	cardComputeUnitsExhausted,
-	cardInsufficientMemory,
-	cardInsufficientCore,
-	numaNotFit,
-	exclusiveDeviceAllocateConflict,
-	cardNotFoundCustomFilterRule,
-	nodeInsufficientDevice,
-	allocatedCardsInsufficientRequest,
 }
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
@@ -91,16 +62,15 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	for _, k := range requests {
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
-			klog.V(5).InfoS(nodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
-			return false, nodeInsufficientDevice
+			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
+			return false, common.NodeInsufficientDevice
 		}
 		sort.Sort(node.Devices)
 		_, ok := device.GetDevices()[k.Type]
 		if !ok {
 			return false, "Device type not found"
 		}
-		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
-		reason := "node:" + node.Node.Name + " " + "reason:" + devreason
+		fit, tmpDevs, reason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
@@ -193,10 +163,10 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 				ctrfit = fit
 				if !fit {
-					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
-					failedNodes[nodeID] = nodeUnfitPod
-					for _, reasonType := range parseNodeReason(reason) {
+					failedNodes[nodeID] = common.NodeUnfitPod
+					for reasonType := range common.ParseReason(reason) {
 						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 					}
 					failedNodesMutex.Unlock()
@@ -209,7 +179,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				res.NodeList = append(res.NodeList, &score)
 				fitNodesMutex.Unlock()
 				score.OverrideScore(snapshot, userNodePolicy)
-				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
+				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
 	}
@@ -230,14 +200,4 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 		errorsSlice = append(errorsSlice, e)
 	}
 	return &res, utilerrors.NewAggregate(errorsSlice)
-}
-
-func parseNodeReason(nodeReason string) []string {
-	var res []string
-	for _, reason := range scheduleFailureReasons {
-		if strings.Contains(nodeReason, reason) {
-			res = append(res, reason)
-		}
-	}
-	return res
 }
