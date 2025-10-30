@@ -46,3 +46,20 @@ func GenReason(reasons map[string]int, cards int) string {
 	}
 	return strings.Join(reason, ", ")
 }
+
+func ParseReason(reason string) map[string]int {
+	reasons := strings.Split(reason, ", ")
+
+	reasonMap := map[string]int{}
+	for _, reason := range reasons {
+		cnt, key := 0, ""
+		_, err := fmt.Sscanf(reason, "%d/%d %s", &cnt, new(int), &key)
+		if err != nil {
+			continue
+		}
+
+		reasonMap[key] = cnt
+	}
+
+	return reasonMap
+}
