@@ -124,24 +124,27 @@ func start() error {
 
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
+	sher.Start()
+	defer sher.Stop()
 
-	var running bool
+	// start monitor metrics
+	go sher.RegisterFromNodeAnnotations()
 
 	go func() {
-		if isLeader() && !running {
-			klog.InfoS("Became leader, starting metrics/watch logic")
-			running = true
-			sher.Start()
-			// start monitor metrics
-			go sher.RegisterFromNodeAnnotations()
-		}
-		if !isLeader() && running {
-			klog.InfoS("Lost leadership, stopping metrics/watch logic")
-			running = false
-			sher.Stop()
-		}
+		lastLeader := false
+		for {
+			currentLeader := isLeader()
 
-		time.Sleep(5 * time.Second)
+			if currentLeader && !lastLeader {
+				fmt.Println("🔹 Became leader")
+			} else if !currentLeader && lastLeader {
+				fmt.Println("🔸 Lost leadership, exiting to trigger restart...")
+				os.Exit(1)
+			}
+
+			lastLeader = currentLeader
+			time.Sleep(5 * time.Second)
+		}
 	}()
 
 	go initMetrics(config.MetricsBindAddress)

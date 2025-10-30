@@ -212,8 +212,6 @@ func (s *Scheduler) Start() {
 
 func (s *Scheduler) Stop() {
 	close(s.stopCh)
-	s.quotaManager.ClearQuotas()
-	s.overviewstatus = nil
 }
 
 func (s *Scheduler) RegisterFromNodeAnnotations() {

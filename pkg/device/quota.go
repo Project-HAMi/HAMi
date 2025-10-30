@@ -236,10 +236,3 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 	}
 
 }
-
-func (q *QuotaManager) ClearQuotas() {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
-
-	q.Quotas = make(map[string]*DeviceQuota)
-}
