@@ -117,6 +117,7 @@ func start() error {
 	defer sher.Stop()
 
 	// start monitor metrics
+	go sher.ResyncPods()
 	go sher.RegisterFromNodeAnnotations()
 	go initMetrics(config.MetricsBindAddress)
 
