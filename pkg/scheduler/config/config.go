@@ -45,6 +45,7 @@ var (
 	Burst                        int
 	Timeout                      int
 	HTTPBind                     string
+	LeaderElect                  bool
 	LeaderElectResourceName      string
 	LeaderElectResourceNamespace string
 	SchedulerName                string

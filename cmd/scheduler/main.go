@@ -64,6 +64,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
+	rootCmd.Flags().BoolVar(&config.LeaderElect, "leader-elect", false, "The pod of hami-scheduler enable leader select")
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
@@ -130,22 +131,24 @@ func start() error {
 	// start monitor metrics
 	go sher.RegisterFromNodeAnnotations()
 
-	go func() {
-		lastLeader := false
-		for {
-			currentLeader := isLeader()
+	if config.LeaderElect {
+		go func() {
+			lastLeader := false
+			for {
+				currentLeader := isLeader()
 
-			if currentLeader && !lastLeader {
-				fmt.Println("🔹 Became leader")
-			} else if !currentLeader && lastLeader {
-				fmt.Println("🔸 Lost leadership, exiting to trigger restart...")
-				os.Exit(1)
+				if currentLeader && !lastLeader {
+					fmt.Println("🔹 Became leader")
+				} else if !currentLeader && lastLeader {
+					fmt.Println("🔸 Lost leadership, exiting to trigger restart...")
+					os.Exit(1)
+				}
+
+				lastLeader = currentLeader
+				time.Sleep(15 * time.Second)
 			}
-
-			lastLeader = currentLeader
-			time.Sleep(5 * time.Second)
-		}
-	}()
+		}()
+	}
 
 	go initMetrics(config.MetricsBindAddress)
 
