@@ -108,8 +108,12 @@ func injectProfilingRoute(router *httprouter.Router) {
 }
 
 func isLeader() bool {
-	lease, _ := client.GetClient().CoordinationV1().Leases(config.LeaderElectResourceNamespace).
+	lease, err := client.GetClient().CoordinationV1().Leases(config.LeaderElectResourceNamespace).
 		Get(context.Background(), config.LeaderElectResourceName, metav1.GetOptions{})
+	if err != nil {
+		klog.ErrorS(err, "failed to get leader election lease", "namespace", config.LeaderElectResourceNamespace, "name", config.LeaderElectResourceName)
+		return false
+	}
 	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == os.Getenv("HOSTNAME")
 }
 
@@ -138,9 +142,9 @@ func start() error {
 				currentLeader := isLeader()
 
 				if currentLeader && !lastLeader {
-					fmt.Println("🔹 Became leader")
+					klog.Info("🔹 Became leader")
 				} else if !currentLeader && lastLeader {
-					fmt.Println("🔸 Lost leadership, exiting to trigger restart...")
+					klog.Info("🔸 Lost leadership, exiting to trigger restart...")
 					os.Exit(1)
 				}
 
