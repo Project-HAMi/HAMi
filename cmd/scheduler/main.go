@@ -129,11 +129,6 @@ func start() error {
 
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
-	sher.Start()
-	defer sher.Stop()
-
-	// start monitor metrics
-	go sher.RegisterFromNodeAnnotations()
 
 	if config.LeaderElect {
 		go func() {
@@ -143,8 +138,13 @@ func start() error {
 
 				if currentLeader && !lastLeader {
 					klog.Info("🔹 Became leader")
+					sher.Start()
+					// start monitor metrics
+					go sher.RegisterFromNodeAnnotations()
+					go initMetrics(config.MetricsBindAddress)
 				} else if !currentLeader && lastLeader {
 					klog.Info("🔸 Lost leadership, exiting to trigger restart...")
+					sher.Stop()
 					os.Exit(1)
 				}
 
@@ -153,8 +153,6 @@ func start() error {
 			}
 		}()
 	}
-
-	go initMetrics(config.MetricsBindAddress)
 
 	// start http server
 	router := httprouter.New()
