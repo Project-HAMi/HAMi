@@ -199,15 +199,15 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					index, _ = strconv.Atoi(items[7])
 					mode = items[8]
 				}
-				count32, err := safecast.ToInt32(count)
+				count32, err := safecast.Convert[int32](count)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devmem32, err := safecast.ToInt32(devmem)
+				devmem32, err := safecast.Convert[int32](devmem)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devcore32, err := safecast.ToInt32(devcore)
+				devcore32, err := safecast.Convert[int32](devcore)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
@@ -383,7 +383,7 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	for _, val := range templates[templateIdx] {
 		count := 0
 		for count < int(val.Count) {
-			n.Index, err = safecast.ToInt32(templateIdx)
+			n.Index, err = safecast.Convert[int32](templateIdx)
 			if err != nil {
 				continue
 			}

@@ -264,7 +264,7 @@ func (p PciInfo) CPUAffinity() *uint {
 	if node < 0 {
 		return nil
 	}
-	affinity, err := safecast.ToUint(node)
+	affinity, err := safecast.Convert[uint](node)
 	if err != nil {
 		return nil
 	}
