@@ -505,7 +505,7 @@ func TestGetMetaxSDevices(t *testing.T) {
 			},
 		},
 		{
-			name: "test annotaions nil",
+			name: "test annotations nil",
 			node: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "normal",

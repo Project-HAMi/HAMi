@@ -51,7 +51,7 @@ const (
 	MLUNoUseUUID          = "cambricon.com/nouse-gpuuuid"
 	DsmluLockTime         = "cambricon.com/dsmlu.lock"
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
-	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGHED"
+	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
 )
 

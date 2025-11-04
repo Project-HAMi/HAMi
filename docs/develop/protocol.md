@@ -8,10 +8,10 @@ HAMi needs to know the spec of each AI devices in the cluster in order to schedu
 
 ```
 hami.io/node-handshake-{device-type}: Reported_{device_node_current_timestamp}
-hami.io/node-{deivce-type}-register: {Device 1}:{Device2}:...:{Device N}
+hami.io/node-{device-type}-register: {Device 1}:{Device2}:...:{Device N}
 ```
 
-The definiation of each device is in the following format:
+The definition of each device is in the following format:
 ```
 {Device UUID},{device split count},{device memory limit},{device core limit},{device type},{device numa},{healthy}
 ```
@@ -52,7 +52,7 @@ hami.io/device-schedule-time: {timestamp}
 each container request is in the following format:
 
 ```
-{device UUID},{device type keywork},{device memory request}:{device core request}
+{device UUID},{device type keyword},{device memory request}:{device core request}
 ```
 
 for example:

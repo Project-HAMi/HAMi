@@ -35,12 +35,12 @@ spec:
 kubectl create -f manifests/setup/
 kubectl create -f manifests/.
 
-#All resouce objects are been created under the monitoring namespace, you can check them and their status by run the following command
+#All resource objects are been created under the monitoring namespace, you can check them and their status by run the following command
 kubectl -n monitoring get all
 ```
 
 ```shell
-#Once all resouce objects under the monitoring namespace are in right status, you can obtain svc information for grafana, prometheus, and alertmanager in the following way
+#Once all resource objects under the monitoring namespace are in right status, you can obtain svc information for grafana, prometheus, and alertmanager in the following way
 root@controller01:~/kube-prometheus# kubectl -n monitoring get svc | egrep "NAME|grafana|prometheus-k8s|alertmanager-main"
 NAME                    TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)                         AGE
 alertmanager-main       NodePort    10.233.5.65     <none>        9093:30093/TCP,8080:30401/TCP   19h
@@ -58,7 +58,7 @@ Go to the "Configuration" -> "Data soutces" page in grafana and create a datasou
 
 ### Import dashboard
 
-Go to the "Configuration" -> "Data soutces" page in grafana and import the dashboard from https://grafana.com/grafana/dashboards/22043-hami-vgpu-metrics-dashboard/ , and a dashboard page named "hami-vgpu-metrics-dashboard" will be created. 22043-hami-vgpu-metrics-dashboard is valid in grafana8.5.5 and grafana9.1.0, and it's grealty possible that this dashboard is vaild in grafana version later than 9.1.0. Now data of some panels in this dashboard page are missing, which requires you read the rest of the document.
+Go to the "Configuration" -> "Data soutces" page in grafana and import the dashboard from https://grafana.com/grafana/dashboards/22043-hami-vgpu-metrics-dashboard/ , and a dashboard page named "hami-vgpu-metrics-dashboard" will be created. 22043-hami-vgpu-metrics-dashboard is valid in grafana8.5.5 and grafana9.1.0, and it's grealty possible that this dashboard is valid in grafana version later than 9.1.0. Now data of some panels in this dashboard page are missing, which requires you read the rest of the document.
 
 For versions earlier than grafana8.5.5, such as grafana7.5.17, please refer to：https://grafana.com/grafana/dashboards/21833-hami-vgpu-dashboard/ 
 
