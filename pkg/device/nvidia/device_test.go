@@ -605,7 +605,7 @@ func Test_InitNvidiaDevice(t *testing.T) {
 		want *NvidiaGPUDevices
 	}{
 		{
-			name: "test with vaild configuration",
+			name: "test with valid configuration",
 			args: NvidiaConfig{
 				ResourceCountName:  "nvidia.com/gpu",
 				ResourceMemoryName: "nvidia.com/gpumem",

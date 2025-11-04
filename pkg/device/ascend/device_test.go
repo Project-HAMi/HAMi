@@ -43,7 +43,7 @@ func Test_InitDevices(t *testing.T) {
 		want         []*Devices
 	}{
 		{
-			name:         "test with vaild configuration",
+			name:         "test with valid configuration",
 			enableAscend: true,
 			args: []VNPUConfig{
 				{

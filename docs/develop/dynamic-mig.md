@@ -15,7 +15,7 @@ HAMi is done by using [hami-core](https://github.com/Project-HAMi/HAMi-core), wh
 - CPU, Mem, and GPU combined schedule
 - GPU dynamic slice: Hami-core and MIG
 - Support node-level binpack and spread by GPU memory, CPU and Mem
-- A unified vGPU Pool different virtualization technics
+- A unified vGPU Pool different virtualization techniques
 - Tasks can choose to use MIG, use HAMi-core, or use both.
 
 ### Config maps
@@ -100,7 +100,7 @@ data:
 
 ## Examples
 
-Dynamic mig is compatable with hami tasks, as the example below: 
+Dynamic mig is compatible with hami tasks, as the example below: 
 Just Setting `nvidia.com/gpu` and `nvidia.com/gpumem`.
 
 ```yaml
@@ -145,9 +145,9 @@ The Procedure of a vGPU task which uses dynamic-mig is shown below:
 
 <img src="./imgs/hami-dynamic-mig-procedure.png" width = "800" /> 
 
-Note that after submited a task, deviceshare plugin will iterate over templates defined in configMap `hami-scheduler-device`, and find the first available template to fit. You can always change the content of that configMap, and restart vc-scheduler to customize.
+Note that after submitting a task, deviceshare plugin will iterate over templates defined in configMap `hami-scheduler-device`, and find the first available template to fit. You can always change the content of that configMap, and restart vc-scheduler to customize.
 
-If you submit the example on an empty A100-PCIE-40GB node, then it will select a GPU and chosse MIG template below:
+If you submit the example on an empty A100-PCIE-40GB node, then it will select a GPU and choose MIG template below:
 
 ```yaml
   2g.10gb : 3
