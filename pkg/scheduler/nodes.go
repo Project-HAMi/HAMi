@@ -111,5 +111,9 @@ func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	return m.nodes, nil
+	nodesCopy := make(map[string]*device.NodeInfo, len(m.nodes))
+	for nodeID, nodeInfo := range m.nodes {
+		nodesCopy[nodeID] = nodeInfo
+	}
+	return nodesCopy, nil
 }
