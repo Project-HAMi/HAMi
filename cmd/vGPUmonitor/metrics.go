@@ -84,13 +84,13 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid"}, nil,
+		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid"}, nil,
+		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
@@ -271,11 +271,18 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
 	}
 
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName = "NVIDIA-" + deviceName
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUdesc,
 		prometheus.GaugeValue,
 		float64(memory.Used),
-		fmt.Sprint(index), uuid,
+		fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
@@ -292,11 +299,18 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
 	}
 
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName = "NVIDIA-" + deviceName
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUUtilizationdesc,
 		prometheus.GaugeValue,
 		float64(util.Gpu),
-		fmt.Sprint(index), uuid,
+		fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
