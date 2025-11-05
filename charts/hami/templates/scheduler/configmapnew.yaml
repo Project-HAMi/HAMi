@@ -90,4 +90,8 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      {{- range .Values.devices.amd.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
 {{- end }}

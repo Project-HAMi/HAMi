@@ -340,6 +340,10 @@ devicePlugin:
 #        memory: 100Mi
 
 devices:
+  amd:
+    customresources:
+      - amd.com/gpu
+      - amd.com/gpu-memory
   awsneuron:
     customresources:
       - aws.amazon.com/neuron
