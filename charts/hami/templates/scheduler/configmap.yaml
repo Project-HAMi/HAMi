@@ -25,6 +25,12 @@ data:
                     "insecure": true
                 },
                 "managedResources": [
+                    {{- range .Values.devices.amd.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
                     {{- if .Values.devices.ascend.enabled }}
                     {{- range .Values.devices.ascend.customresources }}
                     {

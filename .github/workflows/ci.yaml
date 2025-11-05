@@ -123,7 +123,6 @@ jobs:
     runs-on: ubuntu-22.04
     if: needs.get_info.outputs.e2e_run == 'true'
     steps:
-      - uses: actions/checkout@master
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
         run: |

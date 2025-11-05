@@ -134,6 +134,8 @@ data:
     awsneuron:
       resourceCountName: "aws.amazon.com/neuron"
       resourceCoreName: "aws.amazon.com/neuroncore"
+    amd:
+      resourceCountName: "amd.com/gpu"
     vnpus:
     - chipName: 910A
       commonWord: Ascend910A
