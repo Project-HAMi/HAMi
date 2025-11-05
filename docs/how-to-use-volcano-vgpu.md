@@ -109,7 +109,7 @@ spec:
       resources:
         limits:
           volcano.sh/vgpu-number: 2 # requesting 2 gpu cards
-          volcano.sh/vgpu-memory: 3000 # (optinal)each vGPU uses 3G device memory
+          volcano.sh/vgpu-memory: 3000 # (optional)each vGPU uses 3G device memory
           volcano.sh/vgpu-cores: 50 # (optional)each vGPU uses 50% core  
 EOF
 ```
@@ -122,9 +122,4 @@ You can validate device memory using nvidia-smi inside container:
 
 ### Monitor
 
-volcano-scheduler-metrics records every GPU usage and limitation, visit the following address to get these metrics.
-
-```
-curl {volcano scheduler cluster ip}:8080/metrics
-```
-
+For information on monitoring, please refer to the [volcano-vgpu-device-plugin documentation](https://github.com/Project-HAMi/volcano-vgpu-device-plugin#monitor).

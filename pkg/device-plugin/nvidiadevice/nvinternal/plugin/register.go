@@ -158,7 +158,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	return &res
 }
 
-func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
+func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 	devices := plugin.getAPIDevices()
 	klog.InfoS("start working on the devices", "devices", devices)
 	annos := make(map[string]string)
@@ -222,7 +222,7 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 			time.Sleep(successSleepInterval)
 			continue
 		}
-		err := plugin.RegistrInAnnotation()
+		err := plugin.RegisterInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)
 			klog.Infof("Retrying in %v seconds...", errorSleepInterval)

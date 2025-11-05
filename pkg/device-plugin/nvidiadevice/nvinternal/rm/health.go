@@ -201,11 +201,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan any, devices Devices, unhe
 		if d.IsMigDevice() && e.GpuInstanceId != 0xFFFFFFFF && e.ComputeInstanceId != 0xFFFFFFFF {
 			gi := deviceIDToGiMap[d.ID]
 			ci := deviceIDToCiMap[d.ID]
-			giu32, err := safecast.ToUint32(gi)
+			giu32, err := safecast.Convert[uint32](gi)
 			if err != nil || giu32 != e.GpuInstanceId {
 				continue
 			}
-			ciu32, err := safecast.ToUint32(ci)
+			ciu32, err := safecast.Convert[uint32](ci)
 			if err != nil || ciu32 != e.ComputeInstanceId {
 				continue
 			}

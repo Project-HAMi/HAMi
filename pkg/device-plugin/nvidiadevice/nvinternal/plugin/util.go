@@ -54,7 +54,7 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	if err != nil {
 		return corev1.Container{}, device.ContainerDevices{}, err
 	}
-	klog.Infof("pod annotation decode vaule is %+v", pdevices)
+	klog.Infof("pod annotation decode value is %+v", pdevices)
 	res := device.ContainerDevices{}
 
 	pd, ok := pdevices[dtype]

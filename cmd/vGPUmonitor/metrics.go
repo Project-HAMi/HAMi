@@ -106,7 +106,7 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
-		"Container device meory description",
+		"Container device memory description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(

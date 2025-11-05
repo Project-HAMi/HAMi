@@ -700,7 +700,7 @@ func Test_IsValidUUID(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "set vaild uuid",
+			name: "set valid uuid",
 			args: struct {
 				idx  int
 				spec *Spec
@@ -721,7 +721,7 @@ func Test_IsValidUUID(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "set invaild uuid",
+			name: "set invalid uuid",
 			args: struct {
 				idx  int
 				spec *Spec
@@ -1035,7 +1035,7 @@ func Test_GetUtilizationSwitch(t *testing.T) {
 		want int32
 	}{
 		{
-			name: "get utilzation switch",
+			name: "get utilization switch",
 			args: Spec{
 				sr: &sharedRegionT{
 					utilizationSwitch: int32(1234),
@@ -1062,7 +1062,7 @@ func Test_SetUtilizationSwitch(t *testing.T) {
 		want int32
 	}{
 		{
-			name: "set utilzation switch",
+			name: "set utilization switch",
 			args: struct {
 				v    int32
 				spec Spec
