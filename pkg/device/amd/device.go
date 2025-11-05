@@ -237,17 +237,25 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 
 		klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 
-		tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
-			Idx:        int(dev.Index),
-			UUID:       dev.ID,
-			Type:       k.Type,
-			Usedmem:    Mi300xMemory,
-			Usedcores:  0,
-			CustomInfo: map[string]any{},
-		})
-		klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
-		return true, tmpDevs, ""
+		if k.Nums > 0 {
+			k.Nums--
+			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
+				Idx:        int(dev.Index),
+				UUID:       dev.ID,
+				Type:       k.Type,
+				Usedmem:    Mi300xMemory,
+				Usedcores:  0,
+				CustomInfo: map[string]any{},
+			})
+		}
+		if k.Nums == 0 {
+			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
+		}
 	}
-	klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }

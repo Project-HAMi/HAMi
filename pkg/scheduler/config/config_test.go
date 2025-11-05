@@ -28,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
@@ -424,6 +425,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		kunlun.KunlunGPUDevice:       kunlun.KunlunGPUCommonWord,
 		kunlun.XPUDevice:             kunlun.XPUCommonWord,
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
+		amd.AMDDevice:                amd.AMDDevice,
 	}
 
 	return expectedDevices, device.DevicesMap
