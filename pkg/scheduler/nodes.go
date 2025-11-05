@@ -113,7 +113,22 @@ func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 	defer m.mutex.RUnlock()
 	nodesCopy := make(map[string]*device.NodeInfo, len(m.nodes))
 	for nodeID, nodeInfo := range m.nodes {
-		nodesCopy[nodeID] = nodeInfo
+		if nodeInfo == nil || nodeInfo.Node == nil {
+			klog.Warningf("ListNodes nodesCopy step skip nodeID(%s) because of nil nodeInfo or node", nodeID)
+			continue
+		}
+		nodeCopy := &corev1.Node{
+			TypeMeta:   nodeInfo.Node.TypeMeta,
+			ObjectMeta: nodeInfo.Node.ObjectMeta,
+			Spec:       nodeInfo.Node.Spec,
+			Status:     nodeInfo.Node.Status,
+		}
+		nodeInfoCopy := &device.NodeInfo{
+			ID:      nodeInfo.ID,
+			Node:    nodeCopy,
+			Devices: append([]device.DeviceInfo{}, nodeInfo.Devices...),
+		}
+		nodesCopy[nodeID] = nodeInfoCopy
 	}
 	return nodesCopy, nil
 }
