@@ -8,7 +8,7 @@ require (
 	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/NVIDIA/k8s-device-plugin v0.18.0
 	github.com/NVIDIA/nvidia-container-toolkit v1.18.0
-	github.com/ccoveille/go-safecast v1.8.0
+	github.com/ccoveille/go-safecast v1.8.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
 	github.com/imdario/mergo v0.3.16
