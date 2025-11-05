@@ -28,6 +28,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type Devices interface {
@@ -160,10 +162,6 @@ const (
 )
 
 var (
-	HandshakeAnnos     = map[string]string{}
-	RegisterAnnos      = map[string]string{}
-	configFile         string
-	DebugMode          bool
 	GPUSchedulerPolicy string
 	InRequestDevices   map[string]string
 	SupportDevices     map[string]string
@@ -201,15 +199,15 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					index, _ = strconv.Atoi(items[7])
 					mode = items[8]
 				}
-				count32, err := safecast.ToInt32(count)
+				count32, err := safecast.Convert[int32](count)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devmem32, err := safecast.ToInt32(devmem)
+				devmem32, err := safecast.Convert[int32](devmem)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devcore32, err := safecast.ToInt32(devcore)
+				devcore32, err := safecast.Convert[int32](devcore)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
@@ -385,7 +383,7 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	for _, val := range templates[templateIdx] {
 		count := 0
 		for count < int(val.Count) {
-			n.Index, err = safecast.ToInt32(templateIdx)
+			n.Index, err = safecast.Convert[int32](templateIdx)
 			if err != nil {
 				continue
 			}
@@ -408,7 +406,7 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 }
 
 func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	handshake := n.Annotations[HandshakeAnnos[devType]]
+	handshake := n.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false

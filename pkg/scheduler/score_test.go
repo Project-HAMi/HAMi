@@ -28,6 +28,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
@@ -1573,7 +1574,7 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{},
 				},
 				failedNodes: map[string]string{
-					"node1": nodeUnfitPod,
+					"node1": common.NodeUnfitPod,
 				},
 				err: nil,
 			},
@@ -1679,8 +1680,8 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{},
 				},
 				failedNodes: map[string]string{
-					"node1": nodeUnfitPod,
-					"node2": nodeUnfitPod,
+					"node1": common.NodeUnfitPod,
+					"node2": common.NodeUnfitPod,
 				},
 				err: nil,
 			},
@@ -2762,7 +2763,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardTypeMismatch: 1},
+			want3: map[string]int{common.CardTypeMismatch: 1},
 		},
 		{
 			name: "device count less than device used",
@@ -2805,7 +2806,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardTimeSlicingExhausted: 1},
+			want3: map[string]int{common.CardTimeSlicingExhausted: 1},
 		},
 		{
 			name: "core limit exceed 100",
@@ -2848,7 +2849,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardInsufficientCore: 1},
+			want3: map[string]int{common.CardInsufficientCore: 1},
 		},
 		{
 			name: "card insufficient remaining memory",
@@ -2891,7 +2892,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardInsufficientMemory: 1},
+			want3: map[string]int{common.CardInsufficientMemory: 1},
 		},
 		{
 			name: "the container wants exclusive access to an entire card, but the card is already in use",
@@ -2934,7 +2935,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{exclusiveDeviceAllocateConflict: 1},
+			want3: map[string]int{common.ExclusiveDeviceAllocateConflict: 1},
 		},
 		{
 			name: "can't allocate core=0 job to an already full GPU",
@@ -2977,7 +2978,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardComputeUnitsExhausted: 1},
+			want3: map[string]int{common.CardComputeUnitsExhausted: 1},
 		},
 		{
 			name: "mode is mig",
@@ -3040,7 +3041,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 			},
-			want3: map[string]int{cardNotFoundCustomFilterRule: 1, allocatedCardsInsufficientRequest: 1},
+			want3: map[string]int{common.CardNotFoundCustomFilterRule: 1, common.AllocatedCardsInsufficientRequest: 1},
 		},
 		{
 			name: "card uuid don't match",
@@ -3089,7 +3090,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardUUIDMismatch: 1},
+			want3: map[string]int{common.CardUUIDMismatch: 1},
 		},
 		{
 			name: "numa not fit",
@@ -3136,7 +3137,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 			},
-			want3: map[string]int{numaNotFit: 1, allocatedCardsInsufficientRequest: 1},
+			want3: map[string]int{common.NumaNotFit: 1, common.AllocatedCardsInsufficientRequest: 1},
 		},
 		{
 			name: "test device kind of not fit reason",
@@ -3186,8 +3187,8 @@ func Test_fitInCertainDevice(t *testing.T) {
 			},
 			want1: false,
 			want2: map[string]device.ContainerDevices{},
-			want3: map[string]int{cardUUIDMismatch: 3, cardTimeSlicingExhausted: 4,
-				cardInsufficientMemory: 2, cardInsufficientCore: 1},
+			want3: map[string]int{common.CardUUIDMismatch: 3, common.CardTimeSlicingExhausted: 4,
+				common.CardInsufficientMemory: 2, common.CardInsufficientCore: 1},
 		},
 	}
 	for _, test := range tests {

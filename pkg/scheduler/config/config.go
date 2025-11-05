@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
@@ -75,6 +76,7 @@ type Config struct {
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
+	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -195,6 +197,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
 		}, config.AWSNeuronConfig},
+		{amd.AMDDevice, amd.AMDCommonWord, func(cfg any) (device.Devices, error) {
+			amdGPUConfig, ok := cfg.(amd.AMDConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", amd.AMDCommonWord)
+			}
+			return amd.InitAMDGPUDevice(amdGPUConfig), nil
+		}, config.AMDGPUConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -228,22 +237,20 @@ func InitDevicesWithConfig(config *Config) error {
 
 // validateConfig validates the configuration object to ensure it is complete.
 func validateConfig(config *Config) error {
-	var hasAnyConfig bool
-
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.IluvatarConfig, []iluvatar.IluvatarConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{})
-	hasAnyConfig = hasAnyConfig || len(config.VNPUs) > 0
-
-	if !hasAnyConfig {
-		return fmt.Errorf("all configurations are empty")
+	if !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}) ||
+		!reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{}) ||
+		!reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{}) ||
+		len(config.IluvatarConfig) > 0 ||
+		!reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{}) ||
+		!reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{}) ||
+		!reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{}) ||
+		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
+		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
+		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
+		len(config.VNPUs) > 0 {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("all configurations are empty")
 }
 
 func InitDevices() {
@@ -317,6 +324,8 @@ kunlun:
 awsneuron:
   resourceCountName: "aws.amazon.com/neuron"
   resourceCoreName: "aws.amazon.com/neuroncore"
+amd:
+  resourceCountName: "amd.com/gpu"
 vnpus:
   - chipName: "910A"
     commonWord: "Ascend910A"

@@ -80,7 +80,7 @@ GPU spread, use different GPU cards when possible, egs:
 
 ### Node-scheduler-policy
 
-![node-shceduler-policy-demo.png](./imgs/node-shceduler-policy-demo.png)
+![node-scheduler-policy-demo.png](./imgs/node-scheduler-policy-demo.png)
 
 #### Binpack
 

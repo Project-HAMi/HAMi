@@ -25,6 +25,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -67,7 +68,7 @@ func InitIluvatarDevice(config []IluvatarConfig) []*IluvatarDevices {
 		}
 		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
 		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
-		device.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
 		devs = append(devs, dev)
 		klog.Infof("load iluvatar gpu config %s: %v", commonWord, dev.config)
 	}

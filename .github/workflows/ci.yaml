@@ -123,7 +123,6 @@ jobs:
     runs-on: ubuntu-22.04
     if: needs.get_info.outputs.e2e_run == 'true'
     steps:
-      - uses: actions/checkout@master
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
         run: |
@@ -184,7 +183,7 @@ jobs:
           docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
       - name: Upload image.tar as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: hami-image
           path: image.tar
@@ -236,7 +235,7 @@ jobs:
           mv charts/*.tgz tmp
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@v5
         with:
           name: chart_package_artifact
           path: tmp/*
