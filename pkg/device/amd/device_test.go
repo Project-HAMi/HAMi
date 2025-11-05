@@ -113,7 +113,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					Index:      uint(0),
 					ID:         "test-AMDGPU-0",
 					Count:      int32(1),
-					Devmem:     int32(0),
+					Devmem:     int32(Mi300xMemory),
 					Devcore:    int32(100),
 					Type:       AMDDevice,
 					Numa:       0,
@@ -190,7 +190,7 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				device.SupportDevices[AMDDevice]: "test1,AMDGPU,0,3:test2,AMDGPU,0,3;",
+				device.SupportDevices[AMDDevice]: "test1,AMDGPU,0,3:test2,AMDGPU,0,3:;",
 			},
 		},
 	}
@@ -201,7 +201,7 @@ func Test_PatchAnnotations(t *testing.T) {
 			}
 			dev := InitAMDGPUDevice(config)
 			result := dev.PatchAnnotations(&test.args.pod, test.args.annoinput, test.args.pd)
-			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
+			assert.Equal(t, result[device.SupportDevices[AMDDevice]], test.want[device.SupportDevices[AMDDevice]])
 		})
 	}
 }
@@ -375,7 +375,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             AMDDevice,
-				Memreq:           int32(0),
+				Memreq:           int32(Mi300xMemory),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -411,6 +411,51 @@ func TestDevices_Fit(t *testing.T) {
 	}{
 		{
 			name: "fit success",
+			devices: []*device.DeviceUsage{
+				{
+					ID:         "dev-0",
+					Index:      0,
+					Used:       0,
+					Count:      2,
+					Usedmem:    0,
+					Totalmem:   0,
+					Totalcore:  3,
+					Usedcores:  0,
+					Numa:       0,
+					Type:       AMDDevice,
+					Health:     true,
+					CustomInfo: map[string]any{},
+				},
+				{
+					ID:         "dev-1",
+					Index:      0,
+					Used:       0,
+					Count:      12,
+					Usedmem:    0,
+					Totalmem:   0,
+					Totalcore:  3,
+					Usedcores:  0,
+					Numa:       0,
+					Type:       AMDDevice,
+					Health:     true,
+					CustomInfo: map[string]any{},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         0,
+				Type:             AMDDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    2,
+			wantDevIDs: []string{"dev-1", "dev-0"},
+			wantReason: "",
+		},
+		{
+			name: "fit success for multiple cards",
 			devices: []*device.DeviceUsage{
 				{
 					ID:         "dev-0",
