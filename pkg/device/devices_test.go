@@ -25,6 +25,8 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 var inRequestDevices map[string]string
@@ -530,6 +532,7 @@ func Test_EncodeNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
+	util.HandshakeAnnos["huawei.com/Ascend910"] = "hami.io/node-handshake-ascend"
 	tests := []struct {
 		name string
 		args struct {
@@ -549,7 +552,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
 						},
 					},
 				},
@@ -567,7 +570,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
 						},
 					},
 				},
@@ -585,7 +588,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
 						},
 					},
 				},
@@ -603,7 +606,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
 						},
 					},
 				},
