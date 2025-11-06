@@ -48,7 +48,7 @@ func Test_addNode_ListNodes(t *testing.T) {
 			},
 		},
 		{
-			name: "test vaild info",
+			name: "test valid info",
 			args: struct {
 				nodeID   string
 				nodeInfo device.NodeInfo
@@ -170,7 +170,7 @@ func Test_GetNode(t *testing.T) {
 			err:  fmt.Errorf("node %v not found", "node-111"),
 		},
 		{
-			name: "test vaild info",
+			name: "test valid info",
 			args: "node-04",
 			want: &device.NodeInfo{
 				ID:   "node-04",

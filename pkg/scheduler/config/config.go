@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
@@ -75,6 +76,7 @@ type Config struct {
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
+	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -195,6 +197,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
 		}, config.AWSNeuronConfig},
+		{amd.AMDDevice, amd.AMDCommonWord, func(cfg any) (device.Devices, error) {
+			amdGPUConfig, ok := cfg.(amd.AMDConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", amd.AMDCommonWord)
+			}
+			return amd.InitAMDGPUDevice(amdGPUConfig), nil
+		}, config.AMDGPUConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -237,6 +246,7 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{}) ||
 		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
 		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
+		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
 		len(config.VNPUs) > 0 {
 		return nil
 	}
@@ -314,6 +324,8 @@ kunlun:
 awsneuron:
   resourceCountName: "aws.amazon.com/neuron"
   resourceCoreName: "aws.amazon.com/neuroncore"
+amd:
+  resourceCountName: "amd.com/gpu"
 vnpus:
   - chipName: "910A"
     commonWord: "Ascend910A"
