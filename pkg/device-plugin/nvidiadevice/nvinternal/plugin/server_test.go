@@ -221,7 +221,7 @@ func Test_processMigConfigs(t *testing.T) {
 			name: "SingleConfigForAllDevices",
 			migConfigs: map[string]nvidia.MigConfigSpecSlice{
 				"current": {
-					{
+					nvidia.MigConfigSpec{
 						Devices:    []int32{},
 						MigEnabled: true,
 						MigDevices: testConfigs.Configs[1],
@@ -251,12 +251,12 @@ func Test_processMigConfigs(t *testing.T) {
 			name: "MultipleConfigsForSpecificDevicesWithNoEnabled",
 			migConfigs: map[string]nvidia.MigConfigSpecSlice{
 				"current": {
-					{
+					nvidia.MigConfigSpec{
 						Devices:    []int32{0, 1},
 						MigEnabled: true,
 						MigDevices: testConfigs.Configs[0],
 					},
-					{
+					nvidia.MigConfigSpec{
 						Devices:    []int32{2},
 						MigEnabled: false,
 						MigDevices: testConfigs.Configs[1],
