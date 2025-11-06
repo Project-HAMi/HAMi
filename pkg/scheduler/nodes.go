@@ -111,5 +111,18 @@ func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	return m.nodes, nil
+	nodesCopy := make(map[string]*device.NodeInfo, len(m.nodes))
+	for nodeID, nodeInfo := range m.nodes {
+		if nodeInfo == nil || nodeInfo.Node == nil {
+			klog.Warningf("ListNodes nodes copy step skip node(%s) because of nil NodeInfo or NodeInfo.Node", nodeID)
+			continue
+		}
+		nodeInfoCopy := &device.NodeInfo{
+			ID:      nodeInfo.ID,
+			Node:    nodeInfo.Node.DeepCopy(),
+			Devices: append([]device.DeviceInfo{}, nodeInfo.Devices...),
+		}
+		nodesCopy[nodeID] = nodeInfoCopy
+	}
+	return nodesCopy, nil
 }
