@@ -268,10 +268,6 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 }
 
 func MarshalNodeDevices(dlist []*DeviceInfo) string {
-	devAnnos := []*DeviceInfo{}
-	for _, val := range dlist {
-
-	}
 	data, err := json.Marshal(dlist)
 	if err != nil {
 		return ""
