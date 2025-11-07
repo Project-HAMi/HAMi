@@ -240,16 +240,18 @@ func (s *Scheduler) ResyncPods() {
 			return
 		}
 
+		var cachedPods []*corev1.Pod
+		if cachedPods, err = s.podManager.ListPodsUID(); err != nil {
+			klog.ErrorS(err, "Failed to list cached pods in pod manager")
+			continue
+		}
+		// If a Pod is subsequently deleted after `podManager.ListPodsUID`, it will still exist in the cachedPods slice and be deleted again below.
+		// However, as the podManager's deletion operation is inherently idempotent, this poses no issue.
+
 		// List pods scheduled by hami with hami.io/vgpu-node annotation
 		var podList []*corev1.Pod
 		if podList, err = s.podLister.List(vgpuNodeSelector); err != nil {
 			klog.ErrorS(err, "Failed to list scheduled pods")
-			continue
-		}
-
-		var cachedPods []*corev1.Pod
-		if cachedPods, err = s.podManager.ListPodsUID(); err != nil {
-			klog.ErrorS(err, "Failed to list cached pods in pod manager")
 			continue
 		}
 
@@ -268,6 +270,7 @@ func (s *Scheduler) ResyncPods() {
 		for _, p := range shouldDeleteCachedPods {
 			s.podManager.DelPod(p)
 		}
+
 	}
 }
 
