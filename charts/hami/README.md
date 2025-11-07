@@ -8,7 +8,7 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `global.imageRegistry` | Global Docker image registry | `""` |
 | `global.imagePullSecrets` | Global Docker image pull secrets | `[]` |
-| `global.imageTag` | Image tag | `"v2.7.0"` |
+| `global.imageTag` | Image tag | `"v2.7.1"` |
 | `global.gpuHookPath` | GPU Hook path | `/usr/local` |
 | `global.labels` | Global labels | `{}` |
 | `global.annotations` | Global annotations | `{}` |
