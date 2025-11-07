@@ -27,7 +27,6 @@ jobs:
   docker-build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@master
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
         run: |
