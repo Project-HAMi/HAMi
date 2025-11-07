@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.7.0"
+  imageTag: "v2.7.1"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
