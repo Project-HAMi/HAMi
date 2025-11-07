@@ -47,6 +47,11 @@ func Test_getNodesUsage(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
 		ID: "node1",
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
 		Devices: []device.DeviceInfo{
 			{
 				ID:      "GPU0",
