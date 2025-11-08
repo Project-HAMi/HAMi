@@ -325,7 +325,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 	failedNodes := make(map[string]string)
 	allNodes, err := s.ListNodes()
 	if err != nil {
-		return &overallnodeMap, failedNodes, err
+		return nil, nil, err
 	}
 
 	for _, node := range allNodes {
@@ -480,37 +480,41 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 
+	// Function to release node locks in case of binding failure
+	releaseNodeLocks := func() (*extenderv1.ExtenderBindingResult, error) {
+		klog.InfoS("Release node locks", "node", args.Node)
+		for _, val := range device.GetDevices() {
+			if releaseErr := val.ReleaseNodeLock(node, current); releaseErr != nil {
+				klog.ErrorS(releaseErr, "Failed to release node lock", "node", args.Node, "device", val)
+			}
+		}
+		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
+		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
+	}
+
 	for _, val := range device.GetDevices() {
 		err = val.LockNode(node, current)
 		if err != nil {
 			klog.ErrorS(err, "Failed to lock node", "node", args.Node, "device", val)
-			goto ReleaseNodeLocks
+			return releaseNodeLocks()
 		}
 	}
 
 	err = util.PatchPodAnnotations(current, tmppatch)
 	if err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		goto ReleaseNodeLocks
+		return releaseNodeLocks()
 	}
 
 	err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{})
 	if err != nil {
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-		goto ReleaseNodeLocks
+		return releaseNodeLocks()
 	}
 
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
-
-ReleaseNodeLocks:
-	klog.InfoS("Release node locks", "node", args.Node)
-	for _, val := range device.GetDevices() {
-		val.ReleaseNodeLock(node, current)
-	}
-	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
-	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
