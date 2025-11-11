@@ -1,0 +1,24 @@
+{{- if .Values.scheduler.serviceMonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- if .Values.scheduler.serviceMonitor.labels }}
+    {{- include "common.tplvalues.render" ( dict "value" .Values.scheduler.serviceMonitor.labels "context" $ ) | nindent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - interval: {{ .Values.scheduler.serviceMonitor.interval }}
+    path: /metrics
+    port: monitor
+  jobLabel: app
+  namespaceSelector:
+    matchNames:
+    - {{ include "hami-vgpu.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-scheduler
+{{- end }}
