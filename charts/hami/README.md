@@ -137,6 +137,16 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
 | `scheduler.service.monitorTargetPort` | Monitor target port | `9395` |
 
+### Scheduler ServiceMonitor Configuration
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `scheduler.servicemonitor.enabled` | Whether to enable ServiceMonitor for Prometheus monitoring | `false` |
+| `scheduler.servicemonitor.labels` | Additional labels for ServiceMonitor | `{}` |
+| `scheduler.servicemonitor.annotations` | Additional annotations for ServiceMonitor | `{}` |
+| `scheduler.servicemonitor.interval` | Scrape interval for metrics collection | `"15s"` |
+| `scheduler.servicemonitor.honorLabels` | Whether to honor labels from the target | `false` |
+
 ## Device Plugin Configuration
 
 | Parameter | Description | Default Value |
@@ -157,6 +167,16 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+
+### Device Plugin ServiceMonitor Configuration
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devicePlugin.monitor.servicemonitor.enabled` | Whether to enable ServiceMonitor for Prometheus monitoring | `false` |
+| `devicePlugin.monitor.servicemonitor.labels` | Additional labels for ServiceMonitor | `{}` |
+| `devicePlugin.monitor.servicemonitor.annotations` | Additional annotations for ServiceMonitor | `{}` |
+| `devicePlugin.monitor.servicemonitor.interval` | Scrape interval for metrics collection | `"15s"` |
+| `devicePlugin.monitor.servicemonitor.honorLabels` | Whether to honor labels from the target | `false` |
 
 ### Device Plugin Other Configuration
 
