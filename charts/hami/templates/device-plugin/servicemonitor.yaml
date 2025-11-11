@@ -1,0 +1,33 @@
+{{- if .Values.scheduler.servicemonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  {{- if .Values.devicePlugin.monitor.servicemonitor.annotations }}
+  annotations: 
+    {{ toYaml .Values.devicePlugin.monitor.servicemonitor.annotations | nindent 4 }}
+  {{- end }}
+  name: {{ include "hami-vgpu.device-plugin" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- if .Values.devicePlugin.monitor.servicemonitor.labels }}
+    {{ toYaml .Values.devicePlugin.monitor.servicemonitor.labels | indent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - path: /metrics
+    port: monitorport
+    scheme: http
+    interval: {{ .Values.devicePlugin.monitor.servicemonitor.interval | default "15s" }}
+    honorLabels: {{ .Values.devicePlugin.monitor.servicemonitor.honorLabels | default false }}
+  namespaceSelector:
+    matchNames:
+    - {{ include "hami-vgpu.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-device-plugin
+      {{- include "hami-vgpu.labels" . | nindent 6 }}
+      {{- if .Values.devicePlugin.service.labels }}  # Use devicePlugin instead of scheduler
+      {{ toYaml .Values.devicePlugin.service.labels | indent 6 }}
+      {{- end }}
+{{- end }}
