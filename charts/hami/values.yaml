@@ -237,7 +237,7 @@ scheduler:
     annotations: {}
   # scheduler ServiceMonitor configuration
   servicemonitor:
-    enabled: true
+    enabled: false
     labels: {}
     annotations: {}
     interval: "15s"
@@ -292,7 +292,7 @@ devicePlugin:
     resyncInterval: "5m"
     # ServiceMonitor configuration
     servicemonitor:
-      enabled: true
+      enabled: false
       labels: {}
       annotations: {}
       interval: "15s"
