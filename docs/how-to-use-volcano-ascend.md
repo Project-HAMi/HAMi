@@ -1,6 +1,6 @@
 # User Guide for Ascend Devices in Volcano
 
-# Introduction
+## Introduction
 
  Volcano supports vNPU feature for both Ascend 310 and Ascend 910 using the `ascend-device-plugin`. It also support managing heterogeneous Ascend cluster(Cluster with multiple Ascend types,i.e 910A,910B2,910B3,310p)
 
@@ -45,11 +45,11 @@ kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-pl
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
 ```
 
-refer https://github.com/Project-HAMi/ascend-device-plugin
+For more information, refer to the [ascend-device-plugin documentation](https://github.com/Project-HAMi/ascend-device-plugin).
 
 ### Scheduler Config Update
 
-update the scheduler configuration:
+Update the scheduler configuration:
 
 ```shell script
 kubectl edit cm -n volcano-system volcano-scheduler-configmap
@@ -75,7 +75,7 @@ data:
           deviceshare.KnownGeometriesCMName: hami-scheduler-device
 ```
 
-  **Note:** You may noticed that, `volcano-vgpu` has its own `KnownGeometriesCMName` and `KnownGeometriesCMNamespace`, which means if you want to use both vNPU and vGPU in a same volcano cluster, you need to merge the configMap from both sides and set it here.
+  **Note:** You may notice that, `volcano-vgpu` has its own `KnownGeometriesCMName` and `KnownGeometriesCMNamespace`, which means if you want to use both vNPU and vGPU in a same volcano cluster, you need to merge the configMap from both sides and set it here.
 
 ## Usage
 

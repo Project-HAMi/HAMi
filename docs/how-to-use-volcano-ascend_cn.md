@@ -33,7 +33,6 @@ helm install volcano volcano-sh/volcano -n volcano-system --create-namespace
 kubectl label node {ascend-node} ascend=on
 ``` 
 
-
 ### 部署 hami-scheduler-device ConfigMap
 
 ```
@@ -45,7 +44,7 @@ kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-pl
 ```
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
 ```
-参考 https://github.com/Project-HAMi/ascend-device-plugin
+更多信息请参考 [ascend-device-plugin 文档](https://github.com/Project-HAMi/ascend-device-plugin)。
 
 ### 更新调度器配置
 
@@ -74,7 +73,6 @@ data:
 ```
 
 **注意：** 您可能会注意到 `volcano-vgpu` 有自己的 `GeometriesCMName` 和 `KnownGeometriesCMNamespace`，这意味着如果要在同一个 Volcano 集群中同时使用 vNPU 和 vGPU，您需要合并两边的 configMap。
-
 
 ## 使用方法
 
@@ -105,5 +103,3 @@ spec:
 | 910B4 | huawei.com/Ascend910B4 | huawei.com/Ascend910B4-memory |
 | 910B4-1 | huawei.com/Ascend910B4-1 | huawei.com/Ascend910B4-1-memory |
 | 310P3 | huawei.com/Ascend310P | huawei.com/Ascend310P-memory |
-
-
