@@ -710,7 +710,7 @@ func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Dev
 
 func (plugin *NvidiaDevicePlugin) apiEnvs(envvar string, deviceIDs []string) map[string]string {
 	return map[string]string{
-		envvar: strings.Join(deviceIDs, ","),
+		envvar: "nvidia.com/gpu=" + strings.Join(deviceIDs, ","),
 	}
 }
 
