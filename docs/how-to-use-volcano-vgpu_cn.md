@@ -1,28 +1,27 @@
-# Volcano vgpu device plugin for Kubernetes
+# Volcano 中 vGPU 使用指南
 
-**Note**:
+**注意**:
 
-You *DON'T* need to install HAMi when using volcano-vgpu, only use  
-[Volcano vgpu device-plugin](https://github.com/Project-HAMi/volcano-vgpu-device-plugin) is good enough. It can provide device-sharing mechanism for NVIDIA devices managed by volcano.
+在 Volcano 中使用 vgpu 功能时只需要安装 [volcano vgpu device-plugin](https://github.com/Project-HAMi/volcano-vgpu-device-plugin)，不需要安装HAMi。安装后支持为 Volcano 管理的 NVIDIA 设备提供设备共享机制
 
-This is based on [Nvidia Device Plugin](https://github.com/NVIDIA/k8s-device-plugin), it uses [HAMi-core](https://github.com/Project-HAMi/HAMi-core) to support hard isolation of GPU card.
+该功能基于 [Nvidia Device Plugin](https://github.com/NVIDIA/k8s-device-plugin)，使用 [HAMi-core](https://github.com/Project-HAMi/HAMi-core) 支持GPU卡的硬隔离。
 
-Volcano vgpu is only available in volcano > 1.9
+Volcano vGPU功能仅在volcano 1.9以上版本中可用。
 
-## Quick Start
+## 快速开始
 
-### Install Volcano
+### 安装Volcano
 
 ```
 helm repo add volcano-sh https://volcano-sh.github.io/helm-charts
 helm install volcano volcano-sh/volcano -n volcano-system --create-namespace
 ```
 
-Additional installation methods can be found [here](https://github.com/volcano-sh/volcano?tab=readme-ov-file#quick-start-guide).
+更多安装方式请参考[这里](https://github.com/volcano-sh/volcano?tab=readme-ov-file#quick-start-guide)
 
-### Configure scheduler
+### 配置调度器
 
-update the scheduler configuration:
+更新调度器配置：
 
 ```shell script
 kubectl edit cm -n volcano-system volcano-scheduler-configmap
@@ -53,18 +52,17 @@ data:
       - name: binpack
 ```
 
-### Enabling GPU Support in Kubernetes
+### 在 Kubernetes 中启用GPU
 
-Once you have enabled this option on *all* the GPU nodes you wish to use,
-you can then enable GPU support in your cluster by deploying the following Daemonset:
+如果希望在**所有** GPU 节点上启用此功能，可以在集群中部署如下 Daemonset
 
 ```
 $ kubectl create -f https://raw.githubusercontent.com/Project-HAMi/volcano-vgpu-device-plugin/main/volcano-vgpu-device-plugin.yml
 ```
 
-### Verify environment is ready
+### 验证环境
 
-Check the node status, it is ok if `volcano.sh/vgpu-number` is included in the allocatable resources.
+如果可分配资源中包含 `volcano.sh/vgpu-number` 则表示环境正常。
 
 ```shell script
 $ kubectl get node {node name} -oyaml
@@ -94,9 +92,9 @@ status:
     volcano.sh/gpu-number: "10"   # vGPU resource
 ```
 
-### Running VGPU Jobs
+### 运行 vGPU 任务
 
-VGPU can be requested by both set "volcano.sh/vgpu-number" , "volcano.sh/vgpu-cores" and "volcano.sh/vgpu-memory" in resource.limit
+可以通过在resource.limits中设置 `volcano.sh/vgpu-number`、`volcano.sh/vgpu-cores` 和 `volcano.sh/vgpu-memory` 来请求vGPU资源
 
 ```shell script
 $ cat <<EOF | kubectl apply -f -
@@ -118,12 +116,10 @@ spec:
 EOF
 ```
 
-You can validate device memory using nvidia-smi inside container:
+可以在容器内使用nvidia-smi验证设备内存：
 
-> **WARNING:** *if you don't request GPUs when using the device plugin with NVIDIA images all
-> the GPUs on the machine will be exposed inside your container.
-> The number of vgpu used by a container can not exceed the number of gpus on that node.*
+> **警告:** *如果您在使用NVIDIA镜像时没有声明请求GPU资源，机器上的所有GPU都将在容器内暴露。一个容器使用的vGPU数量不能超过该节点上的GPU数量。*
 
-### Monitor
+### 监控
 
-For information on monitoring, please refer to the [volcano-vgpu-device-plugin documentation](https://github.com/Project-HAMi/volcano-vgpu-device-plugin#monitor).
+有关监控信息，请参考 [volcano-vgpu-device-plugin](https://github.com/Project-HAMi/volcano-vgpu-device-plugin#monitor)。
