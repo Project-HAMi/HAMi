@@ -20,7 +20,7 @@ This feature is only available in volcano >= 1.14.
 
 ### Install Volcano
 
-```
+```shell
 helm repo add volcano-sh https://volcano-sh.github.io/helm-charts
 helm install volcano volcano-sh/volcano -n volcano-system --create-namespace
 ```
@@ -29,19 +29,19 @@ Additional installation methods can be found [here](https://github.com/volcano-s
 
 ### Label the Node with ascend=on
 
-```
+```shell
 kubectl label node {ascend-node} ascend=on
 ``` 
 
 ### Deploy `hami-scheduler-device` config map
 
-```
+```shell
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-configmap.yaml
 ```
 
 ### Deploy ascend-device-plugin
 
-```
+```shell
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
 ```
 
@@ -51,7 +51,7 @@ For more information, refer to the [ascend-device-plugin documentation](https://
 
 Update the scheduler configuration:
 
-```shell script
+```shell
 kubectl edit cm -n volcano-system volcano-scheduler-configmap
 ```
 

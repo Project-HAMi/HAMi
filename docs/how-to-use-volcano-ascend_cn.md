@@ -20,7 +20,7 @@ Volcano 通过 `ascend-device-plugin` 支持 Ascend 310 和 Ascend 910 的 vNPU 
 
 ### 安装Volcano
 
-```
+```shell
 helm repo add volcano-sh https://volcano-sh.github.io/helm-charts
 helm install volcano volcano-sh/volcano -n volcano-system --create-namespace
 ```
@@ -29,26 +29,26 @@ helm install volcano volcano-sh/volcano -n volcano-system --create-namespace
 
 ### 给 Ascend 设备打上 ascend=on 标签
 
-```
+```shell
 kubectl label node {ascend-node} ascend=on
 ``` 
 
 ### 部署 hami-scheduler-device ConfigMap
 
-```
+```shell
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-configmap.yaml
 ```
 
 ### 部署 ascend-device-plugin
 
-```
+```shell
 kubectl apply -f https://raw.githubusercontent.com/Project-HAMi/ascend-device-plugin/refs/heads/main/ascend-device-plugin.yaml
 ```
 更多信息请参考 [ascend-device-plugin 文档](https://github.com/Project-HAMi/ascend-device-plugin)。
 
 ### 更新调度器配置
 
-```shell script
+```shell
 kubectl edit cm -n volcano-system volcano-scheduler-configmap
 ```
 
