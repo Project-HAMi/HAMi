@@ -114,7 +114,10 @@ func start() error {
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
-	sher.Start()
+	err := sher.Start()
+	if err != nil {
+		return err
+	}
 	defer sher.Stop()
 
 	// start monitor metrics

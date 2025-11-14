@@ -186,7 +186,7 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 	s.quotaManager.DelQuota(quota)
 }
 
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	defer atomic.StoreUint32(&s.started, 1)
 	s.kubeClient = client.GetClient()
@@ -195,24 +195,34 @@ func (s *Scheduler) Start() {
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
 
-	podEventHandlerRegistration := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
-	nodeEventHandlerRegistration := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register pod event handler: %v", err)
+	}
+	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
 		DeleteFunc: s.onDelNode,
 	})
-	resourceQuotaEventHandlerRegistration := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register node event handler: %v", err)
+	}
+	resourceQuotaEventHandlerRegistration, _ := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
 		UpdateFunc: s.onUpdateQuota,
 		DeleteFunc: s.onDelQuota,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to register resource quota event handler: %v", err)
+	}
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 	s.addAllEventHandlers()
+	return nil
 }
 
 func (s *Scheduler) Stop() {
