@@ -210,7 +210,7 @@ func (s *Scheduler) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to register node event handler: %v", err)
 	}
-	resourceQuotaEventHandlerRegistration, _ := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	resourceQuotaEventHandlerRegistration, err := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
 		UpdateFunc: s.onUpdateQuota,
 		DeleteFunc: s.onDelQuota,
