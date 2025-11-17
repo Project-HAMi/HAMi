@@ -18,7 +18,6 @@ package scheduler
 
 import (
 	"fmt"
-	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -53,21 +52,9 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	_, ok := m.nodes[nodeID]
 	if ok {
 		if len(nodeInfo.Devices) > 0 {
-			tmp := make([]device.DeviceInfo, 0, len(nodeInfo.Devices))
-			devices := device.GetDevices()
-			deviceType := ""
-			for _, val := range devices {
-				if strings.Contains(nodeInfo.Devices[0].Type, val.CommonWord()) {
-					deviceType = val.CommonWord()
-				}
+			for vendor := range nodeInfo.Devices {
+				m.nodes[nodeID].Devices[vendor] = nodeInfo.Devices[vendor]
 			}
-			for _, val := range m.nodes[nodeID].Devices {
-				if !strings.Contains(val.Type, deviceType) {
-					tmp = append(tmp, val)
-				}
-			}
-			m.nodes[nodeID].Devices = tmp
-			m.nodes[nodeID].Devices = append(m.nodes[nodeID].Devices, nodeInfo.Devices...)
 		}
 		m.nodes[nodeID].Node = nodeInfo.Node
 	} else {
@@ -78,25 +65,15 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
-
 	nodeInfo := m.nodes[nodeID]
 	if nodeInfo == nil {
 		return
 	}
-
-	devices := make([]device.DeviceInfo, 0)
-	for _, val := range nodeInfo.Devices {
-		if val.DeviceVendor != deviceVendor {
-			devices = append(devices, val)
-		}
-	}
-
-	if len(devices) == 0 {
+	delete(m.nodes[nodeID].Devices, deviceVendor)
+	if len(m.nodes[nodeID].Devices) == 0 {
 		delete(m.nodes, nodeID)
-	} else {
-		nodeInfo.Devices = devices
 	}
-	klog.InfoS("Removing device from node", "nodeName", nodeID, "deviceVendor", deviceVendor, "remainingDevices", devices)
+	klog.InfoS("Removing device from node", "nodeName", nodeID, "deviceVendor", deviceVendor)
 }
 
 func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {

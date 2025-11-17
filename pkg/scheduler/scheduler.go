@@ -271,28 +271,13 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				_, ok := util.HandshakeAnnos[devhandsk]
-				if ok {
-					tmppat := make(map[string]string)
-					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format(time.DateTime)
-					klog.V(5).InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
-					n, err := util.GetNode(val.Name)
-					if err != nil {
-						klog.ErrorS(err, "Failed to get node", "nodeName", val.Name)
-						continue
-					}
-					klog.V(5).InfoS("Patching node annotations", "nodeName", val.Name, "annotations", tmppat)
-					if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-						klog.ErrorS(err, "Failed to patch node annotations", "nodeName", val.Name)
-					}
-				}
 				nodeInfo := &device.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodeInfo.Devices = make([]device.DeviceInfo, 0)
+				nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
-					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
+					nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
 				}
 				s.addNode(val.Name, nodeInfo)
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
@@ -336,31 +321,33 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			Policy:      userGPUPolicy,
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
-		for _, d := range node.Devices {
-			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
-				Score: 0,
-				Device: &device.DeviceUsage{
-					ID:        d.ID,
-					Index:     d.Index,
-					Used:      0,
-					Count:     d.Count,
-					Usedmem:   0,
-					Totalmem:  d.Devmem,
-					Totalcore: d.Devcore,
-					Usedcores: 0,
-					MigUsage: device.MigInUse{
-						Index:     0,
-						UsageList: make(device.MIGS, 0),
+		for _, k := range node.Devices {
+			for _, d := range k {
+				nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
+					Score: 0,
+					Device: &device.DeviceUsage{
+						ID:        d.ID,
+						Index:     d.Index,
+						Used:      0,
+						Count:     d.Count,
+						Usedmem:   0,
+						Totalmem:  d.Devmem,
+						Totalcore: d.Devcore,
+						Usedcores: 0,
+						MigUsage: device.MigInUse{
+							Index:     0,
+							UsageList: make(device.MIGS, 0),
+						},
+						MigTemplate: d.MIGTemplate,
+						Mode:        d.Mode,
+						Type:        d.Type,
+						Numa:        d.Numa,
+						Health:      d.Health,
+						PodInfos:    make([]*device.PodInfo, 0),
+						CustomInfo:  maps.Clone(d.CustomInfo),
 					},
-					MigTemplate: d.MIGTemplate,
-					Mode:        d.Mode,
-					Type:        d.Type,
-					Numa:        d.Numa,
-					Health:      d.Health,
-					PodInfos:    make([]*device.PodInfo, 0),
-					CustomInfo:  maps.Clone(d.CustomInfo),
-				},
-			})
+				})
+			}
 		}
 		overallnodeMap[node.ID] = nodeInfo
 	}

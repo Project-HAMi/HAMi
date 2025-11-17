@@ -47,8 +47,8 @@ func Test_getNodesUsage(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
 		ID: "node1",
-		Devices: []device.DeviceInfo{
-			{
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
 				ID:      "GPU0",
 				Index:   0,
 				Count:   10,
@@ -58,16 +58,16 @@ func Test_getNodesUsage(t *testing.T) {
 				Mode:    "hami",
 				Health:  true,
 			},
-			{
-				ID:      "GPU1",
-				Index:   1,
-				Count:   10,
-				Devmem:  1024,
-				Devcore: 100,
-				Numa:    1,
-				Mode:    "hami",
-				Health:  true,
-			},
+				{
+					ID:      "GPU1",
+					Index:   1,
+					Count:   10,
+					Devmem:  1024,
+					Devcore: 100,
+					Numa:    1,
+					Mode:    "hami",
+					Health:  true,
+				}},
 		},
 	})
 	podDevces := device.PodDevices{
@@ -364,8 +364,8 @@ func Test_Filter(t *testing.T) {
 		s.addNode("node1", &device.NodeInfo{
 			ID:   "node1",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			Devices: []device.DeviceInfo{
-				{
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
 					ID:           "device1",
 					Index:        0,
 					Count:        10,
@@ -377,44 +377,46 @@ func Test_Filter(t *testing.T) {
 					Health:       true,
 					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
-				{
-					ID:           "device2",
-					Index:        1,
-					Count:        10,
-					Devmem:       8000,
-					Devcore:      100,
-					Numa:         0,
-					Type:         nvidia.NvidiaGPUDevice,
-					Health:       true,
-					DeviceVendor: nvidia.NvidiaGPUDevice,
-				},
+					{
+						ID:           "device2",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					}},
 			},
 		})
 		s.addNode("node2", &device.NodeInfo{
 			ID:   "node2",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
-			Devices: []device.DeviceInfo{
-				{
-					ID:      "device3",
-					Index:   0,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Mode:    "hami",
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
+					ID:           "device3",
+					Index:        0,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Mode:         "hami",
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
-				{
-					ID:      "device4",
-					Index:   1,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
-				},
+					{
+						ID:           "device4",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					}},
 			},
 		})
 		s.podManager.AddPod(pod1, "node1", device.PodDevices{
@@ -951,8 +953,8 @@ func Test_ResourceQuota(t *testing.T) {
 		s.addNode("node1", &device.NodeInfo{
 			ID:   "node1",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			Devices: []device.DeviceInfo{
-				{
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
 					ID:           "device1",
 					Index:        0,
 					Count:        10,
@@ -964,39 +966,39 @@ func Test_ResourceQuota(t *testing.T) {
 					Health:       true,
 					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
-				{
-					ID:           "device2",
-					Index:        1,
-					Count:        10,
-					Devmem:       8000,
-					Devcore:      100,
-					Numa:         0,
-					Mode:         "hami",
-					Type:         nvidia.NvidiaGPUDevice,
-					Health:       true,
-					DeviceVendor: nvidia.NvidiaGPUDevice,
-				},
-				{
-					ID:      "device3",
-					Index:   0,
-					Count:   10,
-					Devmem:  4000,
-					Devcore: 100,
-					Numa:    0,
-					Mode:    "hami",
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
-				},
-				{
-					ID:      "device4",
-					Index:   1,
-					Count:   10,
-					Devmem:  6000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
-				},
+					{
+						ID:           "device2",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Mode:         "hami",
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					},
+					{
+						ID:      "device3",
+						Index:   0,
+						Count:   10,
+						Devmem:  4000,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Type:    nvidia.NvidiaGPUDevice,
+						Health:  true,
+					},
+					{
+						ID:      "device4",
+						Index:   1,
+						Count:   10,
+						Devmem:  6000,
+						Devcore: 100,
+						Numa:    0,
+						Type:    nvidia.NvidiaGPUDevice,
+						Health:  true,
+					}},
 			},
 		})
 	}

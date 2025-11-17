@@ -710,19 +710,21 @@ func Test_GetNodeDevices(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-01",
 					Annotations: map[string]string{
-						RegisterAnnos: "GPU-0,5,8192,100,NVIDIA-Tesla P4,0,true:",
+						RegisterAnnos: `[{"id":"GPU-0","count":5,"devmem":8192,"devcore":100,"type":"NVIDIA-Tesla P4","numa":0,"health":true,"index":0}]`,
 					},
 				},
 			},
 			want: []*device.DeviceInfo{
 				{
-					ID:      "GPU-0",
-					Count:   5,
-					Devmem:  8192,
-					Devcore: 100,
-					Type:    "NVIDIA-Tesla P4",
-					Numa:    0,
-					Health:  true,
+					ID:           "GPU-0",
+					Count:        5,
+					Devmem:       8192,
+					Devcore:      100,
+					Type:         "NVIDIA-Tesla P4",
+					Numa:         0,
+					Health:       true,
+					Index:        0,
+					DeviceVendor: NvidiaGPUDevice,
 				},
 			},
 			err: nil,
@@ -733,12 +735,12 @@ func Test_GetNodeDevices(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-02",
 					Annotations: map[string]string{
-						RegisterAnnos: "",
+						RegisterAnnos: "[]",
 					},
 				},
 			},
 			want: []*device.DeviceInfo{},
-			err:  errors.New("failed to decode node devices"),
+			err:  errors.New("no gpu found on node"),
 		},
 		{
 			name: "no annotation",
@@ -758,6 +760,13 @@ func Test_GetNodeDevices(t *testing.T) {
 			result, err := gpuDevices.GetNodeDevices(test.args)
 			if (err != nil) != (test.err != nil) {
 				t.Errorf("GetNodeDevices error = %v, want %v", err, test.err)
+				return
+			}
+			if err != nil && test.err != nil {
+				if err.Error() != test.err.Error() {
+					t.Errorf("GetNodeDevices error message = %v, want %v", err.Error(), test.err.Error())
+					return
+				}
 			}
 			if len(result) != len(test.want) {
 				t.Errorf("GetNodeDevices got %d devices, want %d", len(result), len(test.want))
@@ -772,6 +781,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					assert.Equal(t, v.Numa, result[k].Numa)
 					assert.Equal(t, v.Type, result[k].Type)
 					assert.Equal(t, v.Count, result[k].Count)
+					assert.Equal(t, v.DeviceVendor, result[k].DeviceVendor)
 				}
 			}
 		})

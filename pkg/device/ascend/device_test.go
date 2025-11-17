@@ -1441,25 +1441,27 @@ func TestDevices_Fit(t *testing.T) {
 				}
 				nodeInfo := &device.NodeInfo{
 					ID: "node1",
-					Devices: []device.DeviceInfo{
-						{
-							ID:         "dev-0",
-							Index:      0,
-							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": float64(0)},
-						},
-						{
-							ID:         "dev-1",
-							Index:      0,
-							Numa:       0,
-							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": float64(1)},
-						},
-						{
-							ID:         "dev-2",
-							Index:      0,
-							Health:     true,
-							CustomInfo: map[string]any{"NetworkID": float64(1)},
+					Devices: map[string][]device.DeviceInfo{
+						dev.config.CommonWord: {
+							{
+								ID:         "dev-0",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
+							},
+							{
+								ID:         "dev-1",
+								Index:      0,
+								Numa:       0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(1)},
+							},
+							{
+								ID:         "dev-2",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(1)},
+							},
 						},
 					},
 				}

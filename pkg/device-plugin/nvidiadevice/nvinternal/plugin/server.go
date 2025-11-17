@@ -102,6 +102,7 @@ type NvidiaDevicePlugin struct {
 
 	operatingMode string
 	migCurrent    nvidia.MigPartedSpec
+	deviceCache   string
 
 	server *grpc.Server
 	health chan *rm.Device
@@ -179,6 +180,7 @@ func NewNvidiaDevicePlugin(nvconfig *nvidia.DeviceConfig, resourceManager rm.Res
 		schedulerConfig:            sConfig.NvidiaConfig,
 		operatingMode:              mode,
 		migCurrent:                 nvidia.MigPartedSpec{},
+		deviceCache:                "",
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.

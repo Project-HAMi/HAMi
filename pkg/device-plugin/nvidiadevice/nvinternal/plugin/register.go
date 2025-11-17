@@ -167,7 +167,12 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := device.EncodeNodeDevices(*devices)
+	encodeddevices := device.MarshalNodeDevices(*devices)
+	if encodeddevices == plugin.deviceCache {
+		return nil
+	}
+	plugin.deviceCache = encodeddevices
+
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
 		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
@@ -182,7 +187,6 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		}
 	}
 	klog.V(4).InfoS("patch nvidia  topo score to node", "hami.io/node-nvidia-score", string(data))
-	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
 	annos[nvidia.RegisterAnnos] = encodeddevices
 	if len(data) > 0 {
 		annos[nvidia.RegisterGPUPairScore] = string(data)
