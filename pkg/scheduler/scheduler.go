@@ -188,7 +188,6 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 
 func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
-	defer atomic.StoreUint32(&s.started, 1)
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -222,6 +221,7 @@ func (s *Scheduler) Start() error {
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 	s.addAllEventHandlers()
+	atomic.StoreUint32(&s.started, 1)
 	return nil
 }
 
