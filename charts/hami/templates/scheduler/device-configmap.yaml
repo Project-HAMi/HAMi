@@ -203,11 +203,11 @@ data:
       aiCPU: 7
       templates:
         - name: vir05_1c_8g
-          memory: 8192
+          memory: 16384
           aiCore: 5
           aiCPU: 1
         - name: vir10_3c_16g
-          memory: 16384
+          memory: 32768
           aiCore: 10
           aiCPU: 3
     - chipName: 910B4
