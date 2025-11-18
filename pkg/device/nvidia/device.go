@@ -218,10 +218,12 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	if quantity != nil {
 		current = quantity.Value()
 	}
+	klog.Infoln("-=-=-=Current device count from allocatable", current, "Reported Devices=", dev.ReportedGPUNum)
 	if current == 0 {
 		if dev.ReportedGPUNum == 0 {
 			return true, false
 		} else {
+			dev.ReportedGPUNum = current
 			return false, false
 		}
 	}
