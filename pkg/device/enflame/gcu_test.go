@@ -219,7 +219,7 @@ func TestGCUDevices_GetNodeDevices(t *testing.T) {
 					Type:         EnflameGCUDevice,
 					Numa:         0,
 					Health:       true,
-					DeviceVendor: EnflameVGCUCommonWord,
+					DeviceVendor: EnflameGCUCommonWord,
 				},
 				{
 					Index:        1,
@@ -230,7 +230,7 @@ func TestGCUDevices_GetNodeDevices(t *testing.T) {
 					Type:         EnflameGCUDevice,
 					Numa:         0,
 					Health:       true,
-					DeviceVendor: EnflameVGCUCommonWord,
+					DeviceVendor: EnflameGCUCommonWord,
 				},
 			},
 			err: nil,
