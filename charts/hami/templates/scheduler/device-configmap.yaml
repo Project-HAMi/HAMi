@@ -204,12 +204,16 @@ data:
       aiCore: 20
       aiCPU: 7
       templates:
+        # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
+        # The memory is used for scheduling so the correct values must be set.
+        # Template vir05_1c_8g actually provides 16GB memory,
         - name: vir05_1c_8g
-          memory: 8192
+          memory: 16384
           aiCore: 5
           aiCPU: 1
+        # Template vir10_3c_16g actually provides 32GB memory
         - name: vir10_3c_16g
-          memory: 16384
+          memory: 32768
           aiCore: 10
           aiCPU: 3
     - chipName: 910B4
