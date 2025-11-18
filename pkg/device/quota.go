@@ -54,12 +54,6 @@ func NewQuotaManager() *QuotaManager {
 }
 
 func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceName string) bool {
-	q.mutex.RLock()
-	defer q.mutex.RUnlock()
-	dq := q.Quotas[ns]
-	if dq == nil {
-		return true
-	}
 	devs, ok := GetDevices()[deviceName]
 	if !ok {
 		return true
@@ -67,17 +61,24 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceN
 	resourceNames := devs.GetResourceNames()
 	memResourceName := resourceNames.ResourceMemoryName
 	coreResourceName := resourceNames.ResourceCoreName
-	_, ok = (*dq)[memResourceName]
+
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	dq := q.Quotas[ns]
+	if dq == nil {
+		return true
+	}
+	memQuota, ok := (*dq)[memResourceName]
 	if ok {
-		klog.V(4).InfoS("resourceMem quota judging", "limit", (*dq)[memResourceName].Limit, "used", (*dq)[memResourceName].Used, "alloc", memreq)
-		if (*dq)[memResourceName].Limit != 0 && (*dq)[memResourceName].Used+memreq > (*dq)[memResourceName].Limit {
-			klog.V(4).InfoS("resourceMem quota not fitted", "limit", (*dq)[memResourceName].Limit, "used", (*dq)[memResourceName].Used, "alloc", memreq)
+		klog.V(4).InfoS("resourceMem quota judging", "limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
+		if memQuota.Limit != 0 && memQuota.Used+memreq > memQuota.Limit {
+			klog.V(4).InfoS("resourceMem quota not fitted", "limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
-	_, ok = (*dq)[coreResourceName]
-	if ok && (*dq)[coreResourceName].Limit != 0 && (*dq)[coreResourceName].Used+coresreq > (*dq)[coreResourceName].Limit {
-		klog.V(4).InfoS("resourceCores quota not fitted", "limit", (*dq)[coreResourceName].Limit, "used", (*dq)[coreResourceName].Used, "alloc", memreq)
+	coreQuota, ok := (*dq)[coreResourceName]
+	if ok && coreQuota.Limit != 0 && coreQuota.Used+coresreq > coreQuota.Limit {
+		klog.V(4).InfoS("resourceCores quota not fitted", "limit", coreQuota.Limit, "used", coreQuota.Used, "alloc", coresreq)
 		return false
 	}
 	return true
@@ -106,12 +107,12 @@ func countPodDevices(podDev PodDevices) map[string]int64 {
 }
 
 func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
 	usage := countPodDevices(podDev)
 	if len(usage) == 0 {
 		return
 	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
 	if q.Quotas[pod.Namespace] == nil {
 		q.Quotas[pod.Namespace] = &DeviceQuota{}
 	}
@@ -129,20 +130,22 @@ func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
 		}
 		(*dp)[idx].Used += val
 	}
-	for _, val := range q.Quotas {
-		for idx, val1 := range *val {
-			klog.V(4).Infoln("add usage val=", idx, ":", val1)
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("add usage val=", idx, ":", val1)
+			}
 		}
 	}
 }
 
 func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
 	usage := countPodDevices(podDev)
 	if len(usage) == 0 {
 		return
 	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
 	dp, ok := q.Quotas[pod.Namespace]
 	if !ok {
 		return
@@ -153,9 +156,11 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 			(*dp)[idx].Used -= val
 		}
 	}
-	for _, val := range q.Quotas {
-		for idx, val1 := range *val {
-			klog.V(4).Infoln("after val=", idx, ":", val1)
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
 		}
 	}
 }
@@ -201,9 +206,11 @@ func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
 		}
 	}
-	for _, val := range q.Quotas {
-		for idx, val1 := range *val {
-			klog.V(4).Infoln("after val=", idx, ":", val1)
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
 		}
 	}
 }
@@ -229,10 +236,12 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 			}
 		}
 	}
-	for _, val := range q.Quotas {
-		for idx, val1 := range *val {
-			klog.V(4).Infoln("after val=", idx, ":", val1)
+
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
 		}
 	}
-
 }

@@ -177,7 +177,7 @@ func (s *Scheduler) onUpdateQuota(oldObj, newObj interface{}) {
 func (s *Scheduler) onDelQuota(obj interface{}) {
 	quota, ok := obj.(*corev1.ResourceQuota)
 	if !ok {
-		klog.Errorf("unknown add object type")
+		klog.Errorf("unknown del object type")
 		return
 	}
 	s.quotaManager.DelQuota(quota)
