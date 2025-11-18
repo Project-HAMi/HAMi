@@ -97,7 +97,11 @@ func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 		nodeInfoCopy := &device.NodeInfo{
 			ID:      nodeInfo.ID,
 			Node:    nodeInfo.Node.DeepCopy(),
-			Devices: append([]device.DeviceInfo{}, nodeInfo.Devices...),
+			Devices: make(map[string][]device.DeviceInfo),
+		}
+		for k, v := range nodeInfo.Devices {
+			nodeInfoCopy.Devices[k] = make([]device.DeviceInfo, len(v))
+			copy(nodeInfoCopy.Devices[k], v)
 		}
 		nodesCopy[nodeID] = nodeInfoCopy
 	}
