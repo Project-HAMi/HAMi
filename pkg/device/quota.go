@@ -245,3 +245,20 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 		}
 	}
 }
+
+func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
+	quotasCopy := make(map[string]*DeviceQuota)
+	q.mutex.RLock()
+	defer q.mutex.RUnlock()
+	for ns, dq := range q.Quotas {
+		curDQ := &DeviceQuota{}
+		for name, quota := range *dq {
+			(*curDQ)[name] = &Quota{
+				Used:  quota.Used,
+				Limit: quota.Limit,
+			}
+		}
+		quotasCopy[ns] = curDQ
+	}
+	return quotasCopy
+}
