@@ -76,7 +76,7 @@ func NewScheduler() *Scheduler {
 	return s
 }
 
-func (s *Scheduler) GetQuotas() *device.QuotaManager {
+func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
 	return s.quotaManager
 }
 
