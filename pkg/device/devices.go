@@ -267,6 +267,7 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	return tmp
 }
 
+// MarshalNodeDevices will only marshal general information, customInfo is neglected
 func MarshalNodeDevices(dlist []*DeviceInfo) string {
 	devAnnos := []*DeviceInfo{}
 	for _, val := range dlist {
