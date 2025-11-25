@@ -157,6 +157,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
+| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### Device Plugin Other Configuration
 
@@ -171,6 +173,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
+| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 
 ### Device Plugin Service Configuration
 

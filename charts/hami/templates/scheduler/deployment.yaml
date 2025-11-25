@@ -97,8 +97,10 @@ spec:
           command:
             - scheduler
             - --http_bind=0.0.0.0:443
+            {{- if .Values.scheduler.admissionWebhook.enabled }}
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
+            {{- end }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
@@ -128,12 +130,14 @@ spec:
               protocol: TCP
           resources:
           {{- toYaml .Values.scheduler.extender.resources | nindent 12 }}
+          {{- if .Values.scheduler.admissionWebhook.enabled }}
           volumeMounts:
             - name: tls-config
               mountPath: /tls
             - name: device-config
               mountPath: /device-config.yaml
               subPath: device-config.yaml
+          {{- end }}
           {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             httpGet:
@@ -146,9 +150,11 @@ spec:
             timeoutSeconds: 5
           {{- end }}
       volumes:
+        {{- if .Values.scheduler.admissionWebhook.enabled }}
         - name: tls-config
           secret:
             secretName: {{ template "hami-vgpu.scheduler.tls" . }}
+        {{- end }}
         {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
