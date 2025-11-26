@@ -121,14 +121,15 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*coresPerMthreadsGPU < cores {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-mthreads-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
-			Devcore: coresPerMthreadsGPU,
-			Type:    MthreadsGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-mthreads-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
+			Devcore:      coresPerMthreadsGPU,
+			Type:         MthreadsGPUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: MthreadsGPUCommonWord,
 		})
 		i++
 	}

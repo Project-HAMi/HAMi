@@ -2625,9 +2625,9 @@ func Test_calcScore(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			for nodeName, nodeUsage := range *(test.args.nodes) {
-				devices := []device.DeviceInfo{}
+				devices := map[string][]device.DeviceInfo{}
 				for _, devinstance := range nodeUsage.Devices.DeviceLists {
-					devices = append(devices, device.DeviceInfo{
+					devices["NVIDIA"] = append(devices["NVIDIA"], device.DeviceInfo{
 						ID: devinstance.Device.ID,
 					})
 				}
@@ -3476,14 +3476,15 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 				},
 				nodeInfo: &device.NodeInfo{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
-					Devices: []device.DeviceInfo{
-						{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 1, "c": 1, "d": 1, "e": 1, "f": 100}}},
-						{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 1, "c": 1, "d": 1, "e": 1, "f": 1}}},
-						{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 1, "b": 1, "d": 1, "e": 1, "f": 100}}},
-						{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "e": 1, "f": 1}}},
-						{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "f": 1}}},
-						{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 100, "b": 1, "c": 100, "d": 1, "e": 1}}},
-					},
+					Devices: map[string][]device.DeviceInfo{
+						"NVIDIA": {
+							{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 1, "c": 1, "d": 1, "e": 1, "f": 100}}},
+							{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 1, "c": 1, "d": 1, "e": 1, "f": 1}}},
+							{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 1, "b": 1, "d": 1, "e": 1, "f": 100}}},
+							{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "e": 1, "f": 1}}},
+							{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "f": 1}}},
+							{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 100, "b": 1, "c": 100, "d": 1, "e": 1}}},
+						}},
 				},
 				allocated: &device.PodDevices{},
 			},
@@ -3537,14 +3538,15 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 				},
 				nodeInfo: &device.NodeInfo{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
-					Devices: []device.DeviceInfo{
-						{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 100, "b": 100, "d": 100, "e": 100, "f": 1}}},
-						{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "e": 100, "f": 1}}},
-						{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "d": 100, "f": 1}}},
-						{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}},
-					},
+					Devices: map[string][]device.DeviceInfo{
+						"NVIDIA": {
+							{ID: "a", DevicePairScore: device.DevicePairScore{ID: "a", Scores: map[string]int{"b": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+							{ID: "b", DevicePairScore: device.DevicePairScore{ID: "b", Scores: map[string]int{"a": 100, "c": 100, "d": 100, "e": 100, "f": 1}}},
+							{ID: "c", DevicePairScore: device.DevicePairScore{ID: "c", Scores: map[string]int{"a": 100, "b": 100, "d": 100, "e": 100, "f": 1}}},
+							{ID: "d", DevicePairScore: device.DevicePairScore{ID: "d", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "e": 100, "f": 1}}},
+							{ID: "e", DevicePairScore: device.DevicePairScore{ID: "e", Scores: map[string]int{"a": 100, "b": 100, "c": 100, "d": 100, "f": 1}}},
+							{ID: "f", DevicePairScore: device.DevicePairScore{ID: "f", Scores: map[string]int{"a": 1, "b": 1, "c": 1, "d": 1, "e": 1}}},
+						}},
 				},
 				allocated: &device.PodDevices{},
 			},

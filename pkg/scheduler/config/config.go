@@ -108,7 +108,7 @@ func InitDevicesWithConfig(config *Config) error {
 			initErrors = append(initErrors, fmt.Errorf("%s: %v", commonWord, err))
 			return
 		}
-		device.DevicesMap[deviceType] = dev
+		device.DevicesMap[dev.CommonWord()] = dev
 		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
 		klog.Infof("%s device initialized successfully", commonWord)
 	}
@@ -120,10 +120,10 @@ func InitDevicesWithConfig(config *Config) error {
 		initFunc   func(any) (device.Devices, error)
 		config     any
 	}{
-		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg any) (device.Devices, error) {
+		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUDevice, func(cfg any) (device.Devices, error) {
 			nvidiaConfig, ok := cfg.(nvidia.NvidiaConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUDevice)
 			}
 			return nvidia.InitNvidiaDevice(nvidiaConfig), nil
 		}, config.NvidiaConfig},

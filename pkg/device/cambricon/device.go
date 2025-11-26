@@ -194,14 +194,15 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(memoryTotal * 256 * 100 / cards),
-			Devcore: 100,
-			Type:    CambriconMLUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       int32(memoryTotal * 256 * 100 / cards),
+			Devcore:      100,
+			Type:         CambriconMLUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: CambriconMLUCommonWord,
 		})
 		i++
 	}

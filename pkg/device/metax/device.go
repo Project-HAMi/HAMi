@@ -72,14 +72,15 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, er
 	}
 	for int64(i) < count {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-metax-" + fmt.Sprint(i),
-			Count:   1,
-			Devmem:  65536,
-			Devcore: 100,
-			Type:    MetaxGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-metax-" + fmt.Sprint(i),
+			Count:        1,
+			Devmem:       65536,
+			Devcore:      100,
+			Type:         MetaxGPUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: MetaxGPUCommonWord,
 		})
 		i++
 	}
