@@ -109,6 +109,9 @@ func (dev *KunlunVDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
 	}
+	for idx := range nodeDevices {
+		nodeDevices[idx].DeviceVendor = dev.CommonWord()
+	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, errors.New("no device found on node")
