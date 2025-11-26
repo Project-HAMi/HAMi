@@ -141,13 +141,13 @@ spec:
               protocol: TCP
           resources:
           {{- toYaml .Values.scheduler.extender.resources | nindent 12 }}
-          {{- if .Values.scheduler.admissionWebhook.enabled }}
           volumeMounts:
-            - name: tls-config
-              mountPath: /tls
             - name: device-config
               mountPath: /device-config.yaml
               subPath: device-config.yaml
+          {{- if .Values.scheduler.admissionWebhook.enabled }}
+            - name: tls-config
+              mountPath: /tls
           {{- end }}
           {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
