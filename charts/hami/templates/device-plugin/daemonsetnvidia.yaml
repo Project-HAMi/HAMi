@@ -55,14 +55,14 @@ spec:
           args:
             - |
               echo "Waiting for NVIDIA Toolkit to be ready..."
-              until [ -f /run/nvidia/validations/toolkit-ready ]; do 
-                echo "Waiting for /run/nvidia/validations/toolkit-ready..."
+              until [ -f {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready ]; do 
+                echo "Waiting for {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready..."
                 sleep 5
               done
               echo "NVIDIA Toolkit is ready!"
           volumeMounts:
           - name: nvidia-validations
-            mountPath: /run/nvidia/validations
+            mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
             mountPropagation: HostToContainer
             readOnly: true
       {{- end }}

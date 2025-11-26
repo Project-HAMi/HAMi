@@ -19,11 +19,11 @@ data:
                 "enableHttps": true,
                 "tlsConfig": {
                     "insecure": true
+                },
                 {{- else }}
                 "urlPrefix": "http://127.0.0.1:80",
                 "enableHttps": false,
                 {{- end }}
-                },
                 "filterVerb": "filter",
                 "bindVerb": "bind",
                 "weight": 1,
