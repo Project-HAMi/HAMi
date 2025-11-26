@@ -162,6 +162,9 @@ func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
 	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = HygonDCUCommonWord
+	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")

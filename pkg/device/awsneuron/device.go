@@ -111,15 +111,16 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 	for int64(i) < counts {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:      uint(i),
-			ID:         n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
-			Count:      int32(dev.coresPerAWSNeuron),
-			Devmem:     0,
-			Devcore:    int32(dev.coremask),
-			Type:       AWSNeuronDevice,
-			Numa:       0,
-			Health:     true,
-			CustomInfo: customInfo,
+			Index:        uint(i),
+			ID:           n.Name + "-" + AWSNeuronDevice + "-" + fmt.Sprint(i),
+			Count:        int32(dev.coresPerAWSNeuron),
+			Devmem:       0,
+			Devcore:      int32(dev.coremask),
+			Type:         AWSNeuronDevice,
+			Numa:         0,
+			Health:       true,
+			CustomInfo:   customInfo,
+			DeviceVendor: AWSNeuronCommonWord,
 		})
 		i++
 	}

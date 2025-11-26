@@ -414,7 +414,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 
 	// Expected devices map
 	expectedDevices := map[string]string{
-		nvidia.NvidiaGPUDevice:       nvidia.NvidiaGPUCommonWord,
+		nvidia.NvidiaGPUDevice:       nvidia.NvidiaGPUDevice,
 		cambricon.CambriconMLUDevice: cambricon.CambriconMLUCommonWord,
 		hygon.HygonDCUDevice:         hygon.HygonDCUCommonWord,
 		mthreads.MthreadsGPUDevice:   mthreads.MthreadsGPUCommonWord,

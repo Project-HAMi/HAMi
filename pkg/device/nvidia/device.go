@@ -40,7 +40,6 @@ const (
 	RegisterAnnos        = "hami.io/node-nvidia-register"
 	RegisterGPUPairScore = "hami.io/node-nvidia-score"
 	NvidiaGPUDevice      = "NVIDIA"
-	NvidiaGPUCommonWord  = "GPU"
 	GPUInUse             = "nvidia.com/use-gputype"
 	GPUNoUse             = "nvidia.com/nouse-gputype"
 	NumaBind             = "nvidia.com/numa-bind"
@@ -155,7 +154,8 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config NvidiaConfig
+	config         NvidiaConfig
+	ReportedGPUNum int64
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -167,12 +167,13 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
 	return &NvidiaGPUDevices{
-		config: nvconfig,
+		config:         nvconfig,
+		ReportedGPUNum: 0,
 	}
 }
 
 func (dev *NvidiaGPUDevices) CommonWord() string {
-	return NvidiaGPUCommonWord
+	return NvidiaGPUDevice
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -212,7 +213,26 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	current := int64(0)
+	quantity := n.Status.Allocatable.Name(corev1.ResourceName(dev.config.ResourceCountName), resource.DecimalSI)
+	if quantity != nil {
+		current = quantity.Value()
+	}
+	klog.Infoln("-=-=-=Current device count from allocatable", current, "Reported Devices=", dev.ReportedGPUNum)
+	if current == 0 {
+		if dev.ReportedGPUNum == 0 {
+			return true, false
+		} else {
+			dev.ReportedGPUNum = current
+			return false, false
+		}
+	}
+	if dev.ReportedGPUNum != current {
+		dev.ReportedGPUNum = current
+		return true, true
+	} else {
+		return true, false
+	}
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -248,7 +268,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if !ok {
 		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
-	nodedevices, err := device.DecodeNodeDevices(devEncoded)
+	nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
@@ -256,6 +276,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if len(nodedevices) == 0 {
 		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}
 	for _, val := range nodedevices {
 		if val.Mode == MigMode {
@@ -860,7 +883,7 @@ func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[str
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
 	deviceScoreMap := make(map[string]*device.DevicePairScore)
 
-	for _, dev := range nodeInfo.Devices {
+	for _, dev := range nodeInfo.Devices[NvidiaGPUDevice] {
 		deviceScoreMap[dev.ID] = &dev.DevicePairScore
 	}
 

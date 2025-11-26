@@ -594,7 +594,7 @@ func Test_CheckHealth(t *testing.T) {
 				},
 			},
 			want1: true,
-			want2: true,
+			want2: false,
 		},
 		{
 			name: "Requesting state expired",

@@ -86,15 +86,16 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for int64(i) < counts {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:      uint(i),
-			ID:         n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
-			Count:      1,
-			Devmem:     Mi300xMemory,
-			Devcore:    100,
-			Type:       AMDDevice,
-			Numa:       0,
-			Health:     true,
-			CustomInfo: make(map[string]any),
+			Index:        uint(i),
+			ID:           n.Name + "-" + AMDDevice + "-" + fmt.Sprint(i),
+			Count:        1,
+			Devmem:       Mi300xMemory,
+			Devcore:      100,
+			Type:         AMDDevice,
+			Numa:         0,
+			Health:       true,
+			CustomInfo:   make(map[string]any),
+			DeviceVendor: AMDCommonWord,
 		})
 		i++
 	}

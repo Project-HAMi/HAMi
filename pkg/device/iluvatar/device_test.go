@@ -60,13 +60,14 @@ func TestGetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					ID:      "GPU-bad51c5a-ed4c-591d-91bf-c04a12e19eae",
-					Count:   int32(10),
-					Devcore: int32(100),
-					Devmem:  int32(8192),
-					Type:    "MR-V100",
-					Numa:    0,
-					Health:  true,
+					ID:           "GPU-bad51c5a-ed4c-591d-91bf-c04a12e19eae",
+					Count:        int32(10),
+					Devcore:      int32(100),
+					Devmem:       int32(8192),
+					Type:         "MR-V100",
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: dev.config.CommonWord,
 				},
 			},
 			err: nil,
@@ -128,6 +129,7 @@ func TestGetNodeDevices(t *testing.T) {
 					assert.Equal(t, v.Type, result[k].Type)
 					assert.Equal(t, v.Numa, result[k].Numa)
 					assert.Equal(t, v.Health, result[k].Health)
+					assert.Equal(t, v.DeviceVendor, result[k].DeviceVendor)
 				}
 			}
 		})

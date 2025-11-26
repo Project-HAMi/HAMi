@@ -57,10 +57,10 @@ func Test_addNode_ListNodes(t *testing.T) {
 				nodeInfo: device.NodeInfo{
 					ID:   "node-01",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID: "node-01",
-						},
+						}},
 					},
 				},
 			},
@@ -68,10 +68,10 @@ func Test_addNode_ListNodes(t *testing.T) {
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID: "node-01",
-						},
+						}},
 					},
 				},
 			},
@@ -87,13 +87,13 @@ func Test_addNode_ListNodes(t *testing.T) {
 				nodeInfo: device.NodeInfo{
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "node-02",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 			},
@@ -101,25 +101,25 @@ func Test_addNode_ListNodes(t *testing.T) {
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "GPU-0",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 				"node-02": {
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "node-02",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 			},
@@ -134,13 +134,13 @@ func Test_addNode_ListNodes(t *testing.T) {
 					"node-01": {
 						ID:   "test123",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"vendor1": {{
 								ID:      "GPU-0",
 								Count:   int32(1),
 								Devcore: int32(1),
 								Devmem:  int32(2000),
-							},
+							}},
 						},
 					},
 				},
@@ -175,13 +175,13 @@ func Test_GetNode(t *testing.T) {
 			want: &device.NodeInfo{
 				ID:   "node-04",
 				Node: &corev1.Node{},
-				Devices: []device.DeviceInfo{
-					{
+				Devices: map[string][]device.DeviceInfo{
+					"vendor1": {{
 						ID:      "GPU-0",
 						Count:   int32(1),
 						Devcore: int32(1),
 						Devmem:  int32(2000),
-					},
+					}},
 				},
 			},
 			err: nil,
@@ -194,13 +194,13 @@ func Test_GetNode(t *testing.T) {
 					"node-04": {
 						ID:   "node-04",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"vendor1": {{
 								ID:      "GPU-0",
 								Count:   int32(1),
 								Devcore: int32(1),
 								Devmem:  int32(2000),
-							},
+							}},
 						},
 					},
 				},
@@ -268,52 +268,52 @@ func Test_rmNodeDevices(t *testing.T) {
 					"node-05": {
 						ID:   "node-05",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"NVIDIA": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "NVIDIA",
-							},
+							}},
 						},
 					},
 					"node-06": {
 						ID:      "node-06",
 						Node:    &corev1.Node{},
-						Devices: []device.DeviceInfo{},
+						Devices: map[string][]device.DeviceInfo{},
 					},
 					"node-07": {
 						ID:   "node-17",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"test1": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "test",
-							},
+							}},
 						},
 					},
 					"node-08": {
 						ID:   "node-08",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"NVIDIA": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "NVIDIA",
 							},
-							{
-								ID:           "GPU-0",
-								Count:        int32(1),
-								Devcore:      int32(1),
-								Devmem:       int32(2000),
-								DeviceVendor: "NVIDIA",
-							},
+								{
+									ID:           "GPU-0",
+									Count:        int32(1),
+									Devcore:      int32(1),
+									Devmem:       int32(2000),
+									DeviceVendor: "NVIDIA",
+								}},
 						},
 					},
 				},

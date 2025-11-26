@@ -109,14 +109,15 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 	dev.factor = int(shared / cards)
 	for i < int(cards) {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-enflame-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  100,
-			Devcore: 100,
-			Type:    EnflameVGCUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-enflame-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       100,
+			Devcore:      100,
+			Type:         EnflameVGCUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: EnflameVGCUCommonWord,
 		})
 		i++
 	}

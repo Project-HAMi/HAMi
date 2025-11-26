@@ -72,14 +72,15 @@ func (dev *GCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	}
 	for int64(i) < count {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-" + EnflameGCUDevice + "-" + fmt.Sprint(i),
-			Count:   1,
-			Devmem:  100,
-			Devcore: 100,
-			Type:    EnflameGCUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-" + EnflameGCUDevice + "-" + fmt.Sprint(i),
+			Count:        1,
+			Devmem:       100,
+			Devcore:      100,
+			Type:         EnflameGCUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: EnflameGCUCommonWord,
 		})
 		i++
 	}

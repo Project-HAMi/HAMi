@@ -70,14 +70,15 @@ func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 	}
 	for int64(i) < cards {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-kunlun-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  98304,
-			Devcore: 100,
-			Type:    KunlunGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-kunlun-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       98304,
+			Devcore:      100,
+			Type:         KunlunGPUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: KunlunGPUCommonWord,
 		})
 		if int64(i) >= (cards / 2) {
 			nodedevices[i].Numa = 1

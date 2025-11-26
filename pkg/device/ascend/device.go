@@ -139,6 +139,9 @@ func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) 
 		return []*device.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
 	}
 	nodeDevices, err := device.UnMarshalNodeDevices(anno)
+	for idx := range nodeDevices {
+		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
+	}
 	if err != nil {
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
@@ -443,7 +446,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				tmpDevs[k.Type] = device.ContainerDevices{tmpDevs[k.Type][0]}
 			} else {
 				// If requesting multiple devices, select the best combination of cards.
-				combination := computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
+				combination := npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
 				tmpDevs[k.Type] = combination
 			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
@@ -470,9 +473,9 @@ func hasNetworkID(devices []*device.DeviceUsage) bool {
 	return true
 }
 
-func computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
+func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
 	deviceMap := make(map[string]*device.DeviceInfo)
-	for _, dev := range nodeInfo.Devices {
+	for _, dev := range nodeInfo.Devices[npudev.config.CommonWord] {
 		deviceMap[dev.ID] = &dev
 	}
 	networkDeviceMap := make(map[int]device.ContainerDevices)

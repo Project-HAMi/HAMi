@@ -31,7 +31,7 @@ jobs:
       HAMI_VERSION: ${{ inputs.ref }}
     steps:
       - name: checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: install Go
         uses: actions/setup-go@v6
