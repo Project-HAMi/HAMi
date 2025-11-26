@@ -55,14 +55,14 @@ spec:
           args:
             - |
               echo "Waiting for NVIDIA Toolkit to be ready..."
-              until [ -f {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready ]; do 
-                echo "Waiting for {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready..."
+              until [ -f /run/nvidia/validations/toolkit-ready ]; do 
+                echo "Waiting for /run/nvidia/validations/toolkit-ready..."
                 sleep 5
               done
               echo "NVIDIA Toolkit is ready!"
           volumeMounts:
           - name: nvidia-validations
-            mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
+            mountPath: /run/nvidia/validations
             mountPropagation: HostToContainer
             readOnly: true
       {{- end }}
@@ -150,7 +150,7 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
-            {{- with .Values.monitor.extraEnvs }}
+            {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
           resources:
