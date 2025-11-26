@@ -127,12 +127,15 @@ spec:
             - {{ . }}
             {{- end }}
           ports:
-            - name: http
-              containerPort: 80
-              protocol: TCP
+            {{- if .Values.scheduler.admissionWebhook.enabled }}
             - name: https
               containerPort: 443
               protocol: TCP
+            {{- else }}
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            {{- end }}
             - name: metrics
               containerPort: {{ last (splitList ":" .Values.scheduler.metricsBindAddress) | int }}
               protocol: TCP
