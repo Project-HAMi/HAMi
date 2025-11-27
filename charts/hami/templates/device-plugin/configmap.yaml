@@ -8,6 +8,11 @@ metadata:
     app.kubernetes.io/component: hami-device-plugin
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
+  {{ $existing := (lookup "v1" "ConfigMap" (include "hami-vgpu.namespace" .) (include "hami-vgpu.device-plugin" .)) -}}
+  {{ if and $existing $existing.data (hasKey $existing.data "config.json") -}}
+  config.json: |
+{{ get $existing.data "config.json" | indent 4 }}
+  {{- else -}}
   config.json: |
     {
         "nodeconfig": [
@@ -24,4 +29,5 @@ data:
             }
         ]
     }
+  {{- end -}}
 {{- end -}}
