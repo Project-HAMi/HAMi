@@ -113,11 +113,14 @@ func start() error {
 
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
-	sher.Start()
+	go sher.RegisterFromNodeAnnotations()
+	err := sher.Start()
+	if err != nil {
+		return err
+	}
 	defer sher.Stop()
 
 	// start monitor metrics
-	go sher.RegisterFromNodeAnnotations()
 	go initMetrics(config.MetricsBindAddress)
 
 	// start http server
