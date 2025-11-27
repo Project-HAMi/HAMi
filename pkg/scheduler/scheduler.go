@@ -28,6 +28,8 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/selection"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
@@ -212,6 +214,64 @@ func (s *Scheduler) Start() {
 
 func (s *Scheduler) Stop() {
 	close(s.stopCh)
+}
+
+func (s *Scheduler) ResyncPods() {
+	klog.InfoS("Entering ResyncPods")
+	defer klog.InfoS("Exiting ResyncPods")
+
+	var err error
+	var labelReq *labels.Requirement
+	if labelReq, err = labels.NewRequirement(util.AssignedNodeAnnotations, selection.Exists, nil); err != nil {
+		klog.ErrorS(err, "Failed to create label requirement for listing scheduled pod")
+		panic(err)
+	}
+	vgpuNodeSelector := labels.NewSelector().Add(*labelReq)
+
+	ticker := time.NewTicker(1 * time.Hour)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ticker.C:
+			klog.V(5).InfoS("Resync pods ticker triggered")
+		case <-s.stopCh:
+			klog.InfoS("Received stop signal, exiting ResyncPods")
+			return
+		}
+
+		var cachedPods []*corev1.Pod
+		if cachedPods, err = s.podManager.ListPodsUID(); err != nil {
+			klog.ErrorS(err, "Failed to list cached pods in pod manager")
+			continue
+		}
+		// If a Pod is subsequently deleted after `podManager.ListPodsUID`, it will still exist in the cachedPods slice and be deleted again below.
+		// However, as the podManager's deletion operation is inherently idempotent, this poses no issue.
+
+		// List pods scheduled by hami with hami.io/vgpu-node annotation
+		var podList []*corev1.Pod
+		if podList, err = s.podLister.List(vgpuNodeSelector); err != nil {
+			klog.ErrorS(err, "Failed to list scheduled pods")
+			continue
+		}
+
+		// Find out pods that are cached in pod manager but is not in cluster
+		realPodMap := make(map[k8stypes.UID]bool, len(podList))
+		for _, p := range podList {
+			realPodMap[p.UID] = true
+		}
+		shouldDeleteCachedPods := make([]*corev1.Pod, 0, len(cachedPods))
+		for _, cachedPod := range cachedPods {
+			if _, exists := realPodMap[cachedPod.UID]; !exists {
+				shouldDeleteCachedPods = append(shouldDeleteCachedPods, cachedPod)
+			}
+		}
+
+		for _, p := range shouldDeleteCachedPods {
+			s.podManager.DelPod(p)
+		}
+
+	}
 }
 
 func (s *Scheduler) RegisterFromNodeAnnotations() {
