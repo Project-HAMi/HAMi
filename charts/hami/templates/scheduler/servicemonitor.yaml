@@ -1,0 +1,33 @@
+{{- if .Values.scheduler.servicemonitor.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  {{- if .Values.scheduler.servicemonitor.annotations }}
+  annotations: 
+    {{ toYaml .Values.scheduler.servicemonitor.annotations | nindent 4 }}
+  {{- end }}
+  name: {{ include "hami-vgpu.scheduler" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- if .Values.scheduler.servicemonitor.labels }}
+    {{ toYaml .Values.scheduler.servicemonitor.labels | indent 4 }}
+    {{- end }}
+spec:
+  endpoints:
+  - path: /metrics
+    port: monitor
+    scheme: http
+    interval: {{ .Values.scheduler.servicemonitor.interval | default "15s" }}
+    honorLabels: {{ .Values.scheduler.servicemonitor.honorLabels | default false }}
+  namespaceSelector:
+    matchNames:
+    - {{ include "hami-vgpu.namespace" . }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-scheduler
+      {{- include "hami-vgpu.labels" . | nindent 6 }}
+      {{- if .Values.scheduler.service.labels }}
+      {{ toYaml .Values.scheduler.service.labels | indent 6 }}
+      {{- end }}
+{{- end }}
