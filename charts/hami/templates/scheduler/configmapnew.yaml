@@ -20,15 +20,20 @@ data:
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
+    {{- if .Values.scheduler.admissionWebhook.enabled }}
     - urlPrefix: "https://127.0.0.1:443"
+      enableHTTPS: true
+      tlsConfig:
+        insecure: true
+    {{- else }}
+    - urlPrefix: "http://127.0.0.1:80"
+      enableHTTPS: false
+    {{- end }}
       filterVerb: filter
       bindVerb: bind
       nodeCacheCapable: true
       weight: 1
       httpTimeout: 30s
-      enableHTTPS: true
-      tlsConfig:
-        insecure: true
       managedResources:
       - name: {{ .Values.resourceName }}
         ignoredByScheduler: true

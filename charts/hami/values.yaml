@@ -238,6 +238,9 @@ scheduler:
 
 devicePlugin:
   enabled: true
+  gpuOperatorToolkitReady:
+    enabled: false
+    hostPath: "/run/nvidia/validations"
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
@@ -283,6 +286,19 @@ devicePlugin:
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
     resyncInterval: "5m"
+    extraArgs:
+      - -v=4
+    extraEnvs: {}
+    resources: {}
+      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
+      # and remove the curly braces after 'resources:'.
+#      limits:
+#        cpu: 1000m
+#        memory: 1000Mi
+#      requests:
+#        cpu: 100m
+#        memory: 100Mi
+
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
@@ -295,7 +311,7 @@ devicePlugin:
   passDeviceSpecsEnabled: false
   extraArgs:
     - -v=4
-
+  extraEnvs: {}
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
@@ -327,17 +343,6 @@ devicePlugin:
 #    requests:
 #      cpu: 100m
 #      memory: 100Mi
-
-  vgpuMonitor:
-    resources: {}
-      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
-      # and remove the curly braces after 'resources:'.
-#      limits:
-#        cpu: 1000m
-#        memory: 1000Mi
-#      requests:
-#        cpu: 100m
-#        memory: 100Mi
 
 devices:
   amd:

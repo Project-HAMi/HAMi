@@ -43,13 +43,13 @@ spec:
       priorityClassName: system-node-critical
       {{- include "hami.scheduler.extender.imagePullSecrets" . | nindent 6 }}
       containers:
-      {{- if .Values.scheduler.kubeScheduler.enabled }}
+        {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: kube-scheduler
           image: {{ include "hami.scheduler.kubeScheduler.image" . }}
           imagePullPolicy: {{ .Values.scheduler.kubeScheduler.image.pullPolicy }}
           command:
             - kube-scheduler
-             {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
+            {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
             {{- range .Values.scheduler.kubeScheduler.extraNewArgs }}
             - {{ . }}
             {{- end }}
@@ -96,9 +96,13 @@ spec:
           {{- end }}
           command:
             - scheduler
+            {{- if .Values.scheduler.admissionWebhook.enabled }}
             - --http_bind=0.0.0.0:443
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
+            {{- else }}
+            - --http_bind=0.0.0.0:80
+            {{- end }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
             - --node-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy }}
@@ -123,32 +127,50 @@ spec:
             - {{ . }}
             {{- end }}
           ports:
-            - name: http
+            {{- if .Values.scheduler.admissionWebhook.enabled }}
+            - name: https
               containerPort: 443
+              protocol: TCP
+            {{- else }}
+            - name: http
+              containerPort: 80
+              protocol: TCP
+            {{- end }}
+            - name: metrics
+              containerPort: {{ last (splitList ":" .Values.scheduler.metricsBindAddress) | int }}
               protocol: TCP
           resources:
           {{- toYaml .Values.scheduler.extender.resources | nindent 12 }}
           volumeMounts:
-            - name: tls-config
-              mountPath: /tls
             - name: device-config
               mountPath: /device-config.yaml
               subPath: device-config.yaml
+          {{- if .Values.scheduler.admissionWebhook.enabled }}
+            - name: tls-config
+              mountPath: /tls
+          {{- end }}
           {{- if .Values.scheduler.livenessProbe }}
           livenessProbe:
             httpGet:
               path: /healthz
-              port: 443
+              {{- if .Values.scheduler.admissionWebhook.enabled }}
+              port: https
               scheme: HTTPS
+              {{- else }}
+              port: http
+              scheme: HTTP
+              {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 5
           {{- end }}
       volumes:
+        {{- if .Values.scheduler.admissionWebhook.enabled }}
         - name: tls-config
           secret:
             secretName: {{ template "hami-vgpu.scheduler.tls" . }}
+        {{- end }}
         {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
