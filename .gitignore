@@ -13,3 +13,5 @@ vgpuvalidator
 _output/
 coverage.out
 .DS_Store
+__pycache__/
+*.pyc
