@@ -286,6 +286,7 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Node configuration for device plugin, Priority: configName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
     # If this is set, it will override the default config.json.
