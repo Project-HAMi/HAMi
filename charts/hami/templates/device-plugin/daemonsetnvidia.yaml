@@ -169,7 +169,7 @@ spec:
             path: /var
         - name: deviceconfig
           configMap:
-            name: {{ template "hami-vgpu.device-plugin" . }}
+            name: {{ .Values.devicePlugin.nodeConfiguration.configName | default (include "hami-vgpu.device-plugin" .) }}
         - name: device-config
           configMap:
             name: {{ include "hami-vgpu.scheduler" . }}-device

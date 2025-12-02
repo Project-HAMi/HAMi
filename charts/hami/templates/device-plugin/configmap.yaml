@@ -1,4 +1,4 @@
-{{- if .Values.devicePlugin.enabled -}}
+{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.configName) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -8,26 +8,24 @@ metadata:
     app.kubernetes.io/component: hami-device-plugin
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
-  {{ $existing := (lookup "v1" "ConfigMap" (include "hami-vgpu.namespace" .) (include "hami-vgpu.device-plugin" .)) -}}
-  {{ if and $existing $existing.data (hasKey $existing.data "config.json") -}}
   config.json: |
-{{ get $existing.data "config.json" | indent 4 }}
-  {{- else -}}
-  config.json: |
-    {
+{{- if .Values.devicePlugin.nodeConfiguration.config }}
+{{- toPrettyJson .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
+{{- else }}
+      {
         "nodeconfig": [
-            {
-                "name": "m5-cloudinfra-online02",
-                "operatingmode": "hami-core",
-                "devicememoryscaling": 1.8,
-                "devicesplitcount": 10,
-                "migstrategy":"none",
-                "filterdevices": {
-                  "uuid": [],
-                  "index": []
-                }
+          {
+            "name": "m5-cloudinfra-online02",
+            "operatingmode": "hami-core",
+            "devicememoryscaling": 1.8,
+            "devicesplitcount": 10,
+            "migstrategy": "none",
+            "filterdevices": {
+              "uuid": [],
+              "index": []
             }
+          }
         ]
-    }
-  {{- end -}}
-{{- end -}}
+      }
+{{- end }}
+{{- end }}
