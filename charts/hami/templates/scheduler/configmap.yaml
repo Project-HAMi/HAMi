@@ -14,16 +14,21 @@ data:
         "apiVersion": "v1",
         "extenders": [
             {
+                {{- if .Values.scheduler.admissionWebhook.enabled }}
                 "urlPrefix": "https://127.0.0.1:443",
-                "filterVerb": "filter",
-                "bindVerb": "bind",
                 "enableHttps": true,
-                "weight": 1,
-                "nodeCacheCapable": true,
-                "httpTimeout": 30000000000,
                 "tlsConfig": {
                     "insecure": true
                 },
+                {{- else }}
+                "urlPrefix": "http://127.0.0.1:80",
+                "enableHttps": false,
+                {{- end }}
+                "filterVerb": "filter",
+                "bindVerb": "bind",
+                "weight": 1,
+                "nodeCacheCapable": true,
+                "httpTimeout": 30000000000,
                 "managedResources": [
                     {{- range .Values.devices.amd.customresources }}
                     {
