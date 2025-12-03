@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -60,6 +61,7 @@ type Scheduler struct {
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
 	quotaManager   *device.QuotaManager
+	started        uint32 // 0 = false, 1 = true
 }
 
 func NewScheduler() *Scheduler {
@@ -68,6 +70,7 @@ func NewScheduler() *Scheduler {
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
+		started:      0,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -196,7 +199,7 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 	s.quotaManager.DelQuota(quota)
 }
 
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
@@ -204,23 +207,35 @@ func (s *Scheduler) Start() {
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
 
-	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
-	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register pod event handler: %v", err)
+	}
+	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
 		DeleteFunc: s.onDelNode,
 	})
-	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register node event handler: %v", err)
+	}
+	resourceQuotaEventHandlerRegistration, err := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
 		UpdateFunc: s.onUpdateQuota,
 		DeleteFunc: s.onDelQuota,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to register resource quota event handler: %v", err)
+	}
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 	s.addAllEventHandlers()
+	atomic.StoreUint32(&s.started, 1)
+	return nil
 }
 
 func (s *Scheduler) Stop() {
@@ -243,6 +258,10 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Received node notification")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
+			if atomic.LoadUint32(&s.started) == 0 {
+				klog.V(5).InfoS("Scheduler not started yet, skipping ...")
+				continue
+			}
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
