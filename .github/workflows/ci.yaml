@@ -38,7 +38,7 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.1
+          version: v2.1.6
       - name: import alias
         run: hack/verify-import-aliases.sh
 
