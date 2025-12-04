@@ -18,8 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.6.3-base-ubi8
-RUN dnf update -y -x cuda-toolkit-config-common -x cuda-toolkit-12-config-common
+FROM nvidia/cuda:12.6.3-base-ubuntu22.04
 RUN rm -rf /usr/local/cuda-12.6/compat/libcuda.so*
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all
