@@ -49,12 +49,12 @@ data:
               memory: 5120
               count: 7
           - 
-            - name: 2g.10gb
-              memory: 10240
-              count: 3
             - name: 1g.5gb
               memory: 5120
               count: 1
+            - name: 2g.10gb
+              memory: 10240
+              count: 3
           - 
             - name: 3g.20gb
               memory: 20480
@@ -70,12 +70,12 @@ data:
               memory: 10240
               count: 7
           - 
-            - name: 2g.20gb
-              memory: 20480
-              count: 3
             - name: 1g.10gb
               memory: 10240
               count: 1
+            - name: 2g.20gb
+              memory: 20480
+              count: 3
           - 
             - name: 3g.40gb
               memory: 40960
