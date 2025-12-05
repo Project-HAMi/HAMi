@@ -121,9 +121,19 @@ func (s *Scheduler) onUpdatePod(_, newObj any) {
 }
 
 func (s *Scheduler) onDelPod(obj any) {
+	if _, ok := obj.(metav1.Object); !ok {
+		// assume it is a tombstone object of type DeletedFinalStateUnknown
+		tombstone, isTombstone := obj.(cache.DeletedFinalStateUnknown)
+		if !isTombstone {
+			klog.Errorf("Error decoding object. Expected cache.DeletedFinalStateUnknown, got type %T", obj)
+			return
+		}
+		obj = tombstone.Obj
+	}
+
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
-		klog.Errorf("unknown add object type")
+		klog.Errorf("onDelPod missing Object, got type %T", obj)
 		return
 	}
 	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
