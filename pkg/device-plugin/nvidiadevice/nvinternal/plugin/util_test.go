@@ -45,8 +45,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 				Models: []string{"A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB"},
 				Geometries: []device.Geometry{
 					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 7}},
-					{device.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
-					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}},
+					{device.MigTemplate{Name: "1g.5gb", Memory: 5120, Count: 1}, device.MigTemplate{Name: "2g.10gb", Memory: 10240, Count: 3}},
 					{device.MigTemplate{Name: "3g.20gb", Memory: 20480, Count: 2}},
 					{device.MigTemplate{Name: "7g.40gb", Memory: 40960, Count: 1}},
 				},
@@ -55,8 +54,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 				Models: []string{"A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"},
 				Geometries: []device.Geometry{
 					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 7}},
-					{device.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
-					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}},
+					{device.MigTemplate{Name: "1g.10gb", Memory: 10240, Count: 1}, device.MigTemplate{Name: "2g.20gb", Memory: 20480, Count: 3}},
 					{device.MigTemplate{Name: "3g.40gb", Memory: 40960, Count: 2}},
 					{device.MigTemplate{Name: "7g.80gb", Memory: 81920, Count: 1}},
 				},
@@ -96,11 +94,12 @@ func TestGenerateMigTemplate(t *testing.T) {
 			containerDev: device.ContainerDevice{
 				Idx:     0,
 				UUID:    "aaaaabbbb[1-1]",
-				Usedmem: 3000,
+				Usedmem: 8000,
 			},
 			expectedPos:   1,
 			expectedReset: true,
 			expectedMig: map[string]int32{
+				"1g.5gb": 1,
 				"2g.10gb": 3,
 			},
 		},
@@ -131,7 +130,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			expectedPos:   2,
 			expectedReset: false,
 			expectedMig: map[string]int32{
-				"1g.5gb": 8,
+				"1g.5gb": 7,
 			},
 		},
 	}
