@@ -32,57 +32,200 @@ data:
         allowedGeometries:
           - 
             - name: 1g.6gb
+              core: 25
               memory: 6144
               count: 4
           - 
             - name: 2g.12gb
+              core: 50
               memory: 12288
               count: 2
           - 
             - name: 4g.24gb
+              core: 100
               memory: 24576
               count: 1
       - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
         allowedGeometries:
           - 
             - name: 1g.5gb
+              core: 14
               memory: 5120
               count: 7
           - 
-            - name: 2g.10gb
-              memory: 10240
-              count: 3
             - name: 1g.5gb
+              core: 14
               memory: 5120
               count: 1
+            - name: 2g.10gb
+              core: 28
+              memory: 10240
+              count: 3
           - 
             - name: 3g.20gb
+              core: 42
               memory: 20480
               count: 2
           - 
             - name: 7g.40gb
+              core: 100
               memory: 40960
               count: 1
       - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
         allowedGeometries:
           - 
             - name: 1g.10gb
+              core: 14
               memory: 10240
               count: 7
           - 
-            - name: 2g.20gb
-              memory: 20480
-              count: 3
             - name: 1g.10gb
+              core: 14
               memory: 10240
               count: 1
+            - name: 2g.20gb
+              core: 28
+              memory: 20480
+              count: 3
           - 
             - name: 3g.40gb
+              core: 42
               memory: 40960
               count: 2
           - 
             - name: 7g.79gb
+              core: 100
               memory: 80896
+              count: 1
+      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+        allowedGeometries:
+          - 
+            - name: 1g.10gb
+              core: 14
+              memory: 10240
+              count: 7
+          - 
+            - name: 1g.10gb
+              core: 14
+              memory: 10240
+              count: 1
+            - name: 2g.20gb
+              core: 28
+              memory: 20480
+              count: 3
+          - 
+            - name: 3g.40gb
+              core: 42
+              memory: 40960
+              count: 2
+          - 
+            - name: 7g.80gb
+              core: 100
+              memory: 81920
+              count: 1
+      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+        allowedGeometries:
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 7
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 1
+            - name: 2g.24gb
+              core: 28
+              memory: 24576
+              count: 3
+          - 
+            - name: 3g.47gb
+              core: 42
+              memory: 48128
+              count: 2
+          - 
+            - name: 7g.94gb
+              core: 100
+              memory: 96256
+              count: 1
+      - models: [ "H20", "H100 on GH200"]
+        allowedGeometries:
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 7
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 1
+            - name: 2g.24gb
+              core: 28
+              memory: 24576
+              count: 3 
+          - 
+            - name: 3g.48gb
+              core: 42
+              memory: 49152
+              count: 2
+          - 
+            - name: 7g.96gb
+              core: 100
+              memory: 98304
+              count: 1
+      - models: [ "H200 NVL", "H200-SXM5"]
+        allowedGeometries:
+          - 
+            - name: 1g.18gb
+              core: 14
+              memory: 18432
+              count: 7
+          - 
+            - name: 1g.18gb
+              core: 14
+              memory: 18432
+              count: 1
+            - name: 2g.35gb
+              core: 28
+              memory: 35840
+              count: 3
+          - 
+            - name: 3g.71gb
+              core: 42
+              memory: 72704
+              count: 2
+          - 
+            - name: 7g.141gb
+              core: 100
+              memory: 144384
+              count: 1
+      - models: [ "B200" ]
+        allowedGeometries:
+          - 
+            - name: 1g.23gb
+              core: 14
+              memory: 23552
+              count: 7
+          - 
+            - name: 1g.23gb
+              core: 14
+              memory: 23552
+              count: 1
+            - name: 2g.45gb
+              core: 28
+              memory: 46080
+              count: 3
+          - 
+            - name: 3g.90gb
+              core: 42
+              memory: 92160
+              count: 2
+          - 
+            - name: 7g.180gb
+              core: 100
+              memory: 184320
               count: 1
     cambricon:
       resourceCountName: {{ .Values.mluResourceName }}
