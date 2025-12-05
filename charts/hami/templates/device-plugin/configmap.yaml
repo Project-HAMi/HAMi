@@ -1,4 +1,4 @@
-{{- if .Values.devicePlugin.enabled -}}
+{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.configName) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -9,19 +9,23 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   config.json: |
-    {
+{{- if .Values.devicePlugin.nodeConfiguration.config }}
+{{- toPrettyJson .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
+{{- else }}
+      {
         "nodeconfig": [
-            {
-                "name": "m5-cloudinfra-online02",
-                "operatingmode": "hami-core",
-                "devicememoryscaling": 1.8,
-                "devicesplitcount": 10,
-                "migstrategy":"none",
-                "filterdevices": {
-                  "uuid": [],
-                  "index": []
-                }
+          {
+            "name": "m5-cloudinfra-online02",
+            "operatingmode": "hami-core",
+            "devicememoryscaling": 1.8,
+            "devicesplitcount": 10,
+            "migstrategy": "none",
+            "filterdevices": {
+              "uuid": [],
+              "index": []
             }
+          }
         ]
-    }
-{{- end -}}
+      }
+{{- end }}
+{{- end }}
