@@ -18,10 +18,10 @@ update-versions:
 	echo "FULL_BUILD_VERSION=$(FULL_BUILD_VERSION)"
 	@# Update chart versions to point to the current version.
 	hami_version="$(VERSION)";		\
-	chart_version=` echo $(VERSION) | tr -d 'v' ` ; \
-	sed -i 's/version: "*'$(VERSION_REGEX)'"*/version: '$$chart_version'/g' $(CHART_FILE);		\
-	sed -i 's/appVersion: "*'$(VERSION_REGEX)'"*/appVersion: "'$$chart_version'"/g' $(CHART_FILE);	\
-	sed -i 's/version: "*'$(VERSION_REGEX)'"*/version: "'$$hami_version'"/g' $(VALUES_FILE)
+	chart_version=`echo $(VERSION) | tr -d 'v'`; \
+	CHART_VERSION="$$chart_version" perl -i -pe 's/version: "*$(VERSION_REGEX)"*/version: $$ENV{CHART_VERSION}/g' $(CHART_FILE);		\
+	CHART_VERSION="$$chart_version" perl -i -pe 's/appVersion: "*$(VERSION_REGEX)"*/appVersion: "$$ENV{CHART_VERSION}"/g' $(CHART_FILE);	\
+	HAMI_VERSION="$$hami_version" perl -i -pe 's/imageTag: "*$(VERSION_REGEX)"*/imageTag: "$$ENV{HAMI_VERSION}"/g' $(VALUES_FILE)
 
 lint: update-versions
 	helm lint --with-subcharts --values ./hami/values.yaml ./hami --debug
@@ -31,4 +31,3 @@ package: lint
 
 clean:
 	rm -f *.tgz
-
