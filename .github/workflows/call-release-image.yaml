@@ -113,7 +113,7 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.24.6-bullseye
+              GOLANG_IMAGE=golang:1.25.5-bookworm
               HAMICORE_IMAGE=${{ steps.meta.outputs.tags }}
               DEST_DIR=/usr/local
             tags: ${{ steps.meta1.outputs.tags }}
