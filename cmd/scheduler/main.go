@@ -17,13 +17,16 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -61,6 +64,9 @@ func init() {
 	rootCmd.Flags().StringVar(&config.HTTPBind, "http_bind", "127.0.0.1:8080", "http server bind address")
 	rootCmd.Flags().StringVar(&tlsCertFile, "cert_file", "", "tls cert file")
 	rootCmd.Flags().StringVar(&tlsKeyFile, "key_file", "", "tls key file")
+	rootCmd.Flags().BoolVar(&config.LeaderElect, "leader-elect", false, "The pod of hami-scheduler enable leader select")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 0, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
@@ -101,6 +107,16 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
+func isLeader() bool {
+	lease, err := client.GetClient().CoordinationV1().Leases(config.LeaderElectResourceNamespace).
+		Get(context.Background(), config.LeaderElectResourceName, metav1.GetOptions{})
+	if err != nil {
+		klog.ErrorS(err, "failed to get leader election lease", "namespace", config.LeaderElectResourceNamespace, "name", config.LeaderElectResourceName)
+		return false
+	}
+	return lease.Spec.HolderIdentity != nil && *lease.Spec.HolderIdentity == os.Getenv("HOSTNAME")
+}
+
 func start() error {
 	// Initialize node lock timeout from config
 	nodelock.NodeLockTimeout = config.NodeLockTimeout
@@ -113,12 +129,30 @@ func start() error {
 
 	config.InitDevices()
 	sher = scheduler.NewScheduler()
-	sher.Start()
-	defer sher.Stop()
 
-	// start monitor metrics
-	go sher.RegisterFromNodeAnnotations()
-	go initMetrics(config.MetricsBindAddress)
+	if config.LeaderElect {
+		go func() {
+			lastLeader := false
+			for {
+				currentLeader := isLeader()
+
+				if currentLeader && !lastLeader {
+					klog.Info("🔹 Became leader")
+					sher.Start()
+					// start monitor metrics
+					go sher.RegisterFromNodeAnnotations()
+					go initMetrics(config.MetricsBindAddress)
+				} else if !currentLeader && lastLeader {
+					klog.Info("🔸 Lost leadership, exiting to trigger restart...")
+					sher.Stop()
+					os.Exit(1)
+				}
+
+				lastLeader = currentLeader
+				time.Sleep(15 * time.Second)
+			}
+		}()
+	}
 
 	// start http server
 	router := httprouter.New()
