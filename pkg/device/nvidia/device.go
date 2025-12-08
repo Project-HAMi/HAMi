@@ -593,14 +593,20 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 	}
 	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
 	if devusage.Mode == MigMode {
+		// The same logic as in AddResourceUsage
 		if len(deviceUsageCurrent.UsageList) == 0 {
 			tmpfound := false
 			for tidx, templates := range devusage.MigTemplate {
-				if templates[0].Memory < request.Memreq {
-					continue
-				} else {
-					device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
-					tmpfound = true
+				for _, template := range templates {
+					if template.Memory < request.Memreq {
+						continue
+					} else {
+						device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
+						tmpfound = true
+						break
+					}
+				}
+				if tmpfound {
 					break
 				}
 			}
@@ -656,19 +662,27 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
+		OuterLoop:
 			for tidx, templates := range n.MigTemplate {
-				if templates[0].Memory < ctr.Usedmem {
-					continue
-				} else {
-					device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
-					ctr.Usedmem = n.MigUsage.UsageList[0].Memory
-					ctr.Usedcores = n.MigUsage.UsageList[0].Core
-					if !strings.Contains(ctr.UUID, "[") {
-						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-0]"
+				for idx, template := range templates {
+					if template.Memory < ctr.Usedmem {
+						continue
+					} else {
+						device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
+						// Calculate the correct UsageList index by summing Count of all templates before idx
+						usageListIdx := 0
+						for i := range idx {
+							usageListIdx += int(templates[i].Count)
+						}
+						ctr.Usedmem = n.MigUsage.UsageList[usageListIdx].Memory
+						ctr.Usedcores = n.MigUsage.UsageList[usageListIdx].Core
+						if !strings.Contains(ctr.UUID, "[") {
+							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(idx) + "]"
+						}
+						n.MigUsage.Index = int32(tidx)
+						n.MigUsage.UsageList[usageListIdx].InUse = true
+						break OuterLoop
 					}
-					n.MigUsage.Index = int32(tidx)
-					n.MigUsage.UsageList[0].InUse = true
-					break
 				}
 			}
 		} else {
