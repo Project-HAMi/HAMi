@@ -136,6 +136,7 @@ func (s *Scheduler) onDelPod(obj any) {
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
+		return
 	}
 
 	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
