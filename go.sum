@@ -6,8 +6,6 @@ github.com/NVIDIA/go-nvml v0.13.0-1 h1:OLX8Jq3dONuPOQPC7rndB6+iDmDakw0XTYgzMxObk
 github.com/NVIDIA/go-nvml v0.13.0-1/go.mod h1:+KNA7c7gIBH7SKSJ1ntlwkfN80zdx8ovl4hrK3LmPt4=
 github.com/NVIDIA/k8s-device-plugin v0.18.0 h1:zTAcR+pU90bEFwLD6WVFn2F77h8bDzqpIuqn+O2Sl/s=
 github.com/NVIDIA/k8s-device-plugin v0.18.0/go.mod h1:HgnEpZMQWmnoS3+TaHl+m4PooKBL4PjxRoCQmQjOI38=
-github.com/NVIDIA/nvidia-container-toolkit v1.18.0 h1:bXoKq9C1WHU5fF6VqXvX3RkMzpp4ihTUgBPrh66vTf0=
-github.com/NVIDIA/nvidia-container-toolkit v1.18.0/go.mod h1:ZxWSG7fnFo2Z7xSGtMyZVF7WnTbj1lgx4dMrBLUq90g=
 github.com/NVIDIA/nvidia-container-toolkit v1.18.1 h1:525Y921X2TwKwBvFfMNqyXF3QWlYbsemQfpd8YB2lHs=
 github.com/NVIDIA/nvidia-container-toolkit v1.18.1/go.mod h1:CNB3Cv4MPOtZ7WwxlMadw3ljAOOqrpesBzPr99n1FY4=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
