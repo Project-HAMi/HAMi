@@ -7,7 +7,7 @@ require (
 	github.com/NVIDIA/go-nvlib v0.8.1
 	github.com/NVIDIA/go-nvml v0.13.0-1
 	github.com/NVIDIA/k8s-device-plugin v0.18.0
-	github.com/NVIDIA/nvidia-container-toolkit v1.18.0
+	github.com/NVIDIA/nvidia-container-toolkit v1.18.1
 	github.com/ccoveille/go-safecast v1.8.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
@@ -35,7 +35,7 @@ require (
 	k8s.io/kube-scheduler v0.28.3
 	k8s.io/kubelet v0.32.3
 	sigs.k8s.io/controller-runtime v0.21.0
-	tags.cncf.io/container-device-interface v1.0.1
+	tags.cncf.io/container-device-interface v1.0.2-0.20251114135136-1b24d969689f
 )
 
 require (
@@ -62,11 +62,12 @@ require (
 	github.com/josharian/intern v1.0.0 // indirect
 	github.com/json-iterator/go v1.1.12 // indirect
 	github.com/mailru/easyjson v0.7.7 // indirect
+	github.com/moby/sys/capability v0.4.0 // indirect
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/opencontainers/runtime-spec v1.2.1 // indirect
-	github.com/opencontainers/runtime-tools v0.9.1-0.20221107090550-2e043c6bd626 // indirect
+	github.com/opencontainers/runtime-spec v1.3.0 // indirect
+	github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 // indirect
 	github.com/pkg/errors v0.9.1 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
