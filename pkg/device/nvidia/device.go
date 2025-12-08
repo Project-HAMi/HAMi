@@ -662,6 +662,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 				} else {
 					device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
 					ctr.Usedmem = n.MigUsage.UsageList[0].Memory
+					ctr.Usedcores = n.MigUsage.UsageList[0].Core
 					if !strings.Contains(ctr.UUID, "[") {
 						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-0]"
 					}
@@ -676,6 +677,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 				if !val.InUse && val.Memory >= ctr.Usedmem {
 					n.MigUsage.UsageList[idx].InUse = true
 					ctr.Usedmem = n.MigUsage.UsageList[idx].Memory
+					ctr.Usedcores = n.MigUsage.UsageList[idx].Core
 					if !strings.Contains(ctr.UUID, "[") {
 						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(n.MigUsage.Index) + "-" + fmt.Sprint(idx) + "]"
 					}
