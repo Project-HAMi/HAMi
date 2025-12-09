@@ -4,6 +4,8 @@ github.com/NVIDIA/go-gpuallocator v0.6.0 h1:2PA2swx59gJYREPkZNTGtyCP6Pnz3WEgnYsX
 github.com/NVIDIA/go-gpuallocator v0.6.0/go.mod h1:c+Yspg+/QxWOmoSQeuI48Z/7nS+mMPtxyj1NYUTwewY=
 github.com/NVIDIA/go-nvlib v0.8.1 h1:OPEHVvn3zcV5OXB68A7WRpeCnYMRSPl7LdeJH/d3gZI=
 github.com/NVIDIA/go-nvlib v0.8.1/go.mod h1:7mzx9FSdO9fXWP9NKuZmWkCwhkEcSWQFe2tmFwtLb9c=
+github.com/NVIDIA/go-nvlib v0.9.0 h1:GKLIvLJ0uhCtTLLZp2Q8QIDRxOYH45MM4Y5OO3U5Rho=
+github.com/NVIDIA/go-nvlib v0.9.0/go.mod h1:7mzx9FSdO9fXWP9NKuZmWkCwhkEcSWQFe2tmFwtLb9c=
 github.com/NVIDIA/go-nvml v0.13.0-1 h1:OLX8Jq3dONuPOQPC7rndB6+iDmDakw0XTYgzMxObkEw=
 github.com/NVIDIA/go-nvml v0.13.0-1/go.mod h1:+KNA7c7gIBH7SKSJ1ntlwkfN80zdx8ovl4hrK3LmPt4=
 github.com/NVIDIA/k8s-device-plugin v0.18.0 h1:zTAcR+pU90bEFwLD6WVFn2F77h8bDzqpIuqn+O2Sl/s=
