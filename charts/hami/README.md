@@ -171,6 +171,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
+| `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | `{}` |
+| `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
 
 ### Device Plugin Service Configuration
 
