@@ -1,4 +1,4 @@
-{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.configName) }}
+{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.externalConfigName) }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
