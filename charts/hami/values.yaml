@@ -302,6 +302,29 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Node configuration for device plugin, Priority: externalConfigName > config > default config
+  nodeConfiguration:
+    # If you want to use a custom config.json, you can set the content here.
+    # If this is set, it will override the default config.json(An example is as follows).
+    config: |
+      {
+        "nodeconfig": [
+          {
+            "name": "m5-cloudinfra-online02",
+            "operatingmode": "hami-core",
+            "devicememoryscaling": 1.8,
+            "devicesplitcount": 10,
+            "migstrategy": "none",
+            "filterdevices": {
+              "uuid": [],
+              "index": []
+            }
+          }
+        ]
+      }
+    # If you want to use an existing ConfigMap, you can set the name here.
+    # If this is set, the chart will not create the ConfigMap and will use the existing one.
+    externalConfigName: ""
   # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
   runtimeClassName: ""
   # Whether to create runtime class, name comes from runtimeClassName when it is set
