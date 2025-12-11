@@ -51,9 +51,9 @@ The app name for DevicePlugin
 {{/*
   The app name for MockDevicePlugin
   */}}
-  {{- define "hami-vgpu.mock-device-plugin" -}}
-  {{- printf "%s-mock-device-plugin" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
-  {{- end -}}
+{{- define "hami-vgpu.mock-device-plugin" -}}
+{{- printf "%s-mock-device-plugin" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
 
 {{/*
 The tls secret name for Scheduler
@@ -131,7 +131,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hami.mockDevicePlugin.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.mockDevicePlugin.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.mockDevicePlugin.image "global" .Values.global "tag" .Values.mockDevicePlugin.tag) }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.monitor.image" -}}

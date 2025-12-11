@@ -7,13 +7,15 @@ metadata:
 spec:
   selector:
     matchLabels:
-      name: hami-mock-dp-ds
+      app.kubernetes.io/component: hami-mock-device-plugin
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
   template:
     metadata:
       annotations:
         scheduler.alpha.kubernetes.io/critical-pod: ""
       labels:
-        name: hami-mock-dp-ds
+        app.kubernetes.io/component: hami-mock-device-plugin
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "hami-vgpu.mock-device-plugin" . }}
       tolerations:
