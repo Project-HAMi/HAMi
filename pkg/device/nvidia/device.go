@@ -40,7 +40,6 @@ const (
 	RegisterAnnos        = "hami.io/node-nvidia-register"
 	RegisterGPUPairScore = "hami.io/node-nvidia-score"
 	NvidiaGPUDevice      = "NVIDIA"
-	NvidiaGPUCommonWord  = "GPU"
 	GPUInUse             = "nvidia.com/use-gputype"
 	GPUNoUse             = "nvidia.com/nouse-gputype"
 	NumaBind             = "nvidia.com/numa-bind"
@@ -155,7 +154,8 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config NvidiaConfig
+	config         NvidiaConfig
+	ReportedGPUNum int64
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -167,12 +167,13 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
 	return &NvidiaGPUDevices{
-		config: nvconfig,
+		config:         nvconfig,
+		ReportedGPUNum: 0,
 	}
 }
 
 func (dev *NvidiaGPUDevices) CommonWord() string {
-	return NvidiaGPUCommonWord
+	return NvidiaGPUDevice
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -212,7 +213,26 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	current := int64(0)
+	quantity := n.Status.Allocatable.Name(corev1.ResourceName(dev.config.ResourceCountName), resource.DecimalSI)
+	if quantity != nil {
+		current = quantity.Value()
+	}
+	klog.Infoln("-=-=-=Current device count from allocatable", current, "Reported Devices=", dev.ReportedGPUNum)
+	if current == 0 {
+		if dev.ReportedGPUNum == 0 {
+			return true, false
+		} else {
+			dev.ReportedGPUNum = current
+			return false, false
+		}
+	}
+	if dev.ReportedGPUNum != current {
+		dev.ReportedGPUNum = current
+		return true, true
+	} else {
+		return true, false
+	}
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -248,7 +268,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if !ok {
 		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
-	nodedevices, err := device.DecodeNodeDevices(devEncoded)
+	nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
@@ -256,6 +276,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if len(nodedevices) == 0 {
 		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}
 	for _, val := range nodedevices {
 		if val.Mode == MigMode {
@@ -570,14 +593,20 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 	}
 	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
 	if devusage.Mode == MigMode {
+		// The same logic as in AddResourceUsage
 		if len(deviceUsageCurrent.UsageList) == 0 {
 			tmpfound := false
 			for tidx, templates := range devusage.MigTemplate {
-				if templates[0].Memory < request.Memreq {
-					continue
-				} else {
-					device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
-					tmpfound = true
+				for _, template := range templates {
+					if template.Memory < request.Memreq {
+						continue
+					} else {
+						device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
+						tmpfound = true
+						break
+					}
+				}
+				if tmpfound {
 					break
 				}
 			}
@@ -633,18 +662,27 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
+		OuterLoop:
 			for tidx, templates := range n.MigTemplate {
-				if templates[0].Memory < ctr.Usedmem {
-					continue
-				} else {
-					device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
-					ctr.Usedmem = n.MigUsage.UsageList[0].Memory
-					if !strings.Contains(ctr.UUID, "[") {
-						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-0]"
+				for idx, template := range templates {
+					if template.Memory < ctr.Usedmem {
+						continue
+					} else {
+						device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
+						// Calculate the correct UsageList index by summing Count of all templates before idx
+						usageListIdx := 0
+						for i := range idx {
+							usageListIdx += int(templates[i].Count)
+						}
+						ctr.Usedmem = n.MigUsage.UsageList[usageListIdx].Memory
+						ctr.Usedcores = n.MigUsage.UsageList[usageListIdx].Core
+						if !strings.Contains(ctr.UUID, "[") {
+							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(idx) + "]"
+						}
+						n.MigUsage.Index = int32(tidx)
+						n.MigUsage.UsageList[usageListIdx].InUse = true
+						break OuterLoop
 					}
-					n.MigUsage.Index = int32(tidx)
-					n.MigUsage.UsageList[0].InUse = true
-					break
 				}
 			}
 		} else {
@@ -653,6 +691,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 				if !val.InUse && val.Memory >= ctr.Usedmem {
 					n.MigUsage.UsageList[idx].InUse = true
 					ctr.Usedmem = n.MigUsage.UsageList[idx].Memory
+					ctr.Usedcores = n.MigUsage.UsageList[idx].Core
 					if !strings.Contains(ctr.UUID, "[") {
 						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(n.MigUsage.Index) + "-" + fmt.Sprint(idx) + "]"
 					}
@@ -860,7 +899,7 @@ func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[str
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
 	deviceScoreMap := make(map[string]*device.DevicePairScore)
 
-	for _, dev := range nodeInfo.Devices {
+	for _, dev := range nodeInfo.Devices[NvidiaGPUDevice] {
 		deviceScoreMap[dev.ID] = &dev.DevicePairScore
 	}
 

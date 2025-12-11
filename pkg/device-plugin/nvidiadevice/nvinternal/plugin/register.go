@@ -121,10 +121,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
-		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && plugin.operatingMode != nvidia.MigMode {
 			registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
+			klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
+		} else {
+			klog.Warningln("mig mode enabled, the memory scaling is not applied")
 		}
-		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -142,13 +144,24 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		if !ok {
 			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
 		}
+		if !strings.HasPrefix(Model, "NVIDIA") {
+			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
+			// This is to handle cases where the model name might not be in the expected format.
+			Model = fmt.Sprintf("NVIDIA-%s", Model)
+		}
+		devcore := int32(100)
+		if plugin.operatingMode != nvidia.MigMode {
+			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
+		} else {
+			klog.Warning("mig mode enabled, the core scaling is not applied")
+		}
 		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
-			Devcore: int32(*plugin.schedulerConfig.DeviceCoreScaling * 100),
-			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
+			Devcore: devcore,
+			Type:    Model,
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
 			Health:  health,
@@ -167,7 +180,12 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := device.EncodeNodeDevices(*devices)
+	encodeddevices := device.MarshalNodeDevices(*devices)
+	if encodeddevices == plugin.deviceCache {
+		return nil
+	}
+	plugin.deviceCache = encodeddevices
+
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
 		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
@@ -182,7 +200,6 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		}
 	}
 	klog.V(4).InfoS("patch nvidia  topo score to node", "hami.io/node-nvidia-score", string(data))
-	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
 	annos[nvidia.RegisterAnnos] = encodeddevices
 	if len(data) > 0 {
 		annos[nvidia.RegisterGPUPairScore] = string(data)

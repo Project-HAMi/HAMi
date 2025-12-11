@@ -157,6 +157,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
+| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### Device Plugin Other Configuration
 
@@ -173,6 +175,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
+| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 
 ### Device Plugin Service Configuration
 

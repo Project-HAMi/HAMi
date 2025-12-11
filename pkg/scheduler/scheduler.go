@@ -23,6 +23,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -60,6 +61,7 @@ type Scheduler struct {
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
 	quotaManager   *device.QuotaManager
+	started        uint32 // 0 = false, 1 = true
 }
 
 func NewScheduler() *Scheduler {
@@ -68,6 +70,7 @@ func NewScheduler() *Scheduler {
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
+		started:      0,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -121,11 +124,24 @@ func (s *Scheduler) onUpdatePod(_, newObj any) {
 }
 
 func (s *Scheduler) onDelPod(obj any) {
-	pod, ok := obj.(*corev1.Pod)
-	if !ok {
-		klog.Errorf("unknown add object type")
+	var pod *corev1.Pod
+	var ok bool
+
+	switch t := obj.(type) {
+	case *corev1.Pod:
+		pod = t
+		klog.V(4).InfoS("Pod deleted, cleaning up cache", "pod", pod.Namespace+"/"+pod.Name)
+	case cache.DeletedFinalStateUnknown:
+		if pod, ok = t.Obj.(*corev1.Pod); ok {
+			klog.V(4).InfoS("Pod tombstone deleted, cleaning up cache", "pod", t.Key)
+		} else {
+			klog.Errorf("Received tombstone for non-pod object on pod delete")
+		}
+	default:
+		klog.Errorf("Received unknown object type on pod delete")
 		return
 	}
+
 	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
 	if !ok {
 		return
@@ -183,7 +199,7 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 	s.quotaManager.DelQuota(quota)
 }
 
-func (s *Scheduler) Start() {
+func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
@@ -191,23 +207,35 @@ func (s *Scheduler) Start() {
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
 
-	informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
 		UpdateFunc: s.onUpdatePod,
 		DeleteFunc: s.onDelPod,
 	})
-	informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register pod event handler: %v", err)
+	}
+	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
 		DeleteFunc: s.onDelNode,
 	})
-	informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
+	if err != nil {
+		return fmt.Errorf("failed to register node event handler: %v", err)
+	}
+	resourceQuotaEventHandlerRegistration, err := informerFactory.Core().V1().ResourceQuotas().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddQuota,
 		UpdateFunc: s.onUpdateQuota,
 		DeleteFunc: s.onDelQuota,
 	})
+	if err != nil {
+		return fmt.Errorf("failed to register resource quota event handler: %v", err)
+	}
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 	s.addAllEventHandlers()
+	atomic.StoreUint32(&s.started, 1)
+	return nil
 }
 
 func (s *Scheduler) Stop() {
@@ -230,6 +258,10 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Received node notification")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
+			if atomic.LoadUint32(&s.started) == 0 {
+				klog.V(5).InfoS("Scheduler not started yet, skipping ...")
+				continue
+			}
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
@@ -271,28 +303,13 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 					klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				_, ok := util.HandshakeAnnos[devhandsk]
-				if ok {
-					tmppat := make(map[string]string)
-					tmppat[util.HandshakeAnnos[devhandsk]] = "Requesting_" + time.Now().Format(time.DateTime)
-					klog.V(5).InfoS("New timestamp for annotation", "nodeName", val.Name, "annotationKey", util.HandshakeAnnos[devhandsk], "annotationValue", tmppat[util.HandshakeAnnos[devhandsk]])
-					n, err := util.GetNode(val.Name)
-					if err != nil {
-						klog.ErrorS(err, "Failed to get node", "nodeName", val.Name)
-						continue
-					}
-					klog.V(5).InfoS("Patching node annotations", "nodeName", val.Name, "annotations", tmppat)
-					if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-						klog.ErrorS(err, "Failed to patch node annotations", "nodeName", val.Name)
-					}
-				}
 				nodeInfo := &device.NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Node = val
 				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodeInfo.Devices = make([]device.DeviceInfo, 0)
+				nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
 				for _, deviceinfo := range nodedevices {
-					nodeInfo.Devices = append(nodeInfo.Devices, *deviceinfo)
+					nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
 				}
 				s.addNode(val.Name, nodeInfo)
 				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
@@ -336,31 +353,33 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			Policy:      userGPUPolicy,
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
-		for _, d := range node.Devices {
-			nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
-				Score: 0,
-				Device: &device.DeviceUsage{
-					ID:        d.ID,
-					Index:     d.Index,
-					Used:      0,
-					Count:     d.Count,
-					Usedmem:   0,
-					Totalmem:  d.Devmem,
-					Totalcore: d.Devcore,
-					Usedcores: 0,
-					MigUsage: device.MigInUse{
-						Index:     0,
-						UsageList: make(device.MIGS, 0),
+		for _, k := range node.Devices {
+			for _, d := range k {
+				nodeInfo.Devices.DeviceLists = append(nodeInfo.Devices.DeviceLists, &policy.DeviceListsScore{
+					Score: 0,
+					Device: &device.DeviceUsage{
+						ID:        d.ID,
+						Index:     d.Index,
+						Used:      0,
+						Count:     d.Count,
+						Usedmem:   0,
+						Totalmem:  d.Devmem,
+						Totalcore: d.Devcore,
+						Usedcores: 0,
+						MigUsage: device.MigInUse{
+							Index:     0,
+							UsageList: make(device.MIGS, 0),
+						},
+						MigTemplate: d.MIGTemplate,
+						Mode:        d.Mode,
+						Type:        d.Type,
+						Numa:        d.Numa,
+						Health:      d.Health,
+						PodInfos:    make([]*device.PodInfo, 0),
+						CustomInfo:  maps.Clone(d.CustomInfo),
 					},
-					MigTemplate: d.MIGTemplate,
-					Mode:        d.Mode,
-					Type:        d.Type,
-					Numa:        d.Numa,
-					Health:      d.Health,
-					PodInfos:    make([]*device.PodInfo, 0),
-					CustomInfo:  maps.Clone(d.CustomInfo),
-				},
-			})
+				})
+			}
 		}
 		overallnodeMap[node.ID] = nodeInfo
 	}

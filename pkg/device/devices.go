@@ -50,12 +50,14 @@ type Devices interface {
 
 type MigTemplate struct {
 	Name   string `yaml:"name"`
+	Core   int32  `yaml:"core"`
 	Memory int32  `yaml:"memory"`
 	Count  int32  `yaml:"count"`
 }
 
 type MigTemplateUsage struct {
 	Name   string `json:"name,omitempty"`
+	Core   int32  `json:"core,omitempty"`
 	Memory int32  `json:"memory,omitempty"`
 	InUse  bool   `json:"inuse,omitempty"`
 }
@@ -118,7 +120,7 @@ type DevicePairScore struct {
 type NodeInfo struct {
 	ID      string
 	Node    *corev1.Node
-	Devices []DeviceInfo
+	Devices map[string][]DeviceInfo
 }
 
 type ResourceNames struct {
@@ -267,8 +269,23 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	return tmp
 }
 
+// MarshalNodeDevices will only marshal general information, customInfo is neglected.
 func MarshalNodeDevices(dlist []*DeviceInfo) string {
-	data, err := json.Marshal(dlist)
+	devAnnos := []*DeviceInfo{}
+	for _, val := range dlist {
+		devAnnos = append(devAnnos, &DeviceInfo{
+			ID:      val.ID,
+			Count:   val.Count,
+			Devmem:  val.Devmem,
+			Devcore: val.Devcore,
+			Type:    val.Type,
+			Numa:    val.Numa,
+			Health:  val.Health,
+			Index:   val.Index,
+			Mode:    val.Mode,
+		})
+	}
+	data, err := json.Marshal(devAnnos)
 	if err != nil {
 		return ""
 	}
@@ -390,6 +407,7 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 			n.UsageList = append(n.UsageList, MigTemplateUsage{
 				Name:   val.Name,
 				Memory: val.Memory,
+				Core:   val.Core,
 				InUse:  false,
 			})
 			count++
@@ -405,14 +423,29 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	return uuids
 }
 
-func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	handshake := n.Annotations[util.HandshakeAnnos[devType]]
+func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
+	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
 	} else {
+		_, ok := util.HandshakeAnnos[devType]
+		if ok {
+			tmppat := make(map[string]string)
+			tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
+			klog.V(5).InfoS("New timestamp for annotation", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
+			n, err := util.GetNode(node.Name)
+			if err != nil {
+				klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
+				return true, false
+			}
+			klog.V(5).InfoS("Patching node annotations", "nodeName", node.Name, "annotations", tmppat)
+			if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
+				klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
+			}
+		}
 		return true, true
 	}
 }

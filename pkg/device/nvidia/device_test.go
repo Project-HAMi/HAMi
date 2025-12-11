@@ -18,6 +18,8 @@ package nvidia
 
 import (
 	"errors"
+	"strconv"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -623,9 +625,6 @@ func Test_InitNvidiaDevice(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			devices := InitNvidiaDevice(test.args)
-			if devices == nil {
-				t.Fatalf("Expected devices to be initialized")
-			}
 			assert.DeepEqual(t, test.want.config, devices.config)
 			assert.Equal(t, "hami.io/vgpu-devices-to-allocate", device.InRequestDevices[NvidiaGPUDevice], "Expected InRequestDevices to be set")
 			assert.Equal(t, "hami.io/vgpu-devices-allocated", device.SupportDevices[NvidiaGPUDevice], "Expected SupportDevices to be set")
@@ -710,19 +709,21 @@ func Test_GetNodeDevices(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-01",
 					Annotations: map[string]string{
-						RegisterAnnos: "GPU-0,5,8192,100,NVIDIA-Tesla P4,0,true:",
+						RegisterAnnos: `[{"id":"GPU-0","count":5,"devmem":8192,"devcore":100,"type":"NVIDIA-Tesla P4","numa":0,"health":true,"index":0}]`,
 					},
 				},
 			},
 			want: []*device.DeviceInfo{
 				{
-					ID:      "GPU-0",
-					Count:   5,
-					Devmem:  8192,
-					Devcore: 100,
-					Type:    "NVIDIA-Tesla P4",
-					Numa:    0,
-					Health:  true,
+					ID:           "GPU-0",
+					Count:        5,
+					Devmem:       8192,
+					Devcore:      100,
+					Type:         "NVIDIA-Tesla P4",
+					Numa:         0,
+					Health:       true,
+					Index:        0,
+					DeviceVendor: NvidiaGPUDevice,
 				},
 			},
 			err: nil,
@@ -733,12 +734,12 @@ func Test_GetNodeDevices(t *testing.T) {
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "node-02",
 					Annotations: map[string]string{
-						RegisterAnnos: "",
+						RegisterAnnos: "[]",
 					},
 				},
 			},
 			want: []*device.DeviceInfo{},
-			err:  errors.New("failed to decode node devices"),
+			err:  errors.New("no gpu found on node"),
 		},
 		{
 			name: "no annotation",
@@ -758,6 +759,13 @@ func Test_GetNodeDevices(t *testing.T) {
 			result, err := gpuDevices.GetNodeDevices(test.args)
 			if (err != nil) != (test.err != nil) {
 				t.Errorf("GetNodeDevices error = %v, want %v", err, test.err)
+				return
+			}
+			if err != nil && test.err != nil {
+				if err.Error() != test.err.Error() {
+					t.Errorf("GetNodeDevices error message = %v, want %v", err.Error(), test.err.Error())
+					return
+				}
 			}
 			if len(result) != len(test.want) {
 				t.Errorf("GetNodeDevices got %d devices, want %d", len(result), len(test.want))
@@ -772,6 +780,7 @@ func Test_GetNodeDevices(t *testing.T) {
 					assert.Equal(t, v.Numa, result[k].Numa)
 					assert.Equal(t, v.Type, result[k].Type)
 					assert.Equal(t, v.Count, result[k].Count)
+					assert.Equal(t, v.DeviceVendor, result[k].DeviceVendor)
 				}
 			}
 		})
@@ -1215,6 +1224,9 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 		ctr         *device.ContainerDevice
 		wantErr     bool
 		wantUsage   *device.DeviceUsage
+		checkMig    bool
+		wantMigIdx  int32
+		wantUUID    string
 	}{
 		{
 			name: "test add resource usage",
@@ -1235,7 +1247,146 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				Usedcores: 65,
 				Usedmem:   3024,
 			},
-			wantErr: false,
+			wantErr:  false,
+			checkMig: false,
+		},
+		{
+			name: "test MIG mode with migNeedsReset true - first template matches",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-0",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				Mode:      MigMode,
+				MigTemplate: []device.Geometry{
+					{
+						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
+					},
+					{
+						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
+						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
+					},
+				},
+				MigUsage: device.MigInUse{
+					UsageList: make(device.MIGS, 0),
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:    "dev-0",
+				Usedmem: 6000,
+			},
+			wantUsage: &device.DeviceUsage{
+				Used:      1,
+				Usedcores: 50,
+				Usedmem:   10240,
+			},
+			wantErr:    false,
+			checkMig:   true,
+			wantMigIdx: 1,
+			wantUUID:   "dev-0[1-1]",
+		},
+		{
+			name: "test MIG mode with migNeedsReset true - second template matches with correct idx",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-1",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				Mode:      MigMode,
+				MigTemplate: []device.Geometry{
+					{
+						{Name: "1g.3gb", Core: 25, Memory: 3072, Count: 1},
+					},
+					{
+						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
+						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
+					},
+				},
+				MigUsage: device.MigInUse{
+					UsageList: make(device.MIGS, 0),
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:    "dev-1",
+				Usedmem: 8000,
+			},
+			wantUsage: &device.DeviceUsage{
+				Used:      1,
+				Usedcores: 50,
+				Usedmem:   10240,
+			},
+			wantErr:    false,
+			checkMig:   true,
+			wantMigIdx: 1,
+			wantUUID:   "dev-1[1-1]",
+		},
+		{
+			name: "test MIG mode with migNeedsReset true - verify outer loop break",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-2",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				Mode:      MigMode,
+				MigTemplate: []device.Geometry{
+					{
+						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
+						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
+					},
+					{
+						{Name: "3g.20gb", Core: 100, Memory: 20480, Count: 1},
+					},
+				},
+				MigUsage: device.MigInUse{
+					UsageList: make(device.MIGS, 0),
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:    "dev-2",
+				Usedmem: 6000,
+			},
+			wantUsage: &device.DeviceUsage{
+				Used:      1,
+				Usedcores: 50,
+				Usedmem:   10240,
+			},
+			wantErr:    false,
+			checkMig:   true,
+			wantMigIdx: 0,
+			wantUUID:   "dev-2[0-1]",
+		},
+		{
+			name: "test MIG mode with migNeedsReset true - template with Count > 1",
+			deviceUsage: &device.DeviceUsage{
+				ID:        "dev-3",
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+				Mode:      MigMode,
+				MigTemplate: []device.Geometry{
+					{
+						// Template index 0: first template has Count=2, second template has Count=1
+						{Name: "1g.5gb", Core: 50, Memory: 5120, Count: 2},
+						{Name: "2g.10gb", Core: 100, Memory: 10240, Count: 1},
+					},
+				},
+				MigUsage: device.MigInUse{
+					UsageList: make(device.MIGS, 0),
+				},
+			},
+			ctr: &device.ContainerDevice{
+				UUID:    "dev-3",
+				Usedmem: 8000, // Requires 8GB, matches second template (idx=1) which should be at UsageList[2]
+			},
+			wantUsage: &device.DeviceUsage{
+				Used:      1,
+				Usedcores: 100,
+				Usedmem:   10240, // Should be set to the matched template's memory
+			},
+			wantErr:    false,
+			checkMig:   true,
+			wantMigIdx: 0,
+			wantUUID:   "dev-3[0-1]",
 		},
 	}
 	for _, tt := range tests {
@@ -1253,6 +1404,42 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 				if tt.deviceUsage.Used != tt.wantUsage.Used {
 					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
+				}
+				if tt.checkMig {
+					// Verify MIG-related fields
+					if tt.deviceUsage.MigUsage.Index != tt.wantMigIdx {
+						t.Errorf("expected MigUsage.Index: %d, got %d", tt.wantMigIdx, tt.deviceUsage.MigUsage.Index)
+					}
+					if tt.ctr.UUID != tt.wantUUID {
+						t.Errorf("expected UUID: %s, got %s", tt.wantUUID, tt.ctr.UUID)
+					}
+					// Verify that the entry at the corresponding index in UsageList is marked as InUse
+					// According to the modified code, should calculate usageListIdx by summing Count of all templates before idx
+					expectedUsageListIdx := -1
+					if strings.Contains(tt.wantUUID, "[") {
+						parts := strings.Split(strings.TrimSuffix(strings.Split(tt.wantUUID, "[")[1], "]"), "-")
+						if len(parts) == 2 {
+							if tidx, err1 := strconv.Atoi(parts[0]); err1 == nil {
+								if idx, err2 := strconv.Atoi(parts[1]); err2 == nil {
+									// Calculate usageListIdx by summing Count of all templates before idx
+									if tidx >= 0 && tidx < len(tt.deviceUsage.MigTemplate) {
+										expectedUsageListIdx = 0
+										for i := 0; i < idx && i < len(tt.deviceUsage.MigTemplate[tidx]); i++ {
+											expectedUsageListIdx += int(tt.deviceUsage.MigTemplate[tidx][i].Count)
+										}
+									}
+								}
+							}
+						}
+					}
+					if expectedUsageListIdx >= 0 && expectedUsageListIdx < len(tt.deviceUsage.MigUsage.UsageList) {
+						if !tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].InUse {
+							t.Errorf("expected UsageList[%d].InUse to be true, got false", expectedUsageListIdx)
+						}
+						if tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].Memory != tt.ctr.Usedmem {
+							t.Errorf("expected UsageList[%d].Memory: %d, got %d", expectedUsageListIdx, tt.ctr.Usedmem, tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].Memory)
+						}
+					}
 				}
 			}
 		})

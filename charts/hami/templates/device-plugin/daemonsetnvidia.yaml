@@ -28,8 +28,12 @@ spec:
         app.kubernetes.io/component: hami-device-plugin
         hami.io/webhook: ignore
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
-      annotations: 
-        checksum/hami-device-plugin-config: {{ include (print $.Template.BasePath "/device-plugin/configmap.yaml") . | sha256sum }}
+      annotations:
+        {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
+        checksum/hami-scheduler-newversion-config: {{ include (print $.Template.BasePath "/scheduler/configmapnew.yaml") . | sha256sum }}
+        {{- else }}
+        checksum/hami-scheduler-config: {{ include (print $.Template.BasePath "/scheduler/configmap.yaml") . | sha256sum }}
+        {{- end }}
         checksum/hami-scheduler-device-config: {{ include (print $.Template.BasePath "/scheduler/device-configmap.yaml") . | sha256sum }}
       {{- if .Values.devicePlugin.podAnnotations }}
         {{- toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
@@ -43,6 +47,29 @@ spec:
       hostPID: true
       hostNetwork: true
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
+      {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+      initContainers:
+        - name: toolkit-validation
+          image: {{ include "hami.devicePlugin.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            runAsUser: 0
+          command: ["sh", "-c"]
+          args:
+            - |
+              echo "Waiting for NVIDIA Toolkit to be ready..."
+              until [ -f {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready ]; do 
+                echo "Waiting for {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}/toolkit-ready..."
+                sleep 5
+              done
+              echo "NVIDIA Toolkit is ready!"
+          volumeMounts:
+          - name: nvidia-validations
+            mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
+            mountPropagation: HostToContainer
+            readOnly: true
+      {{- end }}
       containers:
         - name: device-plugin
           image: {{ include "hami.devicePlugin.image" . }}
@@ -76,6 +103,9 @@ spec:
             - name: ENABLE_TOPOLOGY_SCORE
               value: "true"
             {{- end }}
+            {{- with .Values.devicePlugin.extraEnvs }}
+            {{- . | toYaml | nindent 12 }}
+            {{- end }}
           securityContext:
             privileged: true
             allowPrivilegeEscalation: true
@@ -103,7 +133,7 @@ spec:
           imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
           command:
             - "vGPUmonitor"
-            {{- range .Values.devicePlugin.extraArgs }}
+            {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}
           securityContext:
@@ -119,13 +149,16 @@ spec:
             - name: NVIDIA_VISIBLE_DEVICES
               value: "all"
             - name: NVIDIA_MIG_MONITOR_DEVICES
-              value: all
+              value: "all"
             - name: HOOK_PATH
-              value: {{ .Values.global.gpuHookPath }}/vgpu
+              value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            {{- with .Values.devicePlugin.monitor.extraEnvs }}
+            {{- . | toYaml | nindent 12 }}
+            {{- end }}
           resources:
-          {{- toYaml .Values.devicePlugin.vgpuMonitor.resources | nindent 12 }}
+          {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:
             - name: ctrs
               mountPath: {{ .Values.devicePlugin.monitor.ctrPath }}
@@ -158,6 +191,12 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
+        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+        - name: nvidia-validations
+          hostPath:
+            path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
+            type: DirectoryOrCreate
+        {{- end }}
         - name: usrbin
           hostPath:
             path: /usr/bin
