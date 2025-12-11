@@ -21,7 +21,7 @@ spec:
         operator: Exists
       containers:
       - image: {{ include "hami.mockDevicePlugin.image" . }}
-      imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+        imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
         name: hami-mock-dp-cntr
         env:
           - name: NODE_NAME
