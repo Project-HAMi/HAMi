@@ -30,123 +30,131 @@
  * GitHub history for details.
  */
 
-package manager
+package plugin
 
 import (
+	"context"
 	"fmt"
 
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-type manager struct {
-	migStrategy     string
+type options struct {
+	infolib   info.Interface
+	nvmllib   nvml.Interface
+	devicelib device.Interface
+
 	failOnInitError bool
-	nvmllib         nvml.Interface
 
 	cdiHandler cdi.Interface
-	cdiEnabled bool
 	config     *nvidia.DeviceConfig
-	infolib    info.Interface
+
+	deviceListStrategies spec.DeviceListStrategies
+
+	imexChannels imex.Channels
 }
 
-// New creates a new plugin manager with the supplied options.
-func New(opts ...Option) (Interface, error) {
-	m := &manager{}
+// New a new set of plugins with the supplied options.
+func New(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, opts ...Option) ([]Interface, error) {
+	o := &options{
+		infolib:   infolib,
+		nvmllib:   nvmllib,
+		devicelib: devicelib,
+	}
 	for _, opt := range opts {
-		opt(m)
+		opt(o)
 	}
 
-	if m.config == nil {
+	if o.config == nil {
 		klog.Warning("no config provided, returning a null manager")
-		return &null{}, nil
+		return nil, nil
 	}
 
-	if m.infolib == nil {
-		m.infolib = info.New()
-	}
-	if m.cdiHandler == nil {
-		m.cdiHandler = cdi.NewNullHandler()
+	if o.cdiHandler == nil {
+		o.cdiHandler = cdi.NewNullHandler()
 	}
 
-	mode, err := m.resolveMode()
+	resourceManagers, err := o.getResourceManagers()
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("failed to construct resource managers: %w", err)
 	}
 
-	if mode != "nvml" && m.cdiEnabled {
-		klog.Warning("CDI is not supported; disabling CDI.")
-		m.cdiEnabled = false
+	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
 	}
 
-	switch mode {
-	case "nvml":
-		if m.nvmllib == nil {
-			m.nvmllib = nvml.New()
+	var plugins []Interface
+	for _, resourceManager := range resourceManagers {
+		plugin, err := o.devicePluginForResource(ctx, o.config, resourceManager, sConfig, mode)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create plugin: %w", err)
 		}
-		ret := m.nvmllib.Init()
+		plugins = append(plugins, plugin)
+	}
+	return plugins, nil
+}
+
+// getResourceManager constructs a set of resource managers.
+// Each resource manager maps to a specific named extended resource and may
+// include full GPUs or MIG devices.
+func (o *options) getResourceManagers() ([]rm.ResourceManager, error) {
+	strategy := o.resolveStrategy(*o.config.Flags.DeviceDiscoveryStrategy)
+	switch strategy {
+	case "nvml":
+		ret := o.nvmllib.Init()
 		if ret != nvml.SUCCESS {
 			klog.Errorf("Failed to initialize NVML: %v.", ret)
 			klog.Errorf("If this is a GPU node, did you set the docker default runtime to `nvidia`?")
 			klog.Errorf("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
 			klog.Errorf("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
 			klog.Errorf("If this is not a GPU node, you should set up a toleration or nodeSelector to only deploy this plugin on GPU nodes")
-			if m.failOnInitError {
+			if o.failOnInitError {
 				return nil, fmt.Errorf("nvml init failed: %v", ret)
 			}
 			klog.Warningf("nvml init failed: %v", ret)
-			return &null{}, nil
+			return nil, nil
 		}
-		defer m.nvmllib.Shutdown()
+		defer func() {
+			_ = o.nvmllib.Shutdown()
+		}()
 
-		return (*nvmlmanager)(m), nil
+		return rm.NewNVMLResourceManagers(o.infolib, o.nvmllib, o.devicelib, o.config.Config)
 	case "tegra":
-		return (*tegramanager)(m), nil
-	case "null":
-		return &null{}, nil
-	}
-
-	return nil, fmt.Errorf("unknown mode: %v", mode)
-}
-
-func (m *manager) resolveMode() (string, error) {
-	// logWithReason logs the output of the has* / is* checks from the info.Interface
-	logWithReason := func(f func() (bool, string), tag string) bool {
-		is, reason := f()
-		if !is {
-			tag = "non-" + tag
-		}
-		klog.Infof("Detected %v platform: %v", tag, reason)
-		return is
-	}
-
-	hasNVML := logWithReason(m.infolib.HasNvml, "NVML")
-	isTegra := logWithReason(m.infolib.IsTegraSystem, "Tegra")
-
-	if !hasNVML && !isTegra {
-		klog.Error("Incompatible platform detected")
+		return rm.NewTegraResourceManagers(o.config.Config)
+	default:
+		klog.Errorf("Incompatible strategy detected %v", strategy)
 		klog.Error("If this is a GPU node, did you configure the NVIDIA Container Toolkit?")
 		klog.Error("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
 		klog.Error("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
 		klog.Error("If this is not a GPU node, you should set up a toleration or nodeSelector to only deploy this plugin on GPU nodes")
-		if m.failOnInitError {
-			return "", fmt.Errorf("platform detection failed")
+		if o.failOnInitError {
+			return nil, fmt.Errorf("invalid device discovery strategy")
 		}
-		return "null", nil
+		return nil, nil
+	}
+}
+
+func (o *options) resolveStrategy(strategy string) string {
+	if strategy != "" && strategy != "auto" {
+		return strategy
 	}
 
-	// The NVIDIA container stack does not yet support the use of integrated AND discrete GPUs on the same node.
-	if isTegra {
-		if hasNVML {
-			klog.Warning("Disabling Tegra-based resources on NVML system")
-			return "nvml", nil
-		}
-		return "tegra", nil
+	platform := o.infolib.ResolvePlatform()
+	switch platform {
+	case info.PlatformNVML, info.PlatformWSL:
+		return "nvml"
+	case info.PlatformTegra:
+		return "tegra"
 	}
-
-	return "nvml", nil
+	return strategy
 }

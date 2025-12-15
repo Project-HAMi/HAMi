@@ -34,18 +34,23 @@ package rm
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	"k8s.io/klog/v2"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
-// Device wraps kubeletdevicepluginv1beta1.Device with extra metadata and functions.
+// Device wraps pluginapi.Device with extra metadata and functions.
 type Device struct {
-	kubeletdevicepluginv1beta1.Device
-	Paths []string
-	Index string
+	pluginapi.Device
+	Paths             []string
+	Index             string
+	TotalMemory       uint64
+	ComputeCapability string
+	// Replicas stores the total number of times this device is replicated.
+	// If this is 0 or 1 then the device is not shared.
+	Replicas int
 }
 
 // deviceInfo defines the information the required to construct a Device
@@ -53,6 +58,8 @@ type deviceInfo interface {
 	GetUUID() (string, error)
 	GetPaths() ([]string, error)
 	GetNumaNode() (bool, int, error)
+	GetTotalMemory() (uint64, error)
+	GetComputeCapability() (string, error)
 }
 
 // Devices wraps a map[string]*Device with some functions.
@@ -81,14 +88,27 @@ func BuildDevice(index string, d deviceInfo) (*Device, error) {
 		return nil, fmt.Errorf("error getting device NUMA node: %v", err)
 	}
 
-	dev := Device{}
+	totalMemory, err := d.GetTotalMemory()
+	if err != nil {
+		klog.Warningf("Ignoring error getting device memory: %v", err)
+	}
+
+	computeCapability, err := d.GetComputeCapability()
+	if err != nil {
+		return nil, fmt.Errorf("error getting device compute capability: %w", err)
+	}
+
+	dev := Device{
+		TotalMemory:       totalMemory,
+		ComputeCapability: computeCapability,
+	}
 	dev.ID = uuid
 	dev.Index = index
 	dev.Paths = paths
-	dev.Health = kubeletdevicepluginv1beta1.Healthy
+	dev.Health = pluginapi.Healthy
 	if hasNuma {
-		dev.Topology = &kubeletdevicepluginv1beta1.TopologyInfo{
-			Nodes: []*kubeletdevicepluginv1beta1.NUMANode{
+		dev.Topology = &pluginapi.TopologyInfo{
+			Nodes: []*pluginapi.NUMANode{
 				{
 					ID: int64(numa),
 				},
@@ -156,15 +176,30 @@ func (ds Devices) GetIDs() []string {
 	return res
 }
 
+// GetUUIDs returns the uuids associated with the Device in the set.
+func (ds Devices) GetUUIDs() []string {
+	var res []string
+	seen := make(map[string]bool)
+	for _, d := range ds {
+		uuid := d.GetUUID()
+		if seen[uuid] {
+			continue
+		}
+		seen[uuid] = true
+		res = append(res, uuid)
+	}
+	return res
+}
+
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
-func (ds Devices) GetPluginDevices(count uint) []*kubeletdevicepluginv1beta1.Device {
-	var res []*kubeletdevicepluginv1beta1.Device
+func (ds Devices) GetPluginDevices(count uint) []*pluginapi.Device {
+	var res []*pluginapi.Device
 
 	if !strings.Contains(ds.GetIDs()[0], "MIG") {
 		for _, dev := range ds {
 			for i := uint(0); i < count; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
-				res = append(res, &kubeletdevicepluginv1beta1.Device{
+				res = append(res, &pluginapi.Device{
 					ID:       id,
 					Health:   dev.Health,
 					Topology: nil,
@@ -215,7 +250,13 @@ func (d Device) AlignedAllocationSupported() bool {
 		return false
 	}
 
-	return !slices.Contains(d.Paths, "/dev/dxg")
+	for _, p := range d.Paths {
+		if p == "/dev/dxg" {
+			return false
+		}
+	}
+
+	return true
 }
 
 // IsMigDevice returns checks whether d is a MIG device or not.
@@ -236,10 +277,7 @@ func NewAnnotatedID(id string, replica int) AnnotatedID {
 // HasAnnotations checks if an AnnotatedID has any annotations or not.
 func (r AnnotatedID) HasAnnotations() bool {
 	split := strings.SplitN(string(r), "::", 2)
-	if len(split) != 2 {
-		return false
-	}
-	return true
+	return len(split) == 2
 }
 
 // Split splits a AnnotatedID into its ID and replica number parts.
