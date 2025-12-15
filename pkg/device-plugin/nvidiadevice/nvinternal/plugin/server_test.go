@@ -41,9 +41,10 @@ import (
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/stretchr/testify/require"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func TestCDIAllocateResponse(t *testing.T) {
@@ -52,31 +53,23 @@ func TestCDIAllocateResponse(t *testing.T) {
 		deviceIds            []string
 		deviceListStrategies []string
 		CDIPrefix            string
-		CDIEnabled           bool
+		AdditionalCDIDevices []string
 		GDSEnabled           bool
 		MOFEDEnabled         bool
-		expectedResponse     kubeletdevicepluginv1beta1.ContainerAllocateResponse
+		imexChannels         []*imex.Channel
+		expectedResponse     pluginapi.ContainerAllocateResponse
 	}{
 		{
 			description:          "empty device list has empty response",
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-		},
-		{
-			description:          "CDI disabled has empty response",
-			deviceIds:            []string{"gpu0"},
-			deviceListStrategies: []string{"cdi-annotations"},
-			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           false,
 		},
 		{
 			description:          "single device is added to annotations",
 			deviceIds:            []string{"gpu0"},
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0",
 				},
@@ -87,8 +80,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceIds:            []string{"gpu0"},
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "custom.cdi.k8s.io/",
-			CDIEnabled:           true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"custom.cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0",
 				},
@@ -99,8 +91,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceIds:            []string{"gpu0", "gpu1"},
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gpu=gpu1",
 				},
@@ -111,8 +102,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceIds:            []string{"gpu0", "gpu1"},
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "custom.cdi.k8s.io/",
-			CDIEnabled:           true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"custom.cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gpu=gpu1",
 				},
@@ -122,9 +112,8 @@ func TestCDIAllocateResponse(t *testing.T) {
 			description:          "mofed devices are selected if configured",
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-			MOFEDEnabled:         true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			AdditionalCDIDevices: []string{"nvidia.com/mofed=all"},
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/mofed=all",
 				},
@@ -134,9 +123,8 @@ func TestCDIAllocateResponse(t *testing.T) {
 			description:          "gds devices are selected if configured",
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-			GDSEnabled:           true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			AdditionalCDIDevices: []string{"nvidia.com/gds=all"},
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gds=all",
 				},
@@ -147,18 +135,28 @@ func TestCDIAllocateResponse(t *testing.T) {
 			deviceIds:            []string{"gpu0"},
 			deviceListStrategies: []string{"cdi-annotations"},
 			CDIPrefix:            "cdi.k8s.io/",
-			CDIEnabled:           true,
-			GDSEnabled:           true,
-			MOFEDEnabled:         true,
-			expectedResponse: kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+			AdditionalCDIDevices: []string{"nvidia.com/gds=all", "nvidia.com/mofed=all"},
+			expectedResponse: pluginapi.ContainerAllocateResponse{
 				Annotations: map[string]string{
 					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/gpu=gpu0,nvidia.com/gds=all,nvidia.com/mofed=all",
 				},
 			},
 		},
+		{
+			description:          "imex channel is included with devices",
+			deviceListStrategies: []string{"cdi-annotations"},
+			CDIPrefix:            "cdi.k8s.io/",
+			imexChannels:         []*imex.Channel{{ID: "0"}},
+			expectedResponse: pluginapi.ContainerAllocateResponse{
+				Annotations: map[string]string{
+					"cdi.k8s.io/nvidia-device-plugin_uuid": "nvidia.com/imex-channel=0",
+				},
+			},
+		},
 	}
 
-	for _, tc := range testCases {
+	for i := range testCases {
+		tc := testCases[i]
 		t.Run(tc.description, func(t *testing.T) {
 			deviceListStrategies, _ := v1.NewDeviceListStrategies(tc.deviceListStrategies)
 			plugin := NvidiaDevicePlugin{
@@ -176,18 +174,26 @@ func TestCDIAllocateResponse(t *testing.T) {
 					QualifiedNameFunc: func(c string, s string) string {
 						return "nvidia.com/" + c + "=" + s
 					},
+					AdditionalDevicesFunc: func() []string {
+						return tc.AdditionalCDIDevices
+					},
 				},
-				cdiEnabled:           tc.CDIEnabled,
 				deviceListStrategies: deviceListStrategies,
 				cdiAnnotationPrefix:  tc.CDIPrefix,
+				imexChannels:         tc.imexChannels,
 			}
 
-			response, err := plugin.getAllocateResponseForCDI("uuid", tc.deviceIds)
+			response := pluginapi.ContainerAllocateResponse{}
+			err := plugin.updateResponseForCDI(&response, "uuid", tc.deviceIds...)
 
 			require.Nil(t, err)
 			require.EqualValues(t, &tc.expectedResponse, &response)
 		})
 	}
+}
+
+func ptr[T any](x T) *T {
+	return &x
 }
 
 type MigDeviceConfigs struct {

@@ -38,10 +38,10 @@ import "strings"
 var version = "unknown"
 
 // gitCommit will be the hash that the binary was built from
-// and will be populated by the Makefile.
+// and will be populated by the Makefile
 var gitCommit = ""
 
-// GetVersionParts returns the different version components.
+// GetVersionParts returns the different version components
 func GetVersionParts() []string {
 	v := []string{version}
 
@@ -52,7 +52,7 @@ func GetVersionParts() []string {
 	return v
 }
 
-// GetVersionString returns the string representation of the version.
+// GetVersionString returns the string representation of the version
 func GetVersionString(more ...string) string {
 	v := append(GetVersionParts(), more...)
 	return strings.Join(v, "\n")

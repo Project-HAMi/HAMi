@@ -39,10 +39,9 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
-
-	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 )
 
 const (
@@ -61,14 +60,14 @@ type nvmlMigDevice nvmlDevice
 var _ deviceInfo = (*nvmlDevice)(nil)
 var _ deviceInfo = (*nvmlMigDevice)(nil)
 
-func newGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
+func newNvmlGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
 	index := fmt.Sprintf("%v", i)
-	isWsl, _ := info.New().HasDXCore()
-	if isWsl {
-		return index, wslDevice{gpu}
-	}
-
 	return index, nvmlDevice{gpu}
+}
+
+func newWslGPUDevice(i int, gpu nvml.Device) (string, deviceInfo) {
+	index := fmt.Sprintf("%v", i)
+	return index, wslDevice{gpu}
 }
 
 func newMigDevice(i int, j int, mig nvml.Device) (string, nvmlMigDevice) {
@@ -98,6 +97,24 @@ func (d nvmlDevice) GetPaths() ([]string, error) {
 	path := fmt.Sprintf("/dev/nvidia%d", minor)
 
 	return []string{path}, nil
+}
+
+// GetComputeCapability returns the CUDA Compute Capability for the device.
+func (d nvmlDevice) GetComputeCapability() (string, error) {
+	major, minor, ret := d.GetCudaComputeCapability()
+	if ret != nvml.SUCCESS {
+		return "", ret
+	}
+	return fmt.Sprintf("%d.%d", major, minor), nil
+}
+
+// GetComputeCapability returns the CUDA Compute Capability for the device.
+func (d nvmlMigDevice) GetComputeCapability() (string, error) {
+	parent, ret := d.GetDeviceHandleFromMigDeviceHandle()
+	if ret != nvml.SUCCESS {
+		return "", fmt.Errorf("failed to get parent device: %w", ret)
+	}
+	return nvmlDevice{parent}.GetComputeCapability()
 }
 
 // GetPaths returns the paths for a MIG device
@@ -148,13 +165,13 @@ func (d nvmlMigDevice) GetPaths() ([]string, error) {
 
 // GetNumaNode returns the NUMA node associated with the GPU device
 func (d nvmlDevice) GetNumaNode() (bool, int, error) {
-	pciInfo, ret := d.GetPciInfo()
+	info, ret := d.GetPciInfo()
 	if ret != nvml.SUCCESS {
 		return false, 0, fmt.Errorf("error getting PCI Bus Info of device: %v", ret)
 	}
 
 	// Discard leading zeros.
-	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(pciInfo.BusId[:]).String(), "0000"))
+	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
 
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
@@ -163,7 +180,7 @@ func (d nvmlDevice) GetNumaNode() (bool, int, error) {
 
 	node, err := strconv.Atoi(string(bytes.TrimSpace(b)))
 	if err != nil {
-		return false, 0, fmt.Errorf("error parsing value for NUMA node: %v", err)
+		return false, 0, fmt.Errorf("eror parsing value for NUMA node: %v", err)
 	}
 
 	if node < 0 {
@@ -181,4 +198,22 @@ func (d nvmlMigDevice) GetNumaNode() (bool, int, error) {
 	}
 
 	return nvmlDevice{parent}.GetNumaNode()
+}
+
+// GetTotalMemory returns the total memory available on the device.
+func (d nvmlDevice) GetTotalMemory() (uint64, error) {
+	info, ret := d.GetMemoryInfo()
+	if ret != nvml.SUCCESS {
+		return 0, ret
+	}
+	return info.Total, nil
+}
+
+// GetTotalMemory returns the total memory available on the device.
+func (d nvmlMigDevice) GetTotalMemory() (uint64, error) {
+	info, ret := d.GetMemoryInfo()
+	if ret != nvml.SUCCESS {
+		return 0, ret
+	}
+	return info.Total, nil
 }

@@ -34,8 +34,9 @@ package cdi
 
 // Interface provides the API to the 'cdi' package
 //
-//go:generate moq -stub -out api_mock.go . Interface
+//go:generate moq -rm -fmt=goimports -stub -out api_mock.go . Interface
 type Interface interface {
 	CreateSpecFile() error
 	QualifiedName(string, string) string
+	AdditionalDevices() []string
 }

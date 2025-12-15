@@ -33,30 +33,45 @@
 package cdi
 
 import (
-	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 )
 
 // Option defines a function for passing options to the New() call
 type Option func(*cdiHandler)
 
-// WithEnabled provides an Option to set the enabled flag used by the 'cdi' interface
-func WithEnabled(enabled bool) Option {
+// WithDeviceListStrategies provides an Option to set the enabled flag used by the 'cdi' interface
+func WithDeviceListStrategies(deviceListStrategies spec.DeviceListStrategies) Option {
 	return func(c *cdiHandler) {
-		c.enabled = enabled
+		c.deviceListStrategies = deviceListStrategies
 	}
 }
 
-// WithDriverRoot provides an Option to set the driver root used by the 'cdi' interface
+// WithDriverRoot provides an Option to set the driver root used by the 'cdi' interface.
 func WithDriverRoot(root string) Option {
 	return func(c *cdiHandler) {
 		c.driverRoot = root
 	}
 }
 
-// WithTargetDriverRoot provides an Option to set the target driver root used by the 'cdi' interface
+// WithDevRoot sets the dev root for the `cdi` interface.
+func WithDevRoot(root string) Option {
+	return func(c *cdiHandler) {
+		c.devRoot = root
+	}
+}
+
+// WithTargetDriverRoot provides an Option to set the target (host) driver root used by the 'cdi' interface
 func WithTargetDriverRoot(root string) Option {
 	return func(c *cdiHandler) {
 		c.targetDriverRoot = root
+	}
+}
+
+// WithTargetDevRoot provides an Option to set the target (host) dev root used by the 'cdi' interface
+func WithTargetDevRoot(root string) Option {
+	return func(c *cdiHandler) {
+		c.targetDevRoot = root
 	}
 }
 
@@ -64,13 +79,6 @@ func WithTargetDriverRoot(root string) Option {
 func WithNvidiaCTKPath(path string) Option {
 	return func(c *cdiHandler) {
 		c.nvidiaCTKPath = path
-	}
-}
-
-// WithNvml provides an Option to set the NVML library used by the 'cdi' interface
-func WithNvml(nvml nvml.Interface) Option {
-	return func(c *cdiHandler) {
-		c.nvml = nvml
 	}
 }
 
@@ -88,16 +96,30 @@ func WithVendor(vendor string) Option {
 	}
 }
 
-// WithGdsEnabled provides and option to set whether a GDS CDI spec should be generated
+// WithGdrcopyEnabled provides an option to set whether a GDS CDI spec should be generated
+func WithGdrcopyEnabled(enabled bool) Option {
+	return func(c *cdiHandler) {
+		c.gdrcopyEnabled = enabled
+	}
+}
+
+// WithGdsEnabled provides an option to set whether a GDS CDI spec should be generated
 func WithGdsEnabled(enabled bool) Option {
 	return func(c *cdiHandler) {
 		c.gdsEnabled = enabled
 	}
 }
 
-// WithMofedEnabled provides and option to set whether a MOFED CDI spec should be generated
+// WithMofedEnabled provides an option to set whether a MOFED CDI spec should be generated
 func WithMofedEnabled(enabled bool) Option {
 	return func(c *cdiHandler) {
 		c.mofedEnabled = enabled
+	}
+}
+
+// WithImexChannels sets the IMEX channels for which CDI specs should be generated.
+func WithImexChannels(imexChannels imex.Channels) Option {
+	return func(c *cdiHandler) {
+		c.imexChannels = imexChannels
 	}
 }

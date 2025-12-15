@@ -46,13 +46,17 @@ func NewNullHandler() Interface {
 	return &null{}
 }
 
+func (n *null) AdditionalDevices() []string {
+	return nil
+}
+
 // CreateSpecFile is a no-op for the null handler.
 func (n *null) CreateSpecFile() error {
 	return nil
 }
 
 // QualifiedName is a no-op for the null handler. A error message is logged
-// indicating this should never be called for the null handler.
+// inidicating this should never be called for the null handler.
 func (n *null) QualifiedName(class string, id string) string {
 	klog.Error("cannot return a qualified CDI device name with the null CDI handler")
 	return ""
