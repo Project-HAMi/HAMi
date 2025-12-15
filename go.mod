@@ -21,9 +21,9 @@ require (
 	github.com/spf13/pflag v1.0.10
 	github.com/stretchr/testify v1.11.1
 	github.com/urfave/cli/v2 v2.27.7
-	golang.org/x/net v0.47.0
-	golang.org/x/term v0.37.0
-	golang.org/x/tools v0.39.0
+	golang.org/x/net v0.48.0
+	golang.org/x/term v0.38.0
+	golang.org/x/tools v0.40.0
 	google.golang.org/grpc v1.77.0
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
@@ -35,8 +35,7 @@ require (
 	k8s.io/kube-scheduler v0.28.3
 	k8s.io/kubelet v0.32.3
 	sigs.k8s.io/controller-runtime v0.21.0
-	tags.cncf.io/container-device-interface v1.0.2-0.20251114135136-1b24d969689f
-	tags.cncf.io/container-device-interface/specs-go v1.0.0
+	tags.cncf.io/container-device-interface v1.1.0
 )
 
 require (
@@ -80,12 +79,12 @@ require (
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
 	go.yaml.in/yaml/v2 v2.4.2 // indirect
 	go.yaml.in/yaml/v3 v3.0.4 // indirect
-	golang.org/x/mod v0.30.0 // indirect
+	golang.org/x/mod v0.31.0 // indirect
 	golang.org/x/oauth2 v0.32.0 // indirect
-	golang.org/x/sync v0.18.0 // indirect
-	golang.org/x/sys v0.38.0 // indirect
-	golang.org/x/telemetry v0.0.0-20251111182119-bc8e575c7b54 // indirect
-	golang.org/x/text v0.31.0 // indirect
+	golang.org/x/sync v0.19.0 // indirect
+	golang.org/x/sys v0.39.0 // indirect
+	golang.org/x/telemetry v0.0.0-20251203150158-8fff8a5912fc // indirect
+	golang.org/x/text v0.32.0 // indirect
 	golang.org/x/time v0.9.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251022142026-3a174f9686a8 // indirect
@@ -98,6 +97,7 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
+	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
 
 replace (
