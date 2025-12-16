@@ -110,6 +110,7 @@ type NvidiaConfig struct {
 	DefaultMemory                int32  `yaml:"defaultMemory"`
 	DefaultCores                 int32  `yaml:"defaultCores"`
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
+	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
 	MigGeometriesList []device.AllowedMigGeometries `yaml:"knownMigGeometries"`
@@ -541,6 +542,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}

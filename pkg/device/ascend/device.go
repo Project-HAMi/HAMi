@@ -263,6 +263,11 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
+					}
 					m, _ := dev.trimMemory(memnums)
 					memnum = int(m)
 				}
