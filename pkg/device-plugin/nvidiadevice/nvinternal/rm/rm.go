@@ -115,7 +115,7 @@ func AddDefaultResourcesToConfig(infolib info.Interface, nvmllib nvml.Interface,
 		Pattern: "*",
 		Name:    spec.ResourceName(*config.ResourceName),
 	})
-	fmt.Println("config=", config.Resources.GPUs)
+	klog.V(4).InfoS("AddDefaultResourceToConfig", "config", config.Resources.GPUs)
 	if config.Flags.MigStrategy == nil {
 		return nil
 	}

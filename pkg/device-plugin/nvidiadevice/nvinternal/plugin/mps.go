@@ -25,7 +25,7 @@ import (
 	"context"
 	"os/exec"
 
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -64,6 +64,6 @@ func (m *mpsOptions) waitForDaemon() error {
 	return nil
 }
 
-func (m *mpsOptions) updateReponse(response *pluginapi.ContainerAllocateResponse) {
+func (m *mpsOptions) updateReponse(response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) {
 	return
 }

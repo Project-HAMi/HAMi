@@ -36,6 +36,7 @@ require (
 	k8s.io/kubelet v0.32.3
 	sigs.k8s.io/controller-runtime v0.21.0
 	tags.cncf.io/container-device-interface v1.1.0
+	tags.cncf.io/container-device-interface/specs-go v1.1.0
 )
 
 require (
@@ -97,7 +98,6 @@ require (
 	sigs.k8s.io/randfill v1.0.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/yaml v1.4.0 // indirect
-	tags.cncf.io/container-device-interface/specs-go v1.1.0 // indirect
 )
 
 replace (
