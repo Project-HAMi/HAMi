@@ -33,7 +33,7 @@ import (
 	cli "github.com/urfave/cli/v2"
 	errorsutil "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/klog/v2"
-	pluginapi "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
@@ -141,7 +141,7 @@ func main() {
 		},
 		&cli.StringFlag{
 			Name:        "kubelet-socket",
-			Value:       pluginapi.KubeletSocket,
+			Value:       kubeletdevicepluginv1beta1.KubeletSocket,
 			Usage:       "specify the socket for communicating with the kubelet; if this is empty, no connection with the kubelet is attempted",
 			Destination: &o.kubeletSocket,
 			EnvVars:     []string{"KUBELET_SOCKET"},
@@ -267,7 +267,7 @@ func start(c *cli.Context, o *options) error {
 	klog.Infof("Starting FS watcher for %v", kubeletSocketDir)
 	watcher, err := watch.Files(kubeletSocketDir)
 	if err != nil {
-		return fmt.Errorf("failed to create FS watcher for %s: %v", pluginapi.DevicePluginPath, err)
+		return fmt.Errorf("failed to create FS watcher for %s: %v", kubeletdevicepluginv1beta1.DevicePluginPath, err)
 	}
 	defer watcher.Close()
 
