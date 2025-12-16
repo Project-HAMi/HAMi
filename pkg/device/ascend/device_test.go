@@ -806,12 +806,12 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 	req := corev1.Container{
 		Resources: corev1.ResourceRequirements{
 			Limits: corev1.ResourceList{
-				"huawei.com/Ascend910A":        resource.MustParse("2"),
-				"huawei.com/Ascend910A-memory": resource.MustParse("8738"),
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
 			},
 			Requests: corev1.ResourceList{
-				"huawei.com/Ascend910A":        resource.MustParse("2"),
-				"huawei.com/Ascend910A-memory": resource.MustParse("8738"),
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
 			},
 		},
 	}
@@ -852,9 +852,9 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(87380),
+				Memreq:           int32(2184),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -891,9 +891,9 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(873800),
+				Memreq:           int32(17476),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -930,9 +930,9 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 				},
 			},
 			want: device.ContainerDeviceRequest{
-				Nums:             int32(2),
+				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(8738),
+				Memreq:           int32(2184),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},

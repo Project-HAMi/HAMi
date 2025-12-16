@@ -62,6 +62,7 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
+	MemoryFactor             int32 = 1
 )
 
 type MigPartedSpec struct {
@@ -167,6 +168,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
+	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
 		config:         nvconfig,
 		ReportedGPUNum: 0,
@@ -723,7 +725,7 @@ func fitQuota(tmpDevs map[string]device.ContainerDevices, ns string, memreq int6
 		core += int64(val.Usedcores)
 	}
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
 }
 
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {

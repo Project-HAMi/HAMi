@@ -368,11 +368,11 @@ devicePlugin:
 #      memory: 100Mi
 
 mockDevicePlugin:
-  enabled: true
+  enabled: false
   image:
     registry: "docker.io"
     repository: "projecthami/mock-device-plugin"
-    tag: "latest"
+    tag: "0.1.0"
     ## Specify a imagePullPolicy
     ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
     ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images

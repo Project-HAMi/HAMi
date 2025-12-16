@@ -23,7 +23,7 @@ spec:
         operator: Exists
       containers:
       - image: {{ include "hami.mockDevicePlugin.image" . }}
-        imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+        imagePullPolicy: {{ .Values.mockDevicePlugin.image.pullPolicy }}
         name: hami-mock-dp-cntr
         env:
           - name: NODE_NAME
@@ -34,12 +34,6 @@ spec:
           - ./k8s-device-plugin
           - -v=5
           - --device-config-file=/device-config.yaml
-        securityContext:
-          privileged: true
-          allowPrivilegeEscalation: true
-          capabilities:
-            drop: ["ALL"]
-            add: ["SYS_ADMIN"]
         volumeMounts:
           - name: dp
             mountPath: /var/lib/kubelet/device-plugins
