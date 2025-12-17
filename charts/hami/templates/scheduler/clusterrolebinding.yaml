@@ -1,3 +1,4 @@
+{{- if not .Values.dra.enabled -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRoleBinding
 metadata:
@@ -45,3 +46,4 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "hami-vgpu.scheduler" . }}
     namespace: {{ include "hami-vgpu.namespace" . }}
+{{- end }}
