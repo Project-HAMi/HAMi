@@ -42,13 +42,7 @@ func (s uint8Slice) String() string {
 		if c == 0 {
 			break
 		}
-		b = append(b, byte(c))
+		b = append(b, c)
 	}
 	return string(b)
-}
-
-// uintPtr returns a *uint from a uint32
-func uintPtr(c uint32) *uint {
-	i := uint(c)
-	return &i
 }

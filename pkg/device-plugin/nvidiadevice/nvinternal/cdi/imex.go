@@ -33,20 +33,48 @@
 package cdi
 
 import (
-	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
+	"tags.cncf.io/container-device-interface/specs-go"
 
-	"k8s.io/klog/v2"
+	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
+	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/spec"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 )
 
-// New is a factory method that creates a CDI handler for creating CDI specs.
-func New(opts ...Option) (Interface, error) {
-	infolib := info.New()
+type imexChannelCDILib struct {
+	vendor       string
+	imexChannels imex.Channels
+}
 
-	hasNVML, _ := infolib.HasNvml()
-	if !hasNVML {
-		klog.Warning("No valid resources detected, creating a null CDI handler")
-		return NewNullHandler(), nil
+func (cdi *cdiHandler) newImexChannelSpecGenerator() nvcdi.SpecGenerator {
+	lib := &imexChannelCDILib{
+		vendor:       cdi.vendor,
+		imexChannels: cdi.imexChannels,
 	}
 
-	return newHandler(opts...)
+	return lib
+}
+
+// GetSpec returns the CDI specs for IMEX channels.
+func (l *imexChannelCDILib) GetSpec(...string) (spec.Interface, error) {
+	var deviceSpecs []specs.Device
+	for _, channel := range l.imexChannels {
+		deviceSpec := specs.Device{
+			Name: channel.ID,
+			ContainerEdits: specs.ContainerEdits{
+				DeviceNodes: []*specs.DeviceNode{
+					{
+						Path:     channel.Path,
+						HostPath: channel.HostPath,
+					},
+				},
+			},
+		}
+		deviceSpecs = append(deviceSpecs, deviceSpec)
+	}
+	return spec.New(
+		spec.WithDeviceSpecs(deviceSpecs),
+		spec.WithVendor(l.vendor),
+		spec.WithClass("imex-channel"),
+	)
 }

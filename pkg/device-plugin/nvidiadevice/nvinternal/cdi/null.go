@@ -46,6 +46,10 @@ func NewNullHandler() Interface {
 	return &null{}
 }
 
+func (n *null) AdditionalDevices() []string {
+	return nil
+}
+
 // CreateSpecFile is a no-op for the null handler.
 func (n *null) CreateSpecFile() error {
 	return nil

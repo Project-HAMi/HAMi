@@ -37,6 +37,6 @@ import "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/r
 // Interface defines the API for the plugin package
 type Interface interface {
 	Devices() rm.Devices
-	Start() error
+	Start(string) error
 	Stop() error
 }
