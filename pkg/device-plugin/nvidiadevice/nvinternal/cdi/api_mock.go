@@ -17,6 +17,9 @@ var _ Interface = &InterfaceMock{}
 //
 //		// make and configure a mocked Interface
 //		mockedInterface := &InterfaceMock{
+//			AdditionalDevicesFunc: func() []string {
+//				panic("mock out the AdditionalDevices method")
+//			},
 //			CreateSpecFileFunc: func() error {
 //				panic("mock out the CreateSpecFile method")
 //			},
@@ -30,6 +33,9 @@ var _ Interface = &InterfaceMock{}
 //
 //	}
 type InterfaceMock struct {
+	// AdditionalDevicesFunc mocks the AdditionalDevices method.
+	AdditionalDevicesFunc func() []string
+
 	// CreateSpecFileFunc mocks the CreateSpecFile method.
 	CreateSpecFileFunc func() error
 
@@ -38,6 +44,9 @@ type InterfaceMock struct {
 
 	// calls tracks calls to the methods.
 	calls struct {
+		// AdditionalDevices holds details about calls to the AdditionalDevices method.
+		AdditionalDevices []struct {
+		}
 		// CreateSpecFile holds details about calls to the CreateSpecFile method.
 		CreateSpecFile []struct {
 		}
@@ -49,8 +58,39 @@ type InterfaceMock struct {
 			S2 string
 		}
 	}
-	lockCreateSpecFile sync.RWMutex
-	lockQualifiedName  sync.RWMutex
+	lockAdditionalDevices sync.RWMutex
+	lockCreateSpecFile    sync.RWMutex
+	lockQualifiedName     sync.RWMutex
+}
+
+// AdditionalDevices calls AdditionalDevicesFunc.
+func (mock *InterfaceMock) AdditionalDevices() []string {
+	callInfo := struct {
+	}{}
+	mock.lockAdditionalDevices.Lock()
+	mock.calls.AdditionalDevices = append(mock.calls.AdditionalDevices, callInfo)
+	mock.lockAdditionalDevices.Unlock()
+	if mock.AdditionalDevicesFunc == nil {
+		var (
+			stringsOut []string
+		)
+		return stringsOut
+	}
+	return mock.AdditionalDevicesFunc()
+}
+
+// AdditionalDevicesCalls gets all the calls that were made to AdditionalDevices.
+// Check the length with:
+//
+//	len(mockedInterface.AdditionalDevicesCalls())
+func (mock *InterfaceMock) AdditionalDevicesCalls() []struct {
+} {
+	var calls []struct {
+	}
+	mock.lockAdditionalDevices.RLock()
+	calls = mock.calls.AdditionalDevices
+	mock.lockAdditionalDevices.RUnlock()
+	return calls
 }
 
 // CreateSpecFile calls CreateSpecFileFunc.

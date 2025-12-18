@@ -35,7 +35,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
 type tegraResourceManager struct {
@@ -45,15 +45,15 @@ type tegraResourceManager struct {
 var _ ResourceManager = (*tegraResourceManager)(nil)
 
 // NewTegraResourceManagers returns a set of ResourceManagers for tegra resources
-func NewTegraResourceManagers(config *nvidia.DeviceConfig) ([]ResourceManager, error) {
+func NewTegraResourceManagers(config *spec.Config) ([]ResourceManager, error) {
 	deviceMap, err := buildTegraDeviceMap(config)
 	if err != nil {
 		return nil, fmt.Errorf("error building Tegra device map: %v", err)
 	}
 
-	deviceMap, err = updateDeviceMapWithReplicas(config, deviceMap)
+	deviceMap, err = updateDeviceMapWithReplicas(config.Sharing.ReplicatedResources(), deviceMap)
 	if err != nil {
-		return nil, fmt.Errorf("error updating device map with replicas from config.sharing.timeSlicing.resources: %v", err)
+		return nil, fmt.Errorf("error updating device map with replicas from sharing resources: %v", err)
 	}
 
 	var rms []ResourceManager
@@ -87,6 +87,6 @@ func (r *tegraResourceManager) GetDevicePaths(ids []string) []string {
 }
 
 // CheckHealth is disabled for the tegraResourceManager
-func (r *tegraResourceManager) CheckHealth(stop <-chan any, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
+func (r *tegraResourceManager) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	return nil
 }

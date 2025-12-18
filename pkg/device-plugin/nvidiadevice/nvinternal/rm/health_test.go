@@ -33,68 +33,207 @@
 package rm
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 )
 
-func TestGetAdditionalXids(t *testing.T) {
+func TestNewHealthCheckXIDs(t *testing.T) {
 	testCases := []struct {
-		description string
-		input       string
-		expected    []uint64
+		input    string
+		expected disabledXIDs
 	}{
 		{
-			description: "Empty input",
+			expected: disabledXIDs{},
 		},
 		{
-			description: "Only comma",
-			input:       ",",
+			input:    ",",
+			expected: disabledXIDs{},
 		},
 		{
-			description: "Non-integer input",
-			input:       "not-an-int",
+			input:    "not-an-int",
+			expected: disabledXIDs{},
 		},
 		{
-			description: "Single integer",
-			input:       "68",
-			expected:    []uint64{68},
+			input:    "68",
+			expected: disabledXIDs{68: true},
 		},
 		{
-			description: "Negative integer",
-			input:       "-68",
+			input:    "-68",
+			expected: disabledXIDs{},
 		},
 		{
-			description: "Single integer with trailing spaces",
-			input:       "68  ",
-			expected:    []uint64{68},
+			input:    "68  ",
+			expected: disabledXIDs{68: true},
 		},
 		{
-			description: "Single integer followed by comma without trailing number",
-			input:       "68,",
-			expected:    []uint64{68},
+			input:    "68,",
+			expected: disabledXIDs{68: true},
 		},
 		{
-			description: "Comma without preceding number followed by single integer",
-			input:       ",68",
-			expected:    []uint64{68},
+			input:    ",68",
+			expected: disabledXIDs{68: true},
 		},
 		{
-			description: "Two comma-separated integers",
-			input:       "68,67",
-			expected:    []uint64{68, 67},
+			input:    "68,67",
+			expected: disabledXIDs{67: true, 68: true},
 		},
 		{
-			description: "Two integers separated by non-integer",
-			input:       "68,not-an-int,67",
-			expected:    []uint64{68, 67},
+			input:    "68,not-an-int,67",
+			expected: disabledXIDs{67: true, 68: true},
+		},
+	}
+
+	for i, tc := range testCases {
+		t.Run(fmt.Sprintf("test case %d", i), func(t *testing.T) {
+			xids := newHealthCheckXIDs(strings.Split(tc.input, ",")...)
+
+			require.EqualValues(t, tc.expected, xids)
+		})
+	}
+}
+
+func TestGetHealthCheckXids(t *testing.T) {
+	testCases := []struct {
+		description         string
+		enabled             string
+		disabled            string
+		expectedAllDisabled bool
+		expectedContents    disabledXIDs
+		expectedDisabled    map[uint64]bool
+	}{
+		{
+			description:         "empty envvars are default disabled",
+			expectedAllDisabled: false,
+			expectedContents: disabledXIDs{
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+			expectedDisabled: map[uint64]bool{
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+		},
+		{
+			description:         "disabled is all",
+			disabled:            "all",
+			expectedAllDisabled: true,
+			expectedContents: disabledXIDs{
+				0:   true,
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+			expectedDisabled: map[uint64]bool{
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+				555: true,
+			},
+		},
+		{
+			description:         "disabled is xids",
+			disabled:            "xids",
+			expectedAllDisabled: true,
+			expectedContents: disabledXIDs{
+				0:   true,
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+			expectedDisabled: map[uint64]bool{
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+				555: true,
+			},
+		},
+		{
+			description:         "enabled is all",
+			enabled:             "all",
+			expectedAllDisabled: false,
+			expectedContents: disabledXIDs{
+				0:   false,
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+			expectedDisabled: map[uint64]bool{
+				13:  false,
+				31:  false,
+				43:  false,
+				45:  false,
+				68:  false,
+				109: false,
+				555: false,
+			},
+		},
+		{
+			description:         "enabled overrides disabled",
+			disabled:            "11",
+			enabled:             "11",
+			expectedAllDisabled: false,
+			expectedContents: disabledXIDs{
+				11:  false,
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+			},
+			expectedDisabled: map[uint64]bool{
+				11:  false,
+				13:  true,
+				31:  true,
+				43:  true,
+				45:  true,
+				68:  true,
+				109: true,
+				555: false,
+			},
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			xids := getAdditionalXids(tc.input)
-			require.EqualValues(t, tc.expected, xids)
+			t.Setenv(envDisableHealthChecks, tc.disabled)
+			t.Setenv(envEnableHealthChecks, tc.enabled)
+
+			xids := getHealthCheckXids()
+			require.EqualValues(t, tc.expectedContents, xids)
+			require.Equal(t, tc.expectedAllDisabled, xids.IsAllDisabled())
+
+			disabled := make(map[uint64]bool)
+			for xid := range tc.expectedDisabled {
+				disabled[xid] = xids.IsDisabled(xid)
+			}
+			require.Equal(t, tc.expectedDisabled, disabled)
 		})
 	}
 }
