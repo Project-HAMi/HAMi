@@ -371,8 +371,8 @@ devicePlugin:
 dra:
   enabled: false
 
-# Configuration for the hami-dra-webhook subchart, which includes DRA drivers.
-hami-dra-webhook:
+# Configuration for the hami-dra subchart, which includes DRA drivers.
+hami-dra:
   drivers:
     nvidia:
       enabled: true
