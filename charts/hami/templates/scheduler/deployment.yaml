@@ -110,6 +110,9 @@ spec:
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
             - --force-overwrite-default-scheduler={{ .Values.scheduler.forceOverwriteDefaultScheduler}}
             - --device-config-file=/device-config.yaml
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-name={{ .Values.schedulerName }}
+            - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}
