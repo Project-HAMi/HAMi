@@ -190,7 +190,7 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `devicePlugin.pluginPath` | Plugin path | `/var/lib/kubelet/device-plugins` |
 | `devicePlugin.libPath` | Library path | `/usr/local/vgpu` |
-| `devicePlugin.nvidianodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
+| `devicePlugin.nvidiaNodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
 | `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
 | `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |
 
