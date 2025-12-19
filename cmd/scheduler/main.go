@@ -141,7 +141,7 @@ func start() error {
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
-	router.GET("/readyz", routes.ReadyzRoute())
+	router.GET("/readyz", routes.ReadyzRoute(sher))
 	klog.Info("listen on ", config.HTTPBind)
 
 	if enableProfiling {

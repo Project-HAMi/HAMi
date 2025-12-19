@@ -169,6 +169,17 @@ spec:
             failureThreshold: 3
             timeoutSeconds: 5
           {{- end }}
+          {{- if .Values.scheduler.leaderElect }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: 443
+              scheme: HTTPS
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          {{- end }}
       volumes:
         {{- if .Values.scheduler.admissionWebhook.enabled }}
         - name: tls-config
