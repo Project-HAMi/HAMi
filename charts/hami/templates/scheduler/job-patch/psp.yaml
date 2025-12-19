@@ -1,4 +1,4 @@
-{{- if .Values.scheduler.admissionWebhook.enabled }}
+{{- if and .Values.scheduler.admissionWebhook.enabled (not .Values.dra.enabled) -}}
 {{- if and (.Values.scheduler.patch.enabled) (not .Values.scheduler.certManager.enabled) }}
 {{- if .Values.podSecurityPolicy.enabled }}
 apiVersion: policy/v1beta1

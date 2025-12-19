@@ -23,6 +23,12 @@ version: 2.7.1
 # It is recommended to use it with quotes.
 appVersion: "2.7.1"
 
+dependencies:
+  - name: hami-dra
+    version: "0.0.1"
+    repository: "https://project-hami.github.io/HAMi-DRA/"
+    condition: dra.enabled
+
 kubeVersion: ">= 1.18.0-0"
 
 keywords:
