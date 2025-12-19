@@ -24,8 +24,8 @@ version: 2.7.1
 appVersion: "2.7.1"
 
 dependencies:
-  - name: hami-dra-webhook
-    version: "0.1.2"
+  - name: hami-dra
+    version: "0.0.1"
     repository: "https://project-hami.github.io/HAMi-DRA/"
     condition: dra.enabled
 
