@@ -31,6 +31,7 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -42,6 +43,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
@@ -54,6 +56,7 @@ type Scheduler struct {
 	podLister   listerscorev1.PodLister
 	nodeLister  listerscorev1.NodeLister
 	quotaLister listerscorev1.ResourceQuotaLister
+	leaseLister coordinationv1.LeaseLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
 	nodeNotify   chan struct{}
@@ -61,6 +64,7 @@ type Scheduler struct {
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
 	quotaManager   *device.QuotaManager
+	leaderManager  leaderelection.LeaderManager
 	started        uint32 // 0 = false, 1 = true
 }
 
@@ -75,6 +79,10 @@ func NewScheduler() *Scheduler {
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+	if config.LeaderElect {
+		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.HostName)
+	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }
@@ -85,6 +93,10 @@ func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
 
 func (s *Scheduler) GetPodManager() *device.PodManager {
 	return s.podManager
+}
+
+func (s *Scheduler) GetLeaderManager() leaderelection.LeaderManager {
+	return s.leaderManager
 }
 
 func (s *Scheduler) doNodeNotify() {
@@ -206,6 +218,7 @@ func (s *Scheduler) Start() error {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
+	s.leaseLister = informerFactory.Coordination().V1().Leases().Lister()
 
 	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
@@ -230,9 +243,13 @@ func (s *Scheduler) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to register resource quota event handler: %v", err)
 	}
+	leaseEventHandlerRegistration, err := informerFactory.Coordination().V1().Leases().Informer().AddEventHandler(s.leaderManager)
+	if err != nil {
+		return fmt.Errorf("failed to register lease event handler: %w", err)
+	}
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
-	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
+	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced, leaseEventHandlerRegistration.HasSynced)
 	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
@@ -256,6 +273,8 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		select {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
+		case <-s.leaderManager.LeaderNotifyChan():
+			klog.V(5).InfoS("Received leaderElection notification. We are just elected to leader")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
 			if atomic.LoadUint32(&s.started) == 0 {
@@ -265,6 +284,11 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
+		}
+		// TODO: may be we should lock node when we are doing register.
+		// Only do registration when we are leader
+		if !s.leaderManager.IsLeader() {
+			continue
 		}
 		rawNodes, err := s.nodeLister.List(labelSelector)
 		if err != nil {

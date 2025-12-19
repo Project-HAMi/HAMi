@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -116,9 +117,16 @@ func start() error {
 	)
 
 	config.InitDevices()
+
+	var err error
+	config.HostName, err = os.Hostname()
+	if err != nil {
+		return fmt.Errorf("unable to get hostname: %v", err)
+	}
+
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
-	err := sher.Start()
+	err = sher.Start()
 	if err != nil {
 		return err
 	}
