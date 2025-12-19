@@ -26,6 +26,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -89,6 +90,24 @@ func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 		if count.Value() > 1 {
 			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)] = *resource.NewQuantity(count.Value()*int64(100), resource.DecimalSI)
 		}
+		hasEnv := false
+		for _, env := range ctr.Env {
+			if env.Name == "SOL_CONTINER_NAME" {
+				hasEnv = true
+				break
+			}
+		}
+		if !hasEnv && ctr.Name != "" {
+			envVar := corev1.EnvVar{
+				Name:  "SOL_CONTINER_NAME", // Note: This should be "SOL_CONTAINER_NAME", but keeping the incorrect "SOL_CONTINER_NAME" for backward compatibility
+				Value: ctr.Name,
+			}
+			if ctr.Env == nil {
+				ctr.Env = []corev1.EnvVar{envVar}
+			} else {
+				ctr.Env = append(ctr.Env, envVar)
+			}
+		}
 	}
 	return ok, nil
 }
@@ -130,11 +149,33 @@ func (dev *IluvatarDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[str
 }
 
 func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
 }
 
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
