@@ -64,6 +64,10 @@ var (
 
 	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
 	ForceOverwriteDefaultScheduler bool
+
+	LeaderElect                  bool
+	LeaderElectResourceName      string
+	LeaderElectResourceNamespace string
 )
 
 type Config struct {
