@@ -65,10 +65,10 @@ spec:
               done
               echo "NVIDIA Toolkit is ready!"
           volumeMounts:
-          - name: nvidia-validations
-            mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
-            mountPropagation: HostToContainer
-            readOnly: true
+            - name: nvidia-validations
+              mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
+              mountPropagation: HostToContainer
+              readOnly: true
       {{- end }}
       containers:
         - name: device-plugin
@@ -93,11 +93,33 @@ spec:
                   fieldPath: spec.nodeName
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
+            - name: DEVICE_LIST_STRATEGY
+              value: {{ .Values.devicePlugin.deviceListStrategy }}
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
             {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
+            {{- end }}
+            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- end }}
+            {{- if typeIs "string" .Values.devicePlugin.nvidiaHookPath }}
+            - name: NVIDIA_CDI_HOOK_PATH
+              value: {{ .Values.devicePlugin.nvidiaHookPath }}
+            {{- end }}
+            {{- if typeIs "bool" .Values.devicePlugin.gdrcopyEnabled }}
+            - name: GDRCOPY_ENABLED
+              value: {{ .Values.devicePlugin.gdrcopyEnabled | quote }}
+            {{- end }}
+            {{- if typeIs "bool" .Values.devicePlugin.gdsEnabled }}
+            - name: GDS_ENABLED
+              value: {{ .Values.devicePlugin.gdsEnabled | quote }}
+            {{- end }}
+            {{- if typeIs "bool" .Values.devicePlugin.mofedEnabled }}
+            - name: MOFED_ENABLED
+              value: {{ .Values.devicePlugin.mofedEnabled | quote }}
             {{- end }}
             {{- if eq (.Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy | default "spread")  "topology-aware" }}
             - name: ENABLE_TOPOLOGY_SCORE
@@ -128,6 +150,15 @@ spec:
             - name: device-config
               mountPath: /device-config.yaml
               subPath: device-config.yaml
+            - name: cdi-root
+              mountPath: /var/run/cdi
+            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            # We always mount the driver root at /driver-root in the container.
+            # This is required for CDI detection to work correctly.
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+            {{- end }}
         - name: vgpu-monitor
           image: {{ include "hami.devicePlugin.monitor.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
@@ -197,6 +228,16 @@ spec:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
             type: DirectoryOrCreate
         {{- end }}
+        {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+        - name: driver-root
+          hostPath:
+            path: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            type: Directory
+        {{- end }}
+        - name: cdi-root
+          hostPath:
+            path: /var/run/cdi
+            type: DirectoryOrCreate
         - name: usrbin
           hostPath:
             path: /usr/bin
