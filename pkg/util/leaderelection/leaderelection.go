@@ -18,7 +18,7 @@ type LeaderManager interface {
 var _ LeaderManager = &leaderManager{}
 
 type leaderManager struct {
-	hostName          string
+	hostname          string
 	resourceName      string
 	resourceNamespace string
 
@@ -29,9 +29,9 @@ type leaderManager struct {
 	cache.FilteringResourceEventHandler
 }
 
-func NewLeaderManager(hostName, namespace, name string) *leaderManager {
+func NewLeaderManager(hostname, namespace, name string) *leaderManager {
 	m := &leaderManager{
-		hostName:          hostName,
+		hostname:          hostname,
 		resourceName:      name,
 		resourceNamespace: namespace,
 		leaderNotify:      make(chan struct{}),
@@ -120,7 +120,7 @@ func (m *leaderManager) onDelete(obj interface{}) {
 
 func (m *leaderManager) isHolder(lease *coordinationv1.Lease) bool {
 	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
-	return lease.Spec.HolderIdentity != nil && strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostName)
+	return lease.Spec.HolderIdentity != nil && strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
 }
 
 func (m *leaderManager) IsLeader() bool {
