@@ -34,7 +34,7 @@ func NewLeaderManager(hostname, namespace, name string) *leaderManager {
 		hostname:          hostname,
 		resourceName:      name,
 		resourceNamespace: namespace,
-		leaderNotify:      make(chan struct{}),
+		leaderNotify:      make(chan struct{}, 1),
 	}
 
 	m.FilteringResourceEventHandler = cache.FilteringResourceEventHandler{
@@ -136,13 +136,19 @@ func (m *leaderManager) LeaderNotifyChan() <-chan struct{} {
 type dummyLeaderManager struct {
 	elected bool
 	cache.ResourceEventHandlerFuncs
+
+	leaderNotify chan struct{}
 }
 
 var _ LeaderManager = &dummyLeaderManager{}
 
 func NewDummyLeaderManager(elected bool) *dummyLeaderManager {
+	notifyCh := make(chan struct{}, 1)
+	// dummyLeaderManager will not notify because the elected state is fixed
+	close(notifyCh)
 	return &dummyLeaderManager{
-		elected: elected,
+		elected:      elected,
+		leaderNotify: notifyCh,
 	}
 }
 
@@ -151,5 +157,5 @@ func (d *dummyLeaderManager) IsLeader() bool {
 }
 
 func (d *dummyLeaderManager) LeaderNotifyChan() <-chan struct{} {
-	return nil
+	return d.leaderNotify
 }
