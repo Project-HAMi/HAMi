@@ -3,6 +3,7 @@ package leaderelection
 import (
 	"strings"
 	"sync"
+	"time"
 
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/client-go/tools/cache"
@@ -22,9 +23,10 @@ type leaderManager struct {
 	resourceName      string
 	resourceNamespace string
 
-	leaseLock    sync.RWMutex
-	lease        *coordinationv1.Lease
-	leaderNotify chan struct{}
+	leaseLock     sync.RWMutex
+	observedLease *coordinationv1.Lease
+	observedTime  time.Time
+	leaderNotify  chan struct{}
 
 	cache.FilteringResourceEventHandler
 }
@@ -69,6 +71,16 @@ func objectToLease(obj interface{}) *coordinationv1.Lease {
 	return nil
 }
 
+func (m *leaderManager) setObservedRecord(lease *coordinationv1.Lease) {
+	m.observedLease = lease
+
+	if lease == nil {
+		m.observedTime = time.Time{}
+	} else {
+		m.observedTime = time.Now()
+	}
+}
+
 // onAdd notifies if we are the leader when lease is created.
 func (m *leaderManager) onAdd(obj interface{}) {
 	lease, ok := obj.(*coordinationv1.Lease)
@@ -79,7 +91,7 @@ func (m *leaderManager) onAdd(obj interface{}) {
 	m.leaseLock.Lock()
 	defer m.leaseLock.Unlock()
 
-	m.lease = lease
+	m.setObservedRecord(lease)
 	// Notify if we are the leader from the very begging
 	if m.isHolderOf(lease) {
 		m.leaderNotify <- struct{}{}
@@ -96,7 +108,7 @@ func (m *leaderManager) onUpdate(oldObj, newObj interface{}) {
 	m.leaseLock.Lock()
 	defer m.leaseLock.Unlock()
 
-	m.lease = newLease
+	m.setObservedRecord(newLease)
 	// Notify if we have been elected to become the leader
 	if m.isHolderOf(newLease) {
 		oldLease, ok := oldObj.(*coordinationv1.Lease)
@@ -115,7 +127,7 @@ func (m *leaderManager) onDelete(obj interface{}) {
 	m.leaseLock.Lock()
 	defer m.leaseLock.Unlock()
 
-	m.lease = nil
+	m.setObservedRecord(nil)
 }
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
@@ -123,9 +135,19 @@ func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
 	return lease.Spec.HolderIdentity != nil && strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
 }
 
+func (m *leaderManager) isLeaseValid(now time.Time) bool {
+	return m.observedTime.Add(time.Second * time.Duration(*m.observedLease.Spec.LeaseDurationSeconds)).After(now)
+}
+
 func (m *leaderManager) IsLeader() bool {
 	m.leaseLock.RLock()
 	defer m.leaseLock.RUnlock()
+
+	if m.observedLease == nil {
+		return false
+	}
+
+	// TODO: should we check valid lease here?
 	return m.isHolderOf(m.observedLease)
 }
 
