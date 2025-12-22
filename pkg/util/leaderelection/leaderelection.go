@@ -81,7 +81,7 @@ func (m *leaderManager) onAdd(obj interface{}) {
 
 	m.lease = lease
 	// Notify if we are the leader from the very begging
-	if m.isHolder(lease) {
+	if m.isHolderOf(lease) {
 		m.leaderNotify <- struct{}{}
 	}
 }
@@ -98,13 +98,13 @@ func (m *leaderManager) onUpdate(oldObj, newObj interface{}) {
 
 	m.lease = newLease
 	// Notify if we have been elected to become the leader
-	if m.isHolder(newLease) {
+	if m.isHolderOf(newLease) {
 		oldLease, ok := oldObj.(*coordinationv1.Lease)
 		if !ok {
 			return
 		}
 
-		if !m.isHolder(oldLease) {
+		if !m.isHolderOf(oldLease) {
 			m.leaderNotify <- struct{}{}
 		}
 	}
@@ -118,7 +118,7 @@ func (m *leaderManager) onDelete(obj interface{}) {
 	m.lease = nil
 }
 
-func (m *leaderManager) isHolder(lease *coordinationv1.Lease) bool {
+func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
 	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
 	return lease.Spec.HolderIdentity != nil && strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
 }
@@ -126,7 +126,7 @@ func (m *leaderManager) isHolder(lease *coordinationv1.Lease) bool {
 func (m *leaderManager) IsLeader() bool {
 	m.leaseLock.RLock()
 	defer m.leaseLock.RUnlock()
-	return m.isHolder(m.lease)
+	return m.isHolderOf(m.observedLease)
 }
 
 func (m *leaderManager) LeaderNotifyChan() <-chan struct{} {
