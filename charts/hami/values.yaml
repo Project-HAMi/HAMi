@@ -345,7 +345,7 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
-  nvidianodeSelector:
+  nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
   # The updateStrategy for DevicePlugin DaemonSet.
