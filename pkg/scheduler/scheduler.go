@@ -81,7 +81,7 @@ func NewScheduler() *Scheduler {
 	s.quotaManager = device.NewQuotaManager()
 	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
 	if config.LeaderElect {
-		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.HostName)
+		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
