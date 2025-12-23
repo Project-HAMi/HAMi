@@ -11,6 +11,8 @@ import (
 
 type LeaderManager interface {
 	IsLeader() bool
+
+	// Notify when just elected as leader
 	LeaderNotifyChan() <-chan struct{}
 
 	cache.ResourceEventHandler
@@ -164,6 +166,10 @@ type dummyLeaderManager struct {
 
 var _ LeaderManager = &dummyLeaderManager{}
 
+// NewDummyLeaderManager creates a dummy leader manager which will not change its elected state during its lifetime.
+// It will always return the elected state passed in the constructor when calling IsLeader() and you will never get notified by it's channel.
+//
+// This is useful when disabling leader-election.
 func NewDummyLeaderManager(elected bool) *dummyLeaderManager {
 	notifyCh := make(chan struct{}, 1)
 	// dummyLeaderManager will not notify because the elected state is fixed
