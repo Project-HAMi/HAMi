@@ -30,6 +30,7 @@ type VNPUConfig struct {
 	ResourceMemoryName string     `yaml:"resourceMemoryName"`
 	MemoryAllocatable  int64      `yaml:"memoryAllocatable"`
 	MemoryCapacity     int64      `yaml:"memoryCapacity"`
+	MemoryFactor       int32      `yaml:"memoryFactor"`
 	AICore             int32      `yaml:"aiCore"`
 	AICPU              int32      `yaml:"aiCPU"`
 	Templates          []Template `yaml:"templates"`

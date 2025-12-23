@@ -56,18 +56,21 @@ var (
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
+	MemoryFactor        int32
 )
 
 type HygonConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
+	MemoryFactor       int32  `yaml:"memoryFactor"`
 }
 
 func InitDCUDevice(config HygonConfig) *DCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
+	MemoryFactor = config.MemoryFactor
 	_, ok := device.InRequestDevices[HygonDCUDevice]
 	if !ok {
 		device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
@@ -228,6 +231,11 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}

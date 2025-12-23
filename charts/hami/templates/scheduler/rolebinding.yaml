@@ -14,3 +14,18 @@ subjects:
   - kind: ServiceAccount
     name: {{ include "hami-vgpu.scheduler" . }}
     namespace: {{ include "hami-vgpu.namespace" . }}
+---
+{{- if .Values.mockDevicePlugin.enabled }}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "hami-vgpu.mock-device-plugin" . }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "hami-vgpu.mock-device-plugin" . }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "hami-vgpu.mock-device-plugin" . }}
+    namespace: {{ include "hami-vgpu.namespace" . }}
+{{- end -}}

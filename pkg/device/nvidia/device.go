@@ -62,6 +62,7 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
+	MemoryFactor             int32 = 1
 )
 
 type MigPartedSpec struct {
@@ -110,6 +111,7 @@ type NvidiaConfig struct {
 	DefaultMemory                int32  `yaml:"defaultMemory"`
 	DefaultCores                 int32  `yaml:"defaultCores"`
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
+	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
 	MigGeometriesList []device.AllowedMigGeometries `yaml:"knownMigGeometries"`
@@ -166,6 +168,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
+	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
 		config:         nvconfig,
 		ReportedGPUNum: 0,
@@ -541,6 +544,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}
@@ -717,7 +725,7 @@ func fitQuota(tmpDevs map[string]device.ContainerDevices, ns string, memreq int6
 		core += int64(val.Usedcores)
 	}
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
 }
 
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
