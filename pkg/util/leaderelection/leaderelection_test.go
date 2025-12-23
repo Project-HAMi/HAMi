@@ -193,6 +193,46 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 			assertNotElected(lm)
 		})
 	})
+
+	ginkgo.Describe("When lease is deleted", func() {
+		ginkgo.Describe("we are leader", func() {
+			ginkgo.It("shoud not be leader anymore unless elected", func() {
+				ginkgo.By("Elected as leader")
+				lm.OnAdd(initLease, true)
+				assertNotifyElected(lm)
+
+				ginkgo.By("Lease is deleted")
+				lm.OnDelete(initLease)
+				assertNotElected(lm)
+
+				newLease := acquireLeaseWithNewHost(initLease, hostname)
+				ginkgo.By("Elected as leader again")
+				lm.OnAdd(newLease, false)
+				assertNotifyElected(lm)
+			})
+		})
+
+		ginkgo.Describe("we are not leader", func() {
+			ginkgo.BeforeEach(func() {
+				initLeaseHostname = "another"
+			})
+			ginkgo.It("should still not be leader", func() {
+				ginkgo.By("Not leader at first")
+				lm.OnAdd(initLease, true)
+				assertNotElected(lm)
+
+				ginkgo.By("Lease is deleted")
+				lm.OnDelete(initLease)
+				assertNotElected(lm)
+
+				ginkgo.By("Elected as leader")
+				newLease := acquireLeaseWithNewHost(initLease, hostname)
+				lm.OnAdd(newLease, false)
+				assertNotifyElected(lm)
+			})
+		})
+
+	})
 })
 
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
