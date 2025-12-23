@@ -75,17 +75,20 @@ func generateLease(hostname, namespace, name string) *coordinationv1.Lease {
 }
 
 func assertNotifyElected(lm LeaderManager) {
+	ginkgo.GinkgoHelper()
 	pt := &struct{}{}
 	g.Eventually(lm.LeaderNotifyChan()).Should(g.Receive(pt))
 	g.Expect(lm.IsLeader()).Should(g.BeTrue())
 }
 
 func assertElectedWithoutNotifying(lm LeaderManager) {
+	ginkgo.GinkgoHelper()
 	g.Consistently(lm.LeaderNotifyChan()).ShouldNot(g.Receive())
 	g.Expect(lm.IsLeader()).Should(g.BeTrue())
 }
 
 func assertNotElected(lm LeaderManager) {
+	ginkgo.GinkgoHelper()
 	g.Consistently(lm.LeaderNotifyChan()).ShouldNot(g.Receive())
 	g.Expect(lm.IsLeader()).ShouldNot(g.BeTrue())
 }
