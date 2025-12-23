@@ -332,6 +332,13 @@ devicePlugin:
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false
+  deviceListStrategy: "envvar"
+  nvidiaHookPath: null
+  nvidiaDriverRoot: null
+  gdrcopyEnabled: null
+  gdsEnabled: null
+  mofedEnabled: null
+
   extraArgs:
     - -v=4
   extraEnvs: {}
