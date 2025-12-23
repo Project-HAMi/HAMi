@@ -173,8 +173,13 @@ spec:
           readinessProbe:
             httpGet:
               path: /readyz
-              port: 443
+              {{- if .Values.scheduler.admissionWebhook.enabled }}
+              port: https
               scheme: HTTPS
+              {{- else }}
+              port: http
+              scheme: HTTP
+              {{- end }}
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
