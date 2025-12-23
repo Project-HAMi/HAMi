@@ -673,3 +673,87 @@ func Test_Fit(t *testing.T) {
 		})
 	}
 }
+
+func TestDevices_LockNode(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &IluvatarDevices{
+				config: IluvatarConfig{
+					CommonWord:         "MR-V100",
+					ChipName:           "MR-V100",
+					ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+					ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+				},
+			}
+			err := dev.LockNode(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
+func TestDevices_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		pod         *corev1.Pod
+		expectError bool
+	}{
+		{
+			name:        "Test with no containers",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
+			expectError: false,
+		},
+		{
+			name:        "Test with non-zero resource requests",
+			node:        &corev1.Node{},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			expectError: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &IluvatarDevices{
+				config: IluvatarConfig{
+					CommonWord:         "MR-V100",
+					ChipName:           "MR-V100",
+					ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+					ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+				},
+			}
+			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			if tt.expectError {
+				assert.Equal(t, err != nil, true)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
