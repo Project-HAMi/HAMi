@@ -49,7 +49,9 @@ import (
 
 type Scheduler struct {
 	*nodeManager
-	podManager *device.PodManager
+	podManager    *device.PodManager
+	quotaManager  *device.QuotaManager
+	leaderManager leaderelection.LeaderManager
 
 	stopCh      chan struct{}
 	kubeClient  kubernetes.Interface
@@ -63,8 +65,6 @@ type Scheduler struct {
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
-	quotaManager   *device.QuotaManager
-	leaderManager  leaderelection.LeaderManager
 	started        uint32 // 0 = false, 1 = true
 }
 
