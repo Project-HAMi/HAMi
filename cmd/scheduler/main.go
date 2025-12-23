@@ -123,6 +123,9 @@ func start() error {
 	if err != nil {
 		return fmt.Errorf("unable to get hostname: %v", err)
 	}
+	if config.HostName == "" {
+		return fmt.Errorf("empty hostname returned")
+	}
 
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
