@@ -277,17 +277,18 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Received leaderElection notification. We are just elected to leader")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
-			if atomic.LoadUint32(&s.started) == 0 {
-				klog.V(5).InfoS("Scheduler not started yet, skipping ...")
-				continue
-			}
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
 		}
+		if atomic.LoadUint32(&s.started) == 0 {
+			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
+			continue
+		}
 		// TODO: may be we should lock node when we are doing register.
 		// Only do registration when we are leader
 		if !s.leaderManager.IsLeader() {
+			klog.V(5).InfoS("Sscheduler is not leader yet, skipping ...")
 			continue
 		}
 		rawNodes, err := s.nodeLister.List(labelSelector)
