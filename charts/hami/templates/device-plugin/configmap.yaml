@@ -9,5 +9,5 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   config.json: |
-{{- toPrettyJson .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
+{{- .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
 {{- end }}
