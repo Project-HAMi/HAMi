@@ -81,7 +81,10 @@ kubectl -n <namespace> edit cm hami-device-plugin
 ```bash
 helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 ```
-
+* `devicePlugin.service.schedulerPort`: 整数类型, 预设值为31998, 调度器webhook服务的节点端口.
+* `devicePlugin.deviceListStrategy`: 字符串类型, 预设值为 "envvar", NVIDIA设备挂载策略, "envvar" 为使用环境变量 'NVIDIA_VISIBLE_DEVICES'进行挂载, "cdi-annotations" 为使用CDI进行挂载
+* `devicePlugin.nvidiaDriverRoot`: 字符串类型, 预设值为 "/", GPU节点上NVIDIA驱动的根目录, 主要在CDI模式下使用
+* `devicePlugin.nvidiaHookPath`: 字符串类型, 预设值为 "/usr/bin/nvidia-ctk", GPU节点上文件 'nvidia-ctk' 的路径, 主要在CDI模式下使用
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`：字符串类型，预设值为 "binpack" 表示 GPU 节点调度策略，
   "binpack"表示尽量将任务分配到同一个 GPU 节点上，"spread"表示尽量将任务分配到不同 GPU 节点上。
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`：字符串类型，预设值为 "spread" 表示 GPU 调度策略，

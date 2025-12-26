@@ -67,8 +67,10 @@ you can customize your vGPU support by setting the following parameters using `-
 helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 ```
 
-* `devicePlugin.service.schedulerPort`:
-  Integer type, by default: 31998, scheduler webhook service nodePort.
+* `devicePlugin.service.schedulerPort`: Integer type, by default: 31998, scheduler webhook service nodePort.
+* `devicePlugin.deviceListStrategy`: String type, default value is "envvar", strategy used when mounting nvidia devices, "envvar" means using env 'NVIDIA_VISIBLE_DEVICES', "cdi-annotations" means using CDI
+* `devicePlugin.nvidiaDriverRoot`: String type, default value is "/", root of nvidia driver, used in CDI mode
+* `devicePlugin.nvidiaHookPath`: String type, default value is "/usr/bin/nvidia-ctk", location of binary 'nvidia-ctk' on GPU node, used in CDI mode 
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`: String type, default value is "binpack", representing the GPU node scheduling policy. "binpack" means trying to allocate tasks to the same GPU node as much as possible, while "spread" means trying to allocate tasks to different GPU nodes as much as possible.
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`: String type, default value is "spread", representing the GPU scheduling policy. "binpack" means trying to allocate tasks to the same GPU as much as possible, while "spread" means trying to allocate tasks to different GPUs as much as possible.
 
