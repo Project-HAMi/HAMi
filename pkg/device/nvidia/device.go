@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -157,7 +158,8 @@ type DeviceConfig struct {
 
 type NvidiaGPUDevices struct {
 	config         NvidiaConfig
-	ReportedGPUNum int64
+	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
+	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -171,7 +173,7 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
 		config:         nvconfig,
-		ReportedGPUNum: 0,
+		ReportedGPUNum: make(map[string]int64),
 	}
 }
 
@@ -221,21 +223,27 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	if quantity != nil {
 		current = quantity.Value()
 	}
-	klog.Infoln("-=-=-=Current device count from allocatable", current, "Reported Devices=", dev.ReportedGPUNum)
+
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+
+	reported := dev.ReportedGPUNum[n.Name]
+	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
+
 	if current == 0 {
-		if dev.ReportedGPUNum == 0 {
+		if reported == 0 {
 			return true, false
-		} else {
-			dev.ReportedGPUNum = current
-			return false, false
 		}
+		dev.ReportedGPUNum[n.Name] = current
+		return false, false
 	}
-	if dev.ReportedGPUNum != current {
-		dev.ReportedGPUNum = current
+
+	if reported != current {
+		dev.ReportedGPUNum[n.Name] = current
 		return true, true
-	} else {
-		return true, false
 	}
+
+	return true, false
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
