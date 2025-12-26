@@ -32,6 +32,8 @@
 * `nvidia.defaultGPUNum`：
   整数类型，默认为 1，如果配置为 0，则配置不会生效。当用户在 Pod 资源中没有设置 nvidia.com/gpu 这个 key 时，webhook 会检查 nvidia.com/gpumem、
   resource-mem-percentage、nvidia.com/gpucores 这三个 key 中的任何一个 key 有值，webhook 都会添加 nvidia.com/gpu 键和此默认值到 resources limit 中。
+* `nvidia.memoryFactor`:
+  整数类型，默认为 1。在资源申请时`nvidia.com/gpumem`的真实值会放大相应的倍数。如果部署了`mock-device-plugin`, 在`node.status.capacity`的真实值也会放大对应的倍数。
 * `nvidia.resourceCountName`：
   字符串类型，申请 vgpu 个数的资源名，默认："nvidia.com/gpu"
 * `nvidia.resourceMemoryName`：

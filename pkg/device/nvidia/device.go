@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -62,6 +63,7 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
+	MemoryFactor             int32 = 1
 )
 
 type MigPartedSpec struct {
@@ -110,6 +112,7 @@ type NvidiaConfig struct {
 	DefaultMemory                int32  `yaml:"defaultMemory"`
 	DefaultCores                 int32  `yaml:"defaultCores"`
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
+	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
 	MigGeometriesList []device.AllowedMigGeometries `yaml:"knownMigGeometries"`
@@ -155,7 +158,8 @@ type DeviceConfig struct {
 
 type NvidiaGPUDevices struct {
 	config         NvidiaConfig
-	ReportedGPUNum int64
+	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
+	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -166,9 +170,10 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
+	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
 		config:         nvconfig,
-		ReportedGPUNum: 0,
+		ReportedGPUNum: make(map[string]int64),
 	}
 }
 
@@ -218,21 +223,27 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	if quantity != nil {
 		current = quantity.Value()
 	}
-	klog.Infoln("-=-=-=Current device count from allocatable", current, "Reported Devices=", dev.ReportedGPUNum)
+
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+
+	reported := dev.ReportedGPUNum[n.Name]
+	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
+
 	if current == 0 {
-		if dev.ReportedGPUNum == 0 {
+		if reported == 0 {
 			return true, false
-		} else {
-			dev.ReportedGPUNum = current
-			return false, false
 		}
+		dev.ReportedGPUNum[n.Name] = current
+		return false, false
 	}
-	if dev.ReportedGPUNum != current {
-		dev.ReportedGPUNum = current
+
+	if reported != current {
+		dev.ReportedGPUNum[n.Name] = current
 		return true, true
-	} else {
-		return true, false
 	}
+
+	return true, false
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -541,6 +552,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}
@@ -717,7 +733,7 @@ func fitQuota(tmpDevs map[string]device.ContainerDevices, ns string, memreq int6
 		core += int64(val.Usedcores)
 	}
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, core, NvidiaGPUDevice)
+	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
 }
 
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {

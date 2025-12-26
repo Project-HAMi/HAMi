@@ -253,8 +253,8 @@ spec:
         - name: device-config
           configMap:
             name: {{ include "hami-vgpu.scheduler" . }}-device
-      {{- if .Values.devicePlugin.nvidianodeSelector }}
-      nodeSelector: {{ toYaml .Values.devicePlugin.nvidianodeSelector | nindent 8 }}
+      {{- if .Values.devicePlugin.nvidiaNodeSelector }}
+      nodeSelector: {{ toYaml .Values.devicePlugin.nvidiaNodeSelector | nindent 8 }}
       {{- end }}
       {{- if .Values.devicePlugin.tolerations }}
       tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}
