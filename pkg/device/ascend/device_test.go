@@ -802,6 +802,150 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 }
 
+func Test_GenerateResourceRequestsFactor(t *testing.T) {
+	req := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
+			},
+			Requests: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
+			},
+		},
+	}
+	tests := []struct {
+		name string
+		dev  Devices
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "factor 10",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(10),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(2184),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "factor 100",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(100),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(17476),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "factor 0",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(0),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(2184),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&req)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
 func TestDevices_LockNode(t *testing.T) {
 	tests := []struct {
 		name        string

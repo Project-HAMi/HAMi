@@ -53,7 +53,7 @@ func NewQuotaManager() *QuotaManager {
 	return &localCache
 }
 
-func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceName string) bool {
+func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, coresreq int64, deviceName string) bool {
 	devs, ok := GetDevices()[deviceName]
 	if !ok {
 		return true
@@ -70,9 +70,13 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, coresreq int64, deviceN
 	}
 	memQuota, ok := (*dq)[memResourceName]
 	if ok {
-		klog.V(4).InfoS("resourceMem quota judging", "limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
-		if memQuota.Limit != 0 && memQuota.Used+memreq > memQuota.Limit {
-			klog.V(4).InfoS("resourceMem quota not fitted", "limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq)
+		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq, "memoryFactor", memoryFactor)
+		limit := memQuota.Limit
+		if memoryFactor > 1 {
+			limit = limit * int64(memoryFactor)
+		}
+		if limit != 0 && memQuota.Used+memreq > limit {
+			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
