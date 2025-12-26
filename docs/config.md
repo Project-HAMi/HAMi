@@ -68,9 +68,9 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 ```
 
 * `devicePlugin.service.schedulerPort`: Integer type, by default: 31998, scheduler webhook service nodePort.
-* `devicePlugin.deviceListStrategy`: String type, default value is "envvar", strategy used when mounting nvidia devices, "envvar" means using env 'NVIDIA_VISIBLE_DEVICES', "cdi-annotations" means using CDI
-* `devicePlugin.nvidiaDriverRoot`: String type, default value is "/", root of nvidia driver, used in CDI mode
-* `devicePlugin.nvidiaHookPath`: String type, default value is "/usr/bin/nvidia-ctk", location of binary 'nvidia-ctk' on GPU node, used in CDI mode 
+* `devicePlugin.deviceListStrategy`: String type, default value is "envvar". This sets the strategy for exposing devices to containers. "envvar" uses the `NVIDIA_VISIBLE_DEVICES` environment variable, while "cdi-annotations" uses the Container Device Interface (CDI).
+* `devicePlugin.nvidiaDriverRoot`: String type. Specifies the root of the NVIDIA driver installation on the host. This is used when `deviceListStrategy` is `cdi-annotations`. If not set via Helm, it defaults to `/`.
+* `devicePlugin.nvidiaHookPath`: String type. Specifies the path to the `nvidia-ctk` binary on the GPU node. This is used when `deviceListStrategy` is `cdi-annotations`. If not set via Helm, it defaults to `/usr/bin/nvidia-ctk`.
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`: String type, default value is "binpack", representing the GPU node scheduling policy. "binpack" means trying to allocate tasks to the same GPU node as much as possible, while "spread" means trying to allocate tasks to different GPU nodes as much as possible.
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`: String type, default value is "spread", representing the GPU scheduling policy. "binpack" means trying to allocate tasks to the same GPU as much as possible, while "spread" means trying to allocate tasks to different GPUs as much as possible.
 
