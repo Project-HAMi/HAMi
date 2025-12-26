@@ -131,23 +131,31 @@ func TestFitQuota(t *testing.T) {
 	}
 
 	// Should fit
-	if !qm.FitQuota(ns, 500, 100, deviceName) {
+	if !qm.FitQuota(ns, 500, 1, 100, deviceName) {
 		t.Error("FitQuota should return true when within limits")
 	}
 	// Should not fit memory
-	if qm.FitQuota(ns, 1500, 100, deviceName) {
+	if qm.FitQuota(ns, 1500, 1, 100, deviceName) {
 		t.Error("FitQuota should return false when memory exceeds limit")
 	}
 	// Should not fit core
-	if qm.FitQuota(ns, 500, 300, deviceName) {
+	if qm.FitQuota(ns, 500, 1, 300, deviceName) {
 		t.Error("FitQuota should return false when core exceeds limit")
 	}
+	// Should fit memory with factor
+	if !qm.FitQuota(ns, 1000, 2, 100, deviceName) {
+		t.Error("FitQuota should return true")
+	}
+	// Should not fit memory with factor
+	if qm.FitQuota(ns, 5000, 2, 100, deviceName) {
+		t.Error("FitQuota should return false when memory exceeds limit")
+	}
 	// Should fit if namespace not present
-	if !qm.FitQuota("otherns", 1500, 100, deviceName) {
+	if !qm.FitQuota("otherns", 1500, 1, 100, deviceName) {
 		t.Error("FitQuota should return true if namespace not present")
 	}
 	// Should fit if device not present
-	if !qm.FitQuota(ns, 1000, 100, "unknown-device") {
+	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
 	}
 }

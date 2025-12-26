@@ -29,6 +29,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func viewStatus(usage NodeUsage) {
@@ -104,7 +105,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
-		if value, ok := task.GetAnnotations()[policy.NodeSchedulerPolicyAnnotationKey]; ok {
+		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
 			userNodePolicy = value
 		}
 	}

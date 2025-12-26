@@ -37,7 +37,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -467,8 +466,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test1",
 						UID:  "test1-uid1",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -504,8 +503,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test2",
 						UID:  "test2-uid2",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -541,8 +540,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test3",
 						UID:  "test3-uid3",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -578,8 +577,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test4",
 						UID:  "test4-uid4",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{

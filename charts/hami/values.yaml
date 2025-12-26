@@ -310,9 +310,9 @@ devicePlugin:
       {
         "nodeconfig": [
           {
-            "name": "m5-cloudinfra-online02",
+            "name": "your-node-name",
             "operatingmode": "hami-core",
-            "devicememoryscaling": 1.8,
+            "devicememoryscaling": 1,
             "devicesplitcount": 10,
             "migstrategy": "none",
             "filterdevices": {
@@ -332,6 +332,13 @@ devicePlugin:
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false
+  deviceListStrategy: "envvar"
+  nvidiaHookPath: null
+  nvidiaDriverRoot: null
+  gdrcopyEnabled: null
+  gdsEnabled: null
+  mofedEnabled: null
+
   extraArgs:
     - -v=4
   extraEnvs: {}
@@ -345,7 +352,7 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
-  nvidianodeSelector:
+  nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
   # The updateStrategy for DevicePlugin DaemonSet.
@@ -366,6 +373,25 @@ devicePlugin:
 #    requests:
 #      cpu: 100m
 #      memory: 100Mi
+
+mockDevicePlugin:
+  enabled: false
+  image:
+    registry: "docker.io"
+    repository: "projecthami/mock-device-plugin"
+    tag: "0.1.0"
+    ## Specify a imagePullPolicy
+    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+    ##
+    pullPolicy: IfNotPresent
+    ## Optionally specify an array of imagePullSecrets.
+    ## Secrets must be manually created in the namespace.
+    ## Example:
+    ## pullSecrets:
+    ##   - myRegistryKeySecretName
+    ##
+    pullSecrets: []
 
 devices:
   amd:
