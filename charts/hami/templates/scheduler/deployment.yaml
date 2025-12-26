@@ -109,6 +109,9 @@ spec:
             - --gpu-scheduler-policy={{ .Values.scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy }}
             - --force-overwrite-default-scheduler={{ .Values.scheduler.forceOverwriteDefaultScheduler}}
             - --device-config-file=/device-config.yaml
+            - --leader-elect={{ .Values.scheduler.leaderElect }}
+            - --leader-elect-resource-name={{ .Values.schedulerName }}
+            - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}
@@ -153,6 +156,22 @@ spec:
           livenessProbe:
             httpGet:
               path: /healthz
+              {{- if .Values.scheduler.admissionWebhook.enabled }}
+              port: https
+              scheme: HTTPS
+              {{- else }}
+              port: http
+              scheme: HTTP
+              {{- end }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            failureThreshold: 3
+            timeoutSeconds: 5
+          {{- end }}
+          {{- if .Values.scheduler.leaderElect }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
               {{- if .Values.scheduler.admissionWebhook.enabled }}
               port: https
               scheme: HTTPS
