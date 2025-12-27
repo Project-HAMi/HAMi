@@ -255,8 +255,7 @@ func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error
 	}
 	s := strings.Split(value, NodeLockSep)
 	if len(s) != 3 {
-		lockTime, err = time.Parse(time.RFC3339, value)
-		return lockTime, "", "", err
+		return time.Time{}, "", "", fmt.Errorf("malformed lock annotation: expected 3 parts, got %d from %s", len(s), value)
 	}
 	lockTime, err = time.Parse(time.RFC3339, s[0])
 	return lockTime, s[1], s[2], err
