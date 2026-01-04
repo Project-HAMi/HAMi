@@ -392,6 +392,20 @@ mockDevicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
+# If this option is enabled, the DRA will be installed and the scheduler extender will not be installed.
+dra:
+  enabled: false
+
+# Configuration for the hami-dra subchart, which includes DRA drivers.
+hami-dra:
+  drivers:
+    nvidia:
+      enabled: true
+      # If you are using gpu driver on host, you need to set this to false
+      containerDriver: true
+      image:
+        repository: projecthami/k8s-dra-driver
+        tag: "v0.0.1-dev"
 
 devices:
   amd:
@@ -457,5 +471,3 @@ devices:
       - iluvatar.ai/MR-V50-vgpu
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
-
-

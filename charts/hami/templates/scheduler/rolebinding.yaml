@@ -1,3 +1,4 @@
+{{- if not .Values.dra.enabled -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
@@ -29,3 +30,4 @@ subjects:
     name: {{ include "hami-vgpu.mock-device-plugin" . }}
     namespace: {{ include "hami-vgpu.namespace" . }}
 {{- end -}}
+{{- end }}
