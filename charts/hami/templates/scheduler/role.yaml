@@ -1,3 +1,4 @@
+{{- if not .Values.dra.enabled -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: Role
 metadata:
@@ -10,3 +11,4 @@ rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
     verbs: ["create", "get", "update", "patch"]
+{{- end }}
