@@ -12,12 +12,11 @@
 
 ## Prerequisites
 
-* dtk driver >= 24.04
-* hy-smi v1.6.0
+* DCU device driver >= 6.3.8
 
 ## Enabling DCU-sharing Support
 
-* Deploy the dcu-vgpu-device-plugin [here](https://github.com/Project-HAMi/dcu-vgpu-device-plugin)
+* [DCU-Device-Plugin](https://developer.sourcefind.cn/document/87ee5c5b-c10d-11f0-b077-0242ac150003?id=8df80ff9-c10e-11f0-b077-0242ac150003)
 
 
 ## Running DCU jobs
@@ -29,34 +28,31 @@ using the `hygon.com/dcunum` , `hygon.com/dcumem` and `hygon.com/dcucores` resou
 apiVersion: v1
 kind: Pod
 metadata:
-  name: alexnet-tf-gpu-pod-mem
-  labels:
-    purpose: demo-tf-amdgpu
+  name: vdcu-pytorch-demo
 spec:
   containers:
-    - name: alexnet-tf-gpu-container
-      image: pytorch:resnet50
-      workingDir: /root
-      command: ["sleep","infinity"]
+    - name: vdcu-pytorch-demo
+      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+      command: [ "/bin/bash", "-c", "--" ]
+      args: [ "sleep infinity & wait" ]
       resources:
         limits:
-          hygon.com/dcunum: 1 # requesting a GPU
-          hygon.com/dcumem: 2000 # each dcu require 2000 MiB device memory
-          hygon.com/dcucores: 60 # each dcu use 60% of total compute cores
-
+          hygon.com/dcunum: 1   # requesting a vDCU
+          hygon.com/dcucores: 60  # each vDCU use 60% of total compute cores
+          hygon.com/dcumem: 2000  # each vDCU require 2000 MiB device memory
 ```
 
-## Enable vDCU inside container
+## View the virtual DCU specifications within the container
 
-You need to enable vDCU inside container in order to use it.
+To view the vDCU specifications within the container, it is necessary to configure the driver environment variables.
 ```
-source /opt/hygondriver/env.sh
+source /opt/hyhal/env.sh
 ```
 
-check if you have successfully enabled vDCU by using following command
+Then, use the driver command to view the information of the virtual device.
 
 ```
-hy-virtual -show-device-info
+hy-smi virtual -show-device-info
 ```
 
 If you have an output like this, then you have successfully enabled vDCU inside container.
@@ -74,4 +70,4 @@ Launch your DCU tasks like you usually do
 
 1. DCU-sharing in init container is not supported, pods with "hygon.com/dcumem" in init container will never be scheduled.
 
-2. Only one vdcu can be acquired per container. If you want to mount multiple dcu devices, then you shouldn't set `hygon.com/dcumem` or `hygon.com/dcucores`
+2. Only one vdcu can be aquired per container. If you want to mount multiple dcu devices, then you shouldn't set `hygon.com/dcumem` or `hygon.com/dcucores`
