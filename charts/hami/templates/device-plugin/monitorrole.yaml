@@ -1,4 +1,4 @@
-{{- if .Values.devicePlugin.enabled }}
+{{- if and .Values.devicePlugin.enabled (not .Values.dra.enabled) -}}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:

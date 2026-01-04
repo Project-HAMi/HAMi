@@ -1,3 +1,4 @@
+{{- if not .Values.dra.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -406,3 +407,4 @@ data:
           aiCore: 4
           aiCPU: 4
   {{ end }}
+{{- end }}
