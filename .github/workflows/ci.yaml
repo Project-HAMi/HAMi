@@ -214,6 +214,10 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
+      - name: Build helm dependencies
+        run: |
+          helm dependency build charts/hami
+
       - name: Lint helm chart
         run: |
           make lint_chart
