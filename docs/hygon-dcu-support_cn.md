@@ -2,7 +2,7 @@
 
 本组件支持复用海光DCU设备，并为此提供以下几种与vGPU类似的复用功能，包括：
 
-***DCU 共享***: 每个任务可以只占用一部分显卡，多个任务可以共享一张显卡
+***DCU 共享***: 每个任务可以只占用一部分DCU卡，多个任务可以共享一张DCU卡
 
 ***可限制分配的显存大小***: 你现在可以用显存值（例如3000M）来分配DCU，本组件会确保任务使用的显存不会超过分配数值
 
@@ -12,12 +12,11 @@
 
 ## 节点需求
 
-* dtk driver >= 24.04
-* hy-smi v1.6.0
+* DCU驱动版本 >= 6.3.8
 
 ## 开启DCU复用
 
-* 部署[dcu-vgpu-device-plugin](https://github.com/Project-HAMi/dcu-vgpu-device-plugin)
+* 部署[DCU-Device-Plugin](https://developer.sourcefind.cn/document/87ee5c5b-c10d-11f0-b077-0242ac150003?id=8df80ff9-c10e-11f0-b077-0242ac150003)
 
 ## 运行DCU任务
 
@@ -25,36 +24,33 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: alexnet-tf-gpu-pod-mem
-  labels:
-    purpose: demo-tf-amdgpu
+  name: vdcu-pytorch-demo
 spec:
   containers:
-    - name: alexnet-tf-gpu-container
-      image: pytorch:resnet50
-      workingDir: /root
-      command: ["sleep","infinity"]
+    - name: vdcu-pytorch-demo
+      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+      command: [ "/bin/bash", "-c", "--" ]
+      args: [ "sleep infinity & wait" ]
       resources:
         limits:
-          hygon.com/dcunum: 1 # requesting a GPU
-          hygon.com/dcumem: 2000 # each dcu require 2000 MiB device memory
-          hygon.com/dcucores: 60 # each dcu use 60% of total compute cores
-
+          hygon.com/dcunum: 1   # requesting a vDCU
+          hygon.com/dcucores: 60  # each vDCU use 60% of total compute cores
+          hygon.com/dcumem: 2000  # each vDCU require 2000 MiB device memory
 ```
 
-## 容器内开启虚拟DCU功能
+## 容器内查看虚拟DCU规格
 
-使用vDCU首先需要激活虚拟环境
+容器内查看vDCU规格，需要配置驱动环境变量。
 ```
-source /opt/hygondriver/env.sh
-```
-
-随后，使用hdmcli指令查看虚拟设备是否已经激活
-```
-hy-virtual -show-device-info
+source /opt/hyhal/env.sh
 ```
 
-若输出如下，则代表虚拟设备已经成功激活
+随后，使用驱动命令查看虚拟设备信息。
+```
+hy-smi virtual -show-device-info
+```
+
+若输出如下，则代表虚拟设备已经成功激活。
 ```
 Device 0:
 	Actual Device: 0

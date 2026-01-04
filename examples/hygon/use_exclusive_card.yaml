@@ -1,15 +1,13 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: vdcu-pytorch-demo
+  name: dcu-pytorch-demo
 spec:
   containers:
-    - name: vdcu-pytorch-demo
+    - name: dcu-pytorch-demo
       image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
       command: [ "/bin/bash", "-c", "--" ]
       args: [ "sleep infinity & wait" ]
       resources:
         limits:
-          hygon.com/dcunum: 1   # requesting a vDCU
-          hygon.com/dcucores: 60  # each vDCU use 60% of total compute cores
-          hygon.com/dcumem: 2000  # each vDCU require 2000 MiB device memory
+          hygon.com/dcunum: 2 # declare how many physical DCUs the pod needs
