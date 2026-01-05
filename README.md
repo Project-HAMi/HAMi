@@ -10,10 +10,9 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 [![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
-[![slack](https://img.shields.io/badge/Slack-Join%20Slack-blue)](https://cloud-native.slack.com/archives/C07T10BU4R2)
-[![discuss](https://img.shields.io/badge/Discuss-Ask%20Questions-blue)](https://github.com/Project-HAMi/HAMi/discussions)
-[![website](https://img.shields.io/badge/website-blue)](http://project-hami.io)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/JvNbY6g6)
+[![website](https://img.shields.io/badge/website-green?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
 
 ## Project-HAMi: Heterogeneous AI Computing Virtualization Middleware
 
@@ -172,7 +171,6 @@ If you have any questions, please feel free to reach out to us through the follo
   - [Meeting Link](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
 - Email: refer to the [MAINTAINERS.md](MAINTAINERS.md) to find the email addresses of all maintainers. Feel free to contact them via email to report any issues or ask questions.
 - [mailing list](https://groups.google.com/forum/#!forum/hami-project)
-- [slack](https://cloud-native.slack.com/archives/C07T10BU4R2) | [Join](https://slack.cncf.io/)
 
 ## Talks and References
 
