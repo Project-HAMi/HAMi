@@ -3,7 +3,7 @@ kind: Pod
 metadata:
   name: vdcu-pytorch-demo
   annotations:
-    hygon.com/use-dcutype: "DCU-K100_AI" #Specify the card type for this job, use comma to seperate, will launch job on specified card
+    hygon.com/use-dcutype: "DCU-K100_AI" #Specify the card type for this job, use comma to separate, will launch job on specified card
     #In this example, we  want this container to run on K100_AI
 spec:
   containers:

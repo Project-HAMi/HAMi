@@ -5,7 +5,7 @@ metadata:
   annotations:
     # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-dcu-register}' to get DCU UUID.
     # UUID is like DCU-TPXS320016070601
-    hygon.com/nouse-gpuuuid: "DCU-TPXS320016070601,DCU-TPXS320010040501" # Specify the blacklist card UUIDs for this job, use comma to seperate, will not launch job on specified cards
+    hygon.com/nouse-gpuuuid: "DCU-TPXS320016070601,DCU-TPXS320010040501" # Specify the blacklist card UUIDs for this job, use comma to separate, will not launch job on specified cards
     # In this job, we don't want our job to run on DCU-TPXS320016070601 and DCU-TPXS320010040501.
 spec:
   containers:
