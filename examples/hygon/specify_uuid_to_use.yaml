@@ -3,8 +3,10 @@ kind: Pod
 metadata:
   name: vdcu-pytorch-demo
   annotations:
-    hygon.com/nouse-dcutype: "DCU-K100_AI" #Specify the card type for this job, use comma to separate, will not launch job on non-specified card
-    #In this example, we don't want this container to run on K100_AI
+    # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-dcu-register}' to get DCU UUID.
+    # UUID is like DCU-TPXS320016070601
+    hygon.com/use-gpuuuid: "DCU-TPXS320016070601" # Specify the blacklist card UUIDs for this job, use comma to separate, will launch job on specified cards
+    # In this job, we want our job to run on DCU-TPXS320016070601.
 spec:
   containers:
     - name: vdcu-pytorch-demo
