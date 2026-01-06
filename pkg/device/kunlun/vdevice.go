@@ -275,11 +275,11 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 }
 
 func FitVXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
-	if device.Used == 0 {
-		return true
-	}
 	if request.Memreq+device.Usedmem > device.Totalmem {
 		return false
+	}
+	if device.Used == 0 {
+		return true
 	}
 	avgMem := device.Usedmem / device.Used
 	return avgMem == request.Memreq
