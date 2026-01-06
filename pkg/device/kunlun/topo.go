@@ -225,7 +225,7 @@ func graghSelect(devices []*device.DeviceUsage, request device.ContainerDeviceRe
 	leftwing := 0
 	rightwing := 0
 	for idx, val := range devices {
-		klog.Infoln("graph select val=", *val)
+		klog.V(5).InfoS("graph select val=", "Used", val.Used, "Mem", val.Usedmem)
 		if idx < 4 {
 			if fitFn(val, request) {
 				leftwing++
