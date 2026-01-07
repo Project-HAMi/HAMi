@@ -185,6 +185,18 @@ spec:
             failureThreshold: 3
             timeoutSeconds: 5
           {{- end }}
+      {{- if .Values.scheduler.leaderElect }}
+      affinity:
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+          - labelSelector:
+              matchExpressions:
+              - key: app.kubernetes.io/name
+                operator: In
+                values:
+                - {{ include "hami-vgpu.name" . }}
+            topologyKey: "kubernetes.io/hostname"
+      {{- end }}
       volumes:
         {{- if .Values.scheduler.admissionWebhook.enabled }}
         - name: tls-config
