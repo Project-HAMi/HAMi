@@ -92,7 +92,9 @@ func NewScheduler() *Scheduler {
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
-	s.leaderManager = leaderelection.NewDummyLeaderManager(true) // 单实例，没有开启 leader-elect，没有 lease
+	// Use dummy leader manager when leaderElect is disabled
+	// This ensures IsLeader() always returns true and synced will not be set to false
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
 			OnStartedLeading: func() {
@@ -308,7 +310,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
 			continue
 		}
-		// TODO: may be we should lock node when we are doing register.
+
 		s.register(labelSelector, printedLog)
 	}
 }
