@@ -79,14 +79,16 @@ func generateHolderIdentity(hostname string) string {
 func generateLease(hostname, namespace, name string) *coordinationv1.Lease {
 	holderIdentity := generateHolderIdentity(hostname)
 	now := metav1.NewMicroTime(time.Now())
+	duration := int32(15)
 	return &coordinationv1.Lease{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
 		Spec: coordinationv1.LeaseSpec{
-			HolderIdentity: &holderIdentity,
-			AcquireTime:    &now,
+			HolderIdentity:       &holderIdentity,
+			AcquireTime:          &now,
+			LeaseDurationSeconds: &duration,
 		},
 	}
 }

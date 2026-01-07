@@ -170,8 +170,7 @@ func (m *leaderManager) IsLeader() bool {
 		return false
 	}
 
-	// TODO: should we check valid lease here?
-	return m.isHolderOf(m.observedLease)
+	return m.isHolderOf(m.observedLease) && m.isLeaseValid(time.Now())
 }
 
 type dummyLeaderManager struct {
