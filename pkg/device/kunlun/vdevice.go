@@ -126,8 +126,8 @@ func (dev *KunlunVDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 		deviceStr := device.EncodePodSingleDevice(devList)
 		(*annoinput)[device.InRequestDevices[commonWord]] = deviceStr
 		(*annoinput)[device.SupportDevices[commonWord]] = deviceStr
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[commonWord], deviceStr)
-		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[commonWord], deviceStr)
+		klog.V(4).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[commonWord], deviceStr)
+		klog.V(4).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[commonWord], deviceStr)
 	}
 	return *annoinput
 }
@@ -247,7 +247,7 @@ func (dev *KunlunVDevices) GetResourceNames() device.ResourceNames {
 }
 
 func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
-	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
+	klog.V(4).InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", request)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
@@ -257,7 +257,6 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
 		return false, tmpDevs, common.GenReason(reason, len(reason))
 	}
-
 	for _, dev := range alloc {
 		for _, val := range devices {
 			if val.Index == uint(dev) {
@@ -276,6 +275,9 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 }
 
 func FitVXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
+	if request.Memreq+device.Usedmem > device.Totalmem {
+		return false
+	}
 	if device.Used == 0 {
 		return true
 	}

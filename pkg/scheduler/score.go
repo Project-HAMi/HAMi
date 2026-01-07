@@ -90,7 +90,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 						klog.Errorf("AddResourceUsage failed:%s", err.Error())
 						return false, "AddResourceUsage failed"
 					}
-					klog.Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
+					klog.V(5).Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
