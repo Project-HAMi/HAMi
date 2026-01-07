@@ -243,7 +243,6 @@ func (s *Scheduler) Start() error {
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
-	s.leaseLister = informerFactory.Coordination().V1().Leases().Lister()
 
 	podEventHandlerRegistration, err := informerFactory.Core().V1().Pods().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    s.onAddPod,
@@ -268,13 +267,24 @@ func (s *Scheduler) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to register resource quota event handler: %v", err)
 	}
-	leaseEventHandlerRegistration, err := informerFactory.Coordination().V1().Leases().Informer().AddEventHandler(s.leaderManager)
-	if err != nil {
-		return fmt.Errorf("failed to register lease event handler: %w", err)
-	}
+
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
-	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced, leaseEventHandlerRegistration.HasSynced)
+	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
+
+	if config.LeaderElect {
+		leaseInformerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1, informers.WithNamespace(config.LeaderElectResourceNamespace))
+		s.leaseLister = leaseInformerFactory.Coordination().V1().Leases().Lister()
+
+		leaseEventHandlerRegistration, err := leaseInformerFactory.Coordination().V1().Leases().Informer().AddEventHandler(s.leaderManager)
+		if err != nil {
+			return fmt.Errorf("failed to register lease event handler: %w", err)
+		}
+		leaseInformerFactory.Start(s.stopCh)
+		leaseInformerFactory.WaitForCacheSync(s.stopCh)
+		cache.WaitForCacheSync(s.stopCh, leaseEventHandlerRegistration.HasSynced)
+	}
+
 	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
