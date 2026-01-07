@@ -56,6 +56,16 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				Error: err.Error(),
 			}
 		} else {
+			synced := s.WaitForCacheSync(r.Context())
+			if !synced {
+				// Poll may return false when context is cancelled
+				err := fmt.Errorf("context cancelled")
+				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			}
 			extenderFilterResult, err = s.Filter(extenderArgs)
 			if err != nil {
 				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)

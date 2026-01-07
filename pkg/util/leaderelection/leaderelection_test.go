@@ -17,6 +17,7 @@ limitations under the License.
 package leaderelection
 
 import (
+	"sync"
 	"testing"
 	"time"
 
@@ -90,23 +91,29 @@ func generateLease(hostname, namespace, name string) *coordinationv1.Lease {
 	}
 }
 
-func assertNotifyElected(lm LeaderManager) {
+func assertNotifyElected(lm LeaderManager, leaderNotify <-chan struct{}) {
 	ginkgo.GinkgoHelper()
 	pt := &struct{}{}
-	g.Eventually(lm.LeaderNotifyChan()).Should(g.Receive(pt))
+	g.Eventually(leaderNotify).Should(g.Receive(pt))
 	g.Expect(lm.IsLeader()).Should(g.BeTrue())
 }
 
-func assertElectedWithoutNotifying(lm LeaderManager) {
+func assertElectedWithoutNotifying(lm LeaderManager, leaderNotify <-chan struct{}) {
 	ginkgo.GinkgoHelper()
-	g.Consistently(lm.LeaderNotifyChan()).ShouldNot(g.Receive())
+	g.Consistently(leaderNotify).ShouldNot(g.Receive())
 	g.Expect(lm.IsLeader()).Should(g.BeTrue())
 }
 
-func assertNotElected(lm LeaderManager) {
+func assertSynced(synced bool) {
 	ginkgo.GinkgoHelper()
-	g.Consistently(lm.LeaderNotifyChan()).ShouldNot(g.Receive())
+	g.Expect(synced).Should(g.BeTrue())
+}
+
+func assertNotElected(lm LeaderManager, leaderNotify <-chan struct{}, synced bool) {
+	ginkgo.GinkgoHelper()
+	g.Consistently(leaderNotify).ShouldNot(g.Receive())
 	g.Expect(lm.IsLeader()).ShouldNot(g.BeTrue())
+	g.Expect(synced).Should(g.BeFalse())
 }
 
 func renewLeaseAtNow(lease *coordinationv1.Lease) *coordinationv1.Lease {
@@ -127,11 +134,20 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 	var initLease *coordinationv1.Lease
 	var initLeaseHostname, hostname, namespace, name string
 	var lm LeaderManager
+	var leaderNotify chan struct{}
+	var lock sync.RWMutex
+	var synced bool
+
+	var doSync = func() {
+		lock.Lock()
+		defer lock.Unlock()
+		synced = true
+	}
 
 	// Testing constructor
 	ginkgo.Describe("Initializing LeaderManager", func() {
 		ginkgo.It("should create a new LeaderManager", func() {
-			lm := NewLeaderManager("dev", "kube-system", "hami-scheduler")
+			lm := NewLeaderManager("dev", "kube-system", "hami-scheduler", LeaderCallbacks{})
 			g.Expect(lm).ShouldNot(g.BeNil())
 		})
 	})
@@ -141,31 +157,41 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 		hostname = "dev"
 		namespace = "kube-system"
 		name = "hami-scheduler"
+		leaderNotify = make(chan struct{}, 1)
+		synced = false
 	})
 
 	// Delay creating after all BeforeEach nodes so that each case can override the params with nested BeforeEach node
 	ginkgo.JustBeforeEach(func() {
 		initLease = generateLease(initLeaseHostname, namespace, name)
-		lm = NewLeaderManager(hostname, namespace, name)
+		callbacks := LeaderCallbacks{
+			OnStartedLeading: func() {
+				leaderNotify <- struct{}{}
+			},
+			OnStoppedLeading: func() {
+				synced = false
+			},
+		}
+		lm = NewLeaderManager(hostname, namespace, name, callbacks)
 	})
 
 	ginkgo.Describe("When events of unrelated lease triggered", func() {
 		ginkgo.It("should ignore lease with another name", func() {
 			lease := generateLease(hostname, namespace, "anotherLease")
 			lm.OnAdd(lease, true)
-			assertNotElected(lm)
+			assertNotElected(lm, leaderNotify, synced)
 		})
 		ginkgo.It("should ignore lease with another namespace", func() {
 			lease := generateLease(hostname, "anotherNamspace", name)
 			lm.OnAdd(lease, true)
-			assertNotElected(lm)
+			assertNotElected(lm, leaderNotify, synced)
 		})
 	})
 
-	ginkgo.Describe("When current instance is leader from the begging", func() {
+	ginkgo.Describe("When current instance is leader from the beginning", func() {
 		ginkgo.It("should be notified as leader", func() {
 			lm.OnAdd(initLease, true)
-			assertNotifyElected(lm)
+			assertNotifyElected(lm, leaderNotify)
 		})
 	})
 
@@ -177,12 +203,12 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 		ginkgo.It("should be notified as leader", func() {
 			ginkgo.By("leader is another one at first")
 			lm.OnAdd(initLease, true)
-			assertNotElected(lm)
+			assertNotElected(lm, leaderNotify, synced)
 
 			ginkgo.By("elected as leader")
 			newLease := acquireLeaseWithNewHost(initLease, hostname)
 			lm.OnUpdate(initLease, newLease)
-			assertNotifyElected(lm)
+			assertNotifyElected(lm, leaderNotify)
 		})
 	})
 
@@ -190,13 +216,13 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 		ginkgo.It("should not be notified as leader again", func() {
 			ginkgo.By("elected as leader")
 			lm.OnAdd(initLease, true)
-			assertNotifyElected(lm)
+			assertNotifyElected(lm, leaderNotify)
 
 			ginkgo.By("renewing lease")
 			newLease := renewLeaseAtNow(initLease)
 			lm.OnUpdate(initLease, newLease)
 
-			assertElectedWithoutNotifying(lm)
+			assertElectedWithoutNotifying(lm, leaderNotify)
 		})
 	})
 
@@ -204,12 +230,16 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 		ginkgo.It("should not be leader anymore", func() {
 			ginkgo.By("Elected as leader")
 			lm.OnAdd(initLease, true)
-			assertNotifyElected(lm)
+			assertNotifyElected(lm, leaderNotify)
+
+			ginkgo.By("Setting synced to true")
+			doSync()
+			assertSynced(synced)
 
 			ginkgo.By("Challenged and not leader anymore")
 			challengerLease := acquireLeaseWithNewHost(initLease, "another")
 			lm.OnUpdate(initLease, challengerLease)
-			assertNotElected(lm)
+			assertNotElected(lm, leaderNotify, synced)
 		})
 	})
 
@@ -218,16 +248,20 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 			ginkgo.It("shoud not be leader anymore unless elected", func() {
 				ginkgo.By("Elected as leader")
 				lm.OnAdd(initLease, true)
-				assertNotifyElected(lm)
+				assertNotifyElected(lm, leaderNotify)
+
+				ginkgo.By("Setting synced to true")
+				doSync()
+				assertSynced(synced)
 
 				ginkgo.By("Lease is deleted")
 				lm.OnDelete(initLease)
-				assertNotElected(lm)
+				assertNotElected(lm, leaderNotify, synced)
 
 				newLease := acquireLeaseWithNewHost(initLease, hostname)
 				ginkgo.By("Elected as leader again")
 				lm.OnAdd(newLease, false)
-				assertNotifyElected(lm)
+				assertNotifyElected(lm, leaderNotify)
 			})
 		})
 
@@ -238,16 +272,16 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 			ginkgo.It("should still not be leader", func() {
 				ginkgo.By("Not leader at first")
 				lm.OnAdd(initLease, true)
-				assertNotElected(lm)
+				assertNotElected(lm, leaderNotify, synced)
 
 				ginkgo.By("Lease is deleted")
 				lm.OnDelete(initLease)
-				assertNotElected(lm)
+				assertNotElected(lm, leaderNotify, synced)
 
 				ginkgo.By("Elected as leader")
 				newLease := acquireLeaseWithNewHost(initLease, hostname)
 				lm.OnAdd(newLease, false)
-				assertNotifyElected(lm)
+				assertNotifyElected(lm, leaderNotify)
 			})
 		})
 
@@ -257,6 +291,7 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
 	var lm LeaderManager
 	var elected bool
+	var leaderNotify chan struct{}
 
 	// Testing constructor
 	ginkgo.Describe("Initializing DummyLeaderManager", func() {
@@ -269,6 +304,8 @@ var _ = ginkgo.Describe("DummyLeaderManager", func() {
 
 	ginkgo.BeforeEach(func() {
 		elected = true
+		leaderNotify = make(chan struct{}, 1)
+		close(leaderNotify)
 	})
 	ginkgo.JustBeforeEach(func() {
 		lm = NewDummyLeaderManager(elected)
@@ -276,6 +313,6 @@ var _ = ginkgo.Describe("DummyLeaderManager", func() {
 	})
 
 	ginkgo.It("should always be leader but not notified", func() {
-		assertElectedWithoutNotifying(lm)
+		assertElectedWithoutNotifying(lm, leaderNotify)
 	})
 })

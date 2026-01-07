@@ -23,12 +23,14 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
@@ -47,13 +49,20 @@ import (
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
+const (
+	syncedPollPeriod = 100 * time.Millisecond
+)
+
 type Scheduler struct {
 	*nodeManager
 	podManager    *device.PodManager
 	quotaManager  *device.QuotaManager
 	leaderManager leaderelection.LeaderManager
 
-	stopCh      chan struct{}
+	stopCh       chan struct{}
+	nodeNotify   chan struct{}
+	leaderNotify chan struct{}
+
 	kubeClient  kubernetes.Interface
 	podLister   listerscorev1.PodLister
 	nodeLister  listerscorev1.NodeLister
@@ -61,11 +70,13 @@ type Scheduler struct {
 	leaseLister coordinationv1.LeaseLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
-	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
 	started        uint32 // 0 = false, 1 = true
+
+	lock   sync.RWMutex
+	synced bool
 }
 
 func NewScheduler() *Scheduler {
@@ -74,14 +85,26 @@ func NewScheduler() *Scheduler {
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
+		leaderNotify: make(chan struct{}, 1),
 		started:      0,
+		synced:       false,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
-	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true) // 单实例，没有开启 leader-elect，没有 lease
 	if config.LeaderElect {
-		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName)
+		callbacks := leaderelection.LeaderCallbacks{
+			OnStartedLeading: func() {
+				s.leaderNotify <- struct{}{}
+			},
+			OnStoppedLeading: func() {
+				s.lock.Lock()
+				defer s.lock.Unlock()
+				s.synced = false
+			},
+		}
+		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
 	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
@@ -273,7 +296,7 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		select {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
-		case <-s.leaderManager.LeaderNotifyChan():
+		case <-s.leaderNotify:
 			klog.V(5).InfoS("Received leaderElection notification. We are just elected to leader")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
@@ -286,72 +309,99 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			continue
 		}
 		// TODO: may be we should lock node when we are doing register.
-		// Only do registration when we are leader
-		if !s.leaderManager.IsLeader() {
-			klog.V(5).InfoS("Sscheduler is not leader yet, skipping ...")
-			continue
-		}
-		rawNodes, err := s.nodeLister.List(labelSelector)
-		if err != nil {
-			klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
-			continue
-		}
-		klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
-		var nodeNames []string
-		for _, val := range rawNodes {
-			nodeNames = append(nodeNames, val.Name)
-			klog.V(5).InfoS("Processing node", "nodeName", val.Name)
+		s.register(labelSelector, printedLog)
+	}
+}
 
-			for devhandsk, devInstance := range device.GetDevices() {
-				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
+func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[string]bool) {
+	// Lock here to avoid setting s.synced to false, when we lost leadership, while doing register.
+	// 1. lost leadership before register: synced will set to false in callbacks, and register will be skipped because IsLeader() returns false
+	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	// Only do registration when we are leader
+	if !s.leaderManager.IsLeader() {
+		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
+		return
+	}
+	rawNodes, err := s.nodeLister.List(labelSelector)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
+		return
+	}
+	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
+	var nodeNames []string
+	for _, val := range rawNodes {
+		nodeNames = append(nodeNames, val.Name)
+		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
-				nodedevices, err := devInstance.GetNodeDevices(*val)
+		for devhandsk, devInstance := range device.GetDevices() {
+			klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
+
+			nodedevices, err := devInstance.GetNodeDevices(*val)
+			if err != nil {
+				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+				continue
+			}
+
+			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
+			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
+
+			if !health {
+				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
+				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
-					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
+					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
 				}
 
-				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
-				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
-
-				if !health {
-					klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
-					err := devInstance.NodeCleanUp(val.Name)
-					if err != nil {
-						klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
-					}
-
-					s.rmNodeDevices(val.Name, devhandsk)
-					continue
-				}
-				if !needUpdate {
-					klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
-				}
-				nodeInfo := &device.NodeInfo{}
-				nodeInfo.ID = val.Name
-				nodeInfo.Node = val
-				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
-				for _, deviceinfo := range nodedevices {
-					nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
-				}
-				s.addNode(val.Name, nodeInfo)
-				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					if printedLog[val.Name] {
-						klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
-					} else {
-						klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
-						printedLog[val.Name] = true
-					}
+				s.rmNodeDevices(val.Name, devhandsk)
+				continue
+			}
+			if !needUpdate {
+				klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
+				continue
+			}
+			nodeInfo := &device.NodeInfo{}
+			nodeInfo.ID = val.Name
+			nodeInfo.Node = val
+			klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+			nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
+			for _, deviceinfo := range nodedevices {
+				nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
+			}
+			s.addNode(val.Name, nodeInfo)
+			if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
+				if printedLog[val.Name] {
+					klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
+				} else {
+					klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
+					printedLog[val.Name] = true
 				}
 			}
 		}
-		_, _, err = s.getNodesUsage(&nodeNames, nil)
-		if err != nil {
-			klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
-		}
 	}
+	_, _, err = s.getNodesUsage(&nodeNames, nil)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
+		return
+	}
+
+	// Set synced to true only after getNodeUsage() succeeds
+	s.synced = true
+}
+
+func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
+	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
+		s.lock.RLock()
+		defer s.lock.Unlock()
+		return s.synced, nil
+	})
+	if err != nil {
+		klog.ErrorS(err, "failed to poll until context cancel")
+		return false
+	}
+
+	return true
 }
 
 // InspectAllNodesUsage is used by metrics monitor.

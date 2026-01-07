@@ -25,11 +25,15 @@ import (
 	"k8s.io/client-go/tools/cache"
 )
 
+type LeaderCallbacks struct {
+	// OnStartedLeading is called when starts leading
+	OnStartedLeading func()
+	// OnStoppedLeading is called when stops leading
+	OnStoppedLeading func()
+}
+
 type LeaderManager interface {
 	IsLeader() bool
-
-	// Notify when just elected as leader
-	LeaderNotifyChan() <-chan struct{}
 
 	cache.ResourceEventHandler
 }
@@ -44,17 +48,18 @@ type leaderManager struct {
 	leaseLock     sync.RWMutex
 	observedLease *coordinationv1.Lease
 	observedTime  time.Time
-	leaderNotify  chan struct{}
+
+	callbacks LeaderCallbacks
 
 	cache.FilteringResourceEventHandler
 }
 
-func NewLeaderManager(hostname, namespace, name string) *leaderManager {
+func NewLeaderManager(hostname, namespace, name string, callbacks LeaderCallbacks) *leaderManager {
 	m := &leaderManager{
 		hostname:          hostname,
 		resourceName:      name,
 		resourceNamespace: namespace,
-		leaderNotify:      make(chan struct{}, 1),
+		callbacks:         callbacks,
 	}
 
 	m.FilteringResourceEventHandler = cache.FilteringResourceEventHandler{
@@ -112,7 +117,7 @@ func (m *leaderManager) onAdd(obj interface{}) {
 	m.setObservedRecord(lease)
 	// Notify if we are the leader from the very begging
 	if m.isHolderOf(lease) {
-		m.leaderNotify <- struct{}{}
+		m.callbacks.OnStartedLeading()
 	}
 }
 
@@ -122,21 +127,20 @@ func (m *leaderManager) onUpdate(oldObj, newObj interface{}) {
 	if !ok {
 		return
 	}
+	oldLease, ok := oldObj.(*coordinationv1.Lease)
+	if !ok {
+		return
+	}
 
 	m.leaseLock.Lock()
 	defer m.leaseLock.Unlock()
-
 	m.setObservedRecord(newLease)
-	// Notify if we have been elected to become the leader
-	if m.isHolderOf(newLease) {
-		oldLease, ok := oldObj.(*coordinationv1.Lease)
-		if !ok {
-			return
-		}
 
-		if !m.isHolderOf(oldLease) {
-			m.leaderNotify <- struct{}{}
-		}
+	// Notify if we have been elected to become the leader
+	if !m.isHolderOf(oldLease) && m.isHolderOf(newLease) {
+		m.callbacks.OnStartedLeading()
+	} else if m.isHolderOf(oldLease) && !m.isHolderOf(newLease) {
+		m.callbacks.OnStoppedLeading()
 	}
 }
 
@@ -146,6 +150,7 @@ func (m *leaderManager) onDelete(obj interface{}) {
 	defer m.leaseLock.Unlock()
 
 	m.setObservedRecord(nil)
+	m.callbacks.OnStoppedLeading()
 }
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
@@ -169,15 +174,9 @@ func (m *leaderManager) IsLeader() bool {
 	return m.isHolderOf(m.observedLease)
 }
 
-func (m *leaderManager) LeaderNotifyChan() <-chan struct{} {
-	return m.leaderNotify
-}
-
 type dummyLeaderManager struct {
 	elected bool
 	cache.ResourceEventHandlerFuncs
-
-	leaderNotify chan struct{}
 }
 
 var _ LeaderManager = &dummyLeaderManager{}
@@ -187,19 +186,11 @@ var _ LeaderManager = &dummyLeaderManager{}
 //
 // This is useful when disabling leader-election.
 func NewDummyLeaderManager(elected bool) *dummyLeaderManager {
-	notifyCh := make(chan struct{}, 1)
-	// dummyLeaderManager will not notify because the elected state is fixed
-	close(notifyCh)
 	return &dummyLeaderManager{
-		elected:      elected,
-		leaderNotify: notifyCh,
+		elected: elected,
 	}
 }
 
 func (d *dummyLeaderManager) IsLeader() bool {
 	return d.elected
-}
-
-func (d *dummyLeaderManager) LeaderNotifyChan() <-chan struct{} {
-	return d.leaderNotify
 }
