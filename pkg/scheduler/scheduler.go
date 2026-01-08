@@ -50,6 +50,7 @@ import (
 )
 
 const (
+	defaultResync    = 1 * time.Hour
 	syncedPollPeriod = 100 * time.Millisecond
 )
 
@@ -239,7 +240,7 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
@@ -273,7 +274,7 @@ func (s *Scheduler) Start() error {
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 
 	if config.LeaderElect {
-		leaseInformerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1, informers.WithNamespace(config.LeaderElectResourceNamespace))
+		leaseInformerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync, informers.WithNamespace(config.LeaderElectResourceNamespace))
 		s.leaseLister = leaseInformerFactory.Coordination().V1().Leases().Lister()
 
 		leaseEventHandlerRegistration, err := leaseInformerFactory.Coordination().V1().Leases().Informer().AddEventHandler(s.leaderManager)
