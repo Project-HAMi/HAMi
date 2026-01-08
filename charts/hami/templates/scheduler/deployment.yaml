@@ -191,10 +191,10 @@ spec:
           requiredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
-              - key: app.kubernetes.io/name
+              - key: app.kubernetes.io/component
                 operator: In
                 values:
-                - {{ include "hami-vgpu.name" . }}
+                - hami-scheduler
             topologyKey: "kubernetes.io/hostname"
       {{- end }}
       volumes:
