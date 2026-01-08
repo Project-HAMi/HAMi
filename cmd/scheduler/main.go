@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
@@ -25,6 +27,7 @@ import (
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
 	klog "k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
@@ -141,8 +144,32 @@ func start() error {
 			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	} else {
-		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
+		certWatcher, err := certwatcher.New(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to create cert watcher: %w", err)
+		}
+
+		tlsCfg := &tls.Config{
+			GetCertificate: certWatcher.GetCertificate,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			if err := certWatcher.Start(ctx); err != nil {
+				klog.ErrorS(err, "cert watcher error")
+			}
+		}()
+
+		addr := config.HTTPBind
+		handler := router
+		server := &http.Server{
+			Addr:      addr,
+			Handler:   handler,
+			TLSConfig: tlsCfg,
+		}
+		klog.InfoS("Starting HTTPS server", "address", addr)
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			return fmt.Errorf("HTTPS server error: %w", err)
 		}
 	}
 	return nil
