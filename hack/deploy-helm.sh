@@ -88,7 +88,7 @@ echo "Kubeconfig: ${KUBE_CONF}"
 if ! helm --debug upgrade --install --create-namespace --cleanup-on-fail \
   "${HAMI_ALIAS}" "${HELM_SOURCE}" -n "${TARGET_NS}" \
   --set devicePlugin.passDeviceSpecsEnabled=false \
-  --version "${HELM_VER}" --set global.imageTag="${HELM_VER}" --wait --timeout 15m --kubeconfig "${KUBE_CONF}"; then
+  --version "${HELM_VER}" --set global.imageTag="${HELM_VER}" --wait --timeout 10m --kubeconfig "${KUBE_CONF}"; then
   echo "Error: Failed to deploy/upgrade Helm Chart. Please check the Helm logs above for more details."
   exit 1
 fi
