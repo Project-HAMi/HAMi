@@ -321,7 +321,6 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
 			continue
 		}
-
 		s.register(labelSelector, printedLog)
 	}
 }
