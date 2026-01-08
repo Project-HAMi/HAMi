@@ -406,7 +406,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
 		s.lock.RLock()
-		defer s.lock.Unlock()
+		defer s.lock.RUnlock()
 		return s.synced, nil
 	})
 	if err != nil {
