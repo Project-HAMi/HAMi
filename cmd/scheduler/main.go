@@ -155,7 +155,7 @@ func start() error {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
 		go func() {
-			if err := certWatcher.Start(ctx); err != nil {
+			if err := certWatcher.Start(ctx); err != nil && err != context.Canceled {
 				klog.ErrorS(err, "cert watcher error")
 			}
 		}()
