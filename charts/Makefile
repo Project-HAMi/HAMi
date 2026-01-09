@@ -6,8 +6,8 @@ VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 CHART_FILE := "./hami/Chart.yaml"
 VALUES_FILE := "./hami/values.yaml"
 
-.PHONY: all lint update-versions
-all: update-versions lint package
+.PHONY: all lint update-versions deps
+all: update-versions deps lint package
 
 #update version in chart
 update-versions:
@@ -17,13 +17,19 @@ update-versions:
 	echo "GIT_VERSION=$(GIT_VERSION)"
 	echo "FULL_BUILD_VERSION=$(FULL_BUILD_VERSION)"
 	@# Update chart versions to point to the current version.
+	@# Note: Only update the main chart version and appVersion (before dependencies section), not dependencies
 	hami_version="$(VERSION)";		\
 	chart_version=`echo $(VERSION) | tr -d 'v'`; \
-	CHART_VERSION="$$chart_version" perl -i -pe 's/version: "*$(VERSION_REGEX)"*/version: $$ENV{CHART_VERSION}/g' $(CHART_FILE);		\
-	CHART_VERSION="$$chart_version" perl -i -pe 's/appVersion: "*$(VERSION_REGEX)"*/appVersion: "$$ENV{CHART_VERSION}"/g' $(CHART_FILE);	\
+	CHART_VERSION="$$chart_version" perl -i -pe 'BEGIN { $$skip = 0; } if (/^dependencies:/) { $$skip = 1; } if (!$$skip && /^version: /) { s/"*$(VERSION_REGEX)"*/$$ENV{CHART_VERSION}/; }' $(CHART_FILE);		\
+	CHART_VERSION="$$chart_version" perl -i -pe 'BEGIN { $$skip = 0; } if (/^dependencies:/) { $$skip = 1; } if (!$$skip && /^appVersion: /) { s/"*$(VERSION_REGEX)"*/"$$ENV{CHART_VERSION}"/; }' $(CHART_FILE);	\
 	HAMI_VERSION="$$hami_version" perl -i -pe 's/imageTag: "*$(VERSION_REGEX)"*/imageTag: "$$ENV{HAMI_VERSION}"/g' $(VALUES_FILE)
 
-lint: update-versions
+#update helm dependencies
+deps: update-versions
+	$(ECHO_GEN) " Updating Helm chart dependencies"
+	cd ./hami && helm dependency update
+
+lint: deps
 	helm lint --with-subcharts --values ./hami/values.yaml ./hami --debug
 
 package: lint
