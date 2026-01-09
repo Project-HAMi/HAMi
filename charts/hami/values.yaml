@@ -170,7 +170,7 @@ scheduler:
       # - kube-system
       # - istio-system
     reinvocationPolicy: Never
-    failurePolicy: Fail
+    failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
   ## If enabled, always takes precedence over options 2.
   certManager:
