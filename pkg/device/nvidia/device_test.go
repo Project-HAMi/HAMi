@@ -1447,6 +1447,18 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 }
 
 func TestFitQuota(t *testing.T) {
+	NvidiaGPUDevice := "NVIDIA"
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+	device.DevicesMap = make(map[string]device.Devices)
+	device.DevicesMap[NvidiaGPUDevice] = dev
+
 	qm := device.NewQuotaManager()
 	qm.AddQuota(&corev1.ResourceQuota{
 		TypeMeta: metav1.TypeMeta{
@@ -1459,13 +1471,10 @@ func TestFitQuota(t *testing.T) {
 		},
 		Spec: corev1.ResourceQuotaSpec{
 			Hard: corev1.ResourceList{
-				"limits.nvidia.com/gpumem": resource.MustParse("2048"),
+				corev1.ResourceName("limits.nvidia.com/gpumem"): resource.MustParse("2048"),
 			},
 		},
 	})
-
-	const NvidiaGPUDevice = "nvidia.com/gpu"
-	const MemoryFactor = 1
 
 	tests := []struct {
 		name           string
@@ -1593,7 +1602,7 @@ func TestFitQuota(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := fitQuota(tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
-			assert.Equal(t, tt.expectedResult, result, "fitQuota returned unexpected result")
+			assert.Equal(t, tt.expectedResult, result, tt.name)
 		})
 	}
 }
