@@ -17,36 +17,33 @@ limitations under the License.
 package version
 
 import (
-	"bytes"
-	"io"
-	"os"
 	"testing"
-
-	"gotest.tools/v3/assert"
 )
 
 func TestVersion(t *testing.T) {
-	version = "v1.0.0.1234567890"
-	versionWant := "v1.0.0.1234567890\n"
-
-	var out bytes.Buffer
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() failed: %v", err)
+	tests := []struct {
+		name string
+		info Info
+		want string
+	}{
+		{
+			name: "test1",
+			info: Info{
+				Version:   "2.7.1",
+				Revision:  "5125fd664",
+				BuildDate: "2026-01-11T13:09:22Z",
+				GoVersion: "go1.25.3",
+				Compiler:  "gc",
+				Platform:  "linux/amd64",
+			},
+			want: `version.Info{Version:"2.7.1", Revision:"5125fd664", BuildDate:"2026-01-11T13:09:22Z", GoVersion:"go1.25.3", Compiler:"gc", Platform:"linux/amd64"}`,
+		},
 	}
-	defer r.Close()
-	originalStdout := os.Stdout
-	defer func() {
-		os.Stdout = originalStdout
-		w.Close()
-	}()
-	os.Stdout = w
-
-	VersionCmd.Run(nil, nil)
-	w.Close()
-
-	io.Copy(&out, r)
-
-	versionGet := out.String()
-	assert.Equal(t, versionWant, versionGet)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.info.String(); got != tt.want {
+				t.Errorf("Info.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }

@@ -24,8 +24,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
-
 	klog "k8s.io/klog/v2"
+
+	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -267,6 +268,7 @@ func initMetrics(bindAddress string) {
 	// be a good idea to try it out with a pedantic registry.
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
+	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
