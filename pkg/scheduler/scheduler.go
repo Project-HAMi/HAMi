@@ -214,7 +214,7 @@ func (s *Scheduler) onDelNode(obj any) {
 	}
 }
 
-func (s *Scheduler) onAddQuota(obj interface{}) {
+func (s *Scheduler) onAddQuota(obj any) {
 	quota, ok := obj.(*corev1.ResourceQuota)
 	if !ok {
 		klog.Errorf("unknown add object type")
@@ -223,12 +223,12 @@ func (s *Scheduler) onAddQuota(obj interface{}) {
 	s.quotaManager.AddQuota(quota)
 }
 
-func (s *Scheduler) onUpdateQuota(oldObj, newObj interface{}) {
+func (s *Scheduler) onUpdateQuota(oldObj, newObj any) {
 	s.onDelQuota(oldObj)
 	s.onAddQuota(newObj)
 }
 
-func (s *Scheduler) onDelQuota(obj interface{}) {
+func (s *Scheduler) onDelQuota(obj any) {
 	quota, ok := obj.(*corev1.ResourceQuota)
 	if !ok {
 		klog.Errorf("unknown del object type")

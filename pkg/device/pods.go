@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"maps"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -154,8 +155,6 @@ func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 	// Return a shallow copy of the pods map to avoid race conditions.
 	// This prevents a "concurrent map iteration and map write" fatal error.
 	podsCopy := make(map[k8stypes.UID]*PodInfo, podCount)
-	for uid, info := range m.pods {
-		podsCopy[uid] = info
-	}
+	maps.Copy(podsCopy, m.pods)
 	return podsCopy, nil
 }

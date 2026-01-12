@@ -63,7 +63,7 @@ func NewLeaderManager(hostname, namespace, name string, callbacks LeaderCallback
 	}
 
 	m.FilteringResourceEventHandler = cache.FilteringResourceEventHandler{
-		FilterFunc: func(obj interface{}) bool {
+		FilterFunc: func(obj any) bool {
 			lease := objectToLease(obj)
 			if lease == nil {
 				return false
@@ -80,7 +80,7 @@ func NewLeaderManager(hostname, namespace, name string, callbacks LeaderCallback
 	return m
 }
 
-func objectToLease(obj interface{}) *coordinationv1.Lease {
+func objectToLease(obj any) *coordinationv1.Lease {
 	switch t := obj.(type) {
 	case *coordinationv1.Lease:
 		return t
@@ -105,7 +105,7 @@ func (m *leaderManager) setObservedRecord(lease *coordinationv1.Lease) {
 }
 
 // onAdd notifies if we are the leader when lease is created.
-func (m *leaderManager) onAdd(obj interface{}) {
+func (m *leaderManager) onAdd(obj any) {
 	lease, ok := obj.(*coordinationv1.Lease)
 	if !ok {
 		return
@@ -122,7 +122,7 @@ func (m *leaderManager) onAdd(obj interface{}) {
 }
 
 // onUpdate notifies when we have been elected as leader.
-func (m *leaderManager) onUpdate(oldObj, newObj interface{}) {
+func (m *leaderManager) onUpdate(oldObj, newObj any) {
 	newLease, ok := newObj.(*coordinationv1.Lease)
 	if !ok {
 		return
@@ -144,7 +144,7 @@ func (m *leaderManager) onUpdate(oldObj, newObj interface{}) {
 	}
 }
 
-func (m *leaderManager) onDelete(obj interface{}) {
+func (m *leaderManager) onDelete(obj any) {
 	// Do nothing on delete
 	m.leaseLock.Lock()
 	defer m.leaseLock.Unlock()
