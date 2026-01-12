@@ -18,7 +18,9 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -1216,4 +1218,56 @@ func Test_ResourceQuota(t *testing.T) {
 			assert.DeepEqual(t, test.want, got)
 		})
 	}
+}
+
+func Test_ListNodes_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	m := newNodeManager()
+	stopCh := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Goroutine 1: Continuous Writes (Adding/Updating random nodes)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		i := 0
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+				nodeID := fmt.Sprintf("node-%d", i%100) // Rotate through 100 keys
+				m.addNode(nodeID,
+					&device.NodeInfo{
+						ID:   nodeID,
+						Node: &corev1.Node{},
+						Devices: map[string][]device.DeviceInfo{
+							nvidia.NvidiaGPUDevice: {
+								{
+									ID:           "gpu-1",
+									DeviceVendor: "NVIDIA",
+								},
+							},
+						},
+					},
+				)
+				i++
+			}
+		}
+	}()
+
+	// Goroutine 2: Continuous Iteration
+	// In the original buggy code, this WILL cause a panic:
+	// "fatal error: concurrent map iteration and map write"
+	for i := 0; i < 5000; i++ {
+		nodes, _ := m.ListNodes()
+		// Iterating while the map is being modified in the background
+		for k, v := range nodes {
+			_ = k
+			_ = v
+		}
+	}
+	close(stopCh)
+	wg.Wait()
 }
