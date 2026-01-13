@@ -397,7 +397,10 @@ dra:
   enabled: false
 
 # Configuration for the hami-dra subchart, which includes DRA drivers.
+# This is part of config for DRA, please refer to the DRA documentation for more details.
 hami-dra:
+  monitor:
+    enabled: true
   drivers:
     nvidia:
       enabled: true
