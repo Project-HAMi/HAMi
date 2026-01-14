@@ -23,14 +23,17 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
+	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
@@ -42,26 +45,39 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
+)
+
+const (
+	defaultResync    = 1 * time.Hour
+	syncedPollPeriod = 100 * time.Millisecond
 )
 
 type Scheduler struct {
 	*nodeManager
-	podManager *device.PodManager
+	podManager    *device.PodManager
+	quotaManager  *device.QuotaManager
+	leaderManager leaderelection.LeaderManager
 
-	stopCh      chan struct{}
+	stopCh       chan struct{}
+	nodeNotify   chan struct{}
+	leaderNotify chan struct{}
+
 	kubeClient  kubernetes.Interface
 	podLister   listerscorev1.PodLister
 	nodeLister  listerscorev1.NodeLister
 	quotaLister listerscorev1.ResourceQuotaLister
+	leaseLister coordinationv1.LeaseLister
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
-	nodeNotify   chan struct{}
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
-	quotaManager   *device.QuotaManager
 	started        uint32 // 0 = false, 1 = true
+
+	lock   sync.RWMutex
+	synced bool
 }
 
 func NewScheduler() *Scheduler {
@@ -70,11 +86,29 @@ func NewScheduler() *Scheduler {
 		stopCh:       make(chan struct{}),
 		cachedstatus: make(map[string]*NodeUsage),
 		nodeNotify:   make(chan struct{}, 1),
+		leaderNotify: make(chan struct{}, 1),
 		started:      0,
+		synced:       false,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
+	// Use dummy leader manager when leaderElect is disabled
+	// This ensures IsLeader() always returns true and synced will not be set to false
+	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
+	if config.LeaderElect {
+		callbacks := leaderelection.LeaderCallbacks{
+			OnStartedLeading: func() {
+				s.leaderNotify <- struct{}{}
+			},
+			OnStoppedLeading: func() {
+				s.lock.Lock()
+				defer s.lock.Unlock()
+				s.synced = false
+			},
+		}
+		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
+	}
 	klog.V(2).InfoS("Scheduler initialized successfully")
 	return s
 }
@@ -85,6 +119,10 @@ func (s *Scheduler) GetQuotaManager() *device.QuotaManager {
 
 func (s *Scheduler) GetPodManager() *device.PodManager {
 	return s.podManager
+}
+
+func (s *Scheduler) GetLeaderManager() leaderelection.LeaderManager {
+	return s.leaderManager
 }
 
 func (s *Scheduler) doNodeNotify() {
@@ -202,7 +240,7 @@ func (s *Scheduler) onDelQuota(obj interface{}) {
 func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, time.Hour*1)
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
@@ -230,9 +268,24 @@ func (s *Scheduler) Start() error {
 	if err != nil {
 		return fmt.Errorf("failed to register resource quota event handler: %v", err)
 	}
+
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
+
+	if config.LeaderElect {
+		leaseInformerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync, informers.WithNamespace(config.LeaderElectResourceNamespace))
+		s.leaseLister = leaseInformerFactory.Coordination().V1().Leases().Lister()
+
+		leaseEventHandlerRegistration, err := leaseInformerFactory.Coordination().V1().Leases().Informer().AddEventHandler(s.leaderManager)
+		if err != nil {
+			return fmt.Errorf("failed to register lease event handler: %w", err)
+		}
+		leaseInformerFactory.Start(s.stopCh)
+		leaseInformerFactory.WaitForCacheSync(s.stopCh)
+		cache.WaitForCacheSync(s.stopCh, leaseEventHandlerRegistration.HasSynced)
+	}
+
 	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
@@ -256,77 +309,111 @@ func (s *Scheduler) RegisterFromNodeAnnotations() {
 		select {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
+		case <-s.leaderNotify:
+			klog.V(5).InfoS("Received leaderElection notification. We are just elected to leader")
 		case <-ticker.C:
 			klog.V(5).InfoS("Ticker triggered")
-			if atomic.LoadUint32(&s.started) == 0 {
-				klog.V(5).InfoS("Scheduler not started yet, skipping ...")
-				continue
-			}
 		case <-s.stopCh:
 			klog.InfoS("Received stop signal, exiting RegisterFromNodeAnnotations")
 			return
 		}
-		rawNodes, err := s.nodeLister.List(labelSelector)
-		if err != nil {
-			klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
+		if atomic.LoadUint32(&s.started) == 0 {
+			klog.V(5).InfoS("Scheduler not started yet, skipping ...")
 			continue
 		}
-		klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
-		var nodeNames []string
-		for _, val := range rawNodes {
-			nodeNames = append(nodeNames, val.Name)
-			klog.V(5).InfoS("Processing node", "nodeName", val.Name)
+		s.register(labelSelector, printedLog)
+	}
+}
 
-			for devhandsk, devInstance := range device.GetDevices() {
-				klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
+func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[string]bool) {
+	// Lock here to avoid setting s.synced to false, when we lost leadership, while doing register.
+	// 1. lost leadership before register: synced will set to false in callbacks, and register will be skipped because IsLeader() returns false
+	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	// Only do registration when we are leader
+	if !s.leaderManager.IsLeader() {
+		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
+		return
+	}
+	rawNodes, err := s.nodeLister.List(labelSelector)
+	if err != nil {
+		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
+		return
+	}
+	klog.V(5).InfoS("Listed nodes", "nodeCount", len(rawNodes))
+	var nodeNames []string
+	for _, val := range rawNodes {
+		nodeNames = append(nodeNames, val.Name)
+		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
-				nodedevices, err := devInstance.GetNodeDevices(*val)
+		for devhandsk, devInstance := range device.GetDevices() {
+			klog.V(5).InfoS("Checking device health", "nodeName", val.Name, "deviceVendor", devhandsk)
+
+			nodedevices, err := devInstance.GetNodeDevices(*val)
+			if err != nil {
+				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+				continue
+			}
+
+			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
+			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
+
+			if !health {
+				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
+				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
-					klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
+					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
 				}
 
-				health, needUpdate := devInstance.CheckHealth(devhandsk, val)
-				klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
-
-				if !health {
-					klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
-					err := devInstance.NodeCleanUp(val.Name)
-					if err != nil {
-						klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
-					}
-
-					s.rmNodeDevices(val.Name, devhandsk)
-					continue
-				}
-				if !needUpdate {
-					klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
-					continue
-				}
-				nodeInfo := &device.NodeInfo{}
-				nodeInfo.ID = val.Name
-				nodeInfo.Node = val
-				klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
-				for _, deviceinfo := range nodedevices {
-					nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
-				}
-				s.addNode(val.Name, nodeInfo)
-				if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
-					if printedLog[val.Name] {
-						klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
-					} else {
-						klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
-						printedLog[val.Name] = true
-					}
+				s.rmNodeDevices(val.Name, devhandsk)
+				continue
+			}
+			if !needUpdate {
+				klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
+				continue
+			}
+			nodeInfo := &device.NodeInfo{}
+			nodeInfo.ID = val.Name
+			nodeInfo.Node = val
+			klog.V(5).InfoS("Fetching node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
+			nodeInfo.Devices = make(map[string][]device.DeviceInfo, 0)
+			for _, deviceinfo := range nodedevices {
+				nodeInfo.Devices[deviceinfo.DeviceVendor] = append(nodeInfo.Devices[deviceinfo.DeviceVendor], *deviceinfo)
+			}
+			s.addNode(val.Name, nodeInfo)
+			if s.nodes[val.Name] != nil && len(nodeInfo.Devices) > 0 {
+				if printedLog[val.Name] {
+					klog.V(5).InfoS("Node device updated", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
+				} else {
+					klog.InfoS("Node device added", "nodeName", val.Name, "deviceVendor", devhandsk, "nodeInfo", nodeInfo, "totalDevices", s.nodes[val.Name].Devices)
+					printedLog[val.Name] = true
 				}
 			}
 		}
-		_, _, err = s.getNodesUsage(&nodeNames, nil)
-		if err != nil {
-			klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
-		}
 	}
+	_, _, err = s.getNodesUsage(&nodeNames, nil)
+	if err != nil {
+		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
+		return
+	}
+
+	// Set synced to true only after getNodeUsage() succeeds
+	s.synced = true
+}
+
+func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
+	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
+		s.lock.RLock()
+		defer s.lock.RUnlock()
+		return s.synced, nil
+	})
+	if err != nil {
+		klog.ErrorS(err, "failed to poll until context cancel")
+		return false
+	}
+
+	return true
 }
 
 // InspectAllNodesUsage is used by metrics monitor.
