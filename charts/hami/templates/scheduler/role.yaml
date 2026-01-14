@@ -10,5 +10,5 @@ metadata:
 rules:
   - apiGroups: ["coordination.k8s.io"]
     resources: ["leases"]
-    verbs: ["create", "get", "update", "patch"]
+    verbs: ["create", "list", "watch", "get", "update", "patch"]
 {{- end }}
