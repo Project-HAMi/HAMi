@@ -17,14 +17,18 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"crypto/tls"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
+	"os"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
 	klog "k8s.io/klog/v2"
+	"sigs.k8s.io/controller-runtime/pkg/certwatcher"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
@@ -77,6 +81,10 @@ func init() {
 	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
 
+	rootCmd.Flags().BoolVar(&config.LeaderElect, "leader-elect", false, "The pod of hami-scheduler enable leader select")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")
+	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
+
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
@@ -112,9 +120,19 @@ func start() error {
 	)
 
 	config.InitDevices()
+
+	var err error
+	config.HostName, err = os.Hostname()
+	if err != nil {
+		return fmt.Errorf("unable to get hostname: %v", err)
+	}
+	if config.HostName == "" {
+		return fmt.Errorf("empty hostname returned")
+	}
+
 	sher = scheduler.NewScheduler()
 	go sher.RegisterFromNodeAnnotations()
-	err := sher.Start()
+	err = sher.Start()
 	if err != nil {
 		return err
 	}
@@ -129,6 +147,7 @@ func start() error {
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
+	router.GET("/readyz", routes.ReadyzRoute(sher))
 	klog.Info("listen on ", config.HTTPBind)
 
 	if enableProfiling {
@@ -141,8 +160,32 @@ func start() error {
 			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	} else {
-		if err := http.ListenAndServeTLS(config.HTTPBind, tlsCertFile, tlsKeyFile, router); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
+		certWatcher, err := certwatcher.New(tlsCertFile, tlsKeyFile)
+		if err != nil {
+			return fmt.Errorf("failed to create cert watcher: %w", err)
+		}
+
+		tlsCfg := &tls.Config{
+			GetCertificate: certWatcher.GetCertificate,
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		go func() {
+			if err := certWatcher.Start(ctx); err != nil && err != context.Canceled {
+				klog.ErrorS(err, "cert watcher error")
+			}
+		}()
+
+		addr := config.HTTPBind
+		handler := router
+		server := &http.Server{
+			Addr:      addr,
+			Handler:   handler,
+			TLSConfig: tlsCfg,
+		}
+		klog.InfoS("Starting HTTPS server", "address", addr)
+		if err := server.ListenAndServeTLS("", ""); err != nil {
+			return fmt.Errorf("HTTPS server error: %w", err)
 		}
 	}
 	return nil
