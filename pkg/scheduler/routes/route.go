@@ -56,6 +56,16 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				Error: err.Error(),
 			}
 		} else {
+			synced := s.WaitForCacheSync(r.Context())
+			if !synced {
+				// Poll may return false when context is cancelled
+				err := fmt.Errorf("context cancelled")
+				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			}
 			extenderFilterResult, err = s.Filter(extenderArgs)
 			if err != nil {
 				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
@@ -142,6 +152,22 @@ func WebHookRoute() httprouter.Handle {
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.Infoln("Health check endpoint hit")
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		klog.Infoln("Readiness check endpoint hit")
+
+		ok := s.GetLeaderManager().IsLeader()
+		if !ok {
+			klog.Infoln("Not leader yet")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		klog.Infoln("Scheduler extender is leader")
 		w.WriteHeader(http.StatusOK)
 	}
 }
