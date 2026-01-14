@@ -1445,3 +1445,164 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestFitQuota(t *testing.T) {
+	NvidiaGPUDevice := "NVIDIA"
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+	device.DevicesMap = make(map[string]device.Devices)
+	device.DevicesMap[NvidiaGPUDevice] = dev
+
+	qm := device.NewQuotaManager()
+	qm.AddQuota(&corev1.ResourceQuota{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ResourceQuota",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "basic-quota",
+			Namespace: "default",
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.nvidia.com/gpumem"): resource.MustParse("2048"),
+			},
+		},
+	})
+
+	tests := []struct {
+		name           string
+		tmpDevs        map[string]device.ContainerDevices
+		allocated      *device.PodDevices
+		ns             string
+		memreq         int64
+		coresreq       int64
+		expectedResult bool
+	}{
+		{
+			name:           "no tmp and no allocated",
+			tmpDevs:        map[string]device.ContainerDevices{},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:           "request exceed quota",
+			tmpDevs:        map[string]device.ContainerDevices{},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         3000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "tmpdev",
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name: "tmpdev exceed quota",
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         2000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name:    "allocated devs",
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "allocated devs exceed quota",
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         2000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "exceed quota",
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "fit",
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 1},
+				},
+			},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fitQuota(tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
+			assert.Equal(t, tt.expectedResult, result, tt.name)
+		})
+	}
+}
