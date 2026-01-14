@@ -341,10 +341,7 @@ func TestConcurrentNodeLocks(t *testing.T) {
 	nodeLocks = newNodeLockManager()
 
 	prevProcs := runtime.GOMAXPROCS(0)
-	targetProcs := runtime.NumCPU()
-	if targetProcs < 2 {
-		targetProcs = 2
-	}
+	targetProcs := max(runtime.NumCPU(), 2)
 	runtime.GOMAXPROCS(targetProcs)
 	defer runtime.GOMAXPROCS(prevProcs)
 

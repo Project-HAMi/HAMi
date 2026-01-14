@@ -16,7 +16,10 @@ limitations under the License.
 
 package metax
 
-import "fmt"
+import (
+	"fmt"
+	"strings"
+)
 
 const DirectLinkScore = 10
 
@@ -46,7 +49,7 @@ type LinkDevices []*LinkDevice
 func (devs LinkDevices) Score() int {
 	score := 0
 
-	for i := 0; i < len(devs); i++ {
+	for i := range devs {
 		for j := i + 1; j < len(devs); j++ {
 			score += devs[i].score(devs[j])
 		}
@@ -56,11 +59,12 @@ func (devs LinkDevices) Score() int {
 }
 
 func (devs LinkDevices) String() string {
-	str := "["
+	var str strings.Builder
+	str.WriteString("[")
 	for _, dev := range devs {
-		str += fmt.Sprintf("%v", *dev)
+		str.WriteString(fmt.Sprintf("%v", *dev))
 	}
-	str += "]"
+	str.WriteString("]")
 
-	return str
+	return str.String()
 }

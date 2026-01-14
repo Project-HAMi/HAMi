@@ -188,7 +188,7 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return kunlun.InitKunlunDevice(kunlunConfig), nil
 		}, config.KunlunConfig},
-		{kunlun.XPUDevice, kunlun.XPUCommonWord, func(cfg interface{}) (device.Devices, error) {
+		{kunlun.XPUDevice, kunlun.XPUCommonWord, func(cfg any) (device.Devices, error) {
 			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
 			if !ok {
 				return nil, fmt.Errorf("invalid configuration for %s", kunlun.XPUDevice)
