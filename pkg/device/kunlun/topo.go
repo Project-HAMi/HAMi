@@ -17,6 +17,7 @@ limitations under the License.
 package kunlun
 
 import (
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -39,10 +40,8 @@ func parseUsage(devices []*device.DeviceUsage, request device.ContainerDeviceReq
 }
 
 func addidx(temp []int, value int) []int {
-	for _, val := range temp {
-		if val == value {
-			return temp
-		}
+	if slices.Contains(temp, value) {
+		return temp
 	}
 	temp = append(temp, value)
 	return temp
