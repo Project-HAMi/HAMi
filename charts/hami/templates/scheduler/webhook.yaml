@@ -64,9 +64,10 @@ metadata:
   annotations:
     cert-manager.io/inject-ca-from: {{ include "hami-vgpu.namespace" . }}/{{ include "hami-vgpu.scheduler" . }}-serving-cert
   {{- end }}
-  name: {{ include "hami-vgpu.scheduler.webhook" . }}
+  name: {{ include "hami-vgpu.scheduler.webhook" . }}-validating
 webhooks:
   - admissionReviewVersions:
+    - v1
     - v1beta1
     clientConfig:
       {{- if .Values.scheduler.validatingWebhook.customURL.enabled }}

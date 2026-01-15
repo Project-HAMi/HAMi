@@ -138,9 +138,9 @@ func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) adm
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
 	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
-	for commonWord, dev := range device.GetDevices() {
+	for deviceName, dev := range device.GetDevices() {
 		// Only supports NVIDIA
-		if commonWord != nvidia.NvidiaGPUDevice {
+		if deviceName != nvidia.NvidiaGPUDevice {
 			continue
 		}
 		memoryFactor := nvidia.MemoryFactor
@@ -173,15 +173,9 @@ func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) adm
 				}
 			}
 		}
-		if !device.GetLocalCache().FitResourceQuota(pod.Namespace, resourceNames.ResourceMemoryName, int64(memoryReq), memoryFactor) {
-			msg := fmt.Sprintf("%s quota exceeded", resourceNames.ResourceMemoryName)
-			klog.Infof(template+" - Denying admission as %s", pod.Namespace, pod.Name, pod.UID, msg)
-			return admission.Denied(msg)
-		}
-		if !device.GetLocalCache().FitResourceQuota(pod.Namespace, resourceNames.ResourceCoreName, int64(coresReq), 1) {
-			msg := fmt.Sprintf("%s quota exceeded", resourceNames.ResourceMemoryName)
-			klog.Infof(template+" - Denying admission as %s", pod.Namespace, pod.Name, pod.UID, msg)
-			return admission.Denied(msg)
+		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
+			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
+			return admission.Denied("quota exceeded")
 		}
 	}
 	return admission.Allowed("quota check passed")

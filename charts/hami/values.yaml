@@ -163,7 +163,7 @@ scheduler:
       # should generate host certs here
       host: 127.0.0.1 # hostname or ip, can be your node'IP if you want to use https://<nodeIP>:<schedulerPort>/<path>
       port: 31998
-      path: /webhook
+      path: /webhook/mutating
     whitelistNamespaces:
     # Specify the namespaces that the webhook will not be applied to.
       # - default
@@ -180,7 +180,7 @@ scheduler:
       # should generate host certs here
       host: 127.0.0.1 # hostname or ip, can be your node'IP if you want to use https://<nodeIP>:<schedulerPort>/<path>
       port: 31998
-      path: /webhook
+      path: /webhook/validating
     whitelistNamespaces:
     failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.

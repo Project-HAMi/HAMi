@@ -62,42 +62,30 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 	memResourceName := resourceNames.ResourceMemoryName
 	coreResourceName := resourceNames.ResourceCoreName
 
-	return q.FitResourceQuota(ns, memResourceName, memreq, memoryFactor) && q.FitResourceQuota(ns, coreResourceName, coresreq, 1)
-}
-
-func (q *QuotaManager) FitResourceQuota(ns string, resourceName string, reqVal int64, factor int32) bool {
-	if reqVal == 0 {
-		return true
-	}
-	quota := q.GetQuota(ns, resourceName)
-	if quota == nil || quota.Limit == 0 {
-		return true
-	}
-	limit := quota.Limit
-	if factor > 1 {
-		oriLimit := limit
-		limit = limit * int64(factor)
-		klog.V(5).InfoS("applying factor to quota limit", "resourceName", resourceName, "oriLimit", oriLimit, "limit", limit, "factor", factor)
-	}
-	if quota.Used+reqVal > limit {
-		klog.V(4).InfoS("resource quota not fitted", "resourceName", resourceName, "limit", limit, "used", quota.Used, "alloc", reqVal)
-		return false
-	}
-	return true
-}
-
-func (q *QuotaManager) GetQuota(ns string, resourceName string) *Quota {
 	q.mutex.RLock()
 	defer q.mutex.RUnlock()
 	dq := q.Quotas[ns]
 	if dq == nil {
-		return nil
+		return true
 	}
-	quota, ok := (*dq)[resourceName]
+	memQuota, ok := (*dq)[memResourceName]
 	if ok {
-		return quota
+		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq, "memoryFactor", memoryFactor)
+		limit := memQuota.Limit
+		if memoryFactor > 1 {
+			limit = limit * int64(memoryFactor)
+		}
+		if limit != 0 && memQuota.Used+memreq > limit {
+			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
+			return false
+		}
 	}
-	return nil
+	coreQuota, ok := (*dq)[coreResourceName]
+	if ok && coreQuota.Limit != 0 && coreQuota.Used+coresreq > coreQuota.Limit {
+		klog.V(4).InfoS("resourceCores quota not fitted", "limit", coreQuota.Limit, "used", coreQuota.Used, "alloc", coresreq)
+		return false
+	}
+	return true
 }
 
 func countPodDevices(podDev PodDevices) map[string]int64 {

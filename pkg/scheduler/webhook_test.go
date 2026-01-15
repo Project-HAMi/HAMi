@@ -265,7 +265,7 @@ func TestValidatingHandle(t *testing.T) {
 	qm := device.NewQuotaManager()
 	ns := "default"
 	memName := "nvidia.com/gpumem"
-	coreName := "nvidia.com/gpucore"
+	coreName := "nvidia.com/gpucores"
 
 	qm.Quotas[ns] = &device.DeviceQuota{
 		memName:  &device.Quota{Used: 1000, Limit: 2000},
