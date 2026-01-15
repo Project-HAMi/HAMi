@@ -66,12 +66,29 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
-	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
+	klog.Infof(template+" - Checking resources and scheduler assignment", pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
-	for idx, ctr := range pod.Spec.Containers {
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		if c.SecurityContext != nil {
+			if c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+				klog.Warningf(template+" - Denying admission as init container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
+				continue
+			}
+		}
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
+	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
-		if ctr.SecurityContext != nil {
-			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
+		if c.SecurityContext != nil {
+			if c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
 				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
 				continue
 			}
