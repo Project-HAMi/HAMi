@@ -55,14 +55,16 @@ func NewWebHook(webhookType string) (*admission.Webhook, error) {
 		return nil, err
 	}
 	decoder := admission.NewDecoder(schema)
-	if webhookType == ValidatingWebhookType {
+	switch webhookType {
+	case ValidatingWebhookType:
 		wh := &admission.Webhook{Handler: &validatingWebhook{decoder: decoder}}
 		return wh, nil
-	} else if webhookType == MutatingWebhookType {
+	case MutatingWebhookType:
 		wh := &admission.Webhook{Handler: &mutatingWebhook{decoder: decoder}}
 		return wh, nil
+	default:
+		return nil, fmt.Errorf("unknown webhook type: %v", webhookType)
 	}
-	return nil, fmt.Errorf("webhook type %s not supported", webhookType)
 }
 
 func (h *mutatingWebhook) Handle(_ context.Context, req admission.Request) admission.Response {

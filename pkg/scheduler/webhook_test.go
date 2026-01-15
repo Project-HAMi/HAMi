@@ -247,10 +247,10 @@ func TestValidatingHandle(t *testing.T) {
 
 	sConfig := &config.Config{
 		NvidiaConfig: nvidia.NvidiaConfig{
-			ResourceCountName:            "hami.io/gpu",
-			ResourceMemoryName:           "hami.io/gpumem",
-			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
-			ResourceCoreName:             "hami.io/gpucores",
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
 			DefaultMemory:                0,
 			DefaultCores:                 0,
 			DefaultGPUNum:                1,
@@ -285,6 +285,7 @@ func TestValidatingHandle(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
 					Containers: []corev1.Container{
 						{
 							Name: "container1",
@@ -311,6 +312,7 @@ func TestValidatingHandle(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
 					Containers: []corev1.Container{
 						{
 							Name: "container1",
@@ -337,6 +339,7 @@ func TestValidatingHandle(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
 					Containers: []corev1.Container{
 						{
 							Name: "container1",
@@ -363,6 +366,7 @@ func TestValidatingHandle(t *testing.T) {
 					Namespace: "default",
 				},
 				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
 					Containers: []corev1.Container{
 						{
 							Name: "container1",
