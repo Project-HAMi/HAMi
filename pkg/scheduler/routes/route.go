@@ -138,10 +138,21 @@ func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, typ
 	}
 }
 
-func WebHookRoute() httprouter.Handle {
-	h, err := scheduler.NewWebHook()
+func MutatingWebHookRoute() httprouter.Handle {
+	h, err := scheduler.NewWebHook(scheduler.MutatingWebhookType)
 	if err != nil {
-		klog.ErrorS(err, "Failed to create new webhook")
+		klog.ErrorS(err, "Failed to create new MutatingWebHook")
+	}
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.Infof("Handling webhook request on %s", r.URL.Path)
+		h.ServeHTTP(w, r)
+	}
+}
+
+func ValidatingWebHookRoute() httprouter.Handle {
+	h, err := scheduler.NewWebHook(scheduler.ValidatingWebhookType)
+	if err != nil {
+		klog.ErrorS(err, "Failed to create new ValidatingWebhook")
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.Infof("Handling webhook request on %s", r.URL.Path)

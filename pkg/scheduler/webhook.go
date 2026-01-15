@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
@@ -29,27 +30,42 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
-const template = "Processing admission hook for pod %v/%v, UID: %v"
+const (
+	template              = "Processing admission hook for pod %v/%v, UID: %v"
+	MutatingWebhookType   = "mutating"
+	ValidatingWebhookType = "validating"
+)
 
-type webhook struct {
+type mutatingWebhook struct {
 	decoder admission.Decoder
 }
 
-func NewWebHook() (*admission.Webhook, error) {
+type validatingWebhook struct {
+	decoder admission.Decoder
+}
+
+func NewWebHook(webhookType string) (*admission.Webhook, error) {
 	logf.SetLogger(klog.NewKlogr())
 	schema := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(schema); err != nil {
 		return nil, err
 	}
 	decoder := admission.NewDecoder(schema)
-	wh := &admission.Webhook{Handler: &webhook{decoder: decoder}}
-	return wh, nil
+	if webhookType == ValidatingWebhookType {
+		wh := &admission.Webhook{Handler: &validatingWebhook{decoder: decoder}}
+		return wh, nil
+	} else if webhookType == MutatingWebhookType {
+		wh := &admission.Webhook{Handler: &mutatingWebhook{decoder: decoder}}
+		return wh, nil
+	}
+	return nil, fmt.Errorf("webhook type %s not supported", webhookType)
 }
 
-func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Response {
+func (h *mutatingWebhook) Handle(_ context.Context, req admission.Request) admission.Response {
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
@@ -102,4 +118,69 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) admission.Response {
+	pod := &corev1.Pod{}
+	err := h.decoder.Decode(req, pod)
+	if err != nil {
+		klog.Errorf("Failed to decode request: %v", err)
+		return admission.Errored(http.StatusBadRequest, err)
+	}
+	if len(pod.Spec.Containers) == 0 {
+		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
+		return admission.Denied("pod has no containers")
+	}
+	if pod.Spec.SchedulerName != config.SchedulerName {
+		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
+		return admission.Allowed("pod already has different scheduler assigned")
+	}
+	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
+	for commonWord, dev := range device.GetDevices() {
+		// Only supports NVIDIA
+		if commonWord != nvidia.NvidiaGPUDevice {
+			continue
+		}
+		memoryFactor := nvidia.MemoryFactor
+		resourceNames := dev.GetResourceNames()
+		resourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceCountName))
+		memResourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceMemoryName))
+		coreResourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceCoreName))
+		var memoryReq int64 = 0
+		var coresReq int64 = 0
+		getRequest := func(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
+			v, ok := ctr.Resources.Limits[resName]
+			if !ok {
+				v, ok = ctr.Resources.Requests[resName]
+			}
+			if ok {
+				if n, ok := v.AsInt64(); ok {
+					return n, true
+				}
+			}
+			return 0, false
+		}
+		for _, ctr := range pod.Spec.Containers {
+			req, ok := getRequest(&ctr, resourceName)
+			if ok && req == 1 {
+				if memReq, ok := getRequest(&ctr, memResourceName); ok {
+					memoryReq += memReq
+				}
+				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
+					coresReq += coreReq
+				}
+			}
+		}
+		if !device.GetLocalCache().FitResourceQuota(pod.Namespace, resourceNames.ResourceMemoryName, int64(memoryReq), memoryFactor) {
+			msg := fmt.Sprintf("%s quota exceeded", resourceNames.ResourceMemoryName)
+			klog.Infof(template+" - Denying admission as %s", pod.Namespace, pod.Name, pod.UID, msg)
+			return admission.Denied(msg)
+		}
+		if !device.GetLocalCache().FitResourceQuota(pod.Namespace, resourceNames.ResourceCoreName, int64(coresReq), 1) {
+			msg := fmt.Sprintf("%s quota exceeded", resourceNames.ResourceMemoryName)
+			klog.Infof(template+" - Denying admission as %s", pod.Namespace, pod.Name, pod.UID, msg)
+			return admission.Denied(msg)
+		}
+	}
+	return admission.Allowed("quota check passed")
 }
