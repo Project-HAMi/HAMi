@@ -11,7 +11,7 @@
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
 [![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
-[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/JvNbY6g6)
+[![discord](https://img.shields.io/badge/discord-5865F2?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
 [![website](https://img.shields.io/badge/website-green?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
 
 ## Project-HAMi: 異種AIコンピューティング仮想化ミドルウェア
