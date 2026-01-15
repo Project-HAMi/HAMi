@@ -54,6 +54,8 @@ webhooks:
         scope: '*'
     sideEffects: None
     timeoutSeconds: 10
+{{- end }}
+{{- if and .Values.scheduler.validatingWebhook.enabled (not .Values.dra.enabled) -}}
 ---
 apiVersion: admissionregistration.k8s.io/v1
 kind: ValidatingWebhookConfiguration
@@ -67,8 +69,8 @@ webhooks:
   - admissionReviewVersions:
     - v1beta1
     clientConfig:
-      {{- if .Values.scheduler.admissionWebhook.customURL.enabled }}
-      url: https://{{ .Values.scheduler.admissionWebhook.customURL.host}}:{{.Values.scheduler.admissionWebhook.customURL.port}}{{.Values.scheduler.admissionWebhook.customURL.path}}
+      {{- if .Values.scheduler.validatingWebhook.customURL.enabled }}
+      url: https://{{ .Values.scheduler.validatingWebhook.customURL.host}}:{{.Values.scheduler.validatingWebhook.customURL.port}}{{.Values.scheduler.validatingWebhook.customURL.path}}
       {{- else }}
       service:
         name: {{ include "hami-vgpu.scheduler" . }}
@@ -76,7 +78,7 @@ webhooks:
         path: /webhook/validating
         port: {{ .Values.scheduler.service.httpPort }}
       {{- end }}
-    failurePolicy: {{ .Values.scheduler.admissionWebhook.failurePolicy }}
+    failurePolicy: {{ .Values.scheduler.validatingWebhook.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.hami.io
     namespaceSelector:
@@ -85,11 +87,11 @@ webhooks:
         operator: NotIn
         values:
         - ignore
-      {{- if .Values.scheduler.admissionWebhook.whitelistNamespaces }}
+      {{- if .Values.scheduler.validatingWebhook.whitelistNamespaces }}
       - key: kubernetes.io/metadata.name
         operator: NotIn
         values:
-        {{- toYaml .Values.scheduler.admissionWebhook.whitelistNamespaces | nindent 10 }}
+        {{- toYaml .Values.scheduler.validatingWebhook.whitelistNamespaces | nindent 10 }}
       {{- end }}
     objectSelector:
       matchExpressions:

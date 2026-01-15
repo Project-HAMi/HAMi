@@ -171,6 +171,18 @@ scheduler:
       # - istio-system
     reinvocationPolicy: Never
     failurePolicy: Ignore
+  validatingWebhook:
+    # If set to false, the ValidatingWebhook will not be installed, and the HAMi-managed resource quota will not be checked by webhook.
+    enabled: false
+    customURL:
+      enabled: false
+      # must be an endpoint using https.
+      # should generate host certs here
+      host: 127.0.0.1 # hostname or ip, can be your node'IP if you want to use https://<nodeIP>:<schedulerPort>/<path>
+      port: 31998
+      path: /webhook
+    whitelistNamespaces:
+    failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
   ## If enabled, always takes precedence over options 2.
   certManager:
