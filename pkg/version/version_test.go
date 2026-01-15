@@ -17,6 +17,9 @@ limitations under the License.
 package version
 
 import (
+	"fmt"
+	"runtime"
+
 	"testing"
 )
 
@@ -27,7 +30,7 @@ func TestVersion(t *testing.T) {
 		want string
 	}{
 		{
-			name: "test1",
+			name: "version string",
 			info: Info{
 				Version:   "2.7.1",
 				Revision:  "5125fd664",
@@ -43,6 +46,30 @@ func TestVersion(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			if got := tt.info.String(); got != tt.want {
 				t.Errorf("Info.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestVersionPrint(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{
+			name: "version print",
+			want: `version:          v0.0.0-master
+revision:         unknown
+build date:       unknown
+go version:       ` + runtime.Version() + `
+compiler:         ` + runtime.Compiler + `
+platform:         ` + fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Print(); got != tt.want {
+				t.Errorf("Print() = %v, want %v", got, tt.want)
 			}
 		})
 	}
