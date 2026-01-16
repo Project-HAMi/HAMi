@@ -134,8 +134,8 @@ func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) adm
 		return admission.Denied("pod has no containers")
 	}
 	if pod.Spec.SchedulerName != config.SchedulerName {
-		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
-		return admission.Allowed("pod already has different scheduler assigned")
+		klog.Infof(template+" - scheduler is not hami-scheduler, skip", req.Namespace, req.Name, req.UID)
+		return admission.Allowed("scheduler is not hami-scheduler")
 	}
 	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
 	for deviceName, dev := range device.GetDevices() {
@@ -172,6 +172,11 @@ func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) adm
 					coresReq += coreReq
 				}
 			}
+		}
+		if memoryFactor > 1 {
+			oriMemReq := memoryReq
+			memoryReq = memoryReq * int64(memoryFactor)
+			klog.V(5).Infof("Adjusting memory request for quota check: oriMemReq %d, memoryReq %d, factor %d", oriMemReq, memoryReq, memoryFactor)
 		}
 		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
