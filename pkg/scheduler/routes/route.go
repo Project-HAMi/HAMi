@@ -24,7 +24,6 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -123,18 +122,6 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 			w.WriteHeader(http.StatusOK)
 			w.Write(response)
 		}
-	}
-}
-
-func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, types.UID, string) error) *extenderv1.ExtenderBindingResult {
-	err := bindFunc(args.PodName, args.PodNamespace, args.PodUID, args.Node)
-	errMsg := ""
-	if err != nil {
-		klog.ErrorS(err, "Bind error", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node, "uid", args.PodUID)
-		errMsg = err.Error()
-	}
-	return &extenderv1.ExtenderBindingResult{
-		Error: errMsg,
 	}
 }
 
