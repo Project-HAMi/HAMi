@@ -27,9 +27,11 @@ import (
 	"syscall"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
+	"github.com/Project-HAMi/HAMi/pkg/version"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,6 +55,7 @@ func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+	rootCmd.AddCommand(version.VersionCmd)
 }
 
 func start() error {
@@ -133,6 +136,8 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	klog.V(4).Info("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
+
+	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
