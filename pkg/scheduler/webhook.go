@@ -19,7 +19,6 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
@@ -34,40 +33,24 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
-const (
-	template              = "Processing admission hook for pod %v/%v, UID: %v"
-	MutatingWebhookType   = "mutating"
-	ValidatingWebhookType = "validating"
-)
+const template = "Processing admission hook for pod %v/%v, UID: %v"
 
-type mutatingWebhook struct {
+type webhook struct {
 	decoder admission.Decoder
 }
 
-type validatingWebhook struct {
-	decoder admission.Decoder
-}
-
-func NewWebHook(webhookType string) (*admission.Webhook, error) {
+func NewWebHook() (*admission.Webhook, error) {
 	logf.SetLogger(klog.NewKlogr())
 	schema := runtime.NewScheme()
 	if err := clientgoscheme.AddToScheme(schema); err != nil {
 		return nil, err
 	}
 	decoder := admission.NewDecoder(schema)
-	switch webhookType {
-	case ValidatingWebhookType:
-		wh := &admission.Webhook{Handler: &validatingWebhook{decoder: decoder}}
-		return wh, nil
-	case MutatingWebhookType:
-		wh := &admission.Webhook{Handler: &mutatingWebhook{decoder: decoder}}
-		return wh, nil
-	default:
-		return nil, fmt.Errorf("unknown webhook type: %v", webhookType)
-	}
+	wh := &admission.Webhook{Handler: &webhook{decoder: decoder}}
+	return wh, nil
 }
 
-func (h *mutatingWebhook) Handle(_ context.Context, req admission.Request) admission.Response {
+func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Response {
 	pod := &corev1.Pod{}
 	err := h.decoder.Decode(req, pod)
 	if err != nil {
@@ -114,6 +97,9 @@ func (h *mutatingWebhook) Handle(_ context.Context, req admission.Request) admis
 			return admission.Denied("pod has node assigned")
 		}
 	}
+	if !fitResourceQuota(pod) {
+		return admission.Denied("exceeding resource quota")
+	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
@@ -122,22 +108,7 @@ func (h *mutatingWebhook) Handle(_ context.Context, req admission.Request) admis
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
 }
 
-func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) admission.Response {
-	pod := &corev1.Pod{}
-	err := h.decoder.Decode(req, pod)
-	if err != nil {
-		klog.Errorf("Failed to decode request: %v", err)
-		return admission.Errored(http.StatusBadRequest, err)
-	}
-	if len(pod.Spec.Containers) == 0 {
-		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
-		return admission.Denied("pod has no containers")
-	}
-	if pod.Spec.SchedulerName != config.SchedulerName {
-		klog.Infof(template+" - scheduler is not hami-scheduler, skip", req.Namespace, req.Name, req.UID)
-		return admission.Allowed("scheduler is not hami-scheduler")
-	}
-	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
+func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
 		// Only supports NVIDIA
 		if deviceName != nvidia.NvidiaGPUDevice {
@@ -180,8 +151,8 @@ func (h *validatingWebhook) Handle(_ context.Context, req admission.Request) adm
 		}
 		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
-			return admission.Denied("quota exceeded")
+			return false
 		}
 	}
-	return admission.Allowed("quota check passed")
+	return true
 }

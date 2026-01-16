@@ -80,7 +80,7 @@ func TestHandle(t *testing.T) {
 	}
 
 	// create a WebHook object
-	wh, err := NewWebHook(MutatingWebhookType)
+	wh, err := NewWebHook()
 	if err != nil {
 		t.Fatalf("Error creating WebHook: %v", err)
 	}
@@ -157,7 +157,7 @@ func TestPodHasNodeName(t *testing.T) {
 	}
 
 	// create a WebHook object
-	wh, err := NewWebHook(MutatingWebhookType)
+	wh, err := NewWebHook()
 	if err != nil {
 		t.Fatalf("Error creating WebHook: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestPodHasDifferentScheduler(t *testing.T) {
 			},
 		},
 	}
-	wh, err := NewWebHook(MutatingWebhookType)
+	wh, err := NewWebHook()
 	if err != nil {
 		t.Fatalf("Error creating WebHook: %v", err)
 	}
@@ -242,7 +242,7 @@ func TestPodHasDifferentScheduler(t *testing.T) {
 	}
 }
 
-func TestValidatingHandle(t *testing.T) {
+func TestFitResourceQuota(t *testing.T) {
 	config.SchedulerName = "hami-scheduler"
 
 	sConfig := &config.Config{
@@ -273,9 +273,9 @@ func TestValidatingHandle(t *testing.T) {
 	}
 
 	testCases := []struct {
-		name           string
-		pod            *corev1.Pod
-		expectedDenied bool
+		name string
+		pod  *corev1.Pod
+		fit  bool
 	}{
 		{
 			name: "quota passed",
@@ -302,7 +302,7 @@ func TestValidatingHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedDenied: false,
+			fit: true,
 		},
 		{
 			name: "quota exceeded",
@@ -329,7 +329,7 @@ func TestValidatingHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedDenied: true,
+			fit: false,
 		},
 		{
 			name: "request multiple gpus",
@@ -356,7 +356,7 @@ func TestValidatingHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedDenied: false,
+			fit: true,
 		},
 		{
 			name: "request ascend",
@@ -383,41 +383,15 @@ func TestValidatingHandle(t *testing.T) {
 					},
 				},
 			},
-			expectedDenied: false,
+			fit: true,
 		},
 	}
 
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
-			scheme := runtime.NewScheme()
-			corev1.AddToScheme(scheme)
-			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
-			podBytes, err := runtime.Encode(codec, tc.pod)
-			if err != nil {
-				t.Fatalf("Error encoding pod: %v", err)
-			}
-
-			// create an AdmissionRequest object
-			req := admission.Request{
-				AdmissionRequest: admissionv1.AdmissionRequest{
-					UID:       "test-uid",
-					Namespace: "default",
-					Name:      "test-pod",
-					Object: runtime.RawExtension{
-						Raw: podBytes,
-					},
-				},
-			}
-
-			// create a WebHook object
-			wh, err := NewWebHook(ValidatingWebhookType)
-			if err != nil {
-				t.Fatalf("Error creating WebHook: %v", err)
-			}
-
-			resp := wh.Handle(context.Background(), req)
-			if tc.expectedDenied != !resp.Allowed {
-				t.Errorf("Expected: %v, but got response: %v", tc.expectedDenied, resp)
+			result := fitResourceQuota(tc.pod)
+			if tc.fit != result {
+				t.Errorf("Expected %v, but got %v", tc.fit, result)
 			}
 		})
 	}
