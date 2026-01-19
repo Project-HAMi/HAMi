@@ -1,6 +1,23 @@
 ##### Global variables #####
 include version.mk Makefile.defs
 
+HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
+
+ifndef GITHUB_ACTIONS
+	REVISION?=$(shell git rev-parse --short HEAD)
+else
+	REVISION=$(GITHUB_SHA)
+endif
+
+##### The ldflags for the go build process to set the version related data.
+GO_BUILD_LDFLAGS=\
+	-s \
+	-w \
+	-X $(HAMI_VERSION_PKG)/version.version=$(VERSION)  \
+	-X $(HAMI_VERSION_PKG)/device-plugin/nvidiadevice/nvinternal/info.version=$(VERSION) \
+	-X $(HAMI_VERSION_PKG)/version.revision=$(REVISION)  \
+	-X $(HAMI_VERSION_PKG)/version.buildDate=$(shell date +"%Y%m%d-%T")
+
 all: build
 
 docker:
@@ -34,10 +51,10 @@ proto:
 build: $(CMDS) $(DEVICES)
 
 $(CMDS):
-	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/version.version=$(VERSION)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
+	$(GO) build -ldflags '$(GO_BUILD_LDFLAGS)' -o ${OUTPUT_DIR}/$@ ./cmd/$@
 
 $(DEVICES):
-	$(GO) build -ldflags '-s -w -X github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info.version=$(VERSION)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
+	$(GO) build -ldflags '$(GO_BUILD_LDFLAGS)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
 
 clean:
 	$(GO) clean -r -x ./cmd/...
