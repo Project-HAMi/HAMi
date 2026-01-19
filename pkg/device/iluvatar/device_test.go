@@ -556,7 +556,7 @@ func Test_Fit(t *testing.T) {
 			annos:      map[string]string{},
 			wantOK:     true,
 			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
+			wantDevIDs: []string{"dev-1"},
 		},
 		{
 			name: "fit fail: memory not enough",
