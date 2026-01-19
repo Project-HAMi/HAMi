@@ -198,19 +198,41 @@ func (s *Scheduler) onDelNode(obj any) {
 	// Ensure downstream consumers are notified regardless of decoding success
 	defer s.doNodeNotify()
 
+	var nodeName string
 	switch t := obj.(type) {
 	case *corev1.Node:
-		klog.V(4).InfoS("Node deleted, cleaning up nodelock", "node", t.Name)
-		nodelockutil.CleanupNodeLock(t.Name)
+		nodeName = t.Name
+		klog.V(4).InfoS("Node deleted, cleaning up nodelock", "node", nodeName)
 	case cache.DeletedFinalStateUnknown:
 		if n, ok := t.Obj.(*corev1.Node); ok {
-			klog.V(4).InfoS("Node tombstone deleted, cleaning up nodelock", "node", n.Name)
-			nodelockutil.CleanupNodeLock(n.Name)
+			nodeName = n.Name
+			klog.V(4).InfoS("Node tombstone deleted, cleaning up nodelock", "node", nodeName)
 		} else {
 			klog.V(5).InfoS("Received tombstone for non-node object on delete")
+			return
 		}
 	default:
 		klog.V(5).InfoS("Received unknown object type on node delete")
+		return
+	}
+
+	nodelockutil.CleanupNodeLock(nodeName)
+	s.rmNode(nodeName)
+	s.cleanupNodeUsage(nodeName)
+}
+
+// cleanupNodeUsage removes the node from overviewstatus and cachedstatus maps
+// to ensure metrics no longer report data for deleted nodes.
+func (s *Scheduler) cleanupNodeUsage(nodeID string) {
+	s.lock.Lock()
+	defer s.lock.Unlock()
+	if _, ok := s.overviewstatus[nodeID]; ok {
+		delete(s.overviewstatus, nodeID)
+		klog.V(4).InfoS("Removed node from overviewstatus", "node", nodeID)
+	}
+	if _, ok := s.cachedstatus[nodeID]; ok {
+		delete(s.cachedstatus, nodeID)
+		klog.V(4).InfoS("Removed node from cachedstatus", "node", nodeID)
 	}
 }
 
