@@ -318,7 +318,7 @@ func (l *ContainerLister) initInformerWithConfig(resyncInterval time.Duration) e
 	return nil
 }
 
-func (l *ContainerLister) onPodDelete(obj interface{}) {
+func (l *ContainerLister) onPodDelete(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
 		tombstone, ok := obj.(cache.DeletedFinalStateUnknown)

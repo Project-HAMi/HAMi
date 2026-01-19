@@ -196,3 +196,32 @@ func TestConvertHAMIPodDeviceToMetaxPodDevice(t *testing.T) {
 		})
 	}
 }
+
+func TestPodMetaxSDeviceString(t *testing.T) {
+	device := PodMetaxSDevice{
+		{
+			{
+				UUID:    "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a0",
+				Compute: 50,
+				VRam:    10,
+			},
+			{
+				UUID:    "GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a1",
+				Compute: 30,
+				VRam:    1024,
+			},
+		}}
+
+	result := device.String()
+	expected := `
+PodMetaxSDevice:
+  container[0]:
+    SDevice[GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a0]: Compute=50, VRam=10
+    SDevice[GPU-a16ac188-0592-5c8f-2b6e-8bd8e7a604a1]: Compute=30, VRam=1024
+`
+
+	if !reflect.DeepEqual(expected, result) {
+		t.Errorf("PodMetaxSDevice String() failed: result %v, expected %v",
+			result, expected)
+	}
+}

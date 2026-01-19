@@ -17,6 +17,7 @@ limitations under the License.
 package enflame
 
 import (
+	"maps"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -342,9 +343,7 @@ func TestGCUDevices_PatchAnnotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			annoInputCopy := make(map[string]string)
-			for k, v := range tt.annoInput {
-				annoInputCopy[k] = v
-			}
+			maps.Copy(annoInputCopy, tt.annoInput)
 
 			dev := &GCUDevices{}
 			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)

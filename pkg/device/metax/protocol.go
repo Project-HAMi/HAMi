@@ -18,6 +18,7 @@ package metax
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
@@ -72,29 +73,31 @@ type ContainerMetaxSDevices []ContainerMetaxSDevice
 type PodMetaxSDevice []ContainerMetaxSDevices
 
 func (ni NodeMetaxSDeviceInfo) String() string {
-	str := "\n"
+	var str strings.Builder
+	str.WriteString("\n")
 
 	for _, i := range ni {
-		str += fmt.Sprintf("MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t, QosPolicy=%s, LinkZone=%d\n",
-			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy, i.QosPolicy, i.LinkZone)
+		str.WriteString(fmt.Sprintf("MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t, QosPolicy=%s, LinkZone=%d\n",
+			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy, i.QosPolicy, i.LinkZone))
 	}
 
-	return str
+	return str.String()
 }
 
 func (sdev *PodMetaxSDevice) String() string {
-	str := "\nPodMetaxSDevice:\n"
+	var str strings.Builder
+	str.WriteString("\nPodMetaxSDevice:\n")
 
 	for ctrIdx, ctrDevices := range *sdev {
-		str += fmt.Sprintf("  container[%d]:\n", ctrIdx)
+		str.WriteString(fmt.Sprintf("  container[%d]:\n", ctrIdx))
 
 		for _, device := range ctrDevices {
-			str += fmt.Sprintf("    SDevice[%s]: Compute=%d, VRam=%d\n",
-				device.UUID, device.Compute, device.VRam)
+			str.WriteString(fmt.Sprintf("    SDevice[%s]: Compute=%d, VRam=%d\n",
+				device.UUID, device.Compute, device.VRam))
 		}
 	}
 
-	return str
+	return str.String()
 }
 
 func convertMetaxSDeviceToHAMIDevice(metaxSDevices []*MetaxSDeviceInfo) []*device.DeviceInfo {

@@ -18,7 +18,7 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-GOLANGCI_LINT_VER="v2.1.6"
+GOLANGCI_LINT_VER="v2.8.0"
 
 cd "${REPO_ROOT}"
 source "hack/util.sh"
@@ -32,7 +32,7 @@ else
   curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin ${GOLANGCI_LINT_VER}
 fi
 
-if golangci-lint run; then
+if golangci-lint run -v; then
   echo 'Congratulations!  All Go source files have passed staticcheck.'
 else
   echo # print one empty line, separate from warning messages.
