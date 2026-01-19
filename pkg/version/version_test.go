@@ -32,14 +32,14 @@ func TestVersion(t *testing.T) {
 		{
 			name: "version string",
 			info: Info{
-				Version:   "2.7.1",
+				Version:   "2.8.0",
 				Revision:  "5125fd664",
 				BuildDate: "2026-01-11T13:09:22Z",
 				GoVersion: "go1.25.3",
 				Compiler:  "gc",
 				Platform:  "linux/amd64",
 			},
-			want: `version.Info{Version:"2.7.1", Revision:"5125fd664", BuildDate:"2026-01-11T13:09:22Z", GoVersion:"go1.25.3", Compiler:"gc", Platform:"linux/amd64"}`,
+			want: `version.Info{Version:"2.8.0", Revision:"5125fd664", BuildDate:"2026-01-11T13:09:22Z", GoVersion:"go1.25.3", Compiler:"gc", Platform:"linux/amd64"}`,
 		},
 	}
 	for _, tt := range tests {
