@@ -16,6 +16,7 @@ linters:
     - forcetypeassert
     - godot
     - misspell
+    - modernize
     - staticcheck
   settings:
     dupl:
@@ -54,6 +55,9 @@ linters:
       capital: false
     nestif:
       min-complexity: 20
+    modernize:
+      disable:
+        - omitzero
   exclusions:
     generated: lax
     presets:

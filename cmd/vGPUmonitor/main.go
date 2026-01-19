@@ -27,9 +27,11 @@ import (
 	"syscall"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
+	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
+	"github.com/Project-HAMi/HAMi/pkg/version"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -53,6 +55,7 @@ func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+	rootCmd.AddCommand(version.VersionCmd)
 }
 
 func start() error {
@@ -86,18 +89,14 @@ func start() error {
 	errCh := make(chan error, 2)
 
 	// Start the metrics service
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		if err := initMetrics(ctx, containerLister); err != nil {
 			errCh <- err
 		}
-	}()
+	})
 
 	// Start the monitoring and feedback service
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for {
 			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
@@ -112,7 +111,7 @@ func start() error {
 			}
 			return
 		}
-	}()
+	})
 
 	// Capture system signals
 	signalCh := make(chan os.Signal, 1)
@@ -137,6 +136,8 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	klog.V(4).Info("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
+
+	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.

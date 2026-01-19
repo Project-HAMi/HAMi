@@ -1228,9 +1228,7 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 	var wg sync.WaitGroup
 
 	// Goroutine 1: Continuous Writes (Adding/Updating random nodes)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		i := 0
 		for {
 			select {
@@ -1255,12 +1253,12 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 				i++
 			}
 		}
-	}()
+	})
 
 	// Goroutine 2: Continuous Iteration
 	// In the original buggy code, this WILL cause a panic:
 	// "fatal error: concurrent map iteration and map write"
-	for i := 0; i < 5000; i++ {
+	for range 5000 {
 		nodes, _ := m.ListNodes()
 		// Iterating while the map is being modified in the background
 		for k, v := range nodes {
