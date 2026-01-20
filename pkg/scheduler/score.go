@@ -51,6 +51,7 @@ const (
 	allocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	nodeUnfitPod                      = "NodeUnfitPod"
 	nodeFitPod                        = "NodeFitPod"
+	cardReqNumInvalid                 = "CardReqNumInvalid"
 )
 
 var scheduleFailureReasons = []string{
@@ -195,7 +196,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				if !fit {
 					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
-					failedNodes[nodeID] = nodeUnfitPod
+					if strings.Contains(reason, cardReqNumInvalid) {
+						failedNodes[nodeID] = "node device request must be 1 or even"
+					} else {
+						failedNodes[nodeID] = nodeUnfitPod
+					}
 					for _, reasonType := range parseNodeReason(reason) {
 						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 					}
