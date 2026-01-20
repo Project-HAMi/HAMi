@@ -45,9 +45,9 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
-	// MLUUseUUID is user can use specify MLU device for set MLU UUID.
+	// MLUUseUUID annotation specifies a comma-separated list of MLU UUIDs to use.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
-	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID.
+	// MLUNoUseUUID annotation specifies a comma-separated list of MLU UUIDs to exclude.
 	MLUNoUseUUID          = "cambricon.com/nouse-gpuuuid"
 	DsmluLockTime         = "cambricon.com/dsmlu.lock"
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
