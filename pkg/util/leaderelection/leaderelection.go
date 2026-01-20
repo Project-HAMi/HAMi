@@ -116,7 +116,7 @@ func (m *leaderManager) onAdd(obj any) {
 
 	m.setObservedRecord(lease)
 	// Notify if we are the leader from the very begging
-	if m.isHolderOf(lease) {
+	if m.isHolderOf(lease) && m.callbacks.OnStartedLeading != nil {
 		m.callbacks.OnStartedLeading()
 	}
 }
@@ -138,9 +138,13 @@ func (m *leaderManager) onUpdate(oldObj, newObj any) {
 
 	// Notify if we have been elected to become the leader
 	if !m.isHolderOf(oldLease) && m.isHolderOf(newLease) {
-		m.callbacks.OnStartedLeading()
+		if m.callbacks.OnStartedLeading != nil {
+			m.callbacks.OnStartedLeading()
+		}
 	} else if m.isHolderOf(oldLease) && !m.isHolderOf(newLease) {
-		m.callbacks.OnStoppedLeading()
+		if m.callbacks.OnStoppedLeading != nil {
+			m.callbacks.OnStoppedLeading()
+		}
 	}
 }
 
@@ -150,15 +154,23 @@ func (m *leaderManager) onDelete(obj any) {
 	defer m.leaseLock.Unlock()
 
 	m.setObservedRecord(nil)
-	m.callbacks.OnStoppedLeading()
+	if m.callbacks.OnStoppedLeading != nil {
+		m.callbacks.OnStoppedLeading()
+	}
 }
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
 	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
-	return lease.Spec.HolderIdentity != nil && strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
+	if lease == nil || lease.Spec.HolderIdentity == nil {
+		return false
+	}
+	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
 }
 
 func (m *leaderManager) isLeaseValid(now time.Time) bool {
+	if m.observedLease == nil || m.observedLease.Spec.LeaseDurationSeconds == nil {
+		return false
+	}
 	return m.observedTime.Add(time.Second * time.Duration(*m.observedLease.Spec.LeaseDurationSeconds)).After(now)
 }
 
