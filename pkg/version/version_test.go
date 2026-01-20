@@ -17,36 +17,60 @@ limitations under the License.
 package version
 
 import (
-	"bytes"
-	"io"
-	"os"
-	"testing"
+	"fmt"
+	"runtime"
 
-	"gotest.tools/v3/assert"
+	"testing"
 )
 
 func TestVersion(t *testing.T) {
-	version = "v1.0.0.1234567890"
-	versionWant := "v1.0.0.1234567890\n"
-
-	var out bytes.Buffer
-	r, w, err := os.Pipe()
-	if err != nil {
-		t.Fatalf("os.Pipe() failed: %v", err)
+	tests := []struct {
+		name string
+		info Info
+		want string
+	}{
+		{
+			name: "version string",
+			info: Info{
+				Version:   "2.8.0",
+				Revision:  "5125fd664",
+				BuildDate: "2026-01-11T13:09:22Z",
+				GoVersion: "go1.25.3",
+				Compiler:  "gc",
+				Platform:  "linux/amd64",
+			},
+			want: `version.Info{Version:"2.8.0", Revision:"5125fd664", BuildDate:"2026-01-11T13:09:22Z", GoVersion:"go1.25.3", Compiler:"gc", Platform:"linux/amd64"}`,
+		},
 	}
-	defer r.Close()
-	originalStdout := os.Stdout
-	defer func() {
-		os.Stdout = originalStdout
-		w.Close()
-	}()
-	os.Stdout = w
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := tt.info.String(); got != tt.want {
+				t.Errorf("Info.String() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
 
-	VersionCmd.Run(nil, nil)
-	w.Close()
-
-	io.Copy(&out, r)
-
-	versionGet := out.String()
-	assert.Equal(t, versionWant, versionGet)
+func TestVersionPrint(t *testing.T) {
+	tests := []struct {
+		name string
+		want string
+	}{
+		{
+			name: "version print",
+			want: `version:          v0.0.0-master
+revision:         unknown
+build date:       unknown
+go version:       ` + runtime.Version() + `
+compiler:         ` + runtime.Compiler + `
+platform:         ` + fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := Print(); got != tt.want {
+				t.Errorf("Print() = %v, want %v", got, tt.want)
+			}
+		})
+	}
 }
