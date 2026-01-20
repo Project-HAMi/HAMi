@@ -190,7 +190,7 @@ func (dev *MthreadsDevices) checkUUID(annos map[string]string, d device.DeviceUs
 
 	noUserUUID, ok := annos[MthreadsNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		klog.V(5).Infof("check uuid for Mthreads not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		return !slices.Contains(noUserUUIDs, d.ID)

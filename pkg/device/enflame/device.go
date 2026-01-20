@@ -37,9 +37,9 @@ type EnflameDevices struct {
 const (
 	EnflameVGCUDevice     = "Enflame"
 	EnflameVGCUCommonWord = "Enflame"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameUseUUID is user can use specify Enflame device for set Enflame UUID.
 	EnflameUseUUID = "enflame.com/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameNoUseUUID is user can not use specify Enflame device for set Enflame UUID.
 	EnflameNoUseUUID   = "enflame.com/nouse-gpuuuid"
 	PodRequestGCUSize  = "enflame.com/gcu-request-size"
 	PodAssignedGCUID   = "enflame.com/gcu-assigned-id"
@@ -164,7 +164,7 @@ func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsa
 func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[EnflameUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
+		klog.V(5).Infof("check uuid for Enflame user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		for uuid := range strings.SplitSeq(userUUID, ",") {
 			if d.ID == uuid {
@@ -176,7 +176,7 @@ func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsa
 
 	noUserUUID, ok := annos[EnflameNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		klog.V(5).Infof("check uuid for Enflame not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		for uuid := range strings.SplitSeq(noUserUUID, ",") {
 			if d.ID == uuid {
