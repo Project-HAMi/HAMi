@@ -116,9 +116,9 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		}
 		memoryFactor := nvidia.MemoryFactor
 		resourceNames := dev.GetResourceNames()
-		resourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceCountName))
-		memResourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceMemoryName))
-		coreResourceName := corev1.ResourceName(corev1.ResourceName(resourceNames.ResourceCoreName))
+		resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
+		memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)
+		coreResourceName := corev1.ResourceName(resourceNames.ResourceCoreName)
 		var memoryReq int64 = 0
 		var coresReq int64 = 0
 		getRequest := func(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
