@@ -41,9 +41,9 @@ const (
 	MthreadsGPUDevice       = "Mthreads"
 	MthreadsGPUCommonWord   = "Mthreads"
 	MthreadsDeviceSelection = "mthreads.com/gpu-index"
-	// MthreadsUseUUID is user can use specify Mthreads device for set Mthreads UUID.
+	// MthreadsUseUUID annotation specifies a comma-separated list of Mthreads UUIDs to use.
 	MthreadsUseUUID = "mthreads.ai/use-gpuuuid"
-	// MthreadsNoUseUUID is user can not use specify Mthreads device for set Mthreads UUID.
+	// MthreadsNoUseUUID annotation specifies a comma-separated list of Mthreads UUIDs to exclude.
 	MthreadsNoUseUUID        = "mthreads.ai/nouse-gpuuuid"
 	MthreadsAssignedGPUIndex = "mthreads.com/gpu-index"
 	MthreadsAssignedNode     = "mthreads.com/predicate-node"
@@ -190,7 +190,7 @@ func (dev *MthreadsDevices) checkUUID(annos map[string]string, d device.DeviceUs
 
 	noUserUUID, ok := annos[MthreadsNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		klog.V(5).Infof("check uuid for Mthreads not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		return !slices.Contains(noUserUUIDs, d.ID)

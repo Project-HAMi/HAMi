@@ -18,6 +18,7 @@ package enflame
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -37,9 +38,9 @@ type EnflameDevices struct {
 const (
 	EnflameVGCUDevice     = "Enflame"
 	EnflameVGCUCommonWord = "Enflame"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameUseUUID annotation specifies a comma-separated list of Enflame UUIDs to use.
 	EnflameUseUUID = "enflame.com/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameNoUseUUID annotation specifies a comma-separated list of Enflame UUIDs to exclude.
 	EnflameNoUseUUID   = "enflame.com/nouse-gpuuuid"
 	PodRequestGCUSize  = "enflame.com/gcu-request-size"
 	PodAssignedGCUID   = "enflame.com/gcu-assigned-id"
@@ -164,26 +165,18 @@ func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsa
 func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[EnflameUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
+		klog.V(5).Infof("check uuid for Enflame user uuid [%s], device id is %s", userUUID, d.ID)
 		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(userUUID, ",") {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
+		userUUIDs := strings.Split(userUUID, ",")
+		return slices.Contains(userUUIDs, d.ID)
 	}
 
 	noUserUUID, ok := annos[EnflameNoUseUUID]
 	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
+		klog.V(5).Infof("check uuid for Enflame not user uuid [%s], device id is %s", noUserUUID, d.ID)
 		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(noUserUUID, ",") {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		return !slices.Contains(noUserUUIDs, d.ID)
 	}
 	return true
 }

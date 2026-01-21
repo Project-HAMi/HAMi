@@ -45,9 +45,9 @@ const (
 	GPUNoUse             = "nvidia.com/nouse-gputype"
 	NumaBind             = "nvidia.com/numa-bind"
 	NodeLockNvidia       = "hami.io/mutex.lock"
-	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
+	// GPUUseUUID annotation specifies a comma-separated list of GPU UUIDs to use.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
-	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
+	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
 

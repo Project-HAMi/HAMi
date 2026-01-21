@@ -41,9 +41,9 @@ const (
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
-	// DCUUseUUID is user can use specify DCU device for set DCU UUID.
+	// DCUUseUUID annotation specifies a comma-separated list of DCU UUIDs to use.
 	DCUUseUUID = "hygon.com/use-gpuuuid"
-	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID.
+	// DCUNoUseUUID annotation specifies a comma-separated list of DCU UUIDs to exclude.
 	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 
 	// NodeLockDCU should same with device plugin node lock name
