@@ -474,3 +474,6 @@ devices:
       - iluvatar.ai/MR-V50-vgpu
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
+
+prometheus:
+  enabled: false
