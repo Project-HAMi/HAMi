@@ -279,63 +279,77 @@ func start(c *cli.Context, o *options) error {
 	var started bool
 	var restartTimeout <-chan time.Time
 	var plugins []plugin.Interface
-restart:
-	// If we are restarting, stop plugins from previous run.
-	if started {
-		err := stopPlugins(plugins)
-		if err != nil {
-			return fmt.Errorf("error stopping plugins from previous run: %v", err)
-		}
-	}
 
-	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(c, o)
-	if err != nil {
-		return fmt.Errorf("error starting plugins: %v", err)
-	}
-	started = true
-
-	if restartPlugins {
-		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
-		restartTimeout = time.After(30 * time.Second)
-	}
-
-	// Start an infinite loop, waiting for several indicators to either log
-	// some messages, trigger a restart of the plugins, or exit the program.
 	for {
-		select {
-		// If the restart timeout has expired, then restart the plugins
-		case <-restartTimeout:
-			goto restart
-
-			// Detect a kubelet restart by watching for a newly created
-			// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
-			// restarting all of the plugins in the process.
-		case event := <-watcher.Events:
-			if o.kubeletSocket != "" && event.Name == o.kubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				klog.Infof("inotify: %s created, restarting.", o.kubeletSocket)
-				goto restart
-			}
-
-		// Watch for any other fs errors and log them.
-		case err := <-watcher.Errors:
-			klog.Errorf("inotify: %s", err)
-
-		// Watch for any signals from the OS. On SIGHUP, restart this loop,
-		// restarting all of the plugins in the process. On all other
-		// signals, exit the loop and exit the program.
-		case s := <-sigs:
-			switch s {
-			case syscall.SIGHUP:
-				klog.Info("Received SIGHUP, restarting.")
-				goto restart
-			default:
-				klog.Infof("Received signal \"%v\", shutting down.", s)
-				goto exit
+		// If we are restarting, stop plugins from previous run.
+		if started {
+			err := stopPlugins(plugins)
+			if err != nil {
+				return fmt.Errorf("error stopping plugins from previous run: %v", err)
 			}
 		}
+
+		klog.Info("Starting Plugins.")
+		var restartPlugins bool
+		plugins, restartPlugins, err = startPlugins(c, o)
+		if err != nil {
+			return fmt.Errorf("error starting plugins: %v", err)
+		}
+		started = true
+
+		if restartPlugins {
+			klog.Info("Failed to start one or more plugins. Retrying in 30s...")
+			restartTimeout = time.After(30 * time.Second)
+		}
+
+		// Start an infinite loop, waiting for several indicators to either log
+		// some messages, trigger a restart of the plugins, or exit the program.
+		shouldExit := false
+		shouldRestart := false
+		for {
+			select {
+			// If the restart timeout has expired, then restart the plugins
+			case <-restartTimeout:
+				klog.Info("Restart timeout expired, restarting plugins.")
+				shouldRestart = true
+
+				// Detect a kubelet restart by watching for a newly created
+				// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
+				// restarting all of the plugins in the process.
+			case event := <-watcher.Events:
+				if o.kubeletSocket != "" && event.Name == o.kubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+					klog.Infof("inotify: %s created, restarting.", o.kubeletSocket)
+					shouldRestart = true
+				}
+
+			// Watch for any other fs errors and log them.
+			case err := <-watcher.Errors:
+				klog.Errorf("inotify: %s", err)
+
+			// Watch for any signals from the OS. On SIGHUP, restart this loop,
+			// restarting all of the plugins in the process. On all other
+			// signals, exit the loop and exit the program.
+			case s := <-sigs:
+				switch s {
+				case syscall.SIGHUP:
+					klog.Info("Received SIGHUP, restarting.")
+					shouldRestart = true
+				default:
+					klog.Infof("Received signal \"%v\", shutting down.", s)
+					shouldExit = true
+				}
+			}
+
+			if shouldRestart || shouldExit {
+				break
+			}
+		}
+
+		if shouldExit {
+			break
+		}
 	}
-exit:
+
 	err = stopPlugins(plugins)
 	if err != nil {
 		return fmt.Errorf("error stopping plugins: %v", err)
