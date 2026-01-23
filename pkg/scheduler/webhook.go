@@ -21,6 +21,11 @@ import (
 	"encoding/json"
 	"net/http"
 
+<<<<<<< HEAD
+=======
+	"4pd.io/k8s-vgpu/pkg/device"
+	"4pd.io/k8s-vgpu/pkg/scheduler/config"
+>>>>>>> 21785f7 (update to v2.3.2)
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -76,6 +81,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 				continue
 			}
 		}
+<<<<<<< HEAD
 		for _, val := range device.GetDevices() {
 			found, err := val.MutateAdmission(c, pod)
 			if err != nil {
@@ -83,13 +89,24 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 				return admission.Errored(http.StatusInternalServerError, err)
 			}
 			hasResource = hasResource || found
+=======
+
+		for _, val := range device.GetDevices() {
+			hasResource = hasResource || val.MutateAdmission(c)
+>>>>>>> 21785f7 (update to v2.3.2)
 		}
 	}
 
 	if !hasResource {
+<<<<<<< HEAD
 		klog.Infof(template+" - Allowing admission for pod: no resource found", pod.Namespace, pod.Name, pod.UID)
 		//return admission.Allowed("no resource found")
 	} else if len(config.SchedulerName) > 0 {
+=======
+		return admission.Allowed(fmt.Sprintf("no resource found"))
+	}
+	if len(config.SchedulerName) > 0 {
+>>>>>>> 21785f7 (update to v2.3.2)
 		pod.Spec.SchedulerName = config.SchedulerName
 		if pod.Spec.NodeName != "" {
 			klog.Infof(template+" - Pod already has node assigned", pod.Namespace, pod.Name, pod.UID)

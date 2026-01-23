@@ -21,10 +21,21 @@ import (
 )
 
 const (
+<<<<<<< HEAD
 	AssignedTimeAnnotations = "hami.io/vgpu-time"
 	AssignedNodeAnnotations = "hami.io/vgpu-node"
 	BindTimeAnnotations     = "hami.io/bind-time"
 	DeviceBindPhase         = "hami.io/bind-phase"
+=======
+	//ResourceName = "nvidia.com/gpu"
+	//ResourceName = "4pd.io/vgpu"
+	AssignedTimeAnnotations          = "4pd.io/vgpu-time"
+	AssignedIDsAnnotations           = "4pd.io/vgpu-ids-new"
+	AssignedIDsToAllocateAnnotations = "4pd.io/devices-to-allocate"
+	AssignedNodeAnnotations          = "4pd.io/vgpu-node"
+	BindTimeAnnotations              = "4pd.io/bind-time"
+	DeviceBindPhase                  = "4pd.io/bind-phase"
+>>>>>>> 21785f7 (update to v2.3.2)
 
 	DeviceBindAllocating = "allocating"
 	DeviceBindFailed     = "failed"
@@ -37,11 +48,14 @@ const (
 	BestEffort string = "best-effort"
 	Restricted string = "restricted"
 	Guaranteed string = "guaranteed"
+<<<<<<< HEAD
 
 	// NodeNameEnvName define env var name for use get node name.
 	NodeNameEnvName = "NODE_NAME"
 	TaskPriority    = "CUDA_TASK_PRIORITY"
 	CoreLimitSwitch = "GPU_CORE_UTILIZATION_POLICY"
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 )
 
 type DevicePluginConfigs struct {
@@ -63,6 +77,7 @@ type DeviceConfig struct {
 
 var (
 <<<<<<< HEAD
+<<<<<<< HEAD
 	DebugMode         bool
 	NodeName          string
 	RuntimeSocketFlag string
@@ -81,6 +96,9 @@ var (
 		NodeHandshake:    NodeNvidiaDeviceRegistered,
 		NodeMLUHandshake: NodeMLUDeviceRegistered,
 	}
+=======
+	DebugMode bool
+>>>>>>> 21785f7 (update to v2.3.2)
 
 	DeviceSplitCount    *uint
 	DeviceMemoryScaling *float64
@@ -117,6 +135,33 @@ func (s SchedulerPolicyName) String() string {
 	return string(s)
 }
 
+<<<<<<< HEAD
 const (
 	Weight int = 10
 )
+=======
+type ContainerDeviceRequest struct {
+	Nums             int32
+	Type             string
+	Memreq           int32
+	MemPercentagereq int32
+	Coresreq         int32
+}
+
+type ContainerDevices []ContainerDevice
+
+type PodDevices []ContainerDevices
+
+type DeviceUsage struct {
+	Id        string
+	Index     uint
+	Used      int32
+	Count     int32
+	Usedmem   int32
+	Totalmem  int32
+	Totalcore int32
+	Usedcores int32
+	Type      string
+	Health    bool
+}
+>>>>>>> 21785f7 (update to v2.3.2)

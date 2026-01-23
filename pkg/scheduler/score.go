@@ -21,8 +21,13 @@ import (
 	"strings"
 	"sync"
 
+<<<<<<< HEAD
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
+=======
+	"4pd.io/k8s-vgpu/pkg/device"
+	"4pd.io/k8s-vgpu/pkg/util"
+>>>>>>> 21785f7 (update to v2.3.2)
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -39,6 +44,7 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
+<<<<<<< HEAD
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
@@ -107,6 +113,17 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
 			userNodePolicy = value
+=======
+func checkType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) bool {
+	//General type check, NVIDIA->NVIDIA MLU->MLU
+	if !strings.Contains(d.Type, n.Type) {
+		return false
+	}
+	for _, val := range device.GetDevices() {
+		found, pass := val.CheckType(annos, d, n)
+		if found {
+			return pass
+>>>>>>> 21785f7 (update to v2.3.2)
 		}
 	}
 	res := policy.NodeScoreList{
@@ -186,7 +203,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 						continue
 					}
 					// You can't allocate core=0 job to an already full GPU
-					if node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
+					if node.Devices[i].Totalcore != 0 && node.Devices[i].Usedcores == node.Devices[i].Totalcore && k.Coresreq == 0 {
 						continue
 					}
 					if !checkType(annos, *node.Devices[i], k) {

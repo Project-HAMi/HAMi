@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
 Copyright 2024 The HAMi Authors.
 
@@ -21,10 +22,18 @@ import (
 	"os"
 	"path/filepath"
 	"sync"
+=======
+package client
+
+import (
+	"os"
+	"path/filepath"
+>>>>>>> 21785f7 (update to v2.3.2)
 
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+<<<<<<< HEAD
 	"k8s.io/klog/v2"
 )
 
@@ -98,4 +107,38 @@ func loadKubeConfig() (*rest.Config, error) {
 		return rest.InClusterConfig()
 	}
 	return config, nil
+=======
+	"k8s.io/klog"
+)
+
+var (
+	kubeClient kubernetes.Interface
+)
+
+func init() {
+	kubeClient, _ = NewClient()
+}
+
+func GetClient() kubernetes.Interface {
+	return kubeClient
+}
+
+// NewClient connects to an API server
+func NewClient() (kubernetes.Interface, error) {
+	kubeConfig := os.Getenv("KUBECONFIG")
+	if kubeConfig == "" {
+		kubeConfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		klog.Infoln("InClusterConfig failed", err.Error())
+		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+		if err != nil {
+			klog.Errorln("BuildFromFlags failed", err.Error())
+			return nil, err
+		}
+	}
+	client, err := kubernetes.NewForConfig(config)
+	return client, err
+>>>>>>> 21785f7 (update to v2.3.2)
 }

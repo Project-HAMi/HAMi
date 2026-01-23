@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
 Copyright 2024 The HAMi Authors.
 
@@ -38,6 +39,22 @@ import (
 )
 
 const (
+=======
+package cambricon
+
+import (
+	"flag"
+	"strings"
+
+	"4pd.io/k8s-vgpu/pkg/util"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
+)
+
+const (
+	HandshakeAnnos         = "4pd.io/node-handshake-mlu"
+	RegisterAnnos          = "4pd.io/node-mlu-register"
+>>>>>>> 21785f7 (update to v2.3.2)
 	CambriconMLUDevice     = "MLU"
 	CambriconMLUCommonWord = "MLU"
 	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
@@ -45,6 +62,7 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
+<<<<<<< HEAD
 	// MLUUseUUID annotation specifies a comma-separated list of MLU UUIDs to use.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
 	// MLUNoUseUUID annotation specifies a comma-separated list of MLU UUIDs to exclude.
@@ -53,11 +71,14 @@ const (
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
 	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 )
 
 var (
 	MLUResourceCount  string
 	MLUResourceMemory string
+<<<<<<< HEAD
 	MLUResourceCores  string
 )
 
@@ -240,10 +261,71 @@ func (dev *CambriconDevices) checkUUID(annos map[string]string, d device.DeviceU
 		// use , symbol to connect multiple uuid
 		noUserUUIDs := strings.Split(noUserUUID, ",")
 		return !slices.Contains(noUserUUIDs, d.ID)
+=======
+)
+
+type CambriconDevices struct {
+}
+
+func InitMLUDevice() *CambriconDevices {
+	return &CambriconDevices{}
+}
+
+func (dev *CambriconDevices) ParseConfig(fs *flag.FlagSet) {
+	fs.StringVar(&MLUResourceCount, "mlu-name", "cambricon.com/mlunum", "mlu resource count")
+	fs.StringVar(&MLUResourceMemory, "mlu-memory", "cambricon.com/mlumem", "mlu memory resource")
+}
+
+func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container) bool {
+	_, ok := ctr.Resources.Limits[corev1.ResourceName(MLUResourceMemory)]
+	if ok {
+		if ctr.Lifecycle == nil {
+			ctr.Lifecycle = &corev1.Lifecycle{PostStart: nil}
+		}
+		ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
+			Exec: &corev1.ExecAction{Command: []string{"/usr/bin/smlu-containerd"}}}
+		return true
+	}
+	_, ok = ctr.Resources.Limits[corev1.ResourceName(MLUResourceCount)]
+	return ok
+}
+
+func checkMLUtype(annos map[string]string, cardtype string) bool {
+	inuse, ok := annos[MLUInUse]
+	if ok {
+		if !strings.Contains(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
+				return true
+			}
+		} else {
+			for _, val := range strings.Split(inuse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	nouse, ok := annos[MLUNoUse]
+	if ok {
+		if !strings.Contains(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
+				return false
+			}
+		} else {
+			for _, val := range strings.Split(nouse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return false
+				}
+			}
+		}
+		return true
+>>>>>>> 21785f7 (update to v2.3.2)
 	}
 	return true
 }
 
+<<<<<<< HEAD
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count mlu devices for container ", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
@@ -252,18 +334,42 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	for idx, val := range ctr.Resources.Limits {
 		klog.Infoln("idx=", idx, "val=", val, ctr.Resources.Limits[mluResourceMem])
 	}
+=======
+func (dev *CambriconDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+	if strings.Contains(n.Type, CambriconMLUDevice) {
+		if !strings.Contains(d.Type, "370") && n.Memreq != 0 {
+			return true, false
+		}
+		if strings.Contains(d.Type, "370") && n.Memreq == 0 && d.Used > 0 {
+			return true, false
+		}
+		return true, checkMLUtype(annos, d.Type)
+	}
+	return false, false
+}
+
+func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+	klog.Infof("Counting mlu devices")
+	mluResourceCount := corev1.ResourceName(MLUResourceCount)
+	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
+>>>>>>> 21785f7 (update to v2.3.2)
 	v, ok := ctr.Resources.Limits[mluResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[mluResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+<<<<<<< HEAD
 			klog.Info("Found cambricon devices")
+=======
+			klog.Info("Found mlu devices")
+>>>>>>> 21785f7 (update to v2.3.2)
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[mluResourceMem]
 			}
+<<<<<<< HEAD
 			klog.Infoln("mluResourceMem", mem, "ok=", ok, "memoryname=", mluResourceMem)
 			if ok {
 				memnums, ok := mem.AsInt64()
@@ -432,4 +538,20 @@ func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
 		ResourceMemoryName: MLUResourceMemory,
 		ResourceCoreName:   MLUResourceCores,
 	}
+=======
+			if ok {
+				memnums, ok := mem.AsInt64()
+				if ok {
+					memnum = int(memnums)
+				}
+			}
+			return util.ContainerDeviceRequest{
+				Nums:   int32(n),
+				Type:   CambriconMLUDevice,
+				Memreq: int32(memnum),
+			}
+		}
+	}
+	return util.ContainerDeviceRequest{}
+>>>>>>> 21785f7 (update to v2.3.2)
 }

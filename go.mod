@@ -135,10 +135,12 @@ replace (
 	github.com/NVIDIA/nvidia-container-toolkit v1.13.3
 	github.com/container-orchestrated-devices/container-device-interface v0.5.4-0.20230111111500-5b3b5d81179a
 	github.com/fsnotify/fsnotify v1.6.0
+	github.com/golang/glog v1.1.0
 	github.com/golang/mock v1.6.0
 	github.com/google/uuid v1.3.0
 	github.com/jessevdk/go-flags v1.5.0
 	github.com/julienschmidt/httprouter v1.3.0
+	github.com/kubevirt/device-plugin-manager v1.19.5
 	github.com/onsi/ginkgo v1.16.5
 	github.com/onsi/gomega v1.24.1
 	github.com/opencontainers/runtime-spec v1.1.0-rc.2
@@ -156,9 +158,10 @@ replace (
 	k8s.io/api v0.27.3
 	k8s.io/apimachinery v0.27.3
 	k8s.io/client-go v0.27.3
+	k8s.io/klog v1.0.0
 	k8s.io/klog/v2 v2.90.1
 	k8s.io/kube-scheduler v0.25.4
-	k8s.io/kubelet v0.0.0
+	k8s.io/kubelet v0.19.2
 	k8s.io/kubernetes v1.25.4
 	sigs.k8s.io/controller-runtime v0.13.1
 )

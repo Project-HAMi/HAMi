@@ -9,6 +9,12 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
+<<<<<<< HEAD
           nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
           nvidia.com/gpumem-percentage: 100 # identifies 100% GPU memory each physical GPU allocates to the pod （Optional,Integer）
           nvidia.com/gpucores: 100 # identifies 100% GPU GPU core each physical GPU allocates to the pod（Optional,Integer)
+=======
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+          nvidia.com/gpumem-percentage: 100 # Each vGPU contains 100% of the entire GPU device memory （Optional,Integer）
+          nvidia.com/gpucores: 100 # Each vGPU uses 30% of the entire GPU cores（Optional,Integer)
+>>>>>>> 21785f7 (update to v2.3.2)

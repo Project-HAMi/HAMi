@@ -211,6 +211,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 	schedpods, _ := sher.GetPodManager().GetScheduledPods()
 	for _, val := range schedpods {
+<<<<<<< HEAD
 		for _, podSingleDevice := range val.Devices {
 			for ctridx, ctrdevs := range podSingleDevice {
 				for _, ctrdevval := range ctrdevs {
@@ -249,6 +250,24 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							}
 						}
 						if found {
+=======
+		for ctridx, ctrval := range val.Devices {
+			for _, ctrdevval := range ctrval {
+				fmt.Println("Collecting", val.Namespace, val.NodeID, val.Name, ctrdevval.UUID, ctrdevval.Usedcores, ctrdevval.Usedmem)
+				ch <- prometheus.MustNewConstMetric(
+					ctrvGPUDeviceAllocatedDesc,
+					prometheus.GaugeValue,
+					float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
+					val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID, fmt.Sprint(ctrdevval.Usedcores))
+				var totaldev int32
+				found := false
+				for _, ni := range *nu {
+					for _, nodedev := range ni.Devices {
+						//fmt.Println("uuid=", nodedev.Id, ctrdevval.UUID)
+						if strings.Compare(nodedev.Id, ctrdevval.UUID) == 0 {
+							totaldev = nodedev.Totalmem
+							found = true
+>>>>>>> 21785f7 (update to v2.3.2)
 							break
 						}
 					}

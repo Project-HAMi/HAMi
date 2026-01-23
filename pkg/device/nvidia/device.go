@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
 Copyright 2024 The HAMi Authors.
 
@@ -474,10 +475,102 @@ func checkGPUtype(annos map[string]string, cardtype string) bool {
 		}) {
 			return false
 		}
+=======
+package nvidia
+
+import (
+	"flag"
+	"fmt"
+	"strings"
+
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/scheduler/config"
+	"4pd.io/k8s-vgpu/pkg/util"
+	corev1 "k8s.io/api/core/v1"
+)
+
+const (
+	HandshakeAnnos      = "4pd.io/node-handshake"
+	RegisterAnnos       = "4pd.io/node-nvidia-register"
+	NvidiaGPUDevice     = "NVIDIA"
+	NvidiaGPUCommonWord = "GPU"
+	GPUInUse            = "nvidia.com/use-gputype"
+	GPUNoUse            = "nvidia.com/nouse-gputype"
+)
+
+var (
+	ResourceName          string
+	ResourceMem           string
+	ResourceCores         string
+	ResourceMemPercentage string
+	ResourcePriority      string
+	DebugMode             bool
+)
+
+type NvidiaGPUDevices struct {
+}
+
+func InitNvidiaDevice() *NvidiaGPUDevices {
+	return &NvidiaGPUDevices{}
+}
+
+func (dev *NvidiaGPUDevices) ParseConfig(fs *flag.FlagSet) {
+	fs.StringVar(&ResourceName, "resource-name", "nvidia.com/gpu", "resource name")
+	fs.StringVar(&ResourceMem, "resource-mem", "nvidia.com/gpumem", "gpu memory to allocate")
+	fs.StringVar(&ResourceMemPercentage, "resource-mem-percentage", "nvidia.com/gpumem-percentage", "gpu memory fraction to allocate")
+	fs.StringVar(&ResourceCores, "resource-cores", "nvidia.com/gpucores", "cores percentage to use")
+	fs.StringVar(&ResourcePriority, "resource-priority", "vgputaskpriority", "vgpu task priority 0 for high and 1 for low")
+}
+
+func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container) bool {
+	/*gpu related */
+	priority, ok := ctr.Resources.Limits[corev1.ResourceName(ResourcePriority)]
+	if ok {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{
+			Name:  api.TaskPriority,
+			Value: fmt.Sprint(priority.Value()),
+		})
+	}
+	_, ok = ctr.Resources.Limits[corev1.ResourceName(ResourceName)]
+	return ok
+}
+
+func checkGPUtype(annos map[string]string, cardtype string) bool {
+	inuse, ok := annos[GPUInUse]
+	if ok {
+		if !strings.Contains(inuse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
+				return true
+			}
+		} else {
+			for _, val := range strings.Split(inuse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	nouse, ok := annos[GPUNoUse]
+	if ok {
+		if !strings.Contains(nouse, ",") {
+			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
+				return false
+			}
+		} else {
+			for _, val := range strings.Split(nouse, ",") {
+				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
+					return false
+				}
+			}
+		}
+		return true
+>>>>>>> 21785f7 (update to v2.3.2)
 	}
 	return true
 }
 
+<<<<<<< HEAD
 func assertNuma(annos map[string]string) bool {
 	numabind, ok := annos[NumaBind]
 	if ok {
@@ -497,10 +590,16 @@ func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d device.DeviceU
 	}
 	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
 		return typeCheck, assertNuma(annos)
+=======
+func (dev *NvidiaGPUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+	if strings.Compare(n.Type, NvidiaGPUDevice) == 0 {
+		return true, checkGPUtype(annos, d.Type)
+>>>>>>> 21785f7 (update to v2.3.2)
 	}
 	return false, false
 }
 
+<<<<<<< HEAD
 func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
 	userUUID, ok := annos[GPUUseUUID]
 	if ok {
@@ -538,6 +637,13 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	resourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
 	resourceMemPercentage := corev1.ResourceName(dev.config.ResourceMemoryPercentageName)
 	resourceCores := corev1.ResourceName(dev.config.ResourceCoreName)
+=======
+func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+	resourceName := corev1.ResourceName(ResourceName)
+	resourceMem := corev1.ResourceName(ResourceMem)
+	resourceMemPercentage := corev1.ResourceName(ResourceMemPercentage)
+	resourceCores := corev1.ResourceName(ResourceCores)
+>>>>>>> 21785f7 (update to v2.3.2)
 	v, ok := ctr.Resources.Limits[resourceName]
 	if !ok {
 		v, ok = ctr.Resources.Requests[resourceName]
@@ -552,11 +658,14 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+<<<<<<< HEAD
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(dev.config.MemoryFactor)
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 					memnum = int(memnums)
 				}
 			}
@@ -572,13 +681,22 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
+<<<<<<< HEAD
 				if dev.config.DefaultMemory != 0 {
 					memnum = int(dev.config.DefaultMemory)
+=======
+				if config.DefaultMem != 0 {
+					memnum = int(config.DefaultMem)
+>>>>>>> 21785f7 (update to v2.3.2)
 				} else {
 					mempnum = 100
 				}
 			}
+<<<<<<< HEAD
 			corenum := dev.config.DefaultCores
+=======
+			corenum := config.DefaultCores
+>>>>>>> 21785f7 (update to v2.3.2)
 			core, ok := ctr.Resources.Limits[resourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[resourceCores]
@@ -589,7 +707,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 					corenum = int32(corenums)
 				}
 			}
+<<<<<<< HEAD
 			return device.ContainerDeviceRequest{
+=======
+			return util.ContainerDeviceRequest{
+>>>>>>> 21785f7 (update to v2.3.2)
 				Nums:             int32(n),
 				Type:             NvidiaGPUDevice,
 				Memreq:           int32(memnum),
@@ -598,6 +720,7 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 		}
 	}
+<<<<<<< HEAD
 	return device.ContainerDeviceRequest{}
 }
 
@@ -979,4 +1102,7 @@ func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.Con
 		}
 	}
 	return bestCombination
+=======
+	return util.ContainerDeviceRequest{}
+>>>>>>> 21785f7 (update to v2.3.2)
 }

@@ -1,6 +1,7 @@
 apiVersion: v1
 kind: Pod
 metadata:
+<<<<<<< HEAD
   name: vdcu-pytorch-demo
   annotations:
     hygon.com/use-dcutype: "DCU-K100_AI" #Specify the card type for this job, use comma to separate, will launch job on specified card
@@ -16,3 +17,22 @@ spec:
           hygon.com/dcunum: 1
           hygon.com/dcucores: 60
           hygon.com/dcumem: 2000
+=======
+  name: alexnet-tf-gpu-pod-mem
+  annotations:
+    hygon.com/use-dcutype: "Z100" # Specify the card type for this job, use comma to seperate, will not launch job on non-specified card
+    #In this example, we want to run this job on Z100
+  labels:
+    purpose: demo-tf-amdgpu
+spec:
+  containers:
+    - name: alexnet-tf-gpu-container
+      image: pytorch:resnet50
+      workingDir: /root
+      command: ["sleep","infinity"]
+      resources:
+        limits:
+          hygon.com/dcunum: 1 # requesting a GPU
+          hygon.com/dcumem: 2000
+          hygon.com/dcucores: 60
+>>>>>>> 21785f7 (update to v2.3.2)

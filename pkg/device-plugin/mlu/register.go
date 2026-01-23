@@ -26,7 +26,12 @@ import (
 
 	"4pd.io/k8s-vgpu/pkg/api"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+<<<<<<< HEAD
 	"google.golang.org/grpc"
+=======
+	"4pd.io/k8s-vgpu/pkg/device/cambricon"
+	"4pd.io/k8s-vgpu/pkg/util"
+>>>>>>> 21785f7 (update to v2.3.2)
 )
 
 type DevListFunc func() []*pluginapi.Device
@@ -63,6 +68,7 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 		fmt.Println("mlu registered device id=", dev.dev.ID, "memory=", memory, "type=", cndev.GetDeviceModel(uint(i)))
 		registeredmem := int32(memory)
 <<<<<<< HEAD
+<<<<<<< HEAD
 		if config.DeviceMemoryScaling > 1 {
 			fmt.Println("Memory Scaling to", config.DeviceMemoryScaling)
 			registeredmem = int32(float64(registeredmem) * config.DeviceMemoryScaling)
@@ -71,6 +77,8 @@ func (r *DeviceRegister) apiDevices() *[]*api.DeviceInfo {
 			registeredmem = int32(float64(registeredmem) * *util.DeviceMemoryScaling)
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 		res = append(res, &api.DeviceInfo{
 			Id:     dev.dev.ID,
 			Count:  int32(*util.DeviceSplitCount),
@@ -108,9 +116,18 @@ func (r *DeviceRegister) RegistrInAnnotation() error {
 		err = fmt.Errorf("client register error, %v", err)
 		return err
 	}
+<<<<<<< HEAD
 	klog.Infof("after client register")
 	req := api.RegisterRequest{Node: config.NodeName, Devices: *r.apiDevices()}
 	err = register.Send(&req)
+=======
+	encodeddevices := util.EncodeNodeDevices(*devices)
+	annos[cambricon.HandshakeAnnos] = "Reported " + time.Now().String()
+	annos[cambricon.RegisterAnnos] = encodeddevices
+	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
+	err = util.PatchNodeAnnotations(node, annos)
+
+>>>>>>> 21785f7 (update to v2.3.2)
 	if err != nil {
 		klog.Errorf("register send error, %v", err)
 		return err

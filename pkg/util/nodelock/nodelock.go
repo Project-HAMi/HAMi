@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
 Copyright 2024 The HAMi Authors.
 
@@ -14,11 +15,14 @@ See the License for the specific language governing permissions and
 limitations under the License.
 */
 
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 package nodelock
 
 import (
 	"context"
 	"fmt"
+<<<<<<< HEAD
 	"os"
 	"strings"
 	"sync"
@@ -123,11 +127,60 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
 
+=======
+	"time"
+
+	"4pd.io/k8s-vgpu/pkg/util/client"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/klog/v2"
+)
+
+<<<<<<<< HEAD:pkg/util/nodelock.go
+var kubeClient kubernetes.Interface
+var DevicesToHandle []string
+
+func init() {
+	kubeClient, _ = NewClient()
+	DevicesToHandle = []string{}
+	DevicesToHandle = append(DevicesToHandle, NvidiaGPUCommonWord)
+	DevicesToHandle = append(DevicesToHandle, CambriconMLUCommonWord)
+}
+
+func GetClient() kubernetes.Interface {
+	return kubeClient
+}
+
+// NewClient connects to an API server
+func NewClient() (kubernetes.Interface, error) {
+	kubeConfig := os.Getenv("KUBECONFIG")
+	if kubeConfig == "" {
+		kubeConfig = filepath.Join(os.Getenv("HOME"), ".kube", "config")
+	}
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		config, err = clientcmd.BuildConfigFromFlags("", kubeConfig)
+		if err != nil {
+			return nil, err
+		}
+	}
+	client, err := kubernetes.NewForConfig(config)
+	return client, err
+}
+========
+const (
+	NodeLockTime = "4pd.io/mutex.lock"
+	MaxLockRetry = 5
+)
+>>>>>>>> 21785f7 (update to v2.3.2):pkg/util/nodelock/nodelock.go
+
+func SetNodeLock(nodeName string) error {
+>>>>>>> 21785f7 (update to v2.3.2)
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
@@ -165,11 +218,40 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
 
+=======
+	if _, ok := node.ObjectMeta.Annotations[NodeLockTime]; ok {
+		return fmt.Errorf("node %s is locked", nodeName)
+	}
+	newNode := node.DeepCopy()
+	newNode.ObjectMeta.Annotations[NodeLockTime] = time.Now().Format(time.RFC3339)
+	_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
+	for i := 0; i < MaxLockRetry && err != nil; i++ {
+		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
+		time.Sleep(100 * time.Millisecond)
+		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
+			continue
+		}
+		newNode := node.DeepCopy()
+		newNode.ObjectMeta.Annotations[NodeLockTime] = time.Now().Format(time.RFC3339)
+		_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("setNodeLock exceeds retry count %d", MaxLockRetry)
+	}
+	klog.InfoS("Node lock set", "node", nodeName)
+	return nil
+}
+
+func ReleaseNodeLock(nodeName string) error {
+>>>>>>> 21785f7 (update to v2.3.2)
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 
 	lockStr, ok := node.Annotations[NodeLockKey]
 	if !ok {
@@ -206,11 +288,41 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 }
 
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
+=======
+	if _, ok := node.ObjectMeta.Annotations[NodeLockTime]; !ok {
+		klog.InfoS("Node lock not set", "node", nodeName)
+		return nil
+	}
+	newNode := node.DeepCopy()
+	delete(newNode.ObjectMeta.Annotations, NodeLockTime)
+	_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
+	for i := 0; i < MaxLockRetry && err != nil; i++ {
+		klog.ErrorS(err, "Failed to update node", "node", nodeName, "retry", i)
+		time.Sleep(100 * time.Millisecond)
+		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			klog.ErrorS(err, "Failed to get node when retry to update", "node", nodeName)
+			continue
+		}
+		newNode := node.DeepCopy()
+		delete(newNode.ObjectMeta.Annotations, NodeLockTime)
+		_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
+	}
+	if err != nil {
+		return fmt.Errorf("releaseNodeLock exceeds retry count %d", MaxLockRetry)
+	}
+	klog.InfoS("Node lock released", "node", nodeName)
+	return nil
+}
+
+func LockNode(nodeName string) error {
+>>>>>>> 21785f7 (update to v2.3.2)
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	if _, ok := node.Annotations[NodeLockKey]; !ok {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
@@ -238,10 +350,23 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 
 	if skipOwnerCheck {
 		err = ReleaseNodeLock(nodeName, lockname, pods, true)
+=======
+	if _, ok := node.ObjectMeta.Annotations[NodeLockTime]; !ok {
+		return SetNodeLock(nodeName)
+	}
+	lockTime, err := time.Parse(time.RFC3339, node.ObjectMeta.Annotations[NodeLockTime])
+	if err != nil {
+		return err
+	}
+	if time.Since(lockTime) > time.Minute*5 {
+		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
+		err = ReleaseNodeLock(nodeName)
+>>>>>>> 21785f7 (update to v2.3.2)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
 		}
+<<<<<<< HEAD
 		return SetNodeLock(nodeName, lockname, pods)
 	}
 
@@ -273,4 +398,9 @@ func GeneratePodNamespaceName(pod *corev1.Pod, sep string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s%s%s", pod.Namespace, sep, pod.Name)
+=======
+		return SetNodeLock(nodeName)
+	}
+	return fmt.Errorf("node %s has been locked within 5 minutes", nodeName)
+>>>>>>> 21785f7 (update to v2.3.2)
 }

@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 /*
 Copyright 2024 The HAMi Authors.
 
@@ -29,18 +30,35 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+=======
+package hygon
+
+import (
+	"flag"
+	"strings"
+
+	"4pd.io/k8s-vgpu/pkg/util"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog"
+>>>>>>> 21785f7 (update to v2.3.2)
 )
 
 type DCUDevices struct {
 }
 
 const (
+<<<<<<< HEAD
 	HandshakeAnnos     = "hami.io/node-handshake-dcu"
 	RegisterAnnos      = "hami.io/node-dcu-register"
+=======
+	HandshakeAnnos     = "4pd.io/node-handshake-dcu"
+	RegisterAnnos      = "4pd.io/node-dcu-register"
+>>>>>>> 21785f7 (update to v2.3.2)
 	HygonDCUDevice     = "DCU"
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
+<<<<<<< HEAD
 	// DCUUseUUID annotation specifies a comma-separated list of DCU UUIDs to use.
 	DCUUseUUID = "hygon.com/use-gpuuuid"
 	// DCUNoUseUUID annotation specifies a comma-separated list of DCU UUIDs to exclude.
@@ -50,12 +68,15 @@ const (
 	// there is a bug with nodelock package utils, the key is hard coded as "hami.io/mutex.lock"
 	// so we can only use this value now.
 	NodeLockDCU = "hami.io/mutex.lock"
+=======
+>>>>>>> 21785f7 (update to v2.3.2)
 )
 
 var (
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
+<<<<<<< HEAD
 	MemoryFactor        int32
 )
 
@@ -85,11 +106,21 @@ func (dev *DCUDevices) CommonWord() string {
 }
 
 func ParseConfig(fs *flag.FlagSet) {
+=======
+)
+
+func InitDCUDevice() *DCUDevices {
+	return &DCUDevices{}
+}
+
+func (dev *DCUDevices) ParseConfig(fs *flag.FlagSet) {
+>>>>>>> 21785f7 (update to v2.3.2)
 	fs.StringVar(&HygonResourceCount, "dcu-name", "hygon.com/dcunum", "dcu resource count")
 	fs.StringVar(&HygonResourceMemory, "dcu-memory", "hygon.com/dcumem", "dcu memory resource")
 	fs.StringVar(&HygonResourceCores, "dcu-cores", "hygon.com/dcucores", "dcu core resource")
 }
 
+<<<<<<< HEAD
 func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
 	return ok, nil
@@ -97,12 +128,26 @@ func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
 	if inuse, ok := annos[DCUInUse]; ok {
+=======
+func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container) bool {
+	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
+	return ok
+}
+
+func checkDCUtype(annos map[string]string, cardtype string) bool {
+	inuse, ok := annos[DCUInUse]
+	if ok {
+>>>>>>> 21785f7 (update to v2.3.2)
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
 			}
 		} else {
+<<<<<<< HEAD
 			for val := range strings.SplitSeq(inuse, ",") {
+=======
+			for _, val := range strings.Split(inuse, ",") {
+>>>>>>> 21785f7 (update to v2.3.2)
 				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
 					return true
 				}
@@ -110,13 +155,22 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
+<<<<<<< HEAD
 	if nouse, ok := annos[DCUNoUse]; ok {
+=======
+	nouse, ok := annos[DCUNoUse]
+	if ok {
+>>>>>>> 21785f7 (update to v2.3.2)
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false
 			}
 		} else {
+<<<<<<< HEAD
 			for val := range strings.SplitSeq(nouse, ",") {
+=======
+			for _, val := range strings.Split(nouse, ",") {
+>>>>>>> 21785f7 (update to v2.3.2)
 				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
 					return false
 				}
@@ -127,6 +181,7 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 	return true
 }
 
+<<<<<<< HEAD
 func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
@@ -213,6 +268,17 @@ func (dev *DCUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) 
 
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count dcu devices for container ", ctr.Name)
+=======
+func (dev *DCUDevices) CheckType(annos map[string]string, d util.DeviceUsage, n util.ContainerDeviceRequest) (bool, bool) {
+	if strings.Compare(n.Type, HygonDCUDevice) == 0 {
+		return true, checkDCUtype(annos, d.Type)
+	}
+	return false, false
+}
+
+func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) util.ContainerDeviceRequest {
+	klog.Infof("Counting dcu devices")
+>>>>>>> 21785f7 (update to v2.3.2)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
 	dcuResourceMem := corev1.ResourceName(HygonResourceMemory)
 	dcuResourceCores := corev1.ResourceName(HygonResourceCores)
@@ -231,6 +297,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+<<<<<<< HEAD
 					if MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(MemoryFactor)
@@ -240,6 +307,12 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				}
 			}
 			corenum := int32(100)
+=======
+					memnum = int(memnums)
+				}
+			}
+			corenum := int32(0)
+>>>>>>> 21785f7 (update to v2.3.2)
 			core, ok := ctr.Resources.Limits[dcuResourceCores]
 			if !ok {
 				core, ok = ctr.Resources.Requests[dcuResourceCores]
@@ -256,7 +329,11 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 				mempnum = 100
 			}
 
+<<<<<<< HEAD
 			return device.ContainerDeviceRequest{
+=======
+			return util.ContainerDeviceRequest{
+>>>>>>> 21785f7 (update to v2.3.2)
 				Nums:             int32(n),
 				Type:             HygonDCUDevice,
 				Memreq:           int32(memnum),
@@ -265,6 +342,7 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			}
 		}
 	}
+<<<<<<< HEAD
 	return device.ContainerDeviceRequest{}
 }
 
@@ -394,4 +472,7 @@ func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
 		ResourceMemoryName: HygonResourceMemory,
 		ResourceCoreName:   HygonResourceCores,
 	}
+=======
+	return util.ContainerDeviceRequest{}
+>>>>>>> 21785f7 (update to v2.3.2)
 }

@@ -20,7 +20,11 @@ import (
 	"fmt"
 	"sync"
 
+<<<<<<< HEAD
 	corev1 "k8s.io/api/core/v1"
+=======
+	"4pd.io/k8s-vgpu/pkg/util"
+>>>>>>> 21785f7 (update to v2.3.2)
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -44,20 +48,7 @@ type NodeInfo struct {
 	Devices []DeviceInfo
 }
 
-type DeviceUsage struct {
-	Id        string
-	Index     uint
-	Used      int32
-	Count     int32
-	Usedmem   int32
-	Totalmem  int32
-	Totalcore int32
-	Usedcores int32
-	Type      string
-	Health    bool
-}
-
-type DeviceUsageList []*DeviceUsage
+type DeviceUsageList []*util.DeviceUsage
 
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 type NodeUsage struct {

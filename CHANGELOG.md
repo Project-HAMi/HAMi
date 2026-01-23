@@ -180,6 +180,7 @@ Fix an issue where mlu device-plugin can't be launched properly
 Major rework on devices-related code
 
 Add support for hygon DCU device
+<<<<<<< HEAD
 
 ## v2.3.3
 
@@ -234,3 +235,5 @@ Add support for Ascend910B3 device
 Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
 
+=======
+>>>>>>> 21785f7 (update to v2.3.2)

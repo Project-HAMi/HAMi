@@ -5,6 +5,7 @@ metadata:
 spec:
   containers:
     - name: ubuntu-container
+<<<<<<< HEAD
       image: ubuntu:22.04
       command: ["bash", "-c", "sleep 86400"]
       resources:
@@ -12,3 +13,12 @@ spec:
           nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
           nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
           nvidia.com/gpucores: 30 # identifies 30% GPU GPU core each physical GPU allocates to the pod （Optional,Integer)
+=======
+      image: ubuntu:18.04
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+          nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+          nvidia.com/gpucores: 30 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
+>>>>>>> 21785f7 (update to v2.3.2)

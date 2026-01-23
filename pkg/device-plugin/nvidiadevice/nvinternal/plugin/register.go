@@ -191,6 +191,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	"k8s.io/klog/v2"
 
 	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/device/nvidia"
 	"4pd.io/k8s-vgpu/pkg/util"
 )
 
@@ -266,8 +267,8 @@ func (r *NvidiaDevicePlugin) RegistrInAnnotation() error {
 	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
 =======
 	encodeddevices := util.EncodeNodeDevices(*devices)
-	annos[util.NodeHandshake] = "Reported " + time.Now().String()
-	annos[util.NodeNvidiaDeviceRegistered] = encodeddevices
+	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
+	annos[nvidia.RegisterAnnos] = encodeddevices
 	klog.Infoln("Reporting devices", encodeddevices, "in", time.Now().String())
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	err = util.PatchNodeAnnotations(node, annos)

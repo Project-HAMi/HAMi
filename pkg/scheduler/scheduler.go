@@ -31,13 +31,18 @@ import (
 	"time"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 =======
+=======
+	"4pd.io/k8s-vgpu/pkg/device"
+>>>>>>> 21785f7 (update to v2.3.2)
 	"4pd.io/k8s-vgpu/pkg/k8sutil"
 	"4pd.io/k8s-vgpu/pkg/util"
+	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
@@ -324,6 +329,7 @@ func (s *Scheduler) Start() error {
 
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+<<<<<<< HEAD
 	cache.WaitForCacheSync(s.stopCh, podEventHandlerRegistration.HasSynced, nodeEventHandlerRegistration.HasSynced, resourceQuotaEventHandlerRegistration.HasSynced)
 
 	if config.LeaderElect {
@@ -342,6 +348,9 @@ func (s *Scheduler) Start() error {
 	s.addAllEventHandlers()
 	atomic.StoreUint32(&s.started, 1)
 	return nil
+=======
+
+>>>>>>> 21785f7 (update to v2.3.2)
 }
 
 func (s *Scheduler) Stop() {
@@ -382,7 +391,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 			continue
 =======
 		for _, val := range nodes.Items {
-			for devhandsk, devreg := range util.KnownDevice {
+			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
 					continue
@@ -600,7 +609,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*N
 		}
 		nodeInfo := &NodeUsage{}
 		for _, d := range node.Devices {
-			nodeInfo.Devices = append(nodeInfo.Devices, &DeviceUsage{
+			nodeInfo.Devices = append(nodeInfo.Devices, &util.DeviceUsage{
 				Id:        d.ID,
 				Index:     d.Index,
 				Used:      0,
@@ -761,8 +770,12 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.ErrorS(err, "Failed to get pod", "pod", args.PodName, "namespace", args.PodNamespace)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
+<<<<<<< HEAD
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
+=======
+	err = nodelock.LockNode(args.Node)
+>>>>>>> 21785f7 (update to v2.3.2)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
@@ -817,10 +830,15 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			resourceReqTotal += int(k.Nums)
 		}
 	}
+<<<<<<< HEAD
 	if resourceReqTotal == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
+=======
+	if total == 0 {
+		klog.V(1).Infof("pod %v not find resource", args.Pod.Name)
+>>>>>>> 21785f7 (update to v2.3.2)
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,

@@ -1,0 +1,91 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "4pd-vgpu.device-plugin" . }}-hygon
+  labels:
+    app.kubernetes.io/component: 4pd-device-plugin-hygon
+    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: 4pd-device-plugin-hygon
+      {{- include "4pd-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: 4pd-device-plugin-hygon
+        4pd.io/webhook: ignore
+        {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
+      {{- if .Values.devicePlugin.podAnnotations }}
+      annotations: {{ toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
+      serviceAccountName: {{ include "4pd-vgpu.device-plugin" . }}
+      priorityClassName: system-node-critical
+      hostPID: true
+      hostNetwork: true
+      containers:
+        - name: dcu-device-plugin-ctr
+          image: {{ .Values.devicePlugin.hygonimage }}
+          imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
+          command: ["/hygon","-logtostderr=true","-stderrthreshold=INFO","-v=5"]
+          env:
+            - name: NodeName
+              valueFrom:
+                fieldRef:
+                  fieldPath: spec.nodeName
+            - name: HOOK_PATH
+              value: {{ .Values.devicePlugin.libPath }}
+            - name: HYGONPATH
+              value: {{ .Values.devicePlugin.hygondriver }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            capabilities:
+              drop: ["ALL"]
+              add: ["SYS_ADMIN"]
+          volumeMounts:
+            - name: device-plugin
+              mountPath: /var/lib/kubelet/device-plugins
+            - name: deviceconfig
+              mountPath: /config
+            - name: sysinfo
+              mountPath: /sys
+            - name: lib
+              mountPath: /usr/local/vgpu
+            - name: hwpath
+              mountPath: /usr/share/hwdata
+            - name: hygonloc
+              mountPath: /opt/hygondriver/
+      volumes:
+        - name: device-plugin
+          hostPath:
+            path: {{ .Values.devicePlugin.pluginPath }}
+        - name: sysinfo
+          hostPath:
+            path: /sys
+        - name: deviceconfig
+          configMap:
+            name: {{ template "4pd-vgpu.device-plugin" . }}
+        - name: lib
+          hostPath:
+            path: {{ .Values.devicePlugin.libPath }}
+        - name: hwpath
+          hostPath:
+            path: /usr/share/hwdata
+        - name: hygonloc
+          hostPath:
+            path: {{ .Values.devicePlugin.hygondriver }}
+      {{- if .Values.devicePlugin.hygonnodeSelector }}
+      nodeSelector: {{ toYaml .Values.devicePlugin.hygonnodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.devicePlugin.tolerations }}
+      tolerations: {{ toYaml .Values.devicePlugin.tolerations | nindent 8 }}
+      {{- end }}

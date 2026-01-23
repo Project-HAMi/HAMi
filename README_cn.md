@@ -2,6 +2,7 @@
 
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
 
+<<<<<<< HEAD
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
 [![Releases](https://img.shields.io/github/v/release/Project-HAMi/HAMi)](https://github.com/Project-HAMi/HAMi/releases/latest)
@@ -13,6 +14,33 @@
 [![Contact Me](https://img.shields.io/badge/联系我们-blue)](https://github.com/Project-HAMi/HAMi#contact)
 [![discord](https://img.shields.io/badge/discord-5865F2?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
 [![website](https://img.shields.io/badge/官网-green?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
+=======
+## 支持设备：
+
+[![英伟达 GPU](https://img.shields.io/badge/Nvidia-GPU-blue)](https://github.com/4paradigm/k8s-vgpu-scheduler#preparing-your-gpu-nodes)
+[![寒武纪 MLU](https://img.shields.io/badge/寒武纪-Mlu-blue)](docs/cambricon-mlu-support_cn.md)
+[![海光 DCU](https://img.shields.io/badge/海光-DCU-blue)](docs/hygon-dcu-support.md)
+
+
+## 目录
+
+- [简介](#简介)
+- [使用场景](#使用场景)
+- [安装要求](#安装要求)
+- [快速入门](#快速入门)
+  - [GPU节点准备](#GPU节点准备)
+  - [Kubernetes开启vGPU支持](#Kubernetes开启vGPU支持)
+  - [运行GPU任务](#运行GPU任务)
+- [调度策略](#调度策略)
+- [性能测试](#性能测试)
+- [功能](#功能)
+- [实验性功能](#实验性功能)
+- [已知问题](#已知问题)
+- [开发计划](#开发计划)
+- [测试](#测试)
+- [卸载](#卸载)
+- [问题反馈及代码贡献](#问题反馈及代码贡献)
+>>>>>>> 21785f7 (update to v2.3.2)
 
 ## Project-HAMi：异构 AI 计算虚拟化中间件
 

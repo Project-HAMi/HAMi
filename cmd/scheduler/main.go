@@ -25,6 +25,15 @@ import (
 	"os"
 	"time"
 
+<<<<<<< HEAD
+=======
+	"4pd.io/k8s-vgpu/pkg/device"
+	"4pd.io/k8s-vgpu/pkg/version"
+
+	"4pd.io/k8s-vgpu/pkg/scheduler"
+	"4pd.io/k8s-vgpu/pkg/scheduler/config"
+	"4pd.io/k8s-vgpu/pkg/scheduler/routes"
+>>>>>>> 21785f7 (update to v2.3.2)
 	"github.com/julienschmidt/httprouter"
 	"github.com/spf13/cobra"
 	klog "k8s.io/klog/v2"
@@ -68,6 +77,7 @@ func init() {
 	rootCmd.Flags().StringVar(&config.SchedulerName, "scheduler-name", "", "the name to be added to pod.spec.schedulerName if not empty")
 	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 0, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
+<<<<<<< HEAD
 	rootCmd.Flags().Int32Var(&config.DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
@@ -86,6 +96,9 @@ func init() {
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
+=======
+	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
+>>>>>>> 21785f7 (update to v2.3.2)
 	rootCmd.AddCommand(version.VersionCmd)
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 }

@@ -6,10 +6,18 @@ FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
 ARG VERSION
 ADD . /k8s-vgpu
+<<<<<<< HEAD
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
+=======
+#ENV GOPRIVATE="gitlab.4pd.io/*"
+ARG GOPROXY=https://goproxy.cn,direct
+ARG VERSION="unknown"
+RUN apt-get update && apt-get -y install libhwloc-dev libdrm-dev
+RUN cd /k8s-vgpu && make all
+>>>>>>> 21785f7 (update to v2.3.2)
 
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu

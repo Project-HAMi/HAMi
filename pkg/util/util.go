@@ -30,11 +30,17 @@ import (
 	"strings"
 	"time"
 
+<<<<<<< HEAD
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+=======
+	"4pd.io/k8s-vgpu/pkg/api"
+	"4pd.io/k8s-vgpu/pkg/util/client"
+	v1 "k8s.io/api/core/v1"
+>>>>>>> 21785f7 (update to v2.3.2)
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
@@ -75,11 +81,12 @@ func GetNode(nodename string) (*corev1.Node, error) {
 	return n, nil
 =======
 func GetNode(nodename string) (*v1.Node, error) {
-	n, err := GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	return n, err
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 }
 
+<<<<<<< HEAD
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	pod, err := GetAllocatePodByNode(ctx, node)
 	if err != nil {
@@ -94,6 +101,10 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 		FieldSelector: selector,
 	}
 	podlist, err := client.GetClient().CoreV1().Pods("").List(ctx, podListOptions)
+=======
+func GetPendingPod(node string) (*v1.Pod, error) {
+	podlist, err := client.GetClient().CoreV1().Pods("").List(context.Background(), metav1.ListOptions{})
+>>>>>>> 21785f7 (update to v2.3.2)
 	if err != nil {
 		return nil, err
 	}
@@ -303,6 +314,7 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
 		} else {
 			tmp := ContainerDevices{}
 			for _, dev := range val {
+				klog.Infoln("Selecting erase res=", dtype, ":", dev.Type)
 				if strings.Compare(dtype, dev.Type) == 0 {
 					found = true
 				} else {
@@ -322,45 +334,6 @@ func EraseNextDeviceTypeFromAnnotation(dtype string, p v1.Pod) error {
 	return PatchPodAnnotations(&p, newannos)
 }
 
-func PodAllocationTrySuccess(nodeName string, pod *v1.Pod) {
-	refreshed, _ := kubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	annos := refreshed.Annotations[AssignedIDsToAllocateAnnotations]
-	klog.Infoln("TrySuccess:", annos)
-	for _, val := range DevicesToHandle {
-		if strings.Contains(annos, val) {
-			return
-		}
-	}
-	klog.Infoln("AllDevicesAllocateSuccess releasing lock")
-	PodAllocationSuccess(nodeName, pod)
-}
-
-func PodAllocationSuccess(nodeName string, pod *v1.Pod) {
-	newannos := make(map[string]string)
-	newannos[DeviceBindPhase] = DeviceBindSuccess
-	err := PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
-	}
-	err = ReleaseNodeLock(nodeName)
-	if err != nil {
-		klog.Errorf("release lock failed:%v", err.Error())
-	}
-}
-
-func PodAllocationFailed(nodeName string, pod *v1.Pod) {
-	newannos := make(map[string]string)
-	newannos[DeviceBindPhase] = DeviceBindFailed
-	err := PatchPodAnnotations(pod, newannos)
-	if err != nil {
-		klog.Errorf("patchPodAnnotations failed:%v", err.Error())
-	}
-	err = ReleaseNodeLock(nodeName)
-	if err != nil {
-		klog.Errorf("release lock failed:%v", err.Error())
-	}
-}
-
 func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	type patchMetadata struct {
@@ -378,7 +351,11 @@ func PatchNodeAnnotations(node *v1.Node, annotations map[string]string) error {
 		return err
 	}
 	_, err = client.GetClient().CoreV1().Nodes().
+<<<<<<< HEAD
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+=======
+		Patch(context.Background(), node.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+>>>>>>> 21785f7 (update to v2.3.2)
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
 		klog.Infof("patch node %v failed, %v", node.Name, err)
@@ -407,9 +384,14 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	if err != nil {
 		return err
 	}
+<<<<<<< HEAD
 	klog.V(5).Infof("patch pod %s/%s annotation content is %s", pod.Namespace, pod.Name, string(bytes))
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(context.Background(), pod.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+=======
+	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
+		Patch(context.Background(), pod.Name, k8stypes.StrategicMergePatchType, bytes, metav1.PatchOptions{})
+>>>>>>> 21785f7 (update to v2.3.2)
 	if err != nil {
 		klog.Infof("patch pod %v failed, %v", pod.Name, err)
 	}

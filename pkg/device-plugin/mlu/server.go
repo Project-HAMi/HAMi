@@ -27,9 +27,12 @@ import (
 	"sync"
 	"time"
 
+	"4pd.io/k8s-vgpu/pkg/device"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/allocator"
 	"4pd.io/k8s-vgpu/pkg/device-plugin/mlu/cndev"
+	"4pd.io/k8s-vgpu/pkg/device/cambricon"
 	"4pd.io/k8s-vgpu/pkg/util"
+	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	"google.golang.org/grpc"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
@@ -275,7 +278,6 @@ func (m *CambriconDevicePlugin) GetDeviceIndexByUUID(uuid string) (int, bool) {
 }
 
 func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *pluginapi.AllocateRequest) (*pluginapi.AllocateResponse, error) {
-
 	m.Lock()
 	defer m.Unlock()
 
@@ -283,24 +285,28 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 	nodename := os.Getenv("NODE_NAME")
 	current, err := util.GetPendingPod(nodename)
 	if err != nil {
-		util.ReleaseNodeLock(nodename)
+		nodelock.ReleaseNodeLock(nodename)
 		return &pluginapi.AllocateResponse{}, err
 	}
 	for idx := range reqs.ContainerRequests {
+<<<<<<< HEAD
 		devreq, err := util.GetNextDeviceRequest(util.CambriconMLUDevice, *current)
+=======
+		_, devreq, err := util.GetNextDeviceRequest(cambricon.CambriconMLUDevice, *current)
+>>>>>>> 21785f7 (update to v2.3.2)
 		klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 		if err != nil {
-			util.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current)
 			return &pluginapi.AllocateResponse{}, err
 		}
 		if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-			util.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current)
 			return &pluginapi.AllocateResponse{}, errors.New("device number not matched")
 		}
 
-		err = util.EraseNextDeviceTypeFromAnnotation(util.CambriconMLUDevice, *current)
+		err = util.EraseNextDeviceTypeFromAnnotation(cambricon.CambriconMLUDevice, *current)
 		if err != nil {
-			util.PodAllocationFailed(nodename, current)
+			device.PodAllocationFailed(nodename, current)
 			return &pluginapi.AllocateResponse{}, err
 		}
 
@@ -315,7 +321,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 		for i, v := range devreq {
 			devidx, found := m.GetDeviceIndexByUUID(v.UUID)
 			if !found {
-				util.PodAllocationFailed(nodename, current)
+				device.PodAllocationFailed(nodename, current)
 				return nil, errors.New("device uuid" + v.UUID + "not found")
 			}
 			if i == 0 {
@@ -339,7 +345,7 @@ func (m *CambriconDevicePlugin) allocateMLUShare(ctx context.Context, reqs *plug
 		responses.ContainerResponses = append(responses.ContainerResponses, &resp)
 	}
 	klog.Infoln("response=", responses)
-	util.PodAllocationTrySuccess(nodename, current)
+	device.PodAllocationTrySuccess(nodename, current)
 	return &responses, nil
 }
 
