@@ -846,7 +846,7 @@ func TestCheckUUID(t *testing.T) {
 			annos: map[string]string{
 				GPUNoUseUUID: "abc,123",
 			},
-			id:   "abc",
+			id:   "1abc",
 			want: true,
 		},
 	}

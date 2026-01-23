@@ -285,7 +285,6 @@ func TestMutateAdmissionDefaultsExclusiveCore(t *testing.T) {
 	}
 }
 
-
 func Test_checkType(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
