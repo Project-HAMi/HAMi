@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -510,4 +511,23 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 		klog.V(4).InfoS("Resource requirements collected", "pod", klog.KObj(pod), "requests", counts)
 	}
 	return counts
+}
+
+func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
+	userUUID, ok := annos[useKey]
+	if ok {
+		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		return slices.Contains(userUUIDs, id)
+	}
+
+	noUserUUID, ok := annos[noUseKey]
+	if ok {
+		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		return !slices.Contains(noUserUUIDs, id)
+	}
+	return true
 }

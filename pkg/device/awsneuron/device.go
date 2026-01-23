@@ -19,7 +19,6 @@ package awsneuron
 import (
 	"flag"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -190,25 +189,6 @@ func (dev *AWSNeuronDevices) checkType(n device.ContainerDeviceRequest) (bool, b
 		return true, true, false
 	}
 	return false, false, false
-}
-
-func (dev *AWSNeuronDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[AWSNeuronUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for AWSNeuron user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[AWSNeuronNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for AWSNeuron no-use uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *AWSNeuronDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
@@ -433,7 +413,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if !neuron.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AWSNeuronUseUUID, AWSNeuronNoUseUUID, neuron.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

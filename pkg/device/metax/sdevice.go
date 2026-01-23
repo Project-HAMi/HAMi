@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -207,34 +206,6 @@ func (sdev *MetaxSDevices) checkType(annos map[string]string, d device.DeviceUsa
 	return strings.Compare(n.Type, MetaxSGPUDevice) == 0
 }
 
-func (sdev *MetaxSDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	useUUIDAnno, ok := annos[MetaxUseUUID]
-	if ok {
-		klog.V(5).Infof("check UUID for metax, useUUID[%s], deviceID[%s]", useUUIDAnno, d.ID)
-
-		useUUIDs := strings.Split(useUUIDAnno, ",")
-		if slices.Contains(useUUIDs, d.ID) {
-			klog.V(5).Infof("check UUID pass, the deviceID[%s]", d.ID)
-			return true
-		}
-		return false
-	}
-
-	noUseUUIDAnno, ok := annos[MetaxNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check UUID for metax, nouseUUID[%s], deviceID[%s]", noUseUUIDAnno, d.ID)
-
-		noUseUUIDs := strings.Split(noUseUUIDAnno, ",")
-		if slices.Contains(noUseUUIDs, d.ID) {
-			klog.V(5).Infof("check UUID failed to pass, the deviceID[%s]", d.ID)
-			return false
-		}
-		return true
-	}
-
-	return true
-}
-
 func (sdev *MetaxSDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	devices, _ := sdev.getMetaxSDevices(*n)
 
@@ -370,7 +341,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			}
 		}
 
-		if !mats.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MetaxUseUUID, MetaxNoUseUUID, mats.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

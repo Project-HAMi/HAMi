@@ -18,7 +18,6 @@ package kunlun
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -123,25 +122,6 @@ func (dev *KunlunDevices) CheckType(annos map[string]string, d device.DeviceUsag
 		return true, false
 	}
 	return false, false
-}
-
-func (dev *KunlunDevices) CheckUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[KunlunUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Kunlun user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[KunlunNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Kunlun not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *KunlunDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
