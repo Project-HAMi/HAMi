@@ -18,7 +18,6 @@ package enflame
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -162,25 +161,6 @@ func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsa
 	return false, false, false
 }
 
-func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[EnflameUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Enflame user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[EnflameNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Enflame not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }
@@ -254,7 +234,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !enf.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, EnflameUseUUID, EnflameNoUseUUID, enf.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

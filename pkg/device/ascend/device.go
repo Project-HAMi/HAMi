@@ -21,7 +21,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -221,25 +220,6 @@ func (dev *Devices) checkType(annos map[string]string, d device.DeviceUsage, n d
 	return false, false, false
 }
 
-func (dev *Devices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[dev.useUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for ascend user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[dev.noUseUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for ascend not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return device.CheckHealth(devType, n)
 }
@@ -376,7 +356,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !npu.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, npu.useUUIDAnno, npu.noUseUUIDAnno, npu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

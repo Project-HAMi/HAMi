@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
-	"slices"
 	"strings"
 	"time"
 
@@ -225,25 +224,6 @@ func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceU
 	return false, false, false
 }
 
-func (dev *CambriconDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[MLUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[MLUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count mlu devices for container ", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
@@ -356,7 +336,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !cam.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MLUUseUUID, MLUNoUseUUID, cam.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
