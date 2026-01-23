@@ -52,11 +52,15 @@ package cdi
 
 import (
 <<<<<<< HEAD
+<<<<<<< HEAD
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 =======
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 // Option defines a function for passing options to the New() call

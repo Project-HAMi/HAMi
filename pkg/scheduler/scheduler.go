@@ -45,7 +45,11 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util/nodelock"
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+<<<<<<< HEAD
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	"k8s.io/apimachinery/pkg/labels"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	coordinationv1 "k8s.io/client-go/listers/coordination/v1"
@@ -54,6 +58,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+<<<<<<< HEAD
 <<<<<<< HEAD
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -71,6 +76,8 @@ const (
 =======
 	"k8s.io/kubernetes/pkg/scheduler/framework"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 type Scheduler struct {
@@ -374,6 +381,7 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 	nodeInfoCopy := make(map[string]*NodeInfo)
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	for {
+<<<<<<< HEAD
 		select {
 		case <-s.nodeNotify:
 			klog.V(5).InfoS("Received node notification")
@@ -391,16 +399,36 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 			continue
 =======
 		for _, val := range nodes.Items {
+=======
+		nodes, err := s.nodeLister.List(labels.Everything())
+		if err != nil {
+			klog.Errorln("nodes list failed", err.Error())
+			return err
+		}
+		nodeNames := []string{}
+		for _, val := range nodes {
+			nodeNames = append(nodeNames, val.Name)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 			for devhandsk, devreg := range device.KnownDevice {
 				_, ok := val.Annotations[devreg]
 				if !ok {
 					continue
 				}
+<<<<<<< HEAD
 				nodedevices := util.DecodeNodeDevices(val.Annotations[devreg])
 				if len(nodedevices) == 0 {
+=======
+				nodedevices, err := util.DecodeNodeDevices(val.Annotations[devreg])
+				if err != nil {
+					klog.ErrorS(err, "failed to decode node devices", "node", val.Name, "device annotation", val.Annotations[devreg])
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 					continue
 				}
-				klog.V(5).Infoln("nodedevices=", nodedevices)
+				if len(nodedevices) == 0 {
+					klog.InfoS("no node gpu device found", "node", val.Name, "device annotation", val.Annotations[devreg])
+					continue
+				}
+				klog.V(5).InfoS("nodes device information", "node", val.Name, "nodedevices", util.EncodeNodeDevices(nodedevices))
 				handshake := val.Annotations[devhandsk]
 				if strings.Contains(handshake, "Requesting") {
 					formertime, _ := time.Parse("2006.01.02 15:04:05", strings.Split(handshake, "_")[1])
@@ -410,11 +438,23 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 							s.rmNodeDevice(val.Name, nodeInfoCopy[devhandsk])
 							klog.Infof("node %v device %s:%v leave, %v remaining devices:%v", val.Name, devhandsk, nodeInfoCopy[devhandsk], err, s.nodes[val.Name].Devices)
 
+<<<<<<< HEAD
 							tmppat := make(map[string]string)
 							tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
 							n, err := util.GetNode(val.Name)
 							if err != nil {
 								klog.Errorln("get node failed", err.Error())
+=======
+								tmppat := make(map[string]string)
+								tmppat[devhandsk] = "Deleted_" + time.Now().Format("2006.01.02 15:04:05")
+								n, err := util.GetNode(val.Name)
+								if err != nil {
+									klog.Errorln("get node failed", err.Error())
+									continue
+								}
+								util.PatchNodeAnnotations(n, tmppat)
+								continue
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 							}
 							util.PatchNodeAnnotations(n, tmppat)
 							continue
@@ -429,14 +469,15 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 					n, err := util.GetNode(val.Name)
 					if err != nil {
 						klog.Errorln("get node failed", err.Error())
+						continue
 					}
 					util.PatchNodeAnnotations(n, tmppat)
 				}
 				nodeInfo := &NodeInfo{}
 				nodeInfo.ID = val.Name
 				nodeInfo.Devices = make([]DeviceInfo, 0)
-				found := false
 				for index, deviceinfo := range nodedevices {
+					found := false
 					_, ok := s.nodes[val.Name]
 					if ok {
 						for i1, val1 := range s.nodes[val.Name].Devices {
@@ -468,7 +509,16 @@ func (s *Scheduler) RegisterFromNodeAnnotatons() error {
 			}
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 		}
+<<<<<<< HEAD
 		s.register(labelSelector, printedLog)
+=======
+		_, _, err = s.getNodesUsage(&nodeNames, nil)
+		if err != nil {
+			klog.Errorln("get node usage failed", err.Error())
+			return err
+		}
+		time.Sleep(time.Second * 15)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	}
 }
 
@@ -569,6 +619,7 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &s.overviewstatus
 }
 
+<<<<<<< HEAD
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
@@ -595,6 +646,8 @@ func GenerateNodeMapAndSlice(nodes []*v1.Node) map[string]*framework.NodeInfo {
 	return nodeMap
 }
 
+=======
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *v1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
@@ -822,10 +875,17 @@ ReleaseNodeLocks:
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
+<<<<<<< HEAD
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
 	resourceReqTotal := 0
 	for _, n := range resourceReqs {
+=======
+	klog.InfoS("begin schedule filter", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespaces", args.Pod.Namespace)
+	nums := k8sutil.Resourcereqs(args.Pod)
+	total := 0
+	for _, n := range nums {
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 		for _, k := range n {
 			resourceReqTotal += int(k.Nums)
 		}
@@ -852,10 +912,16 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
+<<<<<<< HEAD
 		klog.V(5).InfoS("Nodes failed during usage retrieval",
 			"nodes", failedNodes)
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
+=======
+		klog.V(5).InfoS("getNodesUsage failed nodes", "nodes", failedNodes)
+	}
+	nodeScores, err := calcScore(nodeUsage, &failedNodes, nums, annos, args.Pod)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)

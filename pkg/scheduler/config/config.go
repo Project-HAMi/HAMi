@@ -16,6 +16,7 @@ limitations under the License.
 
 package config
 
+<<<<<<< HEAD
 import (
 	"flag"
 	"fmt"
@@ -39,6 +40,14 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+=======
+var (
+	HttpBind           string
+	SchedulerName      string
+	DefaultMem         int32
+	DefaultCores       int32
+	MetricsBindAddress string
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 var (

@@ -67,12 +67,39 @@ you can customize your vGPU support by setting the following parameters using `-
 helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 ```
 
+<<<<<<< HEAD
 * `devicePlugin.service.schedulerPort`: Integer type, by default: 31998, scheduler webhook service nodePort.
 * `devicePlugin.deviceListStrategy`: String type, default value is "envvar". This sets the strategy for exposing devices to containers. "envvar" uses the `NVIDIA_VISIBLE_DEVICES` environment variable, while "cdi-annotations" uses the Container Device Interface (CDI).
 * `devicePlugin.nvidiaDriverRoot`: String type. Specifies the root of the NVIDIA driver installation on the host. This is used when `deviceListStrategy` is `cdi-annotations`. If not set via Helm, it defaults to `/`.
 * `devicePlugin.nvidiaHookPath`: String type. Specifies the path to the `nvidia-ctk` binary on the GPU node. This is used when `deviceListStrategy` is `cdi-annotations`. If not set via Helm, it defaults to `/usr/bin/nvidia-ctk`.
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`: String type, default value is "binpack", representing the GPU node scheduling policy. "binpack" means trying to allocate tasks to the same GPU node as much as possible, while "spread" means trying to allocate tasks to different GPU nodes as much as possible.
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`: String type, default value is "spread", representing the GPU scheduling policy. "binpack" means trying to allocate tasks to the same GPU as much as possible, while "spread" means trying to allocate tasks to different GPUs as much as possible.
+=======
+* `devicePlugin.service.schedulerPort:`
+  Integer type, by default: 31998, scheduler webhook service nodePort.
+* `devicePlugin.deviceMemoryScaling:` 
+  Float type, by default: 1. The ratio for NVIDIA device memory scaling, can be greater than 1 (enable virtual device memory, experimental feature). For NVIDIA GPU with *M* memory, if we set `devicePlugin.deviceMemoryScaling` argument to *S*, vGPUs splitted by this GPU will totally get `S * M` memory in Kubernetes with our device plugin.
+* `devicePlugin.deviceSplitCount:` 
+  Integer type, by default: equals 10. Maximum tasks assigned to a simple GPU device.
+* `devicePlugin.migstrategy:`
+  String type, "none" for ignoring MIG features or "mixed" for allocating MIG device by seperate resources. Default "none"
+* `devicePlugin.disablecorelimit:`
+  String type, "true" for disable core limit, "false" for enable core limit, default: false
+* `scheduler.defaultMem:` 
+  Integer type, by default: 5000. The default device memory of the current task, in MB
+* `scheduler.defaultCores:` 
+  Integer type, by default: equals 0. Percentage of GPU cores reserved for the current task. If assigned to 0, it may fit in any GPU with enough device memory. If assigned to 100, it will use an entire GPU card exclusively.
+* `resourceName:`
+  String type, vgpu number resource name, default: "nvidia.com/gpu"
+* `resourceMem:`
+  String type, vgpu memory size resource name, default: "nvidia.com/gpumem"
+* `resourceMemPercentage:`
+  String type, vgpu memory fraction resource name, default: "nvidia.com/gpumem-percentage" 
+* `resourceCores:`
+  String type, vgpu cores resource name, default: "nvidia.com/cores"
+* `resourcePriority:`
+  String type, vgpu task priority name, default: "nvidia.com/priority"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 **Webhook TLS Certificate Configs**
 

@@ -63,11 +63,17 @@ import (
 	"strings"
 
 	"4pd.io/k8s-vgpu/pkg/util"
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+<<<<<<< HEAD
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/device"
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/info"
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	"k8s.io/klog/v2"
 )
 

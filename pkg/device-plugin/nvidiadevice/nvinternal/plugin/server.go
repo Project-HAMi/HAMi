@@ -239,6 +239,14 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 =======
 )
 
+var (
+	hostHookPath string
+)
+
+func init() {
+	hostHookPath, _ = os.LookupEnv("HOOK_PATH")
+}
+
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
 	rm                   rm.ResourceManager
@@ -836,43 +844,64 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *pluginapi.
 				}*/
 			}
 			response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("/usr/local/vgpu/%v.cache", uuid.New().String())
+			response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
 			if *util.DeviceMemoryScaling > 1 {
 				response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
 			}
 			if *util.DisableCoreLimit {
 				response.Envs[api.CoreLimitSwitch] = "disable"
 			}
-			cacheFileHostDirectory := "/usr/local/vgpu/containers/" + string(current.UID) + "_" + currentCtr.Name
+			cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
+
 			os.MkdirAll(cacheFileHostDirectory, 0777)
 			os.Chmod(cacheFileHostDirectory, 0777)
 			os.MkdirAll("/tmp/vgpulock", 0777)
 			os.Chmod("/tmp/vgpulock", 0777)
-			hostHookPath := os.Getenv("HOOK_PATH")
 			response.Mounts = append(response.Mounts,
-				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu/libvgpu.so",
+				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 					HostPath: hostHookPath + "/libvgpu.so",
 					ReadOnly: true},
+<<<<<<< HEAD
 				&pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
 					HostPath: hostHookPath + "/ld.so.preload",
 					ReadOnly: true},
 				&pluginapi.Mount{ContainerPath: "/usr/local/vgpu",
+=======
+				&pluginapi.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 					HostPath: cacheFileHostDirectory,
 					ReadOnly: false},
 				&pluginapi.Mount{ContainerPath: "/tmp/vgpulock",
 					HostPath: "/tmp/vgpulock",
 					ReadOnly: false},
 			)
+<<<<<<< HEAD
 			_, err = os.Stat("/usr/local/vgpu/license")
+=======
+			found := false
+			for _, val := range currentCtr.Env {
+				if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+					found = true
+					break
+				}
+			}
+			if !found {
+				response.Mounts = append(response.Mounts, &pluginapi.Mount{ContainerPath: "/etc/ld.so.preload",
+					HostPath: hostHookPath + "/ld.so.preload",
+					ReadOnly: true},
+				)
+			}
+			_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 			if err == nil {
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
 					ContainerPath: "/vgpu/",
-					HostPath:      "/usr/local/vgpu/license",
+					HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
 					ReadOnly:      true,
 				})
 				response.Mounts = append(response.Mounts, &pluginapi.Mount{
 					ContainerPath: "/usr/bin/vgpuvalidator",
-					HostPath:      hostHookPath + "/vgpuvalidator",
+					HostPath:      fmt.Sprintf("%s/vgpuvalidator", hostHookPath),
 					ReadOnly:      true,
 				})
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

@@ -43,7 +43,11 @@ import (
 	"4pd.io/k8s-vgpu/pkg/util"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	cli "github.com/urfave/cli/v2"
+<<<<<<< HEAD
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	"k8s.io/klog/v2"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 func addFlags() []cli.Flag {
@@ -156,10 +160,10 @@ func readFromConfigFile() error {
 	if err != nil {
 		return err
 	}
-	fmt.Println("json=", deviceConfigs)
+	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
 	for _, val := range deviceConfigs.Nodeconfig {
 		if strings.Compare(os.Getenv("NodeName"), val.Name) == 0 {
-			fmt.Println("Reading config from file", val.Name)
+			klog.Infof("Reading config from file %s", val.Name)
 			if val.Devicememoryscaling > 0 {
 				util.DeviceMemoryScaling = &val.Devicememoryscaling
 			}

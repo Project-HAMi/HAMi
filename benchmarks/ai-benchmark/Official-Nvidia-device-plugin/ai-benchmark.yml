@@ -1,14 +1,14 @@
 apiVersion: batch/v1
 kind: Job
 metadata:
-  name: ai-benchmark-on-official
+  name: ai-benchmark-on-hami
 spec:
   template:
     metadata:
-      name: ai-benchmark-on-official
+      name: ai-benchmark-on-hami
     spec:
       containers:
-        - name: ai-benchmark-on-official
+        - name: ai-benchmark-on-hami
           image: 4pdosc/ai-benchmark:2.4.1-gpu
           resources:
             requests:

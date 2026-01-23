@@ -65,6 +65,7 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
+<<<<<<< HEAD
           nvidia.com/gpu: 2 # requesting 2 vGPUs
           #nvidia.com/gpumem: 3000 # Each vGPU containers 3000M device memory
           nvidia.com/gpumem-percentage: 50 #Each vGPU containers 50% device memory of that GPU. Can not be used with nvidia.com/gpumem
@@ -85,3 +86,7 @@ spec:
           #nvidia.com/gpucores: 90
 
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+          nvidia.com/gpu: 1 # requesting 2 vGPUs
+          nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
+>>>>>>> c7a3893 (Remake this repo to HAMi)

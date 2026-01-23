@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 ARG GOLANG_IMAGE=golang:1.25.5-bookworm
 ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
 
@@ -13,17 +14,36 @@ RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 =======
 #ENV GOPRIVATE="gitlab.4pd.io/*"
+=======
+ARG GOLANG_IMAGE
+ARG NVIDIA_IMAGE
+FROM $GOLANG_IMAGE AS build
+
+FROM $GOLANG_IMAGE AS GOBUILD
+ADD . /k8s-vgpu
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 ARG GOPROXY=https://goproxy.cn,direct
-ARG VERSION="unknown"
 RUN apt-get update && apt-get -y install libhwloc-dev libdrm-dev
 RUN cd /k8s-vgpu && make all
 >>>>>>> 21785f7 (update to v2.3.2)
 
+<<<<<<< HEAD
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
+=======
+FROM $NVIDIA_IMAGE AS NVBUILD
+COPY ./libvgpu /libvgpu
+WORKDIR /libvgpu
+RUN apt-get -y update; apt-get -y install wget
+RUN wget https://cmake.org/files/v3.19/cmake-3.19.8-Linux-x86_64.tar.gz
+RUN tar -xf cmake-3.19.8-Linux-x86_64.tar.gz
+RUN cp /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake /libvgpu/cmake-3.19.8-Linux-x86_64/bin/cmake3
+ENV PATH="/libvgpu/cmake-3.19.8-Linux-x86_64/bin:${PATH}"
+RUN apt-get -y install openssl libssl-dev
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 RUN bash ./build.sh
 
 FROM nvidia/cuda:12.6.3-base-ubuntu22.04
@@ -39,6 +59,7 @@ ENV NVIDIA_DRIVER_CAPABILITIES=compute,utility
 
 ARG VERSION
 LABEL version="$VERSION"
+<<<<<<< HEAD
 LABEL maintainer="info@dynamia.ai"
 COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=gobuild /k8s-vgpu/bin /k8s-vgpu/bin
@@ -47,6 +68,16 @@ COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
 COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
 COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
+=======
+LABEL maintainer="opensource@4paradigm.com"
+COPY ./LICENSE /k8s-vgpu/LICENSE
+COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
+COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
+COPY ./lib /k8s-vgpu/lib
+COPY --from=NVBUILD /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/
+COPY ./lib/mlu/cntopo /usr/bin/
+COPY ./lib/mlu/libcndev.so /usr/lib/
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 ENV PATH="/k8s-vgpu/bin:${PATH}"
 ARG DEST_DIR

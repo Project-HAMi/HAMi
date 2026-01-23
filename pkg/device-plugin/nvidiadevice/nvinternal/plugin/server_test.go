@@ -52,6 +52,7 @@ package plugin
 
 import (
 <<<<<<< HEAD
+<<<<<<< HEAD
 	"encoding/json"
 	"fmt"
 	"os"
@@ -65,6 +66,9 @@ import (
 	"github.com/stretchr/testify/require"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 =======
+=======
+	"fmt"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	"testing"
 
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
@@ -297,6 +301,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 }
 <<<<<<< HEAD
+<<<<<<< HEAD
 
 func ptr[T any](x T) *T {
 	return &x
@@ -496,6 +501,8 @@ func Test_processMigConfigs(t *testing.T) {
 		})
 	}
 }
+=======
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 func Test_pathGeneration(t *testing.T) {
 	hostHookPath := "/usr/local/vgpu"
@@ -508,6 +515,7 @@ func Test_pathGeneration(t *testing.T) {
 		t.Errorf("Expected %s, got %s", expected, result)
 	}
 }
+<<<<<<< HEAD
 
 func Test_configOverride(t *testing.T) {
 	t.Setenv("NODE_NAME", "testnode")
@@ -598,3 +606,5 @@ func Test_configOverride(t *testing.T) {
 }
 =======
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+>>>>>>> c7a3893 (Remake this repo to HAMi)

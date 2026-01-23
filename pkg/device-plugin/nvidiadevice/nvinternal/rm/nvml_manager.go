@@ -60,7 +60,7 @@ import (
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 =======
 	"4pd.io/k8s-vgpu/pkg/util"
-	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"k8s.io/klog/v2"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 )

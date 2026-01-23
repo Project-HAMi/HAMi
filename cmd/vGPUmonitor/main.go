@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+<<<<<<< HEAD
 	"context"
 	"errors"
 	"fmt"
@@ -38,6 +39,9 @@ import (
 
 	"github.com/spf13/cobra"
 	"k8s.io/klog/v2"
+=======
+	"k8s.io/klog"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 var (
@@ -60,6 +64,7 @@ func init() {
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
+<<<<<<< HEAD
 func start() error {
 	if err := ValidateEnvVars(); err != nil {
 		return fmt.Errorf("failed to validate environment variables: %v", err)
@@ -176,4 +181,20 @@ func main() {
 	if err := rootCmd.Execute(); err != nil {
 		klog.Fatal(err)
 	}
+=======
+func main() {
+
+	if err := ValidateEnvVars(); err != nil {
+		klog.Fatalf("Failed to validate environment variables: %v", err)
+	}
+	cgroupDriver = 0
+	errchannel := make(chan error)
+	go serveInfo(errchannel)
+	go initmetrics()
+	go watchAndFeedback()
+	for {
+		err := <-errchannel
+		klog.Errorf("failed to serve: %v", err)
+	}
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 }

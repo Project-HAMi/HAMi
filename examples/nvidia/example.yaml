@@ -9,11 +9,19 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
+<<<<<<< HEAD
           nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
           #nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod
           nvidia.com/gpumem-percentage: 50 # identifies 50% GPU memory each physical GPU allocates to the pod. Can not be used with nvidia.com/gpumem
           #nvidia.com/gpucores: 90 # identifies 90% GPU GPU core each physical GPU allocates to the pod 
           #nvidia.com/priority: 0 # we only have two priority class, 0(high) and 1(low), default: 1 
+=======
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+          #nvidia.com/gpumem: 3000 # Each vGPU containers 3000M device memory
+          nvidia.com/gpumem-percentage: 50 #Each vGPU containers 50% device memory of that GPU. Can not be used with nvidia.com/gpumem
+          #nvidia.com/gpucores: 90 # Utilization limit of this vGPU is set to 50% of total GPU utilization 
+          #nvidia.com/priority: 0 # We only have two priority class, 0(high) and 1(low), default: 1 
+>>>>>>> c7a3893 (Remake this repo to HAMi)
           #The utilization of high priority task won't be limited to resourceCores unless sharing GPU node with other high priority tasks.
           #The utilization of low priority task won't be limited to resourceCores if no other tasks sharing its GPU.
     - name: ubuntu-container0
@@ -24,7 +32,13 @@ spec:
       command: ["bash", "-c", "sleep 86400"]
       resources:
         limits:
+<<<<<<< HEAD
           nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
           nvidia.com/gpumem: 2000 # identifies 2000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
           #nvidia.com/gpucores: 90 # identifies 90% GPU GPU core each physical GPU allocates to the pod
+=======
+          nvidia.com/gpu: 2 # requesting 2 vGPUs
+          nvidia.com/gpumem: 2000
+          #nvidia.com/gpucores: 90
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 

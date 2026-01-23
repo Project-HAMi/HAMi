@@ -17,11 +17,16 @@ limitations under the License.
 package main
 
 import (
+<<<<<<< HEAD
+=======
+	"errors"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	"fmt"
 	"os"
 	"strings"
 	"time"
 
+<<<<<<< HEAD
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -35,6 +40,18 @@ import (
 	"k8s.io/client-go/informers"
 	listerscorev1 "k8s.io/client-go/listers/core/v1"
 	"k8s.io/klog/v2"
+=======
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes"
+	listerscorev1 "k8s.io/client-go/listers/core/v1"
+	"k8s.io/client-go/rest"
+	"k8s.io/klog"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -51,8 +68,12 @@ import (
 type ClusterManager struct {
 	Zone string
 	// Contains many more fields not listed in this example.
+<<<<<<< HEAD
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
+=======
+	PodLister listerscorev1.PodLister
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 }
 
 // ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
@@ -184,12 +205,18 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
+<<<<<<< HEAD
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 
 	// Collect GPU information
 	if err := cc.collectGPUInfo(ch); err != nil {
 		klog.Errorf("Failed to collect GPU info: %v", err)
 		// Decide whether to continue or return based on business requirements
+=======
+	klog.Infof("Starting to collect metrics for vGPUMonitor")
+	if srPodList == nil {
+		srPodList = make(map[string]podusage)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	}
 
 	// Collect Pod and Container information
@@ -215,6 +242,7 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 
 	devnum, err := cc.getDeviceCount()
 	if err != nil {
+<<<<<<< HEAD
 		return err
 	}
 
@@ -358,11 +386,66 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 						klog.Errorf("Failed to collect metrics for container %s in Pod %s/%s: %v", ctr.Name, pod.Namespace, pod.Name, err)
 					}
 					break // Exit the inner loop after finding the matching container
+=======
+		klog.Error("err=", err.Error())
+	}
+	if clientset != nil {
+		nvret := nvml.Init()
+		if nvret != nvml.SUCCESS {
+			klog.Error("nvml Init err=", nvml.ErrorString(nvret))
+		}
+		devnum, nvret := nvml.DeviceGetCount()
+		if nvret != nvml.SUCCESS {
+			klog.Error("nvml GetDeviceCount err=", nvml.ErrorString(nvret))
+		} else {
+			for ii := 0; ii < devnum; ii++ {
+				hdev, nvret := nvml.DeviceGetHandleByIndex(ii)
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
 				}
+				memoryUsed := 0
+				memory, ret := hdev.GetMemoryInfo_v2()
+				if ret == nvml.SUCCESS {
+					memoryUsed = int(memory.Used)
+				} else {
+					klog.Error("nvml get memory_v2 error ret=", ret)
+					memory_v1, ret := hdev.GetMemoryInfo()
+					if ret != nvml.SUCCESS {
+						klog.Error("nvml get memory error ret=", ret)
+					} else {
+						memoryUsed = int(memory_v1.Used)
+					}
+				}
+
+				uuid, nvret := hdev.GetUUID()
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
+				} else {
+					ch <- prometheus.MustNewConstMetric(
+						hostGPUdesc,
+						prometheus.GaugeValue,
+						float64(memoryUsed),
+						fmt.Sprint(ii), uuid,
+					)
+				}
+				util, nvret := hdev.GetUtilizationRates()
+				if nvret != nvml.SUCCESS {
+					klog.Error(nvml.ErrorString(nvret))
+				} else {
+					ch <- prometheus.MustNewConstMetric(
+						hostGPUUtilizationdesc,
+						prometheus.GaugeValue,
+						float64(util.Gpu),
+						fmt.Sprint(ii), uuid,
+					)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
+				}
+
 			}
 		}
 	}
 
+<<<<<<< HEAD
 	klog.V(4).Infof("Finished collecting metrics for %d pods", len(pods))
 	return nil
 }
@@ -477,6 +560,59 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
 							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							return err
+=======
+		pods, err := cc.ClusterManager.PodLister.List(labels.Everything())
+		if err != nil {
+			klog.Error("failed to list pods with err=", err.Error())
+		}
+		for _, val := range pods {
+			for sridx := range srPodList {
+				if srPodList[sridx].sr == nil {
+					continue
+				}
+				pod_uid := strings.Split(srPodList[sridx].idstr, "_")[0]
+				ctr_name := strings.Split(srPodList[sridx].idstr, "_")[1]
+				if strings.Compare(string(val.UID), pod_uid) == 0 {
+					fmt.Println("Pod matched!", val.Name, val.Namespace, val.Labels)
+					for _, ctr := range val.Spec.Containers {
+						if strings.Compare(ctr.Name, ctr_name) == 0 {
+							fmt.Println("container matched", ctr.Name)
+							//err := setHostPid(val, val.Status.ContainerStatuses[ctridx], &srPodList[sridx])
+							//if err != nil {
+							//	fmt.Println("setHostPid filed", err.Error())
+							//}
+							//fmt.Println("sr.list=", srPodList[sridx].sr)
+							podlabels := make(map[string]string)
+							for idx, val := range val.Labels {
+								idxfix := strings.ReplaceAll(idx, "-", "_")
+								valfix := strings.ReplaceAll(val, "-", "_")
+								podlabels[idxfix] = valfix
+							}
+							for i := 0; i < int(srPodList[sridx].sr.num); i++ {
+								value, _ := gettotalusage(srPodList[sridx], i)
+								uuid := string(srPodList[sridx].sr.uuids[i].uuid[:])[0:40]
+
+								//fmt.Println("uuid=", uuid, "length=", len(uuid))
+								ch <- prometheus.MustNewConstMetric(
+									ctrvGPUdesc,
+									prometheus.GaugeValue,
+									float64(value.total),
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+								)
+								ch <- prometheus.MustNewConstMetric(
+									ctrvGPUlimitdesc,
+									prometheus.GaugeValue,
+									float64(srPodList[sridx].sr.limit[i]),
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, /*,string(sr.sr.uuids[i].uuid[:])*/
+								)
+								ch <- prometheus.MustNewConstMetric(
+									ctrDeviceMemorydesc,
+									prometheus.CounterValue,
+									float64(value.total),
+									val.Namespace, val.Name, ctr_name, fmt.Sprint(i), uuid, fmt.Sprint(value.contextSize), fmt.Sprint(value.moduleSize), fmt.Sprint(value.bufferSize), fmt.Sprint(value.offset),
+								)
+							}
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 						}
 					}
 				}
@@ -506,7 +642,11 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 		containerLister: containerLister,
 	}
 
+<<<<<<< HEAD
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
+=======
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(clientset, time.Hour*1)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	c.PodLister = informerFactory.Core().V1().Pods().Lister()
 	stopCh := make(chan struct{})
 	informerFactory.Start(stopCh)
@@ -515,3 +655,38 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
 }
+<<<<<<< HEAD
+=======
+
+func initmetrics() {
+	// Since we are dealing with custom Collector implementations, it might
+	// be a good idea to try it out with a pedantic registry.
+	klog.Infof("Initializing metrics for vGPUmonitor")
+	reg := prometheus.NewRegistry()
+	//reg := prometheus.NewPedanticRegistry()
+	config, err := rest.InClusterConfig()
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+	clientset, err = kubernetes.NewForConfig(config)
+	if err != nil {
+		fmt.Println(err.Error())
+		return
+	}
+
+	// Construct cluster managers. In real code, we would assign them to
+	// variables to then do something with them.
+	NewClusterManager("vGPU", reg)
+	//NewClusterManager("ca", reg)
+
+	// Add the standard process and Go metrics to the custom registry.
+	//reg.MustRegister(
+	//	prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+	//	prometheus.NewGoCollector(),
+	//)
+
+	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	log.Fatal(http.ListenAndServe(":9394", nil))
+}
+>>>>>>> c7a3893 (Remake this repo to HAMi)

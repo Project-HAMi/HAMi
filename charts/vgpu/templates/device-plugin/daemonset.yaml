@@ -38,12 +38,17 @@ spec:
           lifecycle:
             postStart:
               exec:
+<<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
                 command: ["/bin/sh","-c","cp -f /k8s-vgpu/lib/nvidia/* /usr/local/vgpu/"]
 <<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
           #  preStop:
           #    exec:
           #      command: ["/bin/sh","-c","mv /usrbin/nvidia-container-4pdbackup /usrbin/nvidia-container-runtime"]
           #command:
+=======
+                command: ["/bin/sh","-c", {{ printf "cp -f /k8s-vgpu/lib/nvidia/* %s/vgpu/" .Values.global.gpuHookPath | quote }}]
+          command:
+>>>>>>> c7a3893 (Remake this repo to HAMi):charts/vgpu/templates/device-plugin/daemonsetnvidia.yaml
           #  - sleep
           #  - infinity
           command:
@@ -81,6 +86,11 @@ spec:
                   fieldPath: spec.nodeName
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
+<<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
+=======
+            - name: HOOK_PATH
+              value: {{ .Values.global.gpuHookPath }}
+>>>>>>> c7a3893 (Remake this repo to HAMi):charts/vgpu/templates/device-plugin/daemonsetnvidia.yaml
           securityContext:
             allowPrivilegeEscalation: false
             capabilities:
@@ -90,10 +100,14 @@ spec:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
             - name: lib
+<<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
               mountPath: /usr/local/vgpu
             - name: sock
               #mountPath: /var/lib/vgpu
               mountPath: {{ .Values.devicePlugin.sockPath }}
+=======
+              mountPath: {{ printf "%s%s" .Values.global.gpuHookPath "/vgpu" }}
+>>>>>>> c7a3893 (Remake this repo to HAMi):charts/vgpu/templates/device-plugin/daemonsetnvidia.yaml
             - name: usrbin
               mountPath: /usrbin
             - name: deviceconfig
@@ -101,7 +115,6 @@ spec:
         - name: vgpu-monitor
           image: {{ .Values.devicePlugin.image | quote }}
           imagePullPolicy: {{ .Values.devicePlugin.imagePullPolicy | quote }}
-          #command: ["sleep","infinity"]
           command: ["vGPUmonitor"]
           securityContext:
             allowPrivilegeEscalation: false
@@ -113,6 +126,8 @@ spec:
               value: "all"
             - name: NVIDIA_MIG_MONITOR_DEVICES
               value: all
+            - name: HOOK_PATH
+              value: {{ .Values.global.gpuHookPath }}              
           volumeMounts:
             - name: ctrs
               mountPath: /tmp/vgpu/containers
@@ -139,8 +154,12 @@ spec:
             path: {{ .Values.devicePlugin.pluginPath }}
         - name: lib
           hostPath:
+<<<<<<< HEAD:charts/vgpu/templates/device-plugin/daemonset.yaml
             path: /usr/local/vgpu
             #path: {{ .Values.devicePlugin.libPath }}
+=======
+            path: {{ .Values.devicePlugin.libPath }}
+>>>>>>> c7a3893 (Remake this repo to HAMi):charts/vgpu/templates/device-plugin/daemonsetnvidia.yaml
         - name: usrbin
           hostPath:
             path: /usr/bin

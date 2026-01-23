@@ -17,7 +17,7 @@
 package cdi
 
 import (
-	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/info"
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 
 	"k8s.io/klog/v2"
 )

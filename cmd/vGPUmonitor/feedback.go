@@ -26,9 +26,14 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+<<<<<<< HEAD
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+=======
+	v1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 var cgroupDriver int
@@ -67,7 +72,11 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	if err != nvml.SUCCESS {
 		return []uint{}, err
 	}
+<<<<<<< HEAD
 	for i := range count {
+=======
+	for i := 0; i < count; i++ {
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 		device, err := nvml.DeviceGetHandleByIndex(i)
 		if err != nvml.SUCCESS {
 			return []uint{}, err
@@ -90,10 +99,97 @@ func getUsedGPUPid() ([]uint, nvml.Return) {
 	return result, nvml.SUCCESS
 }
 
+<<<<<<< HEAD
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
+=======
+func setHostPid(pod v1.Pod, ctr v1.ContainerStatus, sr *podusage) error {
+	var pids []string
+	mutex.Lock()
+	defer mutex.Unlock()
+
+	if cgroupDriver == 0 {
+		cgroupDriver = setcGgroupDriver()
+	}
+	if cgroupDriver == 0 {
+		return errors.New("can not identify cgroup driver")
+	}
+	usedGPUArray, err := getUsedGPUPid()
+	if err != nvml.SUCCESS {
+		return errors.New("get usedGPUID failed, ret:" + nvml.ErrorString(err))
+	}
+	if len(usedGPUArray) == 0 {
+		return nil
+	}
+	qos := strings.ToLower(string(pod.Status.QOSClass))
+	var filename string
+	if cgroupDriver == 1 {
+		/* Cgroupfs */
+		filename = fmt.Sprintf("/sysinfo/fs/cgroup/memory/kubepods/%s/pod%s/%s/tasks", qos, pod.UID, strings.TrimPrefix(ctr.ContainerID, "docker://"))
+	}
+	if cgroupDriver == 2 {
+		/* Systemd */
+		cgroupuid := strings.ReplaceAll(string(pod.UID), "-", "_")
+		filename = fmt.Sprintf("/sysinfo/fs/cgroup/systemd/kubepods.slice/kubepods-%s.slice/kubepods-%s-pod%s.slice/docker-%s.scope/tasks", qos, qos, cgroupuid, strings.TrimPrefix(ctr.ContainerID, "docker://"))
+	}
+	fmt.Println("filename=", filename)
+	content, ferr := os.ReadFile(filename)
+	if ferr != nil {
+		return ferr
+	}
+	pids = strings.Split(string(content), "\n")
+	hostPidArray := []hostGPUPid{}
+	for _, val := range pids {
+		tmp, _ := strconv.Atoi(val)
+		if tmp != 0 {
+			var stat os.FileInfo
+			var err error
+			if stat, err = os.Lstat(fmt.Sprintf("/proc/%v", tmp)); err != nil {
+				return err
+			}
+			mtime := stat.ModTime().Unix()
+			hostPidArray = append(hostPidArray, hostGPUPid{
+				hostGPUPid: tmp,
+				mtime:      uint64(mtime),
+			})
+		}
+	}
+	usedGPUHostArray := []hostGPUPid{}
+	for _, val := range usedGPUArray {
+		for _, hostpid := range hostPidArray {
+			if uint(hostpid.hostGPUPid) == val {
+				usedGPUHostArray = append(usedGPUHostArray, hostpid)
+			}
+		}
+	}
+	//fmt.Println("usedHostGPUArray=", usedGPUHostArray)
+	sort.Slice(usedGPUHostArray, func(i, j int) bool { return usedGPUHostArray[i].mtime > usedGPUHostArray[j].mtime })
+	if sr == nil || sr.sr == nil {
+		return nil
+	}
+	for idx, val := range sr.sr.procs {
+		//fmt.Println("pid=", val.pid)
+		if val.pid == 0 {
+			break
+		}
+		if idx < len(usedGPUHostArray) {
+			if val.hostpid == 0 || val.hostpid != int32(usedGPUHostArray[idx].hostGPUPid) {
+				fmt.Println("Assign host pid to pid instead", usedGPUHostArray[idx].hostGPUPid, val.pid, val.hostpid)
+				sr.sr.procs[idx].hostpid = int32(usedGPUHostArray[idx].hostGPUPid)
+				fmt.Println("val=", val.hostpid, sr.sr.procs[idx].hostpid)
+			}
+		}
+	}
+	return nil
+
+}
+
+func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, pu podusage) bool {
+	for _, devuuid := range pu.sr.uuids {
+		_, ok := utSwitchOn[string(devuuid.uuid[:])]
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 		if ok {
 			for i := range p {
 				if utSwitchOn[uuid][i] > 0 {
@@ -150,6 +246,7 @@ func Observe(lister *nvidia.ContainerLister) {
 			c.Info.SetRecentKernel(recentKernel)
 		}
 	}
+<<<<<<< HEAD
 	for idx, c := range containers {
 		priority := c.Info.GetPriority()
 		recentKernel := c.Info.GetRecentKernel()
@@ -178,6 +275,36 @@ func Observe(lister *nvidia.ContainerLister) {
 				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
 				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
+=======
+	for idx, val := range *srlist {
+		if val.sr == nil {
+			continue
+		}
+		if CheckBlocking(utSwitchOn, int(val.sr.priority), val) {
+			if (*srlist)[idx].sr.recentKernel >= 0 {
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to on %v", idx)
+				(*srlist)[idx].sr.recentKernel = -1
+			}
+		} else {
+			if (*srlist)[idx].sr.recentKernel < 0 {
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to off %v", idx)
+				(*srlist)[idx].sr.recentKernel = 0
+			}
+		}
+		if CheckPriority(utSwitchOn, int(val.sr.priority), val) {
+			if (*srlist)[idx].sr.utilizationSwitch != 1 {
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to on %v", idx)
+				(*srlist)[idx].sr.utilizationSwitch = 1
+			}
+		} else {
+			if (*srlist)[idx].sr.utilizationSwitch != 0 {
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to off %v", idx)
+				(*srlist)[idx].sr.utilizationSwitch = 0
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 			}
 		}
 	}
@@ -194,6 +321,7 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 	defer ticker.Stop()
 
 	for {
+<<<<<<< HEAD
 		select {
 		case <-ctx.Done():
 			klog.Info("Shutting down watchAndFeedback")
@@ -203,6 +331,15 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 				klog.Info("Received MIG apply lock file")
 				return errTemporaryClosed
 			}
+=======
+		time.Sleep(time.Second * 5)
+		err := monitorpath(srPodList)
+		if err != nil {
+			klog.Errorf("monitorPath failed %v", err.Error())
+		}
+		klog.Infof("WatchAndFeedback srPodList=%v", srPodList)
+		Observe(&srPodList)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 		case <-ticker.C:
 			if err := lister.Update(); err != nil {

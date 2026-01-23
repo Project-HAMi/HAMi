@@ -25,11 +25,15 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 <<<<<<< HEAD
+<<<<<<< HEAD
 	klog "k8s.io/klog/v2"
 
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 =======
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	"k8s.io/klog/v2"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 // ClusterManager is an example for a system that might have been built without
@@ -66,7 +70,11 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Note that Collect could be called concurrently, so we depend on
 // ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
+<<<<<<< HEAD
 	klog.Info("Starting to collect metrics for scheduler")
+=======
+	klog.Infof("Starting to collect metrics for scheduler")
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
@@ -184,6 +192,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
+<<<<<<< HEAD
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"vGPUMemoryAllocated",
 		"vGPU memory allocated from a container",
@@ -193,6 +202,22 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"vGPUCoreAllocated",
 		"vGPU core allocated from a container",
 		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+=======
+	ctrvGPUDeviceAllocatedDesc := prometheus.NewDesc(
+		"vGPUPodsDeviceAllocated",
+		"vGPU Allocated from pods",
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid", "deviceusedcore"}, nil,
+	)
+	ctrvGPUdeviceAllocatedMemoryPercentageDesc := prometheus.NewDesc(
+		"vGPUMemoryPercentage",
+		"vGPU memory percentage allocated from a container",
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+	)
+	ctrvGPUdeviceAllocateCorePercentageDesc := prometheus.NewDesc(
+		"vGPUCorePercentage",
+		"vGPU core allocated from a container",
+		[]string{"namespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	)
 	quotaUsedDesc := prometheus.NewDesc(
 		"QuotaUsed",
@@ -296,10 +321,17 @@ func NewClusterManager(zone string, reg prometheus.Registerer) *ClusterManager {
 	return c
 }
 
+<<<<<<< HEAD
 func initMetrics(bindAddress string) {
 	// Since we are dealing with custom Collector implementations, it might
 	// be a good idea to try it out with a pedantic registry.
 	klog.Info("Initializing metrics for scheduler")
+=======
+func initmetrics(bindAddress string) {
+	// Since we are dealing with custom Collector implementations, it might
+	// be a good idea to try it out with a pedantic registry.
+	klog.Infof("Initializing metrics for scheduler")
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	reg := prometheus.NewRegistry()
 <<<<<<< HEAD
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())

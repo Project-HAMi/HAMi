@@ -1,4 +1,5 @@
 ##### Global variables #####
+<<<<<<< HEAD
 include version.mk Makefile.defs
 
 HAMI_VERSION_PKG=github.com/Project-HAMi/HAMi/pkg
@@ -17,6 +18,9 @@ GO_BUILD_LDFLAGS=\
 	-X $(HAMI_VERSION_PKG)/device-plugin/nvidiadevice/nvinternal/info.version=$(VERSION) \
 	-X $(HAMI_VERSION_PKG)/version.revision=$(REVISION)  \
 	-X $(HAMI_VERSION_PKG)/version.buildDate=$(shell date +"%Y%m%d-%T")
+=======
+include version.mk
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 all: build
 
@@ -26,6 +30,7 @@ docker:
 	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
+<<<<<<< HEAD
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile -t ${IMG_TAG}
@@ -40,6 +45,9 @@ dockerwithlib:
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
 	. -f=docker/Dockerfile.withlib -t ${IMG_TAG}
+=======
+	. -f=docker/Dockerfile -t ${IMG_TAG}
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 tidy:
 	$(GO) mod tidy

@@ -1,0 +1,98 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "4pd-vgpu.scheduler" . }}
+  labels:
+    app.kubernetes.io/component: 4pd-scheduler
+    {{- include "4pd-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: 4pd-scheduler
+      {{- include "4pd-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: 4pd-scheduler
+        {{- include "4pd-vgpu.selectorLabels" . | nindent 8 }}
+        4pd.io/webhook: ignore
+      {{- if .Values.scheduler.podAnnotations }}
+      annotations: {{ toYaml .Values.scheduler.podAnnotations | nindent 8 }}
+      {{- end }}
+    spec:
+      {{- include "4pd-vgpu.imagePullSecrets" . | nindent 6}}
+      serviceAccountName: {{ include "4pd-vgpu.scheduler" . }}
+      priorityClassName: system-node-critical
+      containers:
+        - name: kube-scheduler
+          image: {{ .Values.scheduler.kubeScheduler.image }}:{{ .Values.scheduler.kubeScheduler.imageTag }}
+          imagePullPolicy: {{ .Values.scheduler.kubeScheduler.imagePullPolicy | quote }}
+          command:
+            - kube-scheduler
+            {{- if ge (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 22}}
+            {{- range .Values.scheduler.kubeScheduler.extraNewArgs }}
+            - {{ . }}
+            {{- end }}
+            {{- else }}
+            - --scheduler-name={{ .Values.schedulerName }}
+            {{- range .Values.scheduler.kubeScheduler.extraArgs }}
+            - {{ . }}
+            {{- end }}
+            {{- end }}
+          volumeMounts:
+            - name: scheduler-config
+              mountPath: /config
+        - name: vgpu-scheduler-extender
+          image: {{ .Values.scheduler.extender.image }}:{{ .Values.version }}
+          imagePullPolicy: {{ .Values.scheduler.extender.imagePullPolicy | quote }}
+          command:
+            - scheduler
+            - --resource-name={{ .Values.resourceName }}
+            - --resource-mem={{ .Values.resourceMem }}
+            - --resource-cores={{ .Values.resourceCores }}
+            - --resource-mem-percentage={{ .Values.resourceMemPercentage }}
+            - --resource-priority={{ .Values.resourcePriority }}
+            - --http_bind=0.0.0.0:443
+            - --cert_file=/tls/tls.crt
+            - --key_file=/tls/tls.key
+            - --scheduler-name={{ .Values.schedulerName }}
+            - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
+            - --default-mem={{ .Values.scheduler.defaultMem }}
+            - --default-cores={{ .Values.scheduler.defaultCores }}
+            {{- range .Values.scheduler.extender.extraArgs }}
+            - {{ . }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: 443
+              protocol: TCP
+          volumeMounts:
+            - name: tls-config
+              mountPath: /tls
+      volumes:
+        - name: tls-config
+          secret:
+            secretName: {{ template "4pd-vgpu.scheduler.tls" . }}
+        - name: scheduler-config
+          configMap:
+            {{- if ge (.Values.scheduler.kubeScheduler.imageTag | substr 3 5| atoi) 22 }}
+            name: {{ template "4pd-vgpu.scheduler" . }}-newversion
+            {{- else }}
+            name: {{ template "4pd-vgpu.scheduler" . }}
+            {{- end }}
+      {{- if .Values.scheduler.nodeSelector }}
+      nodeSelector: {{ toYaml .Values.scheduler.nodeSelector | nindent 8 }}
+      {{- end }}
+      {{- if .Values.scheduler.tolerations }}
+      tolerations: {{ toYaml .Values.scheduler.tolerations | nindent 8 }}
+      {{- end }}
+      {{- if .Values.scheduler.nodeName }}
+      nodeName: {{ .Values.scheduler.nodeName }}
+      {{- end }}

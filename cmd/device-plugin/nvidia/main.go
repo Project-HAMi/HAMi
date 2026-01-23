@@ -525,11 +525,11 @@ restart:
 	migStrategy, err := device_plugin.NewMigStrategy(migStrategyFlag)
 =======
 	/*Loading config files*/
-	fmt.Println("NodeName=", util.NodeName)
+	klog.Infof("Start working on node %s", util.NodeName)
 	err = readFromConfigFile()
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
 	if err != nil {
-		fmt.Printf("failed to load config file %s", err.Error())
+		klog.Errorf("failed to load config file %s", err.Error())
 	}
 
 	klog.Info("Starting OS watcher.")

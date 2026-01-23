@@ -1,5 +1,6 @@
 # Maintainers
 
+<<<<<<< HEAD
 - Please check [HAMi Community Membership](https://github.com/Project-HAMi/community/blob/main/community-membership.md) to find how to level up through the project.
 - Please see [Contributors](./AUTHORS.md) for the full list of contributors to the project.
 
@@ -11,3 +12,12 @@
 | [Xiao Zhang](https://github.com/wawa0210)         | xiaozhang0210@hotmail.com | [dynamia.ai](https://www.dynamia.ai/) |
 | [Wang Leibo](https://github.com/william-wang)     | wang.platform@gmail.com | [HuaweiCloud](https://www.huaweicloud.com/) |
 | [Yin Yu](https://github.com/Nimbus318)     | nimbus-nimo@proton.me | Independent Developer |
+=======
+Please see the [AUTHORS](./AUTHORS) file for the full list of contributors to the project
+
+## HAMi Committers
+
+| Maintainer                                        | Emplolyer |
+|---------------------------------------------------|-----------|
+| [Li Mengxuan](https://github.com/archlitchi)      | 4Paradigm |
+>>>>>>> c7a3893 (Remake this repo to HAMi)

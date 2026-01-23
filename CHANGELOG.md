@@ -214,6 +214,7 @@ Improved log messages
 
 fix: loss of metrics after vdeivce restart
 
+<<<<<<< HEAD
 bugfix: device-plugin monitor serves too slowly in big cluster
 
 ## v2.3.9
@@ -237,3 +238,6 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
 =======
 >>>>>>> 21785f7 (update to v2.3.2)
+=======
+bugfix: device-plugin monitor serves too slowly in big cluster
+>>>>>>> c7a3893 (Remake this repo to HAMi)

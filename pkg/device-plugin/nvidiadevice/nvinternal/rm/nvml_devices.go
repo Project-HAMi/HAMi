@@ -55,12 +55,17 @@ import (
 	"strings"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 =======
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/info"
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
+=======
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 	"4pd.io/k8s-vgpu/pkg/device-plugin/nvidiadevice/nvinternal/mig"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)

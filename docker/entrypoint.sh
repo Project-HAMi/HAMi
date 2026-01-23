@@ -14,7 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+<<<<<<< HEAD
 # if [ $1 == "device-plugin" ]; then
 # cp -f /k8s-vgpu/lib/* $DEST_DIR/vgpu
 # fi
 exec "$@"
+=======
+
+if [ $1 == "device-plugin" ]; then
+cp -f /k8s-vgpu/lib/* $DEST_DIR
+fi
+exec "$@"
+>>>>>>> c7a3893 (Remake this repo to HAMi)

@@ -54,10 +54,14 @@ import (
 	"strings"
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 =======
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	"k8s.io/klog/v2"
 )
 

@@ -68,13 +68,18 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 =======
 
+	nvdevice "github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
+	"github.com/NVIDIA/go-nvlib/pkg/nvml"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi/transform"
-	cdiapi "github.com/container-orchestrated-devices/container-device-interface/pkg/cdi"
 	"github.com/sirupsen/logrus"
+<<<<<<< HEAD
 	nvdevice "gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvlib/device"
 	"gitlab.com/nvidia/cloud-native/go-nvlib/pkg/nvml"
 >>>>>>> 32fbedb (update device_plugin version to nvidia v0.14.0)
+=======
+	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 )
 
 const (
@@ -319,7 +324,8 @@ func (cdi *cdiHandler) CreateSpecFile() error {
 			return fmt.Errorf("failed to transform driver root in CDI spec: %v", err)
 		}
 
-		specName, err := cdiapi.GenerateNameForSpec(spec.Raw())
+		raw := spec.Raw()
+		specName, err := cdiapi.GenerateNameForSpec(raw)
 		if err != nil {
 			return fmt.Errorf("failed to generate spec name: %v", err)
 		}

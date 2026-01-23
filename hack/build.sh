@@ -22,11 +22,19 @@ export SHORT_VERSION
 export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
 export LATEST_VERSION="latest"
+<<<<<<< HEAD
 export GOLANG_IMAGE="golang:1.25.5-bookworm"
 export NVIDIA_IMAGE="nvidia/cuda:12.2.0-devel-ubuntu20.04"
 export DEST_DIR="/usr/local"
 
 IMAGE=${IMAGE-"projecthami/hami"}
+=======
+export GOLANG_IMAGE="golang:1.21-bullseye"
+export NVIDIA_IMAGE="nvidia/cuda:11.2.2-base-ubuntu20.04"
+export DEST_DIR=""
+
+IMAGE=${IMAGE-"4pdosc/k8s-vdevice"}
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 function go_build() {
   [[ -z "$J" ]] && J=$(nproc | awk '{print int(($0 + 1)/ 2)}')

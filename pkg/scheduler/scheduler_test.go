@@ -1,4 +1,5 @@
 /*
+<<<<<<< HEAD
 Copyright 2024 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -13,10 +14,27 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
+=======
+ * Copyright © 2021 peizhaoyou <peizhaoyou@4paradigm.com>
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 package scheduler
 
 import (
+<<<<<<< HEAD
 	"context"
 	"fmt"
 	"strings"
@@ -55,12 +73,29 @@ func Test_getNodesUsage(t *testing.T) {
 		},
 		Devices: map[string][]device.DeviceInfo{
 			nvidia.NvidiaGPUDevice: {{
+=======
+	"4pd.io/k8s-vgpu/pkg/util"
+	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"testing"
+)
+
+func Test_getNodesUsage(t *testing.T) {
+	nodeMage := nodeManager{}
+	nodeMage.init()
+	nodeMage.addNode("node1", &NodeInfo{
+		ID: "node1",
+		Devices: []DeviceInfo{
+			{
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 				ID:      "GPU0",
 				Index:   0,
 				Count:   10,
 				Devmem:  1024,
 				Devcore: 100,
 				Numa:    1,
+<<<<<<< HEAD
 				Mode:    "hami",
 				Health:  true,
 			},
@@ -90,13 +125,45 @@ func Test_getNodesUsage(t *testing.T) {
 	}
 	podMap := device.NewPodManager()
 	podMap.AddPod(&corev1.Pod{
+=======
+				Health:  true,
+			},
+			{
+				ID:      "GPU1",
+				Index:   1,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Health:  true,
+			},
+		},
+	})
+	podDevces := util.PodDevices{
+		[]util.ContainerDevice{
+			{
+				Idx:       0,
+				UUID:      "GPU0",
+				Usedmem:   100,
+				Usedcores: 10,
+			},
+		},
+	}
+	podMap := podManager{}
+	podMap.init()
+	podMap.addPod(&corev1.Pod{
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "1111",
 			Name:      "test1",
 			Namespace: "default",
 		},
 	}, "node1", podDevces)
+<<<<<<< HEAD
 	podMap.AddPod(&corev1.Pod{
+=======
+	podMap.addPod(&corev1.Pod{
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "2222",
 			Name:      "test2",
@@ -116,6 +183,7 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, len(*cachenodeMap), 1)
 	v, ok := (*cachenodeMap)["node1"]
 	assert.Equal(t, ok, true)
+<<<<<<< HEAD
 	assert.Equal(t, len(v.Devices.DeviceLists), 2)
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
@@ -1268,4 +1336,10 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 	}
 	close(stopCh)
 	wg.Wait()
+=======
+	assert.Equal(t, len(v.Devices), 2)
+	assert.Equal(t, v.Devices[0].Used, int32(2))
+	assert.Equal(t, v.Devices[0].Usedmem, int32(200))
+	assert.Equal(t, v.Devices[0].Usedcores, int32(20))
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 }

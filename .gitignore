@@ -4,6 +4,7 @@ run_scheduler.sh
 device_plugin.sh
 libvgpu/build
 updateso.sh
+<<<<<<< HEAD
 libvgpu.so
 .idea
 .vscode
@@ -13,3 +14,6 @@ vgpuvalidator
 _output/
 coverage.out
 .DS_Store
+=======
+.idea
+>>>>>>> c7a3893 (Remake this repo to HAMi)

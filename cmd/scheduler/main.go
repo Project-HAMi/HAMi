@@ -78,6 +78,7 @@ func init() {
 	rootCmd.Flags().Int32Var(&config.DefaultMem, "default-mem", 0, "default gpu device memory to allocate")
 	rootCmd.Flags().Int32Var(&config.DefaultCores, "default-cores", 0, "default gpu core percentage to allocate")
 <<<<<<< HEAD
+<<<<<<< HEAD
 	rootCmd.Flags().Int32Var(&config.DefaultResourceNum, "default-gpu", 1, "default gpu to allocate")
 	rootCmd.Flags().StringVar(&config.NodeSchedulerPolicy, "node-scheduler-policy", util.NodeSchedulerPolicyBinpack.String(), "node scheduler policy")
 	rootCmd.Flags().StringVar(&device.GPUSchedulerPolicy, "gpu-scheduler-policy", util.GPUSchedulerPolicySpread.String(), "GPU scheduler policy")
@@ -97,6 +98,9 @@ func init() {
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
 =======
+=======
+	rootCmd.Flags().StringVar(&config.MetricsBindAddress, "metrics-bind-address", ":9395", "The TCP address that the scheduler should bind to for serving prometheus metrics(e.g. 127.0.0.1:9395, :9395)")
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 	rootCmd.PersistentFlags().AddGoFlagSet(device.GlobalFlagSet())
 >>>>>>> 21785f7 (update to v2.3.2)
 	rootCmd.AddCommand(version.VersionCmd)
@@ -152,7 +156,12 @@ func start() error {
 	defer sher.Stop()
 
 	// start monitor metrics
+<<<<<<< HEAD
 	go initMetrics(config.MetricsBindAddress)
+=======
+	go sher.RegisterFromNodeAnnotatons()
+	go initmetrics(config.MetricsBindAddress)
+>>>>>>> c7a3893 (Remake this repo to HAMi)
 
 	// start http server
 	router := httprouter.New()
