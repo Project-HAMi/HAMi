@@ -3,7 +3,7 @@ entries:
   hami:
   - apiVersion: v2
     appVersion: 2.8.0
-    created: "2026-01-20T07:53:06.184041877Z"
+    created: "2026-01-23T07:23:26.174628709Z"
     dependencies:
     - condition: dra.enabled
       name: hami-dra
@@ -28,8 +28,29 @@ entries:
     - https://Project-HAMi.github.io/HAMi/charts/hami-2.8.0.tgz
     version: 2.8.0
   - apiVersion: v2
+    appVersion: 2.7.1
+    created: "2026-01-23T07:23:26.16795999Z"
+    description: Heterogeneous AI Computing Virtualization Middleware
+    digest: 6342c99d39b5128090b9cc4a64cd7bd124298331f617a3f175763c27aa8a8622
+    keywords:
+    - vgpu
+    - gpu
+    kubeVersion: '>= 1.18.0-0'
+    maintainers:
+    - email: archlitchi@gmail.com
+      name: limengxuan
+    - email: xiaozhang0210@hotmail.com
+      name: zhangxiao
+    name: hami
+    sources:
+    - https://github.com/Project-HAMi/HAMi
+    type: application
+    urls:
+    - https://Project-HAMi.github.io/HAMi/charts/hami-2.7.1.tgz
+    version: 2.7.1
+  - apiVersion: v2
     appVersion: 2.7.0
-    created: "2026-01-20T07:53:06.181158561Z"
+    created: "2026-01-23T07:23:26.166599913Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 5c3a6234c6c3ed05ea8fffe722ba83450f3480c2a1c023a26415489a62313b2f
     keywords:
@@ -50,7 +71,7 @@ entries:
     version: 2.7.0
   - apiVersion: v2
     appVersion: 2.6.1
-    created: "2026-01-20T07:53:06.180082146Z"
+    created: "2026-01-23T07:23:26.16552056Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: e6699c47df7af201914432b491031a0002a98af6a4a9ce20bc20593e89c5406b
     keywords:
@@ -69,7 +90,7 @@ entries:
     version: 2.6.1
   - apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-01-20T07:53:06.1792508Z"
+    created: "2026-01-23T07:23:26.164710238Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 21d7db257bdb4b5230d034be984a3d3d3901dbacf8f41150c1e0175654d33c06
     keywords:
@@ -88,7 +109,7 @@ entries:
     version: 2.6.0
   - apiVersion: v2
     appVersion: 2.5.3
-    created: "2026-01-20T07:53:06.178413753Z"
+    created: "2026-01-23T07:23:26.163852478Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: dfa421d12be76156b1893974e17313373811809d78c08fd198de17a06de7f2fd
     keywords:
@@ -107,7 +128,7 @@ entries:
     version: 2.5.3
   - apiVersion: v2
     appVersion: 2.5.2
-    created: "2026-01-20T07:53:06.17762136Z"
+    created: "2026-01-23T07:23:26.162962658Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 05eeec9d417620afaa7b34d69a8af073681f58f078c5a2cd99714afcee18846d
     keywords:
@@ -126,7 +147,7 @@ entries:
     version: 2.5.2
   - apiVersion: v2
     appVersion: 2.5.1
-    created: "2026-01-20T07:53:06.17671863Z"
+    created: "2026-01-23T07:23:26.151645399Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 8b979607de49b6b1b2706b1ec59ef1c5cd56a69d9a2fa06d9549c0cb0bce3ea2
     keywords:
@@ -145,7 +166,7 @@ entries:
     version: 2.5.1
   - apiVersion: v2
     appVersion: 2.5.0
-    created: "2026-01-20T07:53:06.175759876Z"
+    created: "2026-01-23T07:23:26.150711587Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 18405c6324453ce63ed2708436b802d2aa0f96f921c3a00aa8e6c03eb3de4e6a
     keywords:
@@ -164,7 +185,7 @@ entries:
     version: 2.5.0
   - apiVersion: v2
     appVersion: 2.4.1
-    created: "2026-01-20T07:53:06.169214169Z"
+    created: "2026-01-23T07:23:26.144417497Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: a9151a78340c06525b9071bef1f0f24cf52bddc3aa5f20d3045310449b37657a
     keywords:
@@ -183,7 +204,7 @@ entries:
     version: 2.4.1
   - apiVersion: v2
     appVersion: 2.4.0
-    created: "2026-01-20T07:53:06.164163004Z"
+    created: "2026-01-23T07:23:26.143697594Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 1b25c767b32433b02fb3b4fa6194e8946e9f9233de4046ea0536051f8f6c2af2
     keywords:
@@ -200,4 +221,4 @@ entries:
     urls:
     - https://Project-HAMi.github.io/HAMi/charts/hami-2.4.0.tgz
     version: 2.4.0
-generated: "2026-01-20T07:53:06.158389127Z"
+generated: "2026-01-23T07:23:26.138599565Z"
