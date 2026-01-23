@@ -2,6 +2,7 @@ name: Chart Lint
 
 on:
   push:
+<<<<<<< HEAD
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
     branches-ignore:
@@ -9,6 +10,9 @@ on:
   pull_request:
     paths:
       - "charts/**"
+=======
+    branches: ["master","dev"]
+>>>>>>> dd7deeb (add dev branch ci & remove unused binary (#487))
 
 jobs:
   chart-lint-test:

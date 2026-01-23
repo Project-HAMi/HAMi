@@ -4,12 +4,16 @@ on:
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
   pull_request:
   push:
+<<<<<<< HEAD
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
     branches-ignore:
       - 'dependabot/**'
 permissions:
   contents: read  # for actions/checkout to fetch code
+=======
+    branches: ["master","dev"]
+>>>>>>> dd7deeb (add dev branch ci & remove unused binary (#487))
 
 env:
   REGISTRY: docker.io
