@@ -1,13 +1,4 @@
-<<<<<<< HEAD
 [submodule "libvgpu"]
 	path = libvgpu
 	url = https://github.com/Project-HAMi/HAMi-core.git
 	branch = main
-=======
-[submodule "HAMi-core"]
-	path = HAMi-core
-	url = https://github.com/Project-HAMi/HAMi-core.git
-[submodule "libvgpu"]
-	path = libvgpu
-	url = git@github.com:Project-HAMi/HAMi-core.git
->>>>>>> c7a3893 (Remake this repo to HAMi)
