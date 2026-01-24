@@ -136,11 +136,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			//This loop is for different container request
+			// Assume the node is a fit by default. This handles pods with no device
+			// requests, which should be schedulable on any node.
 			ctrfit := true
 			deviceType := ""
-			// When resourceReqs is nil, the range loop won't execute (Go handles nil safely).
-			// Initialize ctrfit to true so nodes are considered fitting when there are no device requirements.
+			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
