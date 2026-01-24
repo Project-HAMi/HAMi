@@ -137,7 +137,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			}
 
 			//This loop is for different container request
-			ctrfit := false
+			ctrfit := true
 			deviceType := ""
 			for ctrid, n := range resourceReqs {
 				sums := 0
