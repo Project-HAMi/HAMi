@@ -12,6 +12,8 @@ github.com/NVIDIA/k8s-device-plugin v0.18.1 h1:t0gDBQWrk73PfohUjHlepM2zp5Rx/9fPL
 github.com/NVIDIA/k8s-device-plugin v0.18.1/go.mod h1:3BVQeDWzcl2VTh6vNvWOoJ+sQvMc23HYxxCR3Y92d5A=
 github.com/NVIDIA/nvidia-container-toolkit v1.18.1 h1:525Y921X2TwKwBvFfMNqyXF3QWlYbsemQfpd8YB2lHs=
 github.com/NVIDIA/nvidia-container-toolkit v1.18.1/go.mod h1:CNB3Cv4MPOtZ7WwxlMadw3ljAOOqrpesBzPr99n1FY4=
+github.com/NVIDIA/nvidia-container-toolkit v1.18.2 h1:S46SDe5aez/qeRvTybHQqOXPNcRphLnIuXoqDDyx8YY=
+github.com/NVIDIA/nvidia-container-toolkit v1.18.2/go.mod h1:/mroSjCgjTpYH74dlaPw7KDQHIry/xDuQiii9SP5eCY=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
