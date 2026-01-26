@@ -106,8 +106,8 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
-		"Container device memory description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
+		"Container device memory description (Deprecated: use vGPU_device_memory_usage_in_bytes instead)",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"Device_utilization_desc_of_container",
@@ -124,6 +124,23 @@ var (
 		"Mig device information for container",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
 	)
+	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
+		"vGPU_device_memory_context_size_bytes",
+		"Container device memory context size",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+
+	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
+		"vGPU_device_memory_module_size_bytes",
+		"Container device memory module size",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
+
+	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
+		"vGPU_device_memory_buffer_size_bytes",
+		"Container device memory buffer size",
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+	)
 )
 
 // Describe is implemented with DescribeByCollect. That's possible because the
@@ -134,6 +151,9 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
+	ch <- ctrDeviceMemoryContextDesc
+	ch <- ctrDeviceMemoryModuleDesc
+	ch <- ctrDeviceMemoryBufferDesc
 	//prometheus.DescribeByCollect(cc, ch)
 }
 
@@ -396,7 +416,6 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		memoryContextSize := c.Info.DeviceMemoryContextSize(i)
 		memoryModuleSize := c.Info.DeviceMemoryModuleSize(i)
 		memoryBufferSize := c.Info.DeviceMemoryBufferSize(i)
-		memoryOffset := c.Info.DeviceMemoryOffset(i)
 		smUtil := c.Info.DeviceSmUtil(i)
 		lastKernelTime := c.Info.LastKernelTime()
 
@@ -413,15 +432,26 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			return err
 		}
 
-		// Send memory-related metrics with additional labels
-		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.CounterValue, float64(memoryTotal), memoryLabels...); err != nil {
+		// Deprecated: This metric is kept for backward compatibility and is identical to vGPU_device_memory_usage_in_bytes.
+		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
 			klog.Errorf("Failed to send memory-related metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
 			return err
 		}
 
 		if err := sendMetric(ch, ctrDeviceUtilizationdesc, prometheus.GaugeValue, float64(smUtil), labels...); err != nil {
 			klog.Errorf("Failed to send SM utilization metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			return err
+		}
+		if err := sendMetric(ch, ctrDeviceMemoryContextDesc, prometheus.GaugeValue, float64(memoryContextSize), labels...); err != nil {
+			klog.Errorf("Failed to send context size metric: %v", err)
+			return err
+		}
+		if err := sendMetric(ch, ctrDeviceMemoryModuleDesc, prometheus.GaugeValue, float64(memoryModuleSize), labels...); err != nil {
+			klog.Errorf("Failed to send module size metric: %v", err)
+			return err
+		}
+		if err := sendMetric(ch, ctrDeviceMemoryBufferDesc, prometheus.GaugeValue, float64(memoryBufferSize), labels...); err != nil {
+			klog.Errorf("Failed to send buffer size metric: %v", err)
 			return err
 		}
 
