@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -76,8 +77,9 @@ type Scheduler struct {
 	eventRecorder  record.EventRecorder
 	started        uint32 // 0 = false, 1 = true
 
-	lock   sync.RWMutex
-	synced bool
+	lock       sync.RWMutex
+	statusLock sync.RWMutex
+	synced     bool
 }
 
 func NewScheduler() *Scheduler {
@@ -224,8 +226,8 @@ func (s *Scheduler) onDelNode(obj any) {
 // cleanupNodeUsage removes the node from overviewstatus and cachedstatus maps
 // to ensure metrics no longer report data for deleted nodes.
 func (s *Scheduler) cleanupNodeUsage(nodeID string) {
-	s.lock.Lock()
-	defer s.lock.Unlock()
+	s.statusLock.Lock()
+	defer s.statusLock.Unlock()
 	if _, ok := s.overviewstatus[nodeID]; ok {
 		delete(s.overviewstatus, nodeID)
 		klog.V(4).InfoS("Removed node from overviewstatus", "node", nodeID)
@@ -440,7 +442,106 @@ func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 
 // InspectAllNodesUsage is used by metrics monitor.
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
-	return &s.overviewstatus
+	s.statusLock.RLock()
+	defer s.statusLock.RUnlock()
+	snapshot := make(map[string]*NodeUsage, len(s.overviewstatus))
+	//nolint:modernize // Deep copy is required; maps.Copy would keep shared pointers.
+	for nodeID, usage := range s.overviewstatus {
+		snapshot[nodeID] = cloneNodeUsage(usage)
+	}
+	return &snapshot
+}
+
+func cloneNodeUsage(usage *NodeUsage) *NodeUsage {
+	if usage == nil {
+		return nil
+	}
+	copied := &NodeUsage{}
+	if usage.Node != nil {
+		copied.Node = usage.Node.DeepCopy()
+	}
+	copied.Devices.Policy = usage.Devices.Policy
+	if len(usage.Devices.DeviceLists) == 0 {
+		return copied
+	}
+	copied.Devices.DeviceLists = make([]*policy.DeviceListsScore, len(usage.Devices.DeviceLists))
+	for idx, ds := range usage.Devices.DeviceLists {
+		if ds == nil {
+			continue
+		}
+		copiedScore := &policy.DeviceListsScore{
+			Score: ds.Score,
+		}
+		if ds.Device != nil {
+			copiedScore.Device = cloneDeviceUsage(ds.Device)
+		}
+		copied.Devices.DeviceLists[idx] = copiedScore
+	}
+	return copied
+}
+
+func cloneDeviceUsage(src *device.DeviceUsage) *device.DeviceUsage {
+	if src == nil {
+		return nil
+	}
+	dst := *src
+	if len(src.MigTemplate) > 0 {
+		dst.MigTemplate = make([]device.Geometry, len(src.MigTemplate))
+		for i, geom := range src.MigTemplate {
+			dst.MigTemplate[i] = slices.Clone(geom)
+		}
+	}
+	dst.MigUsage = device.MigInUse{
+		Index:     src.MigUsage.Index,
+		UsageList: slices.Clone(src.MigUsage.UsageList),
+	}
+	if len(src.PodInfos) > 0 {
+		dst.PodInfos = make([]*device.PodInfo, len(src.PodInfos))
+		for i, pi := range src.PodInfos {
+			dst.PodInfos[i] = clonePodInfo(pi)
+		}
+	} else {
+		dst.PodInfos = nil
+	}
+	dst.CustomInfo = maps.Clone(src.CustomInfo)
+	return &dst
+}
+
+func clonePodInfo(src *device.PodInfo) *device.PodInfo {
+	if src == nil {
+		return nil
+	}
+	dst := &device.PodInfo{
+		NodeID: src.NodeID,
+	}
+	if src.Pod != nil {
+		dst.Pod = src.DeepCopy()
+	}
+	dst.Devices = clonePodDevices(src.Devices)
+	dst.CtrIDs = slices.Clone(src.CtrIDs)
+	return dst
+}
+
+func clonePodDevices(src device.PodDevices) device.PodDevices {
+	if src == nil {
+		return nil
+	}
+	dst := make(device.PodDevices, len(src))
+	for devType, pods := range src {
+		podCopy := make(device.PodSingleDevice, len(pods))
+		for i, ctrDevs := range pods {
+			ctrCopy := make(device.ContainerDevices, len(ctrDevs))
+			for j, ctrDev := range ctrDevs {
+				ctrCopy[j] = ctrDev
+				if ctrDev.CustomInfo != nil {
+					ctrCopy[j].CustomInfo = maps.Clone(ctrDev.CustomInfo)
+				}
+			}
+			podCopy[i] = ctrCopy
+		}
+		dst[devType] = podCopy
+	}
+	return dst
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
@@ -535,6 +636,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
 	}
+	s.statusLock.Lock()
 	s.overviewstatus = overallnodeMap
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
@@ -547,6 +649,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		cachenodeMap[node.ID] = overallnodeMap[node.ID]
 	}
 	s.cachedstatus = cachenodeMap
+	s.statusLock.Unlock()
 	return &cachenodeMap, failedNodes, nil
 }
 
