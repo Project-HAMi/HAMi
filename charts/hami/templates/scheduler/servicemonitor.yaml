@@ -1,7 +1,7 @@
-{{- if and (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PodMonitor") .Values.prometheus.enabled }}
-# Prometheus Monitor Service (Metrics)
+{{- if and (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") .Values.prometheus.enabled }}
+# Prometheus Service Monitor
 apiVersion: monitoring.coreos.com/v1
-kind: PodMonitor
+kind: ServiceMonitor
 metadata:
   name: {{ include "hami-vgpu.scheduler" . }}-metrics-monitor
   namespace: {{ include "hami-vgpu.namespace" . }}
@@ -12,15 +12,11 @@ metadata:
     {{- toYaml . | nindent 4 }}
     {{- end }}
 spec:
-  podMetricsEndpoints:
-    - path: /metrics
-      port: metrics
-      scheme: http
-  namespaceSelector:
-    matchNames:
-      - {{ include "hami-vgpu.namespace" . }}
   selector:
     matchLabels:
       app.kubernetes.io/component: hami-scheduler
       {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: monitor
+    path: "/metrics"
 {{- end }}
