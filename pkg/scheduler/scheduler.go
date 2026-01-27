@@ -452,6 +452,7 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &snapshot
 }
 
+// TODO(@Shouren): Move clone helpers to dedicated files or methods in their packages.
 func cloneNodeUsage(usage *NodeUsage) *NodeUsage {
 	if usage == nil {
 		return nil
@@ -480,6 +481,7 @@ func cloneNodeUsage(usage *NodeUsage) *NodeUsage {
 	return copied
 }
 
+// TODO(@Shouren): Move clone helpers to dedicated files or methods in their packages.
 func cloneDeviceUsage(src *device.DeviceUsage) *device.DeviceUsage {
 	if src == nil {
 		return nil
@@ -507,6 +509,7 @@ func cloneDeviceUsage(src *device.DeviceUsage) *device.DeviceUsage {
 	return &dst
 }
 
+// TODO(@Shouren): Move clone helpers to dedicated files or methods in their packages.
 func clonePodInfo(src *device.PodInfo) *device.PodInfo {
 	if src == nil {
 		return nil
@@ -522,6 +525,7 @@ func clonePodInfo(src *device.PodInfo) *device.PodInfo {
 	return dst
 }
 
+// TODO(@Shouren): Move clone helpers to dedicated files or methods in their packages.
 func clonePodDevices(src device.PodDevices) device.PodDevices {
 	if src == nil {
 		return nil
