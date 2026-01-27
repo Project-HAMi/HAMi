@@ -67,28 +67,28 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryLimit",
 		"Device memory limit for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodevGPUCoreLimitDesc := prometheus.NewDesc(
 		"GPUDeviceCoreLimit",
 		"Device memory core limit for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceMemoryAllocated",
 		"Device memory allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicetype"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"GPUDeviceSharedNum",
 		"Number of containers sharing this GPU",
-		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
 		"GPUDeviceCoreAllocated",
 		"Device core allocated for a certain GPU",
-		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"nodeGPUOverview",
@@ -128,32 +128,32 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodevGPUMemoryLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Totalmem)*float64(1024)*float64(1024),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUCoreLimitDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Totalcore),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Used),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Usedcores),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUOverview,

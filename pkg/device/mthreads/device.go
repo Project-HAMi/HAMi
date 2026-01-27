@@ -179,25 +179,6 @@ func (dev *MthreadsDevices) checkType(annos map[string]string, d device.DeviceUs
 	return false, false, false
 }
 
-func (dev *MthreadsDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[MthreadsUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Mthreads user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[MthreadsNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Mthreads not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }
@@ -316,7 +297,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !mth.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MthreadsUseUUID, MthreadsNoUseUUID, mth.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
