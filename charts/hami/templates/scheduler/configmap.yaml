@@ -119,6 +119,10 @@ data:
                         "ignoredByScheduler": true
                     },
                     {
+                        "name": "{{ .Values.vastaiResourceCores }}",
+                        "ignoredByScheduler": true
+                    },
+                    {
                         "name": "metax-tech.com/gpu",
                         "ignoredByScheduler": true
                     },

@@ -53,6 +53,9 @@ kunlunResourceName: "kunlunxin.com/xpu"
 kunlunResourceVCountName: "kunlunxin.com/vxpu"
 kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
+#Vastai Parameters
+vastaiResourceName: "vastaitech.com/va"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -440,6 +443,10 @@ devices:
     enabled: true
     customresources:
       - mthreads.com/vgpu
+  vastai:
+    enabled: true
+    customresources:
+      - vastaitech.com/va
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1

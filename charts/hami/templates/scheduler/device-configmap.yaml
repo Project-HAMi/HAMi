@@ -283,6 +283,8 @@ data:
       resourceCoreName: "aws.amazon.com/neuroncore"
     amd:
       resourceCountName: "amd.com/gpu"
+    vastai:
+      resourceCountName: "vastaitech.com/va"
     vnpus:
     - chipName: 910A
       commonWord: Ascend910A
