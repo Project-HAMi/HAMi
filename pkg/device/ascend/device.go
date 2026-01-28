@@ -543,7 +543,7 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	// Each physical card hosts exactly 2 NPUs (Ascend 910C module design).
 	const MaxCardNPUNum = 2
 
-	// Group NPU indices by ther module and Sort
+	// Group NPU indices by the module and Sort
 	cardTopology := make(map[int][]int)
 	for _, idx := range npuIndices {
 		cardId := idx / MaxCardNPUNum
