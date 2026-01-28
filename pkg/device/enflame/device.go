@@ -37,9 +37,9 @@ type EnflameDevices struct {
 const (
 	EnflameVGCUDevice     = "Enflame"
 	EnflameVGCUCommonWord = "Enflame"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameUseUUID annotation specifies a comma-separated list of Enflame UUIDs to use.
 	EnflameUseUUID = "enflame.com/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameNoUseUUID annotation specifies a comma-separated list of Enflame UUIDs to exclude.
 	EnflameNoUseUUID   = "enflame.com/nouse-gpuuuid"
 	PodRequestGCUSize  = "enflame.com/gcu-request-size"
 	PodAssignedGCUID   = "enflame.com/gcu-assigned-id"
@@ -161,33 +161,6 @@ func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsa
 	return false, false, false
 }
 
-func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[EnflameUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(userUUID, ",") {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
-	}
-
-	noUserUUID, ok := annos[EnflameNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(noUserUUID, ",") {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
-	}
-	return true
-}
-
 func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }
@@ -261,7 +234,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !enf.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, EnflameUseUUID, EnflameNoUseUUID, enf.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

@@ -801,3 +801,60 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 		})
 	}
 }
+
+func TestCheckUUID(t *testing.T) {
+	GPUUseUUID := "hami.io/gpu-use-uuid"
+	GPUNoUseUUID := "hami.io/gpu-no-use-uuid"
+	tests := []struct {
+		name  string
+		annos map[string]string
+		id    string
+		want  bool
+	}{
+		{
+			name:  "don't set GPUUseUUID and GPUNoUseUUID annotation",
+			annos: make(map[string]string),
+			id:    "abc",
+			want:  true,
+		},
+		{
+			name: "use set GPUUseUUID don't set GPUNoUseUUID annotation,device match",
+			annos: map[string]string{
+				GPUUseUUID: "abc,123",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "use set GPUUseUUID don't set GPUNoUseUUID annotation,device don't match",
+			annos: map[string]string{
+				GPUUseUUID: "abc,123",
+			},
+			id:   "1abc",
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseUUID set GPUNoUseUUID annotation,device match",
+			annos: map[string]string{
+				GPUNoUseUUID: "abc,123",
+			},
+			id:   "abc",
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseUUID set GPUNoUseUUID annotation,device  don't match",
+			annos: map[string]string{
+				GPUNoUseUUID: "abc,123",
+			},
+			id:   "1abc",
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := CheckUUID(test.annos, test.id, GPUUseUUID, GPUNoUseUUID, "NVIDIA")
+			assert.Equal(t, test.want, got)
+		})
+	}
+}

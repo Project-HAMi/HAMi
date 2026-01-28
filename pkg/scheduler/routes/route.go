@@ -30,6 +30,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
 
+const maxRequestSize = 1024 * 1024 // 1MB limit
+
 func checkBody(w http.ResponseWriter, r *http.Request) {
 	if r.Body == nil {
 		http.Error(w, "Please send a request body", 400)
@@ -44,7 +46,9 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		checkBody(w, r)
 
 		var buf bytes.Buffer
-		body := io.TeeReader(r.Body, &buf)
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		body := io.TeeReader(limitedReader, &buf)
 
 		var extenderArgs extenderv1.ExtenderArgs
 		var extenderFilterResult *extenderv1.ExtenderFilterResult
@@ -91,7 +95,9 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		klog.Infoln("Entering Bind handler")
 		var buf bytes.Buffer
-		body := io.TeeReader(r.Body, &buf)
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		body := io.TeeReader(limitedReader, &buf)
 		var extenderBindingArgs extenderv1.ExtenderBindingArgs
 		var extenderBindingResult *extenderv1.ExtenderBindingResult
 

@@ -45,9 +45,9 @@ const (
 	GPUNoUse             = "nvidia.com/nouse-gputype"
 	NumaBind             = "nvidia.com/numa-bind"
 	NodeLockNvidia       = "hami.io/mutex.lock"
-	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
+	// GPUUseUUID annotation specifies a comma-separated list of GPU UUIDs to use.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
-	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
+	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
 
@@ -501,26 +501,6 @@ func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d device.DeviceU
 	return false, false
 }
 
-func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[GPUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[GPUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-
-	return true
-}
-
 func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
@@ -778,7 +758,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !nv.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, GPUUseUUID, GPUNoUseUUID, nv.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

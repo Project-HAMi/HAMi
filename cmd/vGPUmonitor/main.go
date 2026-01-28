@@ -49,12 +49,14 @@ var (
 			return start()
 		},
 	}
+	metricsBindAddress string
 )
 
 func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
+	rootCmd.Flags().StringVar(&metricsBindAddress, "metrics-bind-address", ":9394", "The TCP address that the vGPUmonitor should bind to for serving prometheus metrics(e.g. 127.0.0.1:9394, :9394)")
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
@@ -151,7 +153,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 	//)
 
 	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	server := &http.Server{Addr: ":9394", Handler: nil}
+	server := &http.Server{Addr: metricsBindAddress, Handler: nil}
 
 	// Starting the HTTP server in a goroutine
 	go func() {

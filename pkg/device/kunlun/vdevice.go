@@ -19,8 +19,6 @@ package kunlun
 import (
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -165,25 +163,6 @@ func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsa
 		return true, false
 	}
 	return false, false
-}
-
-func (dev *KunlunVDevices) CheckUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[UseUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for xpu user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[NoUseUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for xpu not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *KunlunVDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
