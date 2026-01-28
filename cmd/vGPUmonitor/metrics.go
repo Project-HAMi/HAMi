@@ -151,6 +151,8 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
+	ch <- ctrDeviceMemorydesc
+	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
@@ -419,29 +421,28 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		smUtil := c.Info.DeviceSmUtil(i)
 		lastKernelTime := c.Info.LastKernelTime()
 
-		// Send metrics to Prometheus
 		labels := []string{pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid}
 
 		if err := sendMetric(ch, ctrvGPUdesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
-			klog.Errorf("Failed to send memoryTotal metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			klog.Errorf("Failed to send memoryTotal metric: %v", err)
 			return err
 		}
 
 		if err := sendMetric(ch, ctrvGPUlimitdesc, prometheus.GaugeValue, float64(memoryLimit), labels...); err != nil {
-			klog.Errorf("Failed to send memoryLimit metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			klog.Errorf("Failed to send memoryLimit metric: %v", err)
 			return err
 		}
 
-		// Deprecated: This metric is kept for backward compatibility and is identical to vGPU_device_memory_usage_in_bytes.
 		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
-			klog.Errorf("Failed to send memory-related metrics for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
 
 		if err := sendMetric(ch, ctrDeviceUtilizationdesc, prometheus.GaugeValue, float64(smUtil), labels...); err != nil {
-			klog.Errorf("Failed to send SM utilization metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+			klog.Errorf("Failed to send device utilization desc: %v", err)
 			return err
 		}
+
 		if err := sendMetric(ch, ctrDeviceMemoryContextDesc, prometheus.GaugeValue, float64(memoryContextSize), labels...); err != nil {
 			klog.Errorf("Failed to send context size metric: %v", err)
 			return err
@@ -455,11 +456,10 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			return err
 		}
 
-		// Send last kernel time metric if valid
 		if lastKernelTime > 0 {
 			lastSec := max(nowSec-lastKernelTime, 0)
 			if err := sendMetric(ch, ctrDeviceLastKernelDesc, prometheus.GaugeValue, float64(lastSec), labels...); err != nil {
-				klog.Errorf("Failed to send last kernel time metric for device %d in Pod %s/%s, Container %s: %v", i, pod.Namespace, pod.Name, ctr.Name, err)
+				klog.Errorf("Failed to send last kernel time metric: %v", err)
 				return err
 			}
 		}
