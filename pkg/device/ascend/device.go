@@ -115,6 +115,25 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	if !ok {
 		return false, nil
 	}
+
+	reqNum := count.Value()
+	if dev.config.CommonWord == Ascend910CType {
+		if reqNum == 1 {
+			// Since the minimum allocation unit is one physical module (2 NPUs), round up the limits and requests to 2.
+			klog.InfoS("Adjusted Ascend910C device request from 1 to 2 (minimum allocation unit)", "pod", klog.KObj(p))
+			reqNum = 2
+			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)] = *resource.NewQuantity(reqNum, resource.DecimalExponent)
+			if _, exists := ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceName)]; exists {
+				ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceName)] = *resource.NewQuantity(reqNum, resource.DecimalExponent)
+			}
+		} else if reqNum%2 != 0 {
+			// Reject any other odd-numbered request (e.g., 3, 5, 7...)
+			errMsg := fmt.Sprintf("Ascend910C device request must be 1 or 2*n, got %d", reqNum)
+			klog.ErrorS(nil, errMsg, "pod", klog.KObj(p))
+			return false, errors.New(errMsg)
+		}
+	}
+
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
@@ -327,19 +346,6 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 
 func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
-	if k.Type == Ascend910CType {
-		// Since the minimum allocation unit is one physical module (2 NPUs), round up the request to 2.
-		if k.Nums == 1 {
-			klog.InfoS("Adjusted Ascend910C device request from 1 to 2 (minimum allocation unit)",
-				"pod", klog.KObj(pod))
-			k.Nums = 2
-		} else if k.Nums%2 != 0 {
-			// Reject any other odd-numbered request (e.g., 3, 5, 7...)
-			errMsg := fmt.Sprintf("CardReqNumInvalid: Ascend910C device request must be 1 or even number, got %d", k.Nums)
-			klog.ErrorS(nil, errMsg, "pod", klog.KObj(pod))
-			return false, nil, errMsg
-		}
-	}
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
