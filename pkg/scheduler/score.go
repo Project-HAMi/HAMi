@@ -168,11 +168,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				if !fit {
 					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
-					if strings.Contains(reason, common.CardReqNumInvalid) {
-						failedNodes[nodeID] = "node device request must be 1 or even"
-					} else {
-						failedNodes[nodeID] = common.NodeUnfitPod
-					}
+					failedNodes[nodeID] = common.NodeUnfitPod
 					for reasonType := range common.ParseReason(reason) {
 						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 					}
