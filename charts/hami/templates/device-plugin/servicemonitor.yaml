@@ -17,6 +17,6 @@ spec:
       app.kubernetes.io/component: hami-device-plugin
       {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
   endpoints:
-  - port: monitor
+  - port: monitorport
     path: "/metrics"
 {{- end }}
