@@ -24,12 +24,13 @@ import (
 	"net/http"
 
 	"github.com/julienschmidt/httprouter"
-	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
+
+const maxRequestSize = 1024 * 1024 // 1MB limit
 
 func checkBody(w http.ResponseWriter, r *http.Request) {
 	if r.Body == nil {
@@ -45,7 +46,9 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		checkBody(w, r)
 
 		var buf bytes.Buffer
-		body := io.TeeReader(r.Body, &buf)
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		body := io.TeeReader(limitedReader, &buf)
 
 		var extenderArgs extenderv1.ExtenderArgs
 		var extenderFilterResult *extenderv1.ExtenderFilterResult
@@ -56,6 +59,16 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				Error: err.Error(),
 			}
 		} else {
+			synced := s.WaitForCacheSync(r.Context())
+			if !synced {
+				// Poll may return false when context is cancelled
+				err := fmt.Errorf("context cancelled")
+				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				w.Write([]byte(err.Error()))
+				return
+			}
 			extenderFilterResult, err = s.Filter(extenderArgs)
 			if err != nil {
 				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
@@ -82,7 +95,9 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		klog.Infoln("Entering Bind handler")
 		var buf bytes.Buffer
-		body := io.TeeReader(r.Body, &buf)
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		body := io.TeeReader(limitedReader, &buf)
 		var extenderBindingArgs extenderv1.ExtenderBindingArgs
 		var extenderBindingResult *extenderv1.ExtenderBindingResult
 
@@ -116,18 +131,6 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	}
 }
 
-func bind(args extenderv1.ExtenderBindingArgs, bindFunc func(string, string, types.UID, string) error) *extenderv1.ExtenderBindingResult {
-	err := bindFunc(args.PodName, args.PodNamespace, args.PodUID, args.Node)
-	errMsg := ""
-	if err != nil {
-		klog.ErrorS(err, "Bind error", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node, "uid", args.PodUID)
-		errMsg = err.Error()
-	}
-	return &extenderv1.ExtenderBindingResult{
-		Error: errMsg,
-	}
-}
-
 func WebHookRoute() httprouter.Handle {
 	h, err := scheduler.NewWebHook()
 	if err != nil {
@@ -142,6 +145,22 @@ func WebHookRoute() httprouter.Handle {
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.Infoln("Health check endpoint hit")
+		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
+		klog.Infoln("Readiness check endpoint hit")
+
+		ok := s.GetLeaderManager().IsLeader()
+		if !ok {
+			klog.Infoln("Not leader yet")
+			w.WriteHeader(http.StatusServiceUnavailable)
+			return
+		}
+
+		klog.Infoln("Scheduler extender is leader")
 		w.WriteHeader(http.StatusOK)
 	}
 }

@@ -35,7 +35,7 @@ package rm
 import (
 	"fmt"
 
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )
 
 const (
@@ -44,7 +44,7 @@ const (
 
 // buildTegraDeviceMap creates a DeviceMap for the tegra devices in the sytesm.
 // NOTE: At present only a single tegra device is expected.
-func buildTegraDeviceMap(config *nvidia.DeviceConfig) (DeviceMap, error) {
+func buildTegraDeviceMap(config *spec.Config) (DeviceMap, error) {
 	devices := make(DeviceMap)
 
 	name := tegraDeviceName
@@ -82,4 +82,14 @@ func (d *tegraDevice) GetPaths() ([]string, error) {
 // GetNumaNode always returns unsupported for a Tegra device
 func (d *tegraDevice) GetNumaNode() (bool, int, error) {
 	return false, -1, nil
+}
+
+// GetTotalMemory is unsupported for a Tegra device.
+func (d *tegraDevice) GetTotalMemory() (uint64, error) {
+	return 0, nil
+}
+
+// GetComputeCapability is unimplemented for a Tegra device.
+func (d *tegraDevice) GetComputeCapability() (string, error) {
+	return "0.0", nil
 }

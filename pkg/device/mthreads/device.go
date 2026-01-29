@@ -41,9 +41,9 @@ const (
 	MthreadsGPUDevice       = "Mthreads"
 	MthreadsGPUCommonWord   = "Mthreads"
 	MthreadsDeviceSelection = "mthreads.com/gpu-index"
-	// MthreadsUseUUID is user can use specify Mthreads device for set Mthreads UUID.
+	// MthreadsUseUUID annotation specifies a comma-separated list of Mthreads UUIDs to use.
 	MthreadsUseUUID = "mthreads.ai/use-gpuuuid"
-	// MthreadsNoUseUUID is user can not use specify Mthreads device for set Mthreads UUID.
+	// MthreadsNoUseUUID annotation specifies a comma-separated list of Mthreads UUIDs to exclude.
 	MthreadsNoUseUUID        = "mthreads.ai/nouse-gpuuuid"
 	MthreadsAssignedGPUIndex = "mthreads.com/gpu-index"
 	MthreadsAssignedNode     = "mthreads.com/predicate-node"
@@ -69,8 +69,11 @@ func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 	MthreadsResourceCount = config.ResourceCountName
 	MthreadsResourceCores = config.ResourceCoreName
 	MthreadsResourceMemory = config.ResourceMemoryName
-	device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
-	device.SupportDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-allocated"
+	_, ok := device.InRequestDevices[MthreadsGPUDevice]
+	if !ok {
+		device.InRequestDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-to-allocate"
+		device.SupportDevices[MthreadsGPUDevice] = "hami.io/mthreads-vgpu-devices-allocated"
+	}
 	return &MthreadsDevices{}
 }
 
@@ -118,14 +121,15 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MthreadsResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*coresPerMthreadsGPU < cores {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-mthreads-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
-			Devcore: coresPerMthreadsGPU,
-			Type:    MthreadsGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-mthreads-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
+			Devcore:      coresPerMthreadsGPU,
+			Type:         MthreadsGPUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: MthreadsGPUCommonWord,
 		})
 		i++
 	}
@@ -173,25 +177,6 @@ func (dev *MthreadsDevices) checkType(annos map[string]string, d device.DeviceUs
 		return true, true, false
 	}
 	return false, false, false
-}
-
-func (dev *MthreadsDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[MthreadsUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Mthreads user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[MthreadsNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *MthreadsDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
@@ -279,7 +264,7 @@ func (dev *MthreadsDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUs
 	return nil
 }
 
-func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -297,7 +282,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			continue
 		}
 
-		_, found, numa := mth.checkType(annos, *dev, k)
+		_, found, numa := mth.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -312,7 +297,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !mth.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MthreadsUseUUID, MthreadsNoUseUUID, mth.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -386,4 +371,12 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *MthreadsDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MthreadsResourceCount,
+		ResourceMemoryName: MthreadsResourceMemory,
+		ResourceCoreName:   MthreadsResourceCores,
+	}
 }

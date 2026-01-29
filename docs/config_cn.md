@@ -19,7 +19,7 @@
   整数类型，预设值是 10。GPU 的分割数，每一张 GPU 都不能分配超过其配置数目的任务。若其配置为 N 的话，每个 GPU 上最多可以同时存在 N 个任务。
 * `nvidia.deviceMemoryScaling`：
   浮点数类型，预设值是 1。NVIDIA 装置显存使用比例，可以大于 1（启用虚拟显存，实验功能）。对于有 *M* 显存大小的 NVIDIA GPU，
-  如果我们配置`nvidia.deviceMemoryScaling`参数为 *S*，在部署了我们装置插件的 Kubenetes 集群中，这张 GPU 分出的 vGPU 将总共包含 `S * M` 显存。
+  如果我们配置`nvidia.deviceMemoryScaling`参数为 *S*，在部署了我们装置插件的 Kubernetes 集群中，这张 GPU 分出的 vGPU 将总共包含 `S * M` 显存。
 * `nvidia.migStrategy`：
   字符串类型，目前支持 "none“ 与 “mixed“ 两种工作方式，前者忽略 MIG 设备，后者使用专门的资源名称指定 MIG 设备，使用详情请参考 mix_example.yaml，默认为 "none"
 * `nvidia.disablecorelimit`：
@@ -28,9 +28,12 @@
   整数类型，预设值为 0，表示不配置显存时使用的默认显存大小，单位为 MB。当值为 0 时，代表使用全部的显存。
 * `nvidia.defaultCores`：
   整数类型 (0-100)，默认为 0，表示默认为每个任务预留的百分比算力。若设置为 0，则代表任务可能会被分配到任一满足显存需求的 GPU 中，若设置为 100，代表该任务独享整张显卡
+  说明：当容器仅声明 `nvidia.com/gpu` 且显存为独占场景（例如显式设置 `nvidia.com/gpumem-percentage: 100`，或显存字段都未配置且 `nvidia.defaultMem` 保持默认 0，从而回退为 100% 显存）并且未显式设置 `nvidia.com/gpucores` 时，HAMi 会在准入阶段将该容器的 `nvidia.com/gpucores` 默认为 100。对于非独占显存（如 `gpumem-percentage: 50`）或已经声明 `nvidia.com/gpucores` 的情况，不会自动调整。
 * `nvidia.defaultGPUNum`：
   整数类型，默认为 1，如果配置为 0，则配置不会生效。当用户在 Pod 资源中没有设置 nvidia.com/gpu 这个 key 时，webhook 会检查 nvidia.com/gpumem、
   resource-mem-percentage、nvidia.com/gpucores 这三个 key 中的任何一个 key 有值，webhook 都会添加 nvidia.com/gpu 键和此默认值到 resources limit 中。
+* `nvidia.memoryFactor`:
+  整数类型，默认为 1。在资源申请时`nvidia.com/gpumem`的真实值会放大相应的倍数。如果部署了`mock-device-plugin`, 在`node.status.capacity`的真实值也会放大对应的倍数。
 * `nvidia.resourceCountName`：
   字符串类型，申请 vgpu 个数的资源名，默认："nvidia.com/gpu"
 * `nvidia.resourceMemoryName`：
@@ -78,7 +81,10 @@ kubectl -n <namespace> edit cm hami-device-plugin
 ```bash
 helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 ```
-
+* `devicePlugin.service.schedulerPort`: 整数类型, 预设值为31998, 调度器webhook服务的节点端口.
+* `devicePlugin.deviceListStrategy`: 字符串类型, 预设值为 "envvar", 用于向容器暴露NVIDIA设备的策略。 "envvar" 表示使用 'NVIDIA_VISIBLE_DEVICES' 环境变量, "cdi-annotations" 表示使用容器设备接口 (CDI)。
+* `devicePlugin.nvidiaDriverRoot`: 字符串类型。指定主机上NVIDIA驱动的根目录, 在 `deviceListStrategy` 为 "cdi-annotations" 时使用。如果未通过Helm设置, 则默认为 "/"。
+* `devicePlugin.nvidiaHookPath`: 字符串类型。指定GPU节点上 `nvidia-ctk` 二进制文件的路径, 在 `deviceListStrategy` 为 "cdi-annotations" 时使用。如果未通过Helm设置, 则默认为 "/usr/bin/nvidia-ctk"。
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`：字符串类型，预设值为 "binpack" 表示 GPU 节点调度策略，
   "binpack"表示尽量将任务分配到同一个 GPU 节点上，"spread"表示尽量将任务分配到不同 GPU 节点上。
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`：字符串类型，预设值为 "spread" 表示 GPU 调度策略，

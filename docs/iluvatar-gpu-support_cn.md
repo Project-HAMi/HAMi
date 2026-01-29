@@ -24,20 +24,38 @@
 
 > **注意:** *只需要安装gpu-manager，不要安装gpu-admission.*
 
-* 部署'gpu-manager'之后，你需要确认显存和核组对应的资源名称(例如 'iluvatar.ai/vcuda-core', 'iluvatar.ai/vcuda-memory')
-
-* 在安装HAMi时配置'iluvatarResourceMem'和'iluvatarResourceCore'参数
-
+* 在安装HAMi时配置设置devices.iluvatar.enabled=true
 ```
-helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set iluvatarResourceMem=iluvatar.ai/vcuda-memory --set iluvatarResourceCore=iluvatar.ai/vcuda-core -n kube-system
+helm install hami hami-charts/hami --set scheduler.kubeScheduler.imageTag={your kubernetes version} --set devices.iluvatar.enabled=true
 ```
 
-> **说明:** 默认资源名称如下：
-> - `iluvatar.ai/vgpu` 用于 GPU 数量
-> - `iluvatar.ai/vcuda-memory` 用于内存分配
-> - `iluvatar.ai/vcuda-core` 用于核心分配
->
-> 你可以通过上述参数自定义这些名称。
+* 部署'gpu-manager'之后，会根据GPU设备型号上报资源名称
+
+
+> **说明:** 目前默认支持的GPU型号和资源名称在(https://github.com/Project-HAMi/HAMi/blob/master/charts/hami/templates/scheduler/device-configmap.yaml)定义：
+```yaml
+    iluvatars:
+    - chipName: MR-V100
+      commonWord: MR-V100
+      resourceCountName: iluvatar.ai/MR-V100-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V100.vMem
+      resourceCoreName: iluvatar.ai/MR-V100.vCore
+    - chipName: MR-V50
+      commonWord: MR-V50
+      resourceCountName: iluvatar.ai/MR-V50-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V50.vMem
+      resourceCoreName: iluvatar.ai/MR-V50.vCore
+    - chipName: BI-V150
+      commonWord: BI-V150
+      resourceCountName: iluvatar.ai/BI-V150-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V150.vMem
+      resourceCoreName: iluvatar.ai/BI-V150.vCore
+    - chipName: BI-V100
+      commonWord: BI-V100
+      resourceCountName: iluvatar.ai/BI-V100-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V100.vMem
+      resourceCoreName: iluvatar.ai/BI-V100.vCore
+```
 
 ## 设备粒度切分
 
@@ -45,13 +63,13 @@ HAMi 将每个天数智芯 GPU 划分为 100 个单元进行资源分配。当�
 
 ### 内存分配
 
-- 每个 `iluvatar.ai/vcuda-memory` 单位代表 256MB 的设备内存
+- 每个 `iluvatar.ai/<card-type>.vMem` 单位代表 256MB 的设备内存
 - 如果不指定内存请求，系统将默认使用 100% 的可用内存
 - 内存分配通过硬限制强制执行，确保任务不会超过其分配的内存
 
 ### 核心分配
 
-- 每个 `iluvatar.ai/vcuda-core` 单位代表 1% 的可用计算核心
+- 每个 `iluvatar.ai/<card-type>.vCore` 单位代表 1% 的可用计算核心
 - 核心分配通过硬限制强制执行，确保任务不会超过其分配的核心
 - 当请求多个 GPU 时，系统会根据请求的 GPU 数量自动设置核心资源
 
@@ -61,12 +79,12 @@ HAMi 将每个天数智芯 GPU 划分为 100 个单元进行资源分配。当�
 apiVersion: v1
 kind: Pod
 metadata:
-  name: poddemo
+  name: BI-V150-poddemo
 spec:
   restartPolicy: Never
   containers:
-  - name: poddemo
-    image: harbor.4pd.io/vgpu/corex_transformers@sha256:36a01ec452e6ee63c7aa08bfa1fa16d469ad19cc1e6000cf120ada83e4ceec1e
+  - name: BI-V150-poddemo
+    image: registry.iluvatar.com.cn:10443/saas/mr-bi150-4.3.0-x86-ubuntu22.04-py3.10-base-base:v1.0
     command:
     - bash
     args:
@@ -80,16 +98,16 @@ spec:
       sleep 360000
     resources:
       requests:
-        iluvatar.ai/vgpu: 1
-        iluvatar.ai/vcuda-core: 50
-        iluvatar.ai/vcuda-memory: 64
+        iluvatar.ai/BI-V150-vgpu: 1
+        iluvatar.ai/BI-V150.vCore: 50
+        iluvatar.ai/BI-V150.vMem: 64
       limits:
-        iluvatar.ai/vgpu: 1
-        iluvatar.ai/vcuda-core: 50
-        iluvatar.ai/vcuda-memory: 64
+        iluvatar.ai/BI-V150-vgpu: 1
+        iluvatar.ai/BI-V150.vCore: 50
+        iluvatar.ai/BI-V150.vMem: 64
 ```
 
-> **注意1:** *每一单位的vcuda-memory代表256M的显存.*
+> **注意1:** *每一单位的vMem代表256M的显存.*
 
 > **注意2:** *查看更多的[用例](../examples/iluvatar/).*
 
@@ -104,14 +122,12 @@ metadata:
   name: poddemo
   annotations:
     # 使用特定的 GPU 设备（逗号分隔的列表）
-    iluvatar.ai/use-gpuuuid: "node1-iluvatar-0,node1-iluvatar-1"
+    hami.io/use-<card-type>-uuid: "device-uuid-1,device-uuid-2"
     # 或者排除特定的 GPU 设备（逗号分隔的列表）
-    iluvatar.ai/nouse-gpuuuid: "node1-iluvatar-2,node1-iluvatar-3"
+    hami.io/no-use-<card-type>-uuid: "device-uuid-1,device-uuid-2"
 spec:
   # ... 其余 Pod 配置
 ```
-
-> **说明:** 设备 ID 格式为 `{节点名称}-iluvatar-{索引}`。你可以在节点状态中找到可用的设备 ID。
 
 ### 查找设备 UUID
 
@@ -124,7 +140,7 @@ kubectl get pod <pod-name> -o yaml | grep -A 10 "hami.io/<card-type>-devices-all
 或者通过检查节点注解：
 
 ```bash
-kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-register-<card-type>"
+kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-<card-type>-register"
 ```
 
 在节点注解中查找包含设备信息的注解。
@@ -143,6 +159,6 @@ kubectl get node <node-name> -o yaml | grep -A 10 "hami.io/node-register-<card-t
 
 2. 共享模式只对申请一张GPU的容器生效（iluvatar.ai/vgpu=1）。当请求多个 GPU 时，系统会根据请求的 GPU 数量自动设置核心资源。
 
-3. `iluvatar.ai/vcuda-memory` 资源仅在 `iluvatar.ai/vgpu=1` 时有效。
+3. `iluvatar.ai/<card-type>.vMem` 资源仅在 `iluvatar.ai/<card-type>-vgpu=1` 时有效。
 
-4. 多设备请求（`iluvatar.ai/vgpu > 1`）不支持 vGPU 模式。
+4. 多设备请求（`iluvatar.ai/<card-type>-vgpu > 1`）不支持 vGPU 模式。

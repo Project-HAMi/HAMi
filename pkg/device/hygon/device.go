@@ -19,7 +19,6 @@ package hygon
 import (
 	"errors"
 	"flag"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -41,9 +40,9 @@ const (
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
-	// DCUUseUUID is user can use specify DCU device for set DCU UUID.
+	// DCUUseUUID annotation specifies a comma-separated list of DCU UUIDs to use.
 	DCUUseUUID = "hygon.com/use-gpuuuid"
-	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID.
+	// DCUNoUseUUID annotation specifies a comma-separated list of DCU UUIDs to exclude.
 	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 
 	// NodeLockDCU should same with device plugin node lock name
@@ -56,21 +55,27 @@ var (
 	HygonResourceCount  string
 	HygonResourceMemory string
 	HygonResourceCores  string
+	MemoryFactor        int32
 )
 
 type HygonConfig struct {
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
+	MemoryFactor       int32  `yaml:"memoryFactor"`
 }
 
 func InitDCUDevice(config HygonConfig) *DCUDevices {
 	HygonResourceCount = config.ResourceCountName
 	HygonResourceMemory = config.ResourceMemoryName
 	HygonResourceCores = config.ResourceCoreName
-	device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
-	device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
-	util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	MemoryFactor = config.MemoryFactor
+	_, ok := device.InRequestDevices[HygonDCUDevice]
+	if !ok {
+		device.InRequestDevices[HygonDCUDevice] = "hami.io/dcu-devices-to-allocate"
+		device.SupportDevices[HygonDCUDevice] = "hami.io/dcu-devices-allocated"
+		util.HandshakeAnnos[HygonDCUDevice] = HandshakeAnnos
+	}
 	return &DCUDevices{}
 }
 
@@ -159,6 +164,9 @@ func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
 	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = HygonDCUCommonWord
+	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
@@ -183,25 +191,6 @@ func (dev *DCUDevices) checkType(annos map[string]string, d device.DeviceUsage, 
 	return false, false, false
 }
 
-func (dev *DCUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[DCUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[DCUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count dcu devices for container ", ctr.Name)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
@@ -222,6 +211,11 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}
@@ -277,7 +271,7 @@ func (dev *DCUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
-func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -289,7 +283,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := dcu.checkType(annos, *dev, k)
+		_, found, numa := dcu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -304,7 +298,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !dcu.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, DCUUseUUID, DCUNoUseUUID, dcu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -372,4 +366,12 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  HygonResourceCount,
+		ResourceMemoryName: HygonResourceMemory,
+		ResourceCoreName:   HygonResourceCores,
+	}
 }

@@ -23,6 +23,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	corev1 "k8s.io/api/core/v1"
@@ -40,14 +41,13 @@ const (
 	RegisterAnnos        = "hami.io/node-nvidia-register"
 	RegisterGPUPairScore = "hami.io/node-nvidia-score"
 	NvidiaGPUDevice      = "NVIDIA"
-	NvidiaGPUCommonWord  = "GPU"
 	GPUInUse             = "nvidia.com/use-gputype"
 	GPUNoUse             = "nvidia.com/nouse-gputype"
 	NumaBind             = "nvidia.com/numa-bind"
 	NodeLockNvidia       = "hami.io/mutex.lock"
-	// GPUUseUUID is user can use specify GPU device for set GPU UUID.
+	// GPUUseUUID annotation specifies a comma-separated list of GPU UUIDs to use.
 	GPUUseUUID = "nvidia.com/use-gpuuuid"
-	// GPUNoUseUUID is user can not use specify GPU device for set GPU UUID.
+	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
 
@@ -63,6 +63,7 @@ var (
 
 	// DevicePluginFilterDevice need device-plugin filter this device, don't register this device.
 	DevicePluginFilterDevice *FilterDevice
+	MemoryFactor             int32 = 1
 )
 
 type MigPartedSpec struct {
@@ -100,7 +101,7 @@ const (
 )
 
 type NvidiaConfig struct {
-	// These configs are shared and can be overritten by Nodeconfig.
+	// These configs are shared and can be overwritten by Nodeconfig.
 	NodeDefaultConfig            `yaml:",inline"`
 	ResourceCountName            string `yaml:"resourceCountName"`
 	ResourceMemoryName           string `yaml:"resourceMemoryName"`
@@ -111,6 +112,7 @@ type NvidiaConfig struct {
 	DefaultMemory                int32  `yaml:"defaultMemory"`
 	DefaultCores                 int32  `yaml:"defaultCores"`
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
+	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
 	MigGeometriesList []device.AllowedMigGeometries `yaml:"knownMigGeometries"`
@@ -120,7 +122,7 @@ type NvidiaConfig struct {
 	RuntimeClassName string `yaml:"runtimeClassName"`
 }
 
-// These configs can be sepecified for each node by using Nodeconfig.
+// These configs can be specified for each node by using Nodeconfig.
 type NodeDefaultConfig struct {
 	DeviceSplitCount    *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
 	DeviceMemoryScaling *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
@@ -138,7 +140,7 @@ type FilterDevice struct {
 
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
-		// These configs is shared and will overrite those in NvidiaConfig.
+		// These configs is shared and will overwrite those in NvidiaConfig.
 		NodeDefaultConfig `json:",inline"`
 		Name              string        `json:"name"`
 		OperatingMode     string        `json:"operatingmode"`
@@ -155,21 +157,28 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config NvidiaConfig
+	config         NvidiaConfig
+	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
+	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	klog.InfoS("initializing nvidia device", "resourceName", nvconfig.ResourceCountName, "resourceMem", nvconfig.ResourceMemoryName, "DefaultGPUNum", nvconfig.DefaultGPUNum)
-	device.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-	device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
-	util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
+	_, ok := device.InRequestDevices[NvidiaGPUDevice]
+	if !ok {
+		device.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
+		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
+	}
+	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
-		config: nvconfig,
+		config:         nvconfig,
+		ReportedGPUNum: make(map[string]int64),
 	}
 }
 
 func (dev *NvidiaGPUDevices) CommonWord() string {
-	return NvidiaGPUCommonWord
+	return NvidiaGPUDevice
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -209,7 +218,32 @@ func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	current := int64(0)
+	quantity := n.Status.Allocatable.Name(corev1.ResourceName(dev.config.ResourceCountName), resource.DecimalSI)
+	if quantity != nil {
+		current = quantity.Value()
+	}
+
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+
+	reported := dev.ReportedGPUNum[n.Name]
+	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
+
+	if current == 0 {
+		if reported == 0 {
+			return true, false
+		}
+		dev.ReportedGPUNum[n.Name] = current
+		return false, false
+	}
+
+	if reported != current {
+		dev.ReportedGPUNum[n.Name] = current
+		return true, true
+	}
+
+	return true, false
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -245,7 +279,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if !ok {
 		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
-	nodedevices, err := device.DecodeNodeDevices(devEncoded)
+	nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
@@ -253,6 +287,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if len(nodedevices) == 0 {
 		klog.InfoS("no nvidia gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}
 	for _, val := range nodedevices {
 		if val.Mode == MigMode {
@@ -275,7 +312,7 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 	pairScores, ok := n.Annotations[RegisterGPUPairScore]
 	if !ok {
-		klog.Warning("no topology score found", "node", n.Name)
+		klog.V(5).InfoS("no topology score found", "node", n.Name)
 	} else {
 		devicePairScores, err := device.DecodePairScores(pairScores)
 		if err != nil {
@@ -320,6 +357,9 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	}
 
 	hasResource := dev.mutateContainerResource(ctr)
+	if dev.defaultExclusiveCoreIfNeeded(ctr) {
+		hasResource = true
+	}
 
 	if hasResource {
 		// Set runtime class name if it is not set by user and the runtime class name is configured
@@ -352,6 +392,67 @@ func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool
 			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)] = *resource.NewQuantity(int64(dev.config.DefaultGPUNum), resource.BinarySI)
 			return true
 		}
+	}
+	return false
+}
+
+func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container) bool {
+	if ctr == nil {
+		return false
+	}
+
+	countName := corev1.ResourceName(dev.config.ResourceCountName)
+	if countName == "" || !resourcePresent(ctr, countName) {
+		return false
+	}
+
+	coreName := corev1.ResourceName(dev.config.ResourceCoreName)
+	if coreName == "" || resourcePresent(ctr, coreName) {
+		return false
+	}
+
+	exclusive := false
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		exclusive = pct == 100
+	} else if dev.config.ResourceMemoryName == "" {
+		exclusive = true
+	} else if _, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryName)); !ok {
+		exclusive = true
+	}
+
+	if !exclusive {
+		return false
+	}
+
+	if ctr.Resources.Limits == nil {
+		ctr.Resources.Limits = corev1.ResourceList{}
+	}
+	ctr.Resources.Limits[coreName] = *resource.NewQuantity(100, resource.DecimalSI)
+	return true
+}
+
+func resourceValue(ctr *corev1.Container, name corev1.ResourceName) (int64, bool) {
+	if name == "" || ctr == nil {
+		return 0, false
+	}
+	if qty, ok := ctr.Resources.Limits[name]; ok {
+		return qty.Value(), true
+	}
+	if qty, ok := ctr.Resources.Requests[name]; ok {
+		return qty.Value(), true
+	}
+	return 0, false
+}
+
+func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
+	if ctr == nil || name == "" {
+		return false
+	}
+	if _, ok := ctr.Resources.Limits[name]; ok {
+		return true
+	}
+	if _, ok := ctr.Resources.Requests[name]; ok {
+		return true
 	}
 	return false
 }
@@ -400,26 +501,6 @@ func (dev *NvidiaGPUDevices) checkType(annos map[string]string, d device.DeviceU
 	return false, false
 }
 
-func (dev *NvidiaGPUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[GPUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for nvidia user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[GPUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for nvidia not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-
-	return true
-}
-
 func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[NvidiaGPUDevice]
 	if ok && len(devlist) > 0 {
@@ -451,6 +532,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
+					}
 					memnum = int(memnums)
 				}
 			}
@@ -503,14 +589,20 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 	}
 	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
 	if devusage.Mode == MigMode {
+		// The same logic as in AddResourceUsage
 		if len(deviceUsageCurrent.UsageList) == 0 {
 			tmpfound := false
 			for tidx, templates := range devusage.MigTemplate {
-				if templates[0].Memory < request.Memreq {
-					continue
-				} else {
-					device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
-					tmpfound = true
+				for _, template := range templates {
+					if template.Memory < request.Memreq {
+						continue
+					} else {
+						device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
+						tmpfound = true
+						break
+					}
+				}
+				if tmpfound {
 					break
 				}
 			}
@@ -566,18 +658,27 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
+		OuterLoop:
 			for tidx, templates := range n.MigTemplate {
-				if templates[0].Memory < ctr.Usedmem {
-					continue
-				} else {
-					device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
-					ctr.Usedmem = n.MigUsage.UsageList[0].Memory
-					if !strings.Contains(ctr.UUID, "[") {
-						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-0]"
+				for idx, template := range templates {
+					if template.Memory < ctr.Usedmem {
+						continue
+					} else {
+						device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
+						// Calculate the correct UsageList index by summing Count of all templates before idx
+						usageListIdx := 0
+						for i := range idx {
+							usageListIdx += int(templates[i].Count)
+						}
+						ctr.Usedmem = n.MigUsage.UsageList[usageListIdx].Memory
+						ctr.Usedcores = n.MigUsage.UsageList[usageListIdx].Core
+						if !strings.Contains(ctr.UUID, "[") {
+							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(idx) + "]"
+						}
+						n.MigUsage.Index = int32(tidx)
+						n.MigUsage.UsageList[usageListIdx].InUse = true
+						break OuterLoop
 					}
-					n.MigUsage.Index = int32(tidx)
-					n.MigUsage.UsageList[0].InUse = true
-					break
 				}
 			}
 		} else {
@@ -586,6 +687,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 				if !val.InUse && val.Memory >= ctr.Usedmem {
 					n.MigUsage.UsageList[idx].InUse = true
 					ctr.Usedmem = n.MigUsage.UsageList[idx].Memory
+					ctr.Usedcores = n.MigUsage.UsageList[idx].Core
 					if !strings.Contains(ctr.UUID, "[") {
 						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(n.MigUsage.Index) + "-" + fmt.Sprint(idx) + "]"
 					}
@@ -603,7 +705,28 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func fitQuota(tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, memreq int64, coresreq int64) bool {
+	mem := memreq
+	core := coresreq
+	for _, val := range tmpDevs[NvidiaGPUDevice] {
+		mem += int64(val.Usedmem)
+		core += int64(val.Usedcores)
+	}
+	if allocated != nil {
+		if podSingleDevice, exists := (*allocated)[NvidiaGPUDevice]; exists {
+			for _, containerDevices := range podSingleDevice {
+				for _, val := range containerDevices {
+					mem += int64(val.Usedmem)
+					core += int64(val.Usedcores)
+				}
+			}
+		}
+	}
+	klog.V(4).Infoln("Allocating...", mem, "cores", core)
+	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
+}
+
+func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -615,8 +738,12 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
-		found, numa := nv.checkType(annos, *dev, k)
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		found, numa := nv.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -631,7 +758,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !nv.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, GPUUseUUID, GPUNoUseUUID, nv.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -654,6 +781,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !fitQuota(tmpDevs, allocated, pod.Namespace, int64(memreq), int64(k.Coresreq)) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
@@ -712,7 +844,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if len(tmpDevs[k.Type]) > int(originReq) {
 			if originReq == 1 {
 				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSignleCard(nodeInfo, request, tmpDevs)
+				lowestDevices := computeWorstSingleCard(nodeInfo, request, tmpDevs)
 				tmpDevs[k.Type] = lowestDevices
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
 			} else {
@@ -730,6 +862,14 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *NvidiaGPUDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  dev.config.ResourceCountName,
+		ResourceMemoryName: dev.config.ResourceMemoryName,
+		ResourceCoreName:   dev.config.ResourceCoreName,
+	}
 }
 
 func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) []device.ContainerDevices {
@@ -765,14 +905,14 @@ func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[str
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
 	deviceScoreMap := make(map[string]*device.DevicePairScore)
 
-	for _, dev := range nodeInfo.Devices {
+	for _, dev := range nodeInfo.Devices[NvidiaGPUDevice] {
 		deviceScoreMap[dev.ID] = &dev.DevicePairScore
 	}
 
 	return deviceScoreMap
 }
 
-func computeWorstSignleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
+func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
 	worstScore := -1
 	worstDevices := device.ContainerDevices{}
 	deviceScoreMap := getDevicePairScoreMap(nodeInfo)

@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.24.6-bullseye
+ARG GOLANG_IMAGE=golang:1.25.5-bookworm
 ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
 
 FROM $GOLANG_IMAGE AS build
@@ -9,7 +9,7 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.10.0
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
@@ -18,8 +18,12 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.6.3-base-ubi8
-RUN dnf update -y -x cuda-toolkit-config-common -x cuda-toolkit-12-config-common
+FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+RUN apt-get update && \
+    apt-mark hold cuda-toolkit-config-common cuda-toolkit-12-config-common && \
+    DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
 RUN rm -rf /usr/local/cuda-12.6/compat/libcuda.so*
 ENV NVIDIA_DISABLE_REQUIRE="true"
 ENV NVIDIA_VISIBLE_DEVICES=all

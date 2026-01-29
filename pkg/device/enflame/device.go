@@ -17,7 +17,6 @@ limitations under the License.
 package enflame
 
 import (
-	"flag"
 	"fmt"
 	"strconv"
 	"strings"
@@ -36,11 +35,11 @@ type EnflameDevices struct {
 }
 
 const (
-	EnflameGPUDevice     = "Enflame"
-	EnflameGPUCommonWord = "Enflame"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
+	EnflameVGCUDevice     = "Enflame"
+	EnflameVGCUCommonWord = "Enflame"
+	// EnflameUseUUID annotation specifies a comma-separated list of Enflame UUIDs to use.
 	EnflameUseUUID = "enflame.com/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
+	// EnflameNoUseUUID annotation specifies a comma-separated list of Enflame UUIDs to exclude.
 	EnflameNoUseUUID   = "enflame.com/nouse-gpuuuid"
 	PodRequestGCUSize  = "enflame.com/gcu-request-size"
 	PodAssignedGCUID   = "enflame.com/gcu-assigned-id"
@@ -52,44 +51,30 @@ const (
 	CountNoSharedName  = "enflame.com/gcu-count"
 )
 
-var (
-	EnflameResourceCount      string
-	EnflameResourcePercentage string
-)
-
-type EnflameConfig struct {
-	ResourceCountName      string `yaml:"resourceCountName"`
-	ResourcePercentageName string `yaml:"resourcePercentageName"`
-	ResourceMemoryName     string `yaml:"resourceMemoryName"`
-	ResourceCoreName       string `yaml:"resourceCoreName"`
-}
-
 func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
-	EnflameResourceCount = config.ResourceCountName
-	EnflameResourcePercentage = config.ResourcePercentageName
-	device.SupportDevices[EnflameGPUDevice] = "hami.io/enflame-vgpu-devices-allocated"
+	EnflameResourceNameVGCU = config.ResourceNameVGCU
+	EnflameResourceNameVGCUPercentage = config.ResourceNameVGCUPercentage
+	_, ok := device.SupportDevices[EnflameVGCUDevice]
+	if !ok {
+		device.SupportDevices[EnflameVGCUDevice] = "hami.io/enflame-vgpu-devices-allocated"
+	}
 	return &EnflameDevices{
 		factor: 0,
 	}
 }
 
 func (dev *EnflameDevices) CommonWord() string {
-	return EnflameGPUCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&EnflameResourceCount, "enflame-name", "enflame.com/vgcu", "enflame resource count name")
-	fs.StringVar(&EnflameResourcePercentage, "enflame-resource-percentage-name", "enflame.com/vgcu-percentage", "enflame resource percentage name")
+	return EnflameVGCUCommonWord
 }
 
 func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	count, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceCount)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCU)]
 	if ok {
 		if count.Value() > 1 {
-			ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(int64(100), resource.DecimalSI)
+			ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(int64(100), resource.DecimalSI)
 			ctr.Resources.Limits[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(dev.factor*int(count.Value())), resource.DecimalSI)
 		} else {
-			percentageResource, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)]
+			percentageResource, ok := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)]
 			percentage := percentageResource.Value()
 			if !ok {
 				percentage = 100
@@ -101,9 +86,9 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 			for i := 0; i < dev.factor; i++ {
 				if slice*float64(i) < float64(percentage) && float64(percentage) <= slice*float64((i+1)) {
 					percentage = int64(slice * float64(i+1))
-					ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
+					ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
 					ctr.Resources.Limits[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
-					ctr.Resources.Requests[corev1.ResourceName(EnflameResourcePercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
+					ctr.Resources.Requests[corev1.ResourceName(EnflameResourceNameVGCUPercentage)] = *resource.NewQuantity(percentage, resource.DecimalSI)
 					ctr.Resources.Requests[corev1.ResourceName(SharedResourceName)] = *resource.NewQuantity(int64(i+1), resource.DecimalSI)
 					break
 				}
@@ -124,14 +109,15 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 	dev.factor = int(shared / cards)
 	for i < int(cards) {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-enflame-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  100,
-			Devcore: 100,
-			Type:    EnflameGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-enflame-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       100,
+			Devcore:      100,
+			Type:         EnflameVGCUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: EnflameVGCUCommonWord,
 		})
 		i++
 	}
@@ -139,9 +125,9 @@ func (dev *EnflameDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, 
 }
 
 func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
-	devlist, ok := pd[EnflameGPUDevice]
+	devlist, ok := pd[EnflameVGCUDevice]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[device.SupportDevices[EnflameGPUDevice]] = device.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.SupportDevices[EnflameVGCUDevice]] = device.EncodePodSingleDevice(devlist)
 		(*annoinput)[PodHasAssignedGCU] = "false"
 		(*annoinput)[PodAssignedGCUTime] = strconv.FormatInt(time.Now().UnixNano(), 10)
 		annoKey := PodAssignedGCUID
@@ -169,37 +155,10 @@ func (dev *EnflameDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *EnflameDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, EnflameGPUDevice) == 0 {
+	if strings.Compare(n.Type, EnflameVGCUDevice) == 0 {
 		return true, true, false
 	}
 	return false, false, false
-}
-
-func (dev *EnflameDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[EnflameUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(userUUID, ",") {
-			if d.ID == uuid {
-				return true
-			}
-		}
-		return false
-	}
-
-	noUserUUID, ok := annos[EnflameNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		for uuid := range strings.SplitSeq(noUserUUID, ",") {
-			if d.ID == uuid {
-				return false
-			}
-		}
-		return true
-	}
-	return true
 }
 
 func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
@@ -208,8 +167,8 @@ func (dev *EnflameDevices) CheckHealth(devType string, n *corev1.Node) (bool, bo
 
 func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count enflame devices for container ", ctr.Name)
-	resourceCount := corev1.ResourceName(EnflameResourceCount)
-	resourcePercentage := corev1.ResourceName(EnflameResourcePercentage)
+	resourceCount := corev1.ResourceName(EnflameResourceNameVGCU)
+	resourcePercentage := corev1.ResourceName(EnflameResourceNameVGCUPercentage)
 	v, ok := ctr.Resources.Limits[resourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[resourceCount]
@@ -227,7 +186,7 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 				Memreq:           int32(memnum),
 				MemPercentagereq: 0,
 				Coresreq:         0,
@@ -248,7 +207,7 @@ func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsa
 	return nil
 }
 
-func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -260,7 +219,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := enf.checkType(annos, *dev, k)
+		_, found, numa := enf.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -275,7 +234,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !enf.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, EnflameUseUUID, EnflameNoUseUUID, enf.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -344,4 +303,12 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *EnflameDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  EnflameResourceNameVGCU,
+		ResourceMemoryName: EnflameResourceNameVGCUPercentage,
+		ResourceCoreName:   "",
+	}
 }

@@ -18,6 +18,7 @@ package enflame
 
 import (
 	"flag"
+	"maps"
 	"strconv"
 	"testing"
 	"time"
@@ -53,14 +54,15 @@ func TestGetNodeDevices(t *testing.T) {
 			},
 			expected: []*device.DeviceInfo{
 				{
-					Index:   0,
-					ID:      "test-enflame-0",
-					Count:   100,
-					Devmem:  100,
-					Devcore: 100,
-					Type:    EnflameGPUDevice,
-					Numa:    0,
-					Health:  true,
+					Index:        0,
+					ID:           "test-enflame-0",
+					Count:        100,
+					Devmem:       100,
+					Devcore:      100,
+					Type:         EnflameVGCUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: EnflameVGCUCommonWord,
 				},
 			},
 			err: nil,
@@ -118,7 +120,7 @@ func TestPatchAnnotations(t *testing.T) {
 			name:      "With devices",
 			annoInput: map[string]string{},
 			podDevices: device.PodDevices{
-				EnflameGPUDevice: device.PodSingleDevice{
+				EnflameVGCUDevice: device.PodSingleDevice{
 					[]device.ContainerDevice{
 						{
 							Idx:  0,
@@ -129,10 +131,10 @@ func TestPatchAnnotations(t *testing.T) {
 				},
 			},
 			expected: map[string]string{
-				device.SupportDevices[EnflameGPUDevice]: "k8s-gpu-enflame-0,Enflame,0,0:;",
-				PodHasAssignedGCU:                       "false",
-				PodAssignedGCUTime:                      strconv.FormatInt(time.Now().UnixNano(), 10),
-				PodAssignedGCUID:                        "0",
+				device.SupportDevices[EnflameVGCUDevice]: "k8s-gpu-enflame-0,Enflame,0,0:;",
+				PodHasAssignedGCU:                        "false",
+				PodAssignedGCUTime:                       strconv.FormatInt(time.Now().UnixNano(), 10),
+				PodAssignedGCUID:                         "0",
 			},
 		},
 	}
@@ -140,9 +142,7 @@ func TestPatchAnnotations(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			annoInputCopy := make(map[string]string)
-			for k, v := range tt.annoInput {
-				annoInputCopy[k] = v
-			}
+			maps.Copy(annoInputCopy, tt.annoInput)
 
 			dev := &EnflameDevices{}
 			got := dev.PatchAnnotations(&corev1.Pod{}, &annoInputCopy, tt.podDevices)
@@ -201,8 +201,8 @@ func Test_MutateAdmission(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			config := EnflameConfig{
-				ResourceCountName:      "enflame.com/vgcu",
-				ResourcePercentageName: "enflame.com/vgcu-percentage",
+				ResourceNameVGCU:           "enflame.com/vgcu",
+				ResourceNameVGCUPercentage: "enflame.com/vgcu-percentage",
 			}
 			InitEnflameDevice(config)
 			dev := EnflameDevices{
@@ -210,7 +210,7 @@ func Test_MutateAdmission(t *testing.T) {
 			}
 			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
-			limits := test.args.ctr.Resources.Limits[corev1.ResourceName(EnflameResourcePercentage)]
+			limits := test.args.ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameVGCUPercentage)]
 			number, _ := limits.AsInt64()
 			assert.Equal(t, number, int64(25))
 		})
@@ -239,7 +239,7 @@ func Test_checkType(t *testing.T) {
 				annos: map[string]string{},
 				d:     device.DeviceUsage{},
 				n: device.ContainerDeviceRequest{
-					Type: EnflameGPUDevice,
+					Type: EnflameVGCUDevice,
 				},
 			},
 			want1: true,
@@ -275,98 +275,6 @@ func Test_checkType(t *testing.T) {
 	}
 }
 
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "useid is same as the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"enflame.com/use-gpuuuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "useid is different from the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"enflame.com/use-gpuuuid": "test2",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no annos",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{},
-				d: device.DeviceUsage{
-					ID: "test3",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "nouseid is same as the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"enflame.com/nouse-gpuuuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "nouseid is different from the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"enflame.com/nouse-gpuuuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test2",
-				},
-			},
-			want: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := EnflameDevices{}
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
-		})
-	}
-}
-
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
@@ -389,7 +297,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 				Memreq:           int32(15),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
@@ -419,7 +327,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 				Memreq:           int32(100),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
@@ -439,8 +347,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 
 func TestDevices_Fit(t *testing.T) {
 	config := EnflameConfig{
-		ResourceCountName:      "enflame.com/vgcu",
-		ResourcePercentageName: "enflame.com/vgcu-percentage",
+		ResourceNameVGCU:           "enflame.com/vgcu",
+		ResourceNameVGCUPercentage: "enflame.com/vgcu-percentage",
 	}
 	dev := InitEnflameDevice(config)
 
@@ -467,7 +375,7 @@ func TestDevices_Fit(t *testing.T) {
 					Totalcore: 100,
 					Usedcores: 0,
 					Numa:      0,
-					Type:      EnflameGPUDevice,
+					Type:      EnflameVGCUDevice,
 					Health:    true,
 				},
 				{
@@ -480,7 +388,7 @@ func TestDevices_Fit(t *testing.T) {
 					Totalcore: 100,
 					Usedcores: 0,
 					Numa:      0,
-					Type:      EnflameGPUDevice,
+					Type:      EnflameVGCUDevice,
 					Health:    true,
 				},
 			},
@@ -489,7 +397,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           64,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    true,
@@ -509,7 +417,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -517,7 +425,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -537,7 +445,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 100,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -545,7 +453,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -566,7 +474,7 @@ func TestDevices_Fit(t *testing.T) {
 				Usedcores: 0,
 				Numa:      0,
 				Health:    true,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 			}},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -593,7 +501,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -601,7 +509,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{EnflameUseUUID: "dev-0"},
 			wantFit:    false,
@@ -621,7 +529,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -629,7 +537,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{EnflameNoUseUUID: "dev-0"},
 			wantFit:    false,
@@ -649,7 +557,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -657,7 +565,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         50,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -677,7 +585,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -685,7 +593,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         120,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    true,
@@ -705,7 +613,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 0,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -713,7 +621,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         100,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -733,7 +641,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 100,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -741,7 +649,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         0,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -761,7 +669,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 10,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -769,7 +677,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           512,
 				MemPercentagereq: 0,
 				Coresreq:         20,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
@@ -789,7 +697,7 @@ func TestDevices_Fit(t *testing.T) {
 				Totalcore: 100,
 				Usedcores: 10,
 				Numa:      0,
-				Type:      EnflameGPUDevice,
+				Type:      EnflameVGCUDevice,
 				Health:    true,
 			}},
 			request: device.ContainerDeviceRequest{
@@ -797,7 +705,7 @@ func TestDevices_Fit(t *testing.T) {
 				Memreq:           0,
 				MemPercentagereq: 10,
 				Coresreq:         20,
-				Type:             EnflameGPUDevice,
+				Type:             EnflameVGCUDevice,
 			},
 			annos:      map[string]string{},
 			wantFit:    true,
@@ -810,17 +718,22 @@ func TestDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
 			if test.wantFit {
-				if len(result[EnflameGPUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameGPUDevice]))
+				if len(result[EnflameVGCUDevice]) != test.wantLen {
+					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameVGCUDevice]))
 				}
 				for idx, id := range test.wantDevIDs {
-					if id != result[EnflameGPUDevice][idx].UUID {
-						t.Errorf("expected device id: %s, got device id %s", id, result[EnflameGPUDevice][idx].UUID)
+					if id != result[EnflameVGCUDevice][idx].UUID {
+						t.Errorf("expected device id: %s, got device id %s", id, result[EnflameVGCUDevice][idx].UUID)
 					}
 				}
 			}

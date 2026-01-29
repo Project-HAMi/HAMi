@@ -50,3 +50,13 @@ func (d wslDevice) GetPaths() ([]string, error) {
 func (d wslDevice) GetNumaNode() (bool, int, error) {
 	return nvmlDevice(d).GetNumaNode()
 }
+
+// GetTotalMemory returns the total memory available on the device.
+func (d wslDevice) GetTotalMemory() (uint64, error) {
+	return nvmlDevice(d).GetTotalMemory()
+}
+
+// GetComputeCapability returns the CUDA compute capability for the device.
+func (d wslDevice) GetComputeCapability() (string, error) {
+	return nvmlDevice(d).GetComputeCapability()
+}

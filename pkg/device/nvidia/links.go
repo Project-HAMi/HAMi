@@ -125,7 +125,7 @@ func (l P2PLinkType) String() string {
 func GetP2PLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 	level, ret := dev1.GetTopologyCommonAncestor(dev2)
 	if !errors.Is(ret, nvml.SUCCESS) {
-		return P2PLinkUnknown, fmt.Errorf("failed to get commmon anscestor: %v", ret)
+		return P2PLinkUnknown, fmt.Errorf("failed to get common ancestor: %v", ret)
 	}
 
 	switch level {
@@ -212,7 +212,7 @@ func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 // getAllNvLinkRemotePciInfo returns the PCI info for all devices attached to the specified device by an NVLink.
 func getAllNvLinkRemotePciInfo(dev device.Device) ([]PciInfo, error) {
 	var pciInfos []PciInfo
-	for i := 0; i < nvml.NVLINK_MAX_LINKS; i++ {
+	for i := range nvml.NVLINK_MAX_LINKS {
 		state, ret := dev.GetNvLinkState(i)
 		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
 			continue
@@ -264,7 +264,7 @@ func (p PciInfo) CPUAffinity() *uint {
 	if node < 0 {
 		return nil
 	}
-	affinity, err := safecast.ToUint(node)
+	affinity, err := safecast.Convert[uint](node)
 	if err != nil {
 		return nil
 	}

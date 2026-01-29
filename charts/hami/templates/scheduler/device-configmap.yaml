@@ -1,3 +1,4 @@
+{{- if not .Values.dra.enabled -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -21,6 +22,7 @@ data:
       defaultMemory: 0
       defaultCores: 0
       defaultGPUNum: 1
+      memoryFactor: 1
       deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
@@ -32,57 +34,200 @@ data:
         allowedGeometries:
           - 
             - name: 1g.6gb
+              core: 25
               memory: 6144
               count: 4
           - 
             - name: 2g.12gb
+              core: 50
               memory: 12288
               count: 2
           - 
             - name: 4g.24gb
+              core: 100
               memory: 24576
               count: 1
-      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB" ]
+      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
         allowedGeometries:
           - 
             - name: 1g.5gb
+              core: 14
               memory: 5120
               count: 7
           - 
-            - name: 2g.10gb
-              memory: 10240
-              count: 3
             - name: 1g.5gb
+              core: 14
               memory: 5120
               count: 1
+            - name: 2g.10gb
+              core: 28
+              memory: 10240
+              count: 3
           - 
             - name: 3g.20gb
+              core: 42
               memory: 20480
               count: 2
           - 
             - name: 7g.40gb
+              core: 100
               memory: 40960
               count: 1
       - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
         allowedGeometries:
           - 
             - name: 1g.10gb
+              core: 14
               memory: 10240
               count: 7
           - 
-            - name: 2g.20gb
-              memory: 20480
-              count: 3
             - name: 1g.10gb
+              core: 14
               memory: 10240
               count: 1
+            - name: 2g.20gb
+              core: 28
+              memory: 20480
+              count: 3
           - 
             - name: 3g.40gb
+              core: 42
               memory: 40960
               count: 2
           - 
             - name: 7g.79gb
+              core: 100
               memory: 80896
+              count: 1
+      - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
+        allowedGeometries:
+          - 
+            - name: 1g.10gb
+              core: 14
+              memory: 10240
+              count: 7
+          - 
+            - name: 1g.10gb
+              core: 14
+              memory: 10240
+              count: 1
+            - name: 2g.20gb
+              core: 28
+              memory: 20480
+              count: 3
+          - 
+            - name: 3g.40gb
+              core: 42
+              memory: 40960
+              count: 2
+          - 
+            - name: 7g.80gb
+              core: 100
+              memory: 81920
+              count: 1
+      - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
+        allowedGeometries:
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 7
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 1
+            - name: 2g.24gb
+              core: 28
+              memory: 24576
+              count: 3
+          - 
+            - name: 3g.47gb
+              core: 42
+              memory: 48128
+              count: 2
+          - 
+            - name: 7g.94gb
+              core: 100
+              memory: 96256
+              count: 1
+      - models: [ "H20", "H100 on GH200"]
+        allowedGeometries:
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 7
+          - 
+            - name: 1g.12gb
+              core: 14
+              memory: 12288
+              count: 1
+            - name: 2g.24gb
+              core: 28
+              memory: 24576
+              count: 3 
+          - 
+            - name: 3g.48gb
+              core: 42
+              memory: 49152
+              count: 2
+          - 
+            - name: 7g.96gb
+              core: 100
+              memory: 98304
+              count: 1
+      - models: [ "H200 NVL", "H200-SXM5"]
+        allowedGeometries:
+          - 
+            - name: 1g.18gb
+              core: 14
+              memory: 18432
+              count: 7
+          - 
+            - name: 1g.18gb
+              core: 14
+              memory: 18432
+              count: 1
+            - name: 2g.35gb
+              core: 28
+              memory: 35840
+              count: 3
+          - 
+            - name: 3g.71gb
+              core: 42
+              memory: 72704
+              count: 2
+          - 
+            - name: 7g.141gb
+              core: 100
+              memory: 144384
+              count: 1
+      - models: [ "B200" ]
+        allowedGeometries:
+          - 
+            - name: 1g.23gb
+              core: 14
+              memory: 23552
+              count: 7
+          - 
+            - name: 1g.23gb
+              core: 14
+              memory: 23552
+              count: 1
+            - name: 2g.45gb
+              core: 28
+              memory: 46080
+              count: 3
+          - 
+            - name: 3g.90gb
+              core: 42
+              memory: 92160
+              count: 2
+          - 
+            - name: 7g.180gb
+              core: 100
+              memory: 184320
               count: 1
     cambricon:
       resourceCountName: {{ .Values.mluResourceName }}
@@ -92,6 +237,7 @@ data:
       resourceCountName: {{ .Values.dcuResourceName }}
       resourceMemoryName: {{ .Values.dcuResourceMem }}
       resourceCoreName: {{ .Values.dcuResourceCores }}
+      memoryFactor: 1
     metax:
       resourceCountName: "metax-tech.com/gpu"
       resourceVCountName: {{ .Values.metaxResourceName }}
@@ -99,21 +245,43 @@ data:
       resourceVCoreName: {{ .Values.metaxResourceCore }}
       sgpuTopologyAware: {{ .Values.metaxsGPUTopologyAware }}
     enflame:
-      resourceCountName: "enflame.com/vgcu"
-      resourcePercentageName: "enflame.com/vgcu-percentage"
+      resourceNameGCU: "enflame.com/gcu"
+      resourceNameVGCU: {{ .Values.enflameResourceNameVGCU }}
+      resourceNameVGCUPercentage: {{ .Values.enflameResourceNameVGCUPercentage }}
     mthreads:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
       resourceCoreName: "mthreads.com/sgpu-core"
-    iluvatar:
-      resourceCountName: {{ .Values.iluvatarResourceName }}
-      resourceMemoryName: {{ .Values.iluvatarResourceMem }}
-      resourceCoreName: {{ .Values.iluvatarResourceCore }}
+    iluvatars:
+    - chipName: MR-V100
+      commonWord: MR-V100
+      resourceCountName: iluvatar.ai/MR-V100-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V100.vMem
+      resourceCoreName: iluvatar.ai/MR-V100.vCore
+    - chipName: MR-V50
+      commonWord: MR-V50
+      resourceCountName: iluvatar.ai/MR-V50-vgpu
+      resourceMemoryName: iluvatar.ai/MR-V50.vMem
+      resourceCoreName: iluvatar.ai/MR-V50.vCore
+    - chipName: BI-V150
+      commonWord: BI-V150
+      resourceCountName: iluvatar.ai/BI-V150-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V150.vMem
+      resourceCoreName: iluvatar.ai/BI-V150.vCore
+    - chipName: BI-V100
+      commonWord: BI-V100
+      resourceCountName: iluvatar.ai/BI-V100-vgpu
+      resourceMemoryName: iluvatar.ai/BI-V100.vMem
+      resourceCoreName: iluvatar.ai/BI-V100.vCore
     kunlun:
       resourceCountName: {{ .Values.kunlunResourceName }}
+      resourceVCountName: {{ .Values.kunlunResourceVCountName }}
+      resourceVMemoryName: {{ .Values.kunlunResourceVMemoryName }}
     awsneuron:
       resourceCountName: "aws.amazon.com/neuron"
       resourceCoreName: "aws.amazon.com/neuroncore"
+    amd:
+      resourceCountName: "amd.com/gpu"
     vnpus:
     - chipName: 910A
       commonWord: Ascend910A
@@ -121,6 +289,7 @@ data:
       resourceMemoryName: huawei.com/Ascend910A-memory
       memoryAllocatable: 32768
       memoryCapacity: 32768
+      memoryFactor: 1
       aiCore: 30
       templates:
         - name: vir02
@@ -141,6 +310,7 @@ data:
       resourceMemoryName: huawei.com/Ascend910B2-memory
       memoryAllocatable: 65536
       memoryCapacity: 65536
+      memoryFactor: 1
       aiCore: 24
       aiCPU: 6
       templates:
@@ -162,6 +332,7 @@ data:
       resourceMemoryName: huawei.com/Ascend910B3-memory
       memoryAllocatable: 65536
       memoryCapacity: 65536
+      memoryFactor: 1
       aiCore: 20
       aiCPU: 7
       templates:
@@ -173,12 +344,35 @@ data:
           memory: 32768
           aiCore: 10
           aiCPU: 3
+    - chipName: 910B4-1
+      commonWord: Ascend910B4-1
+      resourceName: huawei.com/Ascend910B4-1
+      resourceMemoryName: huawei.com/Ascend910B4-1-memory
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      memoryFactor: 1
+      aiCore: 20
+      aiCPU: 7
+      templates:
+        # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
+        # The memory is used for scheduling so the correct values must be set.
+        # Template vir05_1c_8g actually provides 16GB memory,
+        - name: vir05_1c_8g
+          memory: 16384
+          aiCore: 5
+          aiCPU: 1
+        # Template vir10_3c_16g actually provides 32GB memory
+        - name: vir10_3c_16g
+          memory: 32768
+          aiCore: 10
+          aiCPU: 3
     - chipName: 910B4
       commonWord: Ascend910B4
       resourceName: huawei.com/Ascend910B4
       resourceMemoryName: huawei.com/Ascend910B4-memory
       memoryAllocatable: 32768
       memoryCapacity: 32768
+      memoryFactor: 1
       aiCore: 20
       aiCPU: 7
       templates:
@@ -196,6 +390,7 @@ data:
       resourceMemoryName: huawei.com/Ascend310P-memory
       memoryAllocatable: 21527
       memoryCapacity: 24576
+      memoryFactor: 1
       aiCore: 8
       aiCPU: 7
       templates:
@@ -212,3 +407,4 @@ data:
           aiCore: 4
           aiCPU: 4
   {{ end }}
+{{- end }}

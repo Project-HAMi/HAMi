@@ -8,7 +8,7 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `global.imageRegistry` | Global Docker image registry | `""` |
 | `global.imagePullSecrets` | Global Docker image pull secrets | `[]` |
-| `global.imageTag` | Image tag | `"v2.6.1"` |
+| `global.imageTag` | Image tag | `"v2.8.0"` |
 | `global.gpuHookPath` | GPU Hook path | `/usr/local` |
 | `global.labels` | Global labels | `{}` |
 | `global.annotations` | Global annotations | `{}` |
@@ -43,13 +43,6 @@ This document provides detailed descriptions of all configurable values paramete
 | `dcuResourceMem` | DCU memory resource name | `"hygon.com/dcumem"` |
 | `dcuResourceCores` | DCU core resource name | `"hygon.com/dcucores"` |
 
-### Iluvatar GPU Resources
-| Parameter | Description | Default Value |
-|-----------|-------------|---------------|
-| `iluvatarResourceName` | GPU resource name | `"iluvatar.ai/vgpu"` |
-| `iluvatarResourceMem` | GPU memory resource name | `"iluvatar.ai/vcuda-memory"` |
-| `iluvatarResourceCore` | GPU core resource name | `"iluvatar.ai/vcuda-core"` |
-
 ### Metax GPU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
@@ -57,6 +50,12 @@ This document provides detailed descriptions of all configurable values paramete
 | `metaxResourceCore` | GPU core resource name | `"metax-tech.com/vcore"` |
 | `metaxResourceMem` | GPU memory resource name | `"metax-tech.com/vmemory"` |
 | `metaxsGPUTopologyAware` | GPU topology awareness | `"false"` |
+
+### Enflame GCU Resources
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `enflameResourceNameVGCU` | vGCU resource name | `"enflame.com/vgcu"` |
+| `enflameResourceNameVGCUPercentage` | vGCU percentage resource name | `"enflame.com/vgcu-percentage"` |
 
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |
@@ -158,6 +157,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.monitor.image.pullPolicy` | Monitor image pull policy | `IfNotPresent` |
 | `devicePlugin.monitor.image.pullSecrets` | Monitor image pull secrets | `[]` |
 | `devicePlugin.monitor.ctrPath` | Container path | `/usr/local/vgpu/containers` |
+| `devicePlugin.monitor.extraArgs` | Monitor extra arguments | `["-v=4"]` |
+| `devicePlugin.monitor.extraEnvs` | Monitor extra environments | `{}` |
 
 ### Device Plugin Other Configuration
 
@@ -172,6 +173,9 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.disablecorelimit` | String type, "true" means disable core limit, "false" means enable core limit | `"false"` |
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
+| `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
+| `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
+| `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 
 ### Device Plugin Service Configuration
 
@@ -186,7 +190,7 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `devicePlugin.pluginPath` | Plugin path | `/var/lib/kubelet/device-plugins` |
 | `devicePlugin.libPath` | Library path | `/usr/local/vgpu` |
-| `devicePlugin.nvidianodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
+| `devicePlugin.nvidiaNodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
 | `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
 | `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |
 
@@ -225,3 +229,9 @@ This document provides detailed descriptions of all configurable values paramete
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
 | `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
+
+### Iluvatar
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devices.iluvatar.enabled` | Whether to enable | `false` |
+| `devices.iluvatar.customresources` | Custom resources | `["iluvatar.ai/BI-V150-vgpu", "iluvatar.ai/BI-V150.vMem","iluvatar.ai/BI-V150.vCore", ...]` |

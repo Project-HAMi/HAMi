@@ -229,15 +229,16 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					ID:      "test-0",
-					Count:   int32(1),
-					Devmem:  int32(1024),
-					Devcore: int32(100),
-					Type:    dev.CommonWord(),
-					Numa:    0,
-					Health:  true,
-					Index:   uint(0),
-					Mode:    "test",
+					ID:           "test-0",
+					Count:        int32(1),
+					Devmem:       int32(1024),
+					Devcore:      int32(100),
+					Type:         dev.CommonWord(),
+					Numa:         0,
+					Health:       true,
+					Index:        uint(0),
+					Mode:         "test",
+					DeviceVendor: HygonDCUCommonWord,
 				},
 			},
 			err: nil,
@@ -427,98 +428,6 @@ func Test_checkType(t *testing.T) {
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 			assert.Equal(t, result3, test.want3)
-		})
-	}
-}
-
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "device id the same as the dcu in use uuid",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hygon.com/use-gpuuuid": "123",
-				},
-				d: device.DeviceUsage{
-					ID: "123",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "device id the different from the dcu in use uuid",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hygon.com/use-gpuuuid": "123",
-				},
-				d: device.DeviceUsage{
-					ID: "456",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no dcu in use uuid annos",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{},
-				d: device.DeviceUsage{
-					ID: "456",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "device id the same as the dcu no use uuid",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hygon.com/nouse-gpuuuid": "123",
-				},
-				d: device.DeviceUsage{
-					ID: "123",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "device id the different from the dcu no use uuid",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hygon.com/nouse-gpuuuid": "123",
-				},
-				d: device.DeviceUsage{
-					ID: "456",
-				},
-			},
-			want: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := DCUDevices{}
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
 		})
 	}
 }
@@ -755,7 +664,10 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 		{
 			name: "Test with non-zero resource requests",
 			node: &corev1.Node{},
-			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "nozerorr",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
 			hasLock:     false,
@@ -770,7 +682,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values,default,nozerorr"},
 				},
 			}
 
@@ -1174,7 +1086,12 @@ func TestDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}

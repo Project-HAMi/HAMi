@@ -18,7 +18,9 @@ package scheduler
 
 import (
 	"context"
+	"fmt"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -27,6 +29,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
@@ -36,17 +39,22 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
-	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func Test_getNodesUsage(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
 		ID: "node1",
-		Devices: []device.DeviceInfo{
-			{
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
 				ID:      "GPU0",
 				Index:   0,
 				Count:   10,
@@ -56,16 +64,16 @@ func Test_getNodesUsage(t *testing.T) {
 				Mode:    "hami",
 				Health:  true,
 			},
-			{
-				ID:      "GPU1",
-				Index:   1,
-				Count:   10,
-				Devmem:  1024,
-				Devcore: 100,
-				Numa:    1,
-				Mode:    "hami",
-				Health:  true,
-			},
+				{
+					ID:      "GPU1",
+					Index:   1,
+					Count:   10,
+					Devmem:  1024,
+					Devcore: 100,
+					Numa:    1,
+					Mode:    "hami",
+					Health:  true,
+				}},
 		},
 	})
 	podDevces := device.PodDevices{
@@ -80,15 +88,15 @@ func Test_getNodesUsage(t *testing.T) {
 			},
 		},
 	}
-	podMap := newPodManager()
-	podMap.addPod(&corev1.Pod{
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "1111",
 			Name:      "test1",
 			Namespace: "default",
 		},
 	}, "node1", podDevces)
-	podMap.addPod(&corev1.Pod{
+	podMap.AddPod(&corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "2222",
 			Name:      "test2",
@@ -136,7 +144,7 @@ func Test_getPodUsage(t *testing.T) {
 	tests := []struct {
 		name    string
 		pods    []*corev1.Pod
-		want    map[string]PodUseDeviceStat
+		want    map[string]device.PodUseDeviceStat
 		wantErr error
 	}{
 		{
@@ -154,7 +162,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node12": {
 					TotalPod:     0, // Running pod does not count
 					UseDevicePod: 0,
@@ -176,7 +184,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node13": {
 					TotalPod:     1,
 					UseDevicePod: 0, // No annotation
@@ -199,7 +207,7 @@ func Test_getPodUsage(t *testing.T) {
 					},
 				},
 			},
-			want: map[string]PodUseDeviceStat{
+			want: map[string]device.PodUseDeviceStat{
 				"node11": {
 					TotalPod:     1,
 					UseDevicePod: 1,
@@ -212,7 +220,7 @@ func Test_getPodUsage(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			for _, pod := range test.pods {
 				client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-				s.addPod(pod, pod.Spec.NodeName, device.PodDevices{})
+				s.podManager.AddPod(pod, pod.Spec.NodeName, device.PodDevices{})
 			}
 
 			result, err := s.getPodUsage()
@@ -354,16 +362,16 @@ func Test_Filter(t *testing.T) {
 		for index := range nodes {
 			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
 		}
-		pods, _ := s.ListPodsUID()
+		pods, _ := s.podManager.ListPodsUID()
 		for index := range pods {
-			s.delPod(pods[index])
+			s.podManager.DelPod(pods[index])
 		}
 
 		s.addNode("node1", &device.NodeInfo{
 			ID:   "node1",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
-			Devices: []device.DeviceInfo{
-				{
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
 					ID:           "device1",
 					Index:        0,
 					Count:        10,
@@ -375,47 +383,49 @@ func Test_Filter(t *testing.T) {
 					Health:       true,
 					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
-				{
-					ID:           "device2",
-					Index:        1,
-					Count:        10,
-					Devmem:       8000,
-					Devcore:      100,
-					Numa:         0,
-					Type:         nvidia.NvidiaGPUDevice,
-					Health:       true,
-					DeviceVendor: nvidia.NvidiaGPUDevice,
-				},
+					{
+						ID:           "device2",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					}},
 			},
 		})
 		s.addNode("node2", &device.NodeInfo{
 			ID:   "node2",
 			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node2"}},
-			Devices: []device.DeviceInfo{
-				{
-					ID:      "device3",
-					Index:   0,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Mode:    "hami",
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
+					ID:           "device3",
+					Index:        0,
+					Count:        10,
+					Devmem:       8000,
+					Devcore:      100,
+					Numa:         0,
+					Mode:         "hami",
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
 				},
-				{
-					ID:      "device4",
-					Index:   1,
-					Count:   10,
-					Devmem:  8000,
-					Devcore: 100,
-					Numa:    0,
-					Type:    nvidia.NvidiaGPUDevice,
-					Health:  true,
-				},
+					{
+						ID:           "device4",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					}},
 			},
 		})
-		s.addPod(pod1, "node1", device.PodDevices{
+		s.podManager.AddPod(pod1, "node1", device.PodDevices{
 			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
@@ -428,7 +438,7 @@ func Test_Filter(t *testing.T) {
 				},
 			},
 		})
-		s.addPod(pod2, "node2", device.PodDevices{
+		s.podManager.AddPod(pod2, "node2", device.PodDevices{
 			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 				{
 					{
@@ -458,8 +468,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test1",
 						UID:  "test1-uid1",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -495,8 +505,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test2",
 						UID:  "test2-uid2",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -532,8 +542,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test3",
 						UID:  "test3-uid3",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -569,8 +579,8 @@ func Test_Filter(t *testing.T) {
 						Name: "test4",
 						UID:  "test4-uid4",
 						Annotations: map[string]string{
-							policy.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
-							policy.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicySpread.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicySpread.String(),
 						},
 					},
 					Spec: corev1.PodSpec{
@@ -612,6 +622,75 @@ func Test_Filter(t *testing.T) {
 			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
 		})
 	}
+}
+
+func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	const nodeName = "node-direct"
+	nodelockutil.EnsureNodeLockForTest(nodeName)
+	require.Equal(t, 1, nodelockutil.NodeLockCountForTest())
+
+	s := NewScheduler()
+	select {
+	case <-s.nodeNotify:
+	default:
+	}
+
+	s.onDelNode(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected node notification on delete")
+	}
+
+	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
+}
+
+func TestSchedulerOnDelNodeCleansLockFromTombstone(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	const nodeName = "node-tomb"
+	nodelockutil.EnsureNodeLockForTest(nodeName)
+	require.Equal(t, 1, nodelockutil.NodeLockCountForTest())
+
+	s := NewScheduler()
+
+	s.onDelNode(cache.DeletedFinalStateUnknown{Obj: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}}})
+
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected node notification from tombstone delete")
+	}
+
+	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
+}
+
+func TestSchedulerOnDelNodeIgnoresNonNodeObjects(t *testing.T) {
+	nodelockutil.ResetNodeLocksForTest()
+	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
+	nodelockutil.EnsureNodeLockForTest("keep-node")
+	initial := nodelockutil.NodeLockCountForTest()
+
+	s := NewScheduler()
+
+	s.onDelNode(cache.DeletedFinalStateUnknown{Obj: struct{}{}})
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected notification for tombstone with non-node")
+	}
+
+	s.onDelNode(struct{}{})
+	select {
+	case <-s.nodeNotify:
+	case <-time.After(time.Second):
+		t.Fatal("expected notification for unknown object delete")
+	}
+
+	require.Equal(t, initial, nodelockutil.NodeLockCountForTest())
 }
 
 func Test_RegisterFromNodeAnnotations(t *testing.T) {
@@ -834,4 +913,359 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_ResourceQuota(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	informer := informerFactory.Core().V1().Pods().Informer()
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddPod,
+		UpdateFunc: s.onUpdatePod,
+		DeleteFunc: s.onDelPod,
+	})
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+	s.addAllEventHandlers()
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	initNode := func() {
+		nodes, _ := s.ListNodes()
+		for index := range nodes {
+			s.rmNodeDevices(index, nvidia.NvidiaGPUDevice)
+		}
+		pods, _ := s.podManager.ListPodsUID()
+		for index := range pods {
+			s.podManager.DelPod(pods[index])
+		}
+
+		s.addNode("node1", &device.NodeInfo{
+			ID:   "node1",
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {{
+					ID:           "device1",
+					Index:        0,
+					Count:        10,
+					Devmem:       2000,
+					Devcore:      100,
+					Numa:         0,
+					Mode:         "hami",
+					Type:         nvidia.NvidiaGPUDevice,
+					Health:       true,
+					DeviceVendor: nvidia.NvidiaGPUDevice,
+				},
+					{
+						ID:           "device2",
+						Index:        1,
+						Count:        10,
+						Devmem:       8000,
+						Devcore:      100,
+						Numa:         0,
+						Mode:         "hami",
+						Type:         nvidia.NvidiaGPUDevice,
+						Health:       true,
+						DeviceVendor: nvidia.NvidiaGPUDevice,
+					},
+					{
+						ID:      "device3",
+						Index:   0,
+						Count:   10,
+						Devmem:  4000,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Type:    nvidia.NvidiaGPUDevice,
+						Health:  true,
+					},
+					{
+						ID:      "device4",
+						Index:   1,
+						Count:   10,
+						Devmem:  6000,
+						Devcore: 100,
+						Numa:    0,
+						Type:    nvidia.NvidiaGPUDevice,
+						Health:  true,
+					}},
+			},
+		})
+	}
+
+	tests := []struct {
+		name    string
+		args    extenderv1.ExtenderArgs
+		quota   corev1.ResourceQuota
+		want    *extenderv1.ExtenderFilterResult
+		wantErr error
+	}{
+		{
+			name: "multi device Resourcequota pass",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test1",
+						UID:       "test1-uid1",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(2, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(2000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(200, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{"node1"},
+			},
+		},
+		{
+			name: "multi device Resourcequota deny",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test2",
+						UID:       "test2-uid2",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(2, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(60, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(3000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(200, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				FailedNodes: map[string]string{
+					"node1": "NodeUnfitPod",
+				},
+			},
+		},
+		{
+			name: "unspecified device Resourcequota pass",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test3",
+						UID:       "test3-uid3",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(2000, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{"node1"},
+			},
+		},
+		{
+			name: "unspecified device Resourcequota deny",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "test4",
+						UID:       "test4-uid4",
+						Namespace: "default",
+					},
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Name:  "gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1"},
+			},
+			quota: corev1.ResourceQuota{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-quota",
+					Namespace: "default",
+				},
+				Spec: corev1.ResourceQuotaSpec{
+					Hard: corev1.ResourceList{
+						"limits.hami.io/gpucores": *resource.NewQuantity(100, resource.BinarySI),
+						"limits.hami.io/gpumem":   *resource.NewQuantity(1500, resource.BinarySI),
+					},
+				},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				FailedNodes: map[string]string{
+					"node1": "NodeUnfitPod",
+				},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			s.onAddQuota(&test.quota)
+			initNode()
+			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Create(context.Background(), test.args.Pod, metav1.CreateOptions{})
+			got, gotErr := s.Filter(test.args)
+			client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Delete(context.Background(), test.args.Pod.Name, metav1.DeleteOptions{})
+			// wait for pod deletion to be processed by the informer
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+			err := wait.PollUntilContextTimeout(ctx, 10*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+				_, ok := s.podManager.GetPod(test.args.Pod)
+				return !ok, nil
+			})
+			require.NoError(t, err, "timed out waiting for pod to be deleted from pod manager")
+			s.onDelQuota(&test.quota)
+			assert.DeepEqual(t, test.wantErr, gotErr)
+			assert.DeepEqual(t, test.want, got)
+		})
+	}
+}
+
+func Test_ListNodes_Concurrent(t *testing.T) {
+	t.Parallel()
+
+	m := newNodeManager()
+	stopCh := make(chan struct{})
+	var wg sync.WaitGroup
+
+	// Goroutine 1: Continuous Writes (Adding/Updating random nodes)
+	wg.Go(func() {
+		i := 0
+		for {
+			select {
+			case <-stopCh:
+				return
+			default:
+				nodeID := fmt.Sprintf("node-%d", i%100) // Rotate through 100 keys
+				m.addNode(nodeID,
+					&device.NodeInfo{
+						ID:   nodeID,
+						Node: &corev1.Node{},
+						Devices: map[string][]device.DeviceInfo{
+							nvidia.NvidiaGPUDevice: {
+								{
+									ID:           "gpu-1",
+									DeviceVendor: "NVIDIA",
+								},
+							},
+						},
+					},
+				)
+				i++
+			}
+		}
+	})
+
+	// Goroutine 2: Continuous Iteration
+	// In the original buggy code, this WILL cause a panic:
+	// "fatal error: concurrent map iteration and map write"
+	for range 5000 {
+		nodes, _ := m.ListNodes()
+		// Iterating while the map is being modified in the background
+		for k, v := range nodes {
+			_ = k
+			_ = v
+		}
+	}
+	close(stopCh)
+	wg.Wait()
 }

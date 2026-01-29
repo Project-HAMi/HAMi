@@ -71,3 +71,7 @@ const (
 func (s SchedulerPolicyName) String() string {
 	return string(s)
 }
+
+const (
+	Weight int = 10
+)

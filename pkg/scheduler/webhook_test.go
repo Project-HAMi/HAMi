@@ -240,3 +240,101 @@ func TestPodHasDifferentScheduler(t *testing.T) {
 		t.Errorf("Expected allowed response for pod with different scheduler, but got: %v", resp)
 	}
 }
+
+func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+	})
+
+	config.SchedulerName = "hami-scheduler"
+	config.ForceOverwriteDefaultScheduler = false
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "container1",
+					SecurityContext: &corev1.SecurityContext{
+						Privileged: nil,
+					},
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hami.io/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("Error encoding pod: %v", err)
+	}
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "test-uid",
+			Namespace: "default",
+			Name:      "test-pod",
+			Object: runtime.RawExtension{
+				Raw: podBytes,
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	resp := wh.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("Expected allowed response, but got: %v", resp)
+	}
+	if len(resp.Patches) == 0 {
+		t.Fatalf("Expected patches for schedulerName injection, got none")
+	}
+	found := false
+	for _, patch := range resp.Patches {
+		if patch.Path != "/spec/schedulerName" {
+			continue
+		}
+		if patch.Operation != "add" && patch.Operation != "replace" {
+			continue
+		}
+		if value, ok := patch.Value.(string); ok && value == config.SchedulerName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Expected schedulerName patch to %q, got patches: %+v", config.SchedulerName, resp.Patches)
+	}
+}

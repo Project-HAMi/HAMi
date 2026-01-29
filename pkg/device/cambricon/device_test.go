@@ -45,7 +45,7 @@ func Test_GetNodeDevices(t *testing.T) {
 		want []*device.DeviceInfo
 	}{
 		{
-			name: "test with vaild configuration",
+			name: "test with valid configuration",
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test",
@@ -59,14 +59,15 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					Index:   0,
-					ID:      "test-cambricon-mlu-0",
-					Count:   int32(100),
-					Devmem:  int32(25600),
-					Devcore: int32(100),
-					Type:    CambriconMLUDevice,
-					Numa:    0,
-					Health:  true,
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         CambriconMLUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
 				},
 			},
 		},
@@ -196,95 +197,6 @@ func Test_checkType(t *testing.T) {
 			result1, result2, _ := dev.checkType(test.args.annos, test.args.d, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
-		})
-	}
-}
-
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "don't set UserUUID,NoUserUUID and annotation",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{annos: map[string]string{},
-				d: device.DeviceUsage{},
-			},
-			want: true,
-		},
-		{
-			name: "set UserUUID and annotation, don't set NoUserUUID",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"cambricon.com/use-gpuuuid": "test123,111",
-				},
-				d: device.DeviceUsage{
-					ID: "test123",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "don't set UserUUID, set NoUserUUID and annotation",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"cambricon.com/nouse-gpuuuid": "test123,111",
-				},
-				d: device.DeviceUsage{
-					ID: "test123",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "set UserUUID, don't set NoUserUUID,annotation and device not match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"cambricon.com/nouse-gpuuuid": "test123,111",
-				},
-				d: device.DeviceUsage{
-					ID: "test456",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "don't set UserUUID,set NoUserUUID,annotation and device not match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"cambricon.com/use-gpuuuid": "test123,111",
-				},
-				d: device.DeviceUsage{
-					ID: "test456",
-				},
-			},
-			want: false,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := CambriconDevices{}
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
 		})
 	}
 }
@@ -422,7 +334,7 @@ func Test_PatchAnnotations(t *testing.T) {
 				},
 			},
 			want: map[string]string{
-				"CAMBRICON_DSMLU_ASSIGHED":                  "false",
+				"CAMBRICON_DSMLU_ASSIGNED":                  "false",
 				"CAMBRICON_DSMLU_PROFILE":                   "0_1_1000",
 				"hami.io/cambricon-mlu-devices-to-allocate": "device-0,MLU,256000,1:;",
 				"hami.io/cambricon-mlu-devices-allocated":   "device-0,MLU,256000,1:;",
@@ -1072,7 +984,12 @@ func TestDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}

@@ -1,4 +1,4 @@
-{{- if .Values.scheduler.kubeScheduler.enabled }}
+{{- if and .Values.scheduler.kubeScheduler.enabled (not .Values.dra.enabled) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -14,17 +14,28 @@ data:
         "apiVersion": "v1",
         "extenders": [
             {
+                {{- if .Values.scheduler.admissionWebhook.enabled }}
                 "urlPrefix": "https://127.0.0.1:443",
-                "filterVerb": "filter",
-                "bindVerb": "bind",
                 "enableHttps": true,
-                "weight": 1,
-                "nodeCacheCapable": true,
-                "httpTimeout": 30000000000,
                 "tlsConfig": {
                     "insecure": true
                 },
+                {{- else }}
+                "urlPrefix": "http://127.0.0.1:80",
+                "enableHttps": false,
+                {{- end }}
+                "filterVerb": "filter",
+                "bindVerb": "bind",
+                "weight": 1,
+                "nodeCacheCapable": true,
+                "httpTimeout": 30000000000,
                 "managedResources": [
+                    {{- range .Values.devices.amd.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
                     {{- if .Values.devices.ascend.enabled }}
                     {{- range .Values.devices.ascend.customresources }}
                     {
@@ -63,6 +74,14 @@ data:
                       "ignoredByScheduler": true
                     },
                     {{- end }}
+                    {{- if .Values.devices.iluvatar.enabled }}
+                    {{- range .Values.devices.iluvatar.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
@@ -97,10 +116,6 @@ data:
                     },
                     {
                         "name": "{{ .Values.dcuResourceCores }}",
-                        "ignoredByScheduler": true
-                    },
-                    {
-                        "name": "{{ .Values.iluvatarResourceName }}",
                         "ignoredByScheduler": true
                     },
                     {

@@ -1,4 +1,4 @@
-{{- if .Values.scheduler.admissionWebhook.enabled }}
+{{- if and .Values.scheduler.admissionWebhook.enabled (not .Values.dra.enabled) -}}
 {{- if .Values.scheduler.certManager.enabled }}
 apiVersion: cert-manager.io/v1
 kind: Certificate

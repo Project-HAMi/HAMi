@@ -199,14 +199,15 @@ func Test_GetNodeDevices(t *testing.T) {
 			},
 			want: []*device.DeviceInfo{
 				{
-					Index:   uint(0),
-					ID:      "test-mthreads-0",
-					Count:   int32(100),
-					Devmem:  int32(8192),
-					Devcore: int32(16),
-					Type:    MthreadsGPUDevice,
-					Numa:    0,
-					Health:  true,
+					Index:        uint(0),
+					ID:           "test-mthreads-0",
+					Count:        int32(100),
+					Devmem:       int32(8192),
+					Devcore:      int32(16),
+					Type:         MthreadsGPUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: MthreadsGPUCommonWord,
 				},
 			},
 		},
@@ -324,96 +325,6 @@ func Test_checkType(t *testing.T) {
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 			assert.Equal(t, result3, test.want3)
-		})
-	}
-}
-
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "no annos",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{},
-				d:     device.DeviceUsage{},
-			},
-			want: true,
-		},
-		{
-			name: "use id the same as device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					MthreadsUseUUID: "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "use id the different from device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					MthreadsUseUUID: "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test2",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no use id the same as device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					MthreadsNoUseUUID: "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no use id the different from device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					MthreadsNoUseUUID: "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test2",
-				},
-			},
-			want: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := MthreadsDevices{}
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
 		})
 	}
 }
@@ -942,7 +853,12 @@ func TestDevices_Fit(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			allocated := &device.PodDevices{}
-			fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: test.annos,
+				},
+			}
+			fit, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}

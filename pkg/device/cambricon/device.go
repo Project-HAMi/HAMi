@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
-	"slices"
 	"strings"
 	"time"
 
@@ -45,13 +44,13 @@ const (
 	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
 	MLUInUse               = "cambricon.com/use-mlutype"
 	MLUNoUse               = "cambricon.com/nouse-mlutype"
-	// MLUUseUUID is user can use specify MLU device for set MLU UUID.
+	// MLUUseUUID annotation specifies a comma-separated list of MLU UUIDs to use.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
-	// MLUNoUseUUID is user can not use specify MLU device for set MLU UUID.
+	// MLUNoUseUUID annotation specifies a comma-separated list of MLU UUIDs to exclude.
 	MLUNoUseUUID          = "cambricon.com/nouse-gpuuuid"
 	DsmluLockTime         = "cambricon.com/dsmlu.lock"
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
-	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGHED"
+	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
 )
 
@@ -80,8 +79,11 @@ func InitMLUDevice(config CambriconConfig) *CambriconDevices {
 	MLUResourceCount = config.ResourceCountName
 	MLUResourceMemory = config.ResourceMemoryName
 	MLUResourceCores = config.ResourceCoreName
-	device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
-	device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	_, ok := device.InRequestDevices[CambriconMLUDevice]
+	if !ok {
+		device.InRequestDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-to-allocate"
+		device.SupportDevices[CambriconMLUDevice] = "hami.io/cambricon-mlu-devices-allocated"
+	}
 	return &CambriconDevices{}
 }
 
@@ -191,14 +193,15 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(memoryTotal * 256 * 100 / cards),
-			Devcore: 100,
-			Type:    CambriconMLUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
+			Count:        100,
+			Devmem:       int32(memoryTotal * 256 * 100 / cards),
+			Devcore:      100,
+			Type:         CambriconMLUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: CambriconMLUCommonWord,
 		})
 		i++
 	}
@@ -219,25 +222,6 @@ func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceU
 		return true, true, false
 	}
 	return false, false, false
-}
-
-func (dev *CambriconDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[MLUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for mlu user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[MLUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for mlu not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
@@ -325,7 +309,7 @@ func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -337,7 +321,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := cam.checkType(annos, *dev, k)
+		_, found, numa := cam.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -352,7 +336,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !cam.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MLUUseUUID, MLUNoUseUUID, cam.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -420,4 +404,12 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MLUResourceCount,
+		ResourceMemoryName: MLUResourceMemory,
+		ResourceCoreName:   MLUResourceCores,
+	}
 }

@@ -31,12 +31,12 @@ jobs:
       HAMI_VERSION: ${{ inputs.ref }}
     steps:
       - name: checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
 
       - name: install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
-          go-version: "1.21"
+          go-version-file: go.mod
 
       - name: setup e2e env
         run: |
@@ -44,14 +44,14 @@ jobs:
 
       - name: download hami helm
         if: inputs.type == 'pullrequest'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: chart_package_artifact
           path: charts/
 
       - name: download hami image
         if: inputs.type == 'pullrequest'
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v7
         with:
           name: hami-image
           path: ./image

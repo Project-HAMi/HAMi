@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: dcu-pytorch-demo
+spec:
+  containers:
+    - name: dcu-pytorch-demo
+      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+      command: [ "/bin/bash", "-c", "--" ]
+      args: [ "sleep infinity & wait" ]
+      resources:
+        limits:
+          hygon.com/dcunum: 2 # declare how many physical DCUs the pod needs

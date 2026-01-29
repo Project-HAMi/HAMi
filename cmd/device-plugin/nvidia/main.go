@@ -21,9 +21,13 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
+	nvinfo "github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/fsnotify/fsnotify"
 	cli "github.com/urfave/cli/v2"
@@ -34,20 +38,26 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/watch"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	flagutil "github.com/Project-HAMi/HAMi/pkg/util/flag"
 )
 
-func main() {
-	var configFile string
+type options struct {
+	flags         []cli.Flag
+	configFile    string
+	kubeletSocket string
+}
 
+func main() {
 	c := cli.NewApp()
+	o := &options{}
 	c.Name = "NVIDIA Device Plugin"
 	c.Usage = "NVIDIA device plugin for Kubernetes"
 	c.Action = func(ctx *cli.Context) error {
 		flagutil.PrintCliFlags(ctx)
-		return start(ctx, c.Flags)
+		return start(ctx, o)
 	}
 	c.Commands = []*cli.Command{
 		{
@@ -90,6 +100,12 @@ func main() {
 			Usage:   "the root path for the NVIDIA driver installation (typical values are '/' or '/run/nvidia/driver')",
 			EnvVars: []string{"NVIDIA_DRIVER_ROOT"},
 		},
+		&cli.StringFlag{
+			Name:    "dev-root",
+			Aliases: []string{"nvidia-dev-root"},
+			Usage:   "the root path for the NVIDIA device nodes on the host (typical values are '/' or '/run/nvidia/driver')",
+			EnvVars: []string{"NVIDIA_DEV_ROOT"},
+		},
 		&cli.BoolFlag{
 			Name:    "pass-device-specs",
 			Value:   false,
@@ -109,6 +125,11 @@ func main() {
 			EnvVars: []string{"DEVICE_ID_STRATEGY"},
 		},
 		&cli.BoolFlag{
+			Name:    "gdrcopy-enabled",
+			Usage:   "ensure that containers that request NVIDIA GPU resources are started with GDRCopy support",
+			EnvVars: []string{"GDRCOPY_ENABLED"},
+		},
+		&cli.BoolFlag{
 			Name:    "gds-enabled",
 			Usage:   "ensure that containers are started with NVIDIA_GDS=enabled",
 			EnvVars: []string{"GDS_ENABLED"},
@@ -119,9 +140,16 @@ func main() {
 			EnvVars: []string{"MOFED_ENABLED"},
 		},
 		&cli.StringFlag{
+			Name:        "kubelet-socket",
+			Value:       kubeletdevicepluginv1beta1.KubeletSocket,
+			Usage:       "specify the socket for communicating with the kubelet; if this is empty, no connection with the kubelet is attempted",
+			Destination: &o.kubeletSocket,
+			EnvVars:     []string{"KUBELET_SOCKET"},
+		},
+		&cli.StringFlag{
 			Name:        "config-file",
 			Usage:       "the path to a config file as an alternative to command line options or environment variables",
-			Destination: &configFile,
+			Destination: &o.configFile,
 			EnvVars:     []string{"CONFIG_FILE"},
 		},
 		&cli.StringFlag{
@@ -131,16 +159,34 @@ func main() {
 			EnvVars: []string{"CDI_ANNOTATION_PREFIX"},
 		},
 		&cli.StringFlag{
-			Name:    "nvidia-ctk-path",
+			Name:    "nvidia-cdi-hook-path",
+			Aliases: []string{"nvidia-ctk-path"},
 			Value:   spec.DefaultNvidiaCTKPath,
-			Usage:   "the path to use for the nvidia-ctk in the generated CDI specification",
-			EnvVars: []string{"NVIDIA_CTK_PATH"},
+			Usage:   "the path to use for NVIDIA CDI hooks in the generated CDI specification",
+			EnvVars: []string{"NVIDIA_CDI_HOOK_PATH", "NVIDIA_CTK_PATH"},
 		},
 		&cli.StringFlag{
-			Name:    "container-driver-root",
+			Name:    "driver-root-ctr-path",
+			Aliases: []string{"container-driver-root"},
 			Value:   spec.DefaultContainerDriverRoot,
 			Usage:   "the path where the NVIDIA driver root is mounted in the container; used for generating CDI specifications",
-			EnvVars: []string{"CONTAINER_DRIVER_ROOT"},
+			EnvVars: []string{"DRIVER_ROOT_CTR_PATH", "CONTAINER_DRIVER_ROOT"},
+		},
+		&cli.StringFlag{
+			Name:    "device-discovery-strategy",
+			Value:   "auto",
+			Usage:   "the strategy to use to discover devices: 'auto', 'nvml', or 'tegra'",
+			EnvVars: []string{"DEVICE_DISCOVERY_STRATEGY"},
+		},
+		&cli.IntSliceFlag{
+			Name:    "imex-channel-ids",
+			Usage:   "A list of IMEX channels to inject.",
+			EnvVars: []string{"IMEX_CHANNEL_IDS"},
+		},
+		&cli.BoolFlag{
+			Name:    "imex-required",
+			Usage:   "The specified IMEX channels are required",
+			EnvVars: []string{"IMEX_REQUIRED"},
 		},
 		&cli.IntFlag{
 			Name:  "v",
@@ -149,6 +195,7 @@ func main() {
 		},
 	}
 	c.Flags = append(c.Flags, addFlags()...)
+	o.flags = c.Flags
 	err := c.Run(os.Args)
 	if err != nil {
 		klog.Error(err)
@@ -156,15 +203,50 @@ func main() {
 	}
 }
 
-func validateFlags(config *spec.Config) error {
-	_, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
+func validateFlags(infolib nvinfo.Interface, config *spec.Config) error {
+	deviceListStrategies, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
 	if err != nil {
 		return fmt.Errorf("invalid --device-list-strategy option: %v", err)
+	}
+
+	hasNvml, _ := infolib.HasNvml()
+	if deviceListStrategies.AnyCDIEnabled() && !hasNvml {
+		return fmt.Errorf("CDI --device-list-strategy options are only supported on NVML-based systems")
 	}
 
 	if *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyUUID && *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyIndex {
 		return fmt.Errorf("invalid --device-id-strategy option: %v", *config.Flags.Plugin.DeviceIDStrategy)
 	}
+
+	if config.Sharing.SharingStrategy() == spec.SharingStrategyMPS {
+		if *config.Flags.MigStrategy == spec.MigStrategyMixed {
+			return fmt.Errorf("using --mig-strategy=mixed is not supported with MPS")
+		}
+		if config.Flags.MpsRoot == nil || *config.Flags.MpsRoot == "" {
+			return fmt.Errorf("using MPS requires --mps-root to be specified")
+		}
+	}
+
+	switch *config.Flags.DeviceDiscoveryStrategy {
+	case "auto":
+	case "nvml":
+	case "tegra":
+	default:
+		return fmt.Errorf("invalid --device-discovery-strategy option %v", *config.Flags.DeviceDiscoveryStrategy)
+	}
+
+	switch *config.Flags.MigStrategy {
+	case spec.MigStrategyNone:
+	case spec.MigStrategySingle:
+	case spec.MigStrategyMixed:
+	default:
+		return fmt.Errorf("unknown MIG strategy: %v", *config.Flags.MigStrategy)
+	}
+
+	if err := spec.AssertChannelIDsValid(config.Imex.ChannelIDs); err != nil {
+		return fmt.Errorf("invalid IMEX channel IDs: %w", err)
+	}
+
 	return nil
 }
 
@@ -173,36 +255,33 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("unable to finalize config: %v", err)
 	}
-	err = validateFlags(config)
-	if err != nil {
-		return nil, fmt.Errorf("unable to validate flags: %v", err)
-	}
 	config.Flags.GFD = nil
 	return config, nil
 }
 
-func start(c *cli.Context, flags []cli.Flag) error {
-	klog.Info("Starting FS watcher.")
+func start(c *cli.Context, o *options) error {
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	client.InitGlobalClient()
-	watcher, err := newFSWatcher(kubeletdevicepluginv1beta1.DevicePluginPath)
+
+	kubeletSocketDir := filepath.Dir(o.kubeletSocket)
+	klog.Infof("Starting FS watcher for %v", kubeletSocketDir)
+	watcher, err := watch.Files(kubeletSocketDir)
 	if err != nil {
-		return fmt.Errorf("failed to create FS watcher: %v", err)
+		return fmt.Errorf("failed to create FS watcher for %s: %v", kubeletdevicepluginv1beta1.DevicePluginPath, err)
 	}
 	defer watcher.Close()
-	//device.InitDevices()
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
 	klog.Info("Starting OS watcher.")
-	sigs := newOSWatcher(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	sigs := watch.Signals(syscall.SIGHUP, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 
-	var restarting bool
+	var started bool
 	var restartTimeout <-chan time.Time
 	var plugins []plugin.Interface
 restart:
 	// If we are restarting, stop plugins from previous run.
-	if restarting {
+	if started {
 		err := stopPlugins(plugins)
 		if err != nil {
 			return fmt.Errorf("error stopping plugins from previous run: %v", err)
@@ -210,17 +289,16 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(c, flags, restarting)
+	plugins, restartPlugins, err := startPlugins(c, o)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
+	started = true
 
 	if restartPlugins {
 		klog.Info("Failed to start one or more plugins. Retrying in 30s...")
 		restartTimeout = time.After(30 * time.Second)
 	}
-
-	restarting = true
 
 	// Start an infinite loop, waiting for several indicators to either log
 	// some messages, trigger a restart of the plugins, or exit the program.
@@ -230,12 +308,12 @@ restart:
 		case <-restartTimeout:
 			goto restart
 
-		// Detect a kubelet restart by watching for a newly created
-		// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
-		// restarting all of the plugins in the process.
+			// Detect a kubelet restart by watching for a newly created
+			// 'kubeletdevicepluginv1beta1.KubeletSocket' file. When this occurs, restart this loop,
+			// restarting all of the plugins in the process.
 		case event := <-watcher.Events:
-			if event.Name == kubeletdevicepluginv1beta1.KubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
-				klog.Infof("inotify: %s created, restarting.", kubeletdevicepluginv1beta1.KubeletSocket)
+			if o.kubeletSocket != "" && event.Name == o.kubeletSocket && event.Op&fsnotify.Create == fsnotify.Create {
+				klog.Infof("inotify: %s created, restarting.", o.kubeletSocket)
 				goto restart
 			}
 
@@ -265,10 +343,10 @@ exit:
 	return nil
 }
 
-func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.Interface, bool, error) {
+func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
 	klog.Info("Loading configuration.")
-	config, err := loadConfig(c, flags)
+	config, err := loadConfig(c, o.flags)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to load config: %v", err)
 	}
@@ -276,15 +354,32 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 
 	/*Loading config files*/
 	//fmt.Println("NodeName=", config.NodeName)
-	devConfig, err := generateDeviceConfigFromNvidia(config, c, flags)
+	devConfig, err := generateDeviceConfigFromNvidia(config, c, o.flags)
 	if err != nil {
 		klog.Errorf("failed to load config file %s", err.Error())
 		return nil, false, err
 	}
 
+	driverRoot := root(*config.Flags.Plugin.ContainerDriverRoot)
+	// We construct an NVML library specifying the path to libnvidia-ml.so.1
+	// explicitly so that we don't have to rely on the library path.
+	nvmllib := nvml.New(
+		nvml.WithLibraryPath(driverRoot.tryResolveLibrary("libnvidia-ml.so.1")),
+	)
+	devicelib := device.New(nvmllib)
+	infolib := nvinfo.New(
+		nvinfo.WithNvmlLib(nvmllib),
+		nvinfo.WithDeviceLib(devicelib),
+	)
+
+	err = validateFlags(infolib, config)
+	if err != nil {
+		return nil, false, fmt.Errorf("unable to validate flags: %v", err)
+	}
+
 	// Update the configuration file with default resources.
 	klog.Info("Updating config with default resource matching patterns.")
-	err = rm.AddDefaultResourcesToConfig(&devConfig)
+	err = rm.AddDefaultResourcesToConfig(infolib, nvmllib, devicelib, &devConfig)
 	if err != nil {
 		return nil, false, fmt.Errorf("unable to add default resources to config: %v", err)
 	}
@@ -298,11 +393,7 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 
 	// Get the set of plugins.
 	klog.Info("Retrieving plugins.")
-	pluginManager, err := NewPluginManager(&devConfig)
-	if err != nil {
-		return nil, false, fmt.Errorf("error creating plugin manager: %v", err)
-	}
-	plugins, err := pluginManager.GetPlugins()
+	plugins, err := GetPlugins(c.Context, infolib, nvmllib, devicelib, &devConfig)
 	if err != nil {
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
@@ -318,10 +409,8 @@ func startPlugins(c *cli.Context, flags []cli.Flag, restarting bool) ([]plugin.I
 		}
 
 		// Start the gRPC server for plugin p and connect it with the kubelet.
-		if err := p.Start(); err != nil {
-			klog.Error("Could not contact Kubelet. Did you enable the device plugin feature gate?")
-			klog.Error("You can check the prerequisites at: https://github.com/NVIDIA/k8s-device-plugin#prerequisites")
-			klog.Error("You can learn how to set the runtime at: https://github.com/NVIDIA/k8s-device-plugin#quick-start")
+		if err := p.Start(o.kubeletSocket); err != nil {
+			klog.Errorf("Failed to start plugin: %v", err)
 			return plugins, true, nil
 		}
 		started++

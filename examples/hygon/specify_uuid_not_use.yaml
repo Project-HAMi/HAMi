@@ -1,0 +1,20 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vdcu-pytorch-demo
+  annotations:
+    # You can run command: kubectl get node $node -o jsonpath='{.metadata.annotations.hami\.io/node-dcu-register}' to get DCU UUID.
+    # UUID is like DCU-TPXS320016070601
+    hygon.com/nouse-gpuuuid: "DCU-TPXS320016070601,DCU-TPXS320010040501" # Specify the blacklist card UUIDs for this job, use comma to separate, will not launch job on specified cards
+    # In this job, we don't want our job to run on DCU-TPXS320016070601 and DCU-TPXS320010040501.
+spec:
+  containers:
+    - name: vdcu-pytorch-demo
+      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+      command: [ "/bin/bash", "-c", "--" ]
+      args: [ "sleep infinity & wait" ]
+      resources:
+        limits:
+          hygon.com/dcunum: 1
+          hygon.com/dcucores: 60
+          hygon.com/dcumem: 2000

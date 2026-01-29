@@ -25,6 +25,8 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 var inRequestDevices map[string]string
@@ -530,6 +532,7 @@ func Test_EncodeNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
+	util.HandshakeAnnos["huawei.com/Ascend910"] = "hami.io/node-handshake-ascend"
 	tests := []struct {
 		name string
 		args struct {
@@ -549,7 +552,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2128-12-02 00:00:00",
 						},
 					},
 				},
@@ -567,7 +570,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
 						},
 					},
 				},
@@ -585,13 +588,13 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Unknown",
 						},
 					},
 				},
 			},
 			want1: true,
-			want2: true,
+			want2: false,
 		},
 		{
 			name: "Requesting state expired",
@@ -603,7 +606,7 @@ func Test_CheckHealth(t *testing.T) {
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
 						},
 					},
 				},
@@ -795,6 +798,63 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := EncodeContainerDeviceType(tt.cd, tt.t)
 			assert.Equal(t, got, tt.want)
+		})
+	}
+}
+
+func TestCheckUUID(t *testing.T) {
+	GPUUseUUID := "hami.io/gpu-use-uuid"
+	GPUNoUseUUID := "hami.io/gpu-no-use-uuid"
+	tests := []struct {
+		name  string
+		annos map[string]string
+		id    string
+		want  bool
+	}{
+		{
+			name:  "don't set GPUUseUUID and GPUNoUseUUID annotation",
+			annos: make(map[string]string),
+			id:    "abc",
+			want:  true,
+		},
+		{
+			name: "use set GPUUseUUID don't set GPUNoUseUUID annotation,device match",
+			annos: map[string]string{
+				GPUUseUUID: "abc,123",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "use set GPUUseUUID don't set GPUNoUseUUID annotation,device don't match",
+			annos: map[string]string{
+				GPUUseUUID: "abc,123",
+			},
+			id:   "1abc",
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseUUID set GPUNoUseUUID annotation,device match",
+			annos: map[string]string{
+				GPUNoUseUUID: "abc,123",
+			},
+			id:   "abc",
+			want: false,
+		},
+		{
+			name: "use don't set GPUUseUUID set GPUNoUseUUID annotation,device  don't match",
+			annos: map[string]string{
+				GPUNoUseUUID: "abc,123",
+			},
+			id:   "1abc",
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := CheckUUID(test.annos, test.id, GPUUseUUID, GPUNoUseUUID, "NVIDIA")
+			assert.Equal(t, test.want, got)
 		})
 	}
 }

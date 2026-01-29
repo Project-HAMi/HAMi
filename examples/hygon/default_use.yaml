@@ -1,17 +1,15 @@
 apiVersion: v1
 kind: Pod
 metadata:
-  name: alexnet-tf-gpu-pod-mem
-  labels:
-    purpose: demo-tf-amdgpu
+  name: vdcu-pytorch-demo
 spec:
   containers:
-    - name: alexnet-tf-gpu-container
-      image: pytorch:resnet50
-      workingDir: /root
-      command: ["sleep","infinity"]
+    - name: vdcu-pytorch-demo
+      image: image.sourcefind.cn:5000/dcu/admin/base/pytorch:2.1.0-ubuntu22.04-dtk24.04.2-py3.10
+      command: [ "/bin/bash", "-c", "--" ]
+      args: [ "sleep infinity & wait" ]
       resources:
         limits:
-          hygon.com/dcunum: 1 # requesting a GPU
-          hygon.com/dcumem: 2000 # each dcu require 2000 MiB device memory
-          hygon.com/dcucores: 60 # each dcu use 60% of total compute cores
+          hygon.com/dcunum: 1   # requesting a vDCU
+          hygon.com/dcucores: 60  # each vDCU use 60% of total compute cores
+          hygon.com/dcumem: 2000  # each vDCU require 2000 MiB device memory

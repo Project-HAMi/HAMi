@@ -33,10 +33,10 @@
 package plugin
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"os"
-	"os/exec"
 	"strconv"
 	"strings"
 	"time"
@@ -49,66 +49,41 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-func (plugin *NvidiaDevicePlugin) getNumaInformation(idx int) (int, error) {
-	cmd := exec.Command("nvidia-smi", "topo", "-m")
-	out, err := cmd.CombinedOutput()
-	if err != nil {
-		return 0, err
+// uint8Slice wraps an []uint8 with more functions.
+type uint8Slice []uint8
+
+// String turns a nil terminated uint8Slice into a string
+func (s uint8Slice) String() string {
+	var b []byte
+	for _, c := range s {
+		if c == 0 {
+			break
+		}
+		b = append(b, c)
 	}
-	klog.V(5).InfoS("nvidia-smi topo -m output", "result", string(out))
-	return parseNvidiaNumaInfo(idx, string(out))
+	return string(b)
 }
 
-func parseNvidiaNumaInfo(idx int, nvidiaTopoStr string) (int, error) {
-	result := 0
-	numaAffinityColumnIndex := 0
-	for index, val := range strings.Split(nvidiaTopoStr, "\n") {
-		if !strings.Contains(val, "GPU") {
-			continue
-		}
-		// Example: GPU0	 X 	0-7		N/A		N/A
-		// Many values are separated by two tabs, but this actually represents 5 values instead of 7
-		// So add logic to remove multiple tabs
-		words := strings.Split(strings.ReplaceAll(val, "\t\t", "\t"), "\t")
-		klog.V(5).InfoS("parseNumaInfo", "words", words)
-		// get numa affinity column number
-		if index == 0 {
-			for columnIndex, headerVal := range words {
-				// The topology output of a single card is as follows:
-				// 			GPU0	CPU Affinity	NUMA Affinity	GPU NUMA ID
-				// GPU0	 X 	0-7		N/A		N/A
-				//Legend: Other content omitted
-
-				// The topology output in the case of multiple cards is as follows:
-				// 			GPU0	GPU1	CPU Affinity	NUMA Affinity
-				// GPU0	 X 	PHB	0-31		N/A
-				// GPU1	PHB	 X 	0-31		N/A
-				// Legend: Other content omitted
-
-				// We need to get the value of the NUMA Affinity column, but their column indexes are inconsistent,
-				// so we need to get the index first and then get the value.
-				if strings.Contains(headerVal, "NUMA Affinity") {
-					// The header is one column less than the actual row.
-					numaAffinityColumnIndex = columnIndex
-					continue
-				}
-			}
-			continue
-		}
-		klog.V(5).InfoS("nvidia-smi topo -m row output", "row output", words, "length", len(words))
-		if strings.Contains(words[0], fmt.Sprint(idx)) {
-			if len(words) <= numaAffinityColumnIndex || words[numaAffinityColumnIndex] == "N/A" {
-				klog.InfoS("current card has not established numa topology", "gpu row info", words, "index", idx)
-				return 0, nil
-			}
-			result, err := strconv.Atoi(words[numaAffinityColumnIndex])
-			if err != nil {
-				return result, err
-			}
-			return result, nil
-		}
+// GetNumaNode returns the NUMA node associated with the GPU device
+func GetNumaNode(d nvml.Device) (bool, int, error) {
+	info, ret := d.GetPciInfo()
+	if ret != nvml.SUCCESS {
+		return false, 0, fmt.Errorf("error getting PCI Bus Info of device: %v", ret)
 	}
-	return result, nil
+	// Discard leading zeros.
+	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
+	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
+	if err != nil {
+		return false, 0, err
+	}
+	node, err := strconv.Atoi(string(bytes.TrimSpace(b)))
+	if err != nil {
+		return false, 0, fmt.Errorf("error parsing value for NUMA node: %v", err)
+	}
+	if node < 0 {
+		return false, 0, nil
+	}
+	return true, node, nil
 }
 
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
@@ -146,10 +121,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
-		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && plugin.operatingMode != nvidia.MigMode {
 			registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
+			klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
+		} else {
+			klog.Warningln("mig mode enabled, the memory scaling is not applied")
 		}
-		klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
 		health := true
 		for _, val := range devs {
 			if strings.Compare(val.ID, UUID) == 0 {
@@ -163,17 +140,28 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 				break
 			}
 		}
-		numa, err := plugin.getNumaInformation(idx)
-		if err != nil {
-			klog.ErrorS(err, "failed to get numa information", "idx", idx)
+		ok, numa, err := GetNumaNode(ndev)
+		if !ok {
+			klog.ErrorS(err, "failed to get numa information from sysfs", "idx", idx)
+		}
+		if !strings.HasPrefix(Model, "NVIDIA") {
+			// If the model name does not start with "NVIDIA ", we assume it is a virtual GPU or a non-NVIDIA device.
+			// This is to handle cases where the model name might not be in the expected format.
+			Model = fmt.Sprintf("NVIDIA-%s", Model)
+		}
+		devcore := int32(100)
+		if plugin.operatingMode != nvidia.MigMode {
+			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
+		} else {
+			klog.Warning("mig mode enabled, the core scaling is not applied")
 		}
 		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
 			Devmem:  registeredmem,
-			Devcore: int32(*plugin.schedulerConfig.DeviceCoreScaling * 100),
-			Type:    fmt.Sprintf("%v-%v", "NVIDIA", Model),
+			Devcore: devcore,
+			Type:    Model,
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
 			Health:  health,
@@ -183,7 +171,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	return &res
 }
 
-func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
+func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 	devices := plugin.getAPIDevices()
 	klog.InfoS("start working on the devices", "devices", devices)
 	annos := make(map[string]string)
@@ -192,7 +180,12 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 		klog.Errorln("get node error", err.Error())
 		return err
 	}
-	encodeddevices := device.EncodeNodeDevices(*devices)
+	encodeddevices := device.MarshalNodeDevices(*devices)
+	if encodeddevices == plugin.deviceCache {
+		return nil
+	}
+	plugin.deviceCache = encodeddevices
+
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
 		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
@@ -207,7 +200,6 @@ func (plugin *NvidiaDevicePlugin) RegistrInAnnotation() error {
 		}
 	}
 	klog.V(4).InfoS("patch nvidia  topo score to node", "hami.io/node-nvidia-score", string(data))
-	annos[nvidia.HandshakeAnnos] = "Reported " + time.Now().String()
 	annos[nvidia.RegisterAnnos] = encodeddevices
 	if len(data) > 0 {
 		annos[nvidia.RegisterGPUPairScore] = string(data)
@@ -247,7 +239,7 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 			time.Sleep(successSleepInterval)
 			continue
 		}
-		err := plugin.RegistrInAnnotation()
+		err := plugin.RegisterInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v", err)
 			klog.Infof("Retrying in %v seconds...", errorSleepInterval)

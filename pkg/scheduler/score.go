@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 	"sync"
@@ -25,8 +26,10 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func viewStatus(usage NodeUsage) {
@@ -35,22 +38,6 @@ func viewStatus(usage NodeUsage) {
 		klog.V(5).InfoS("device status", "device id", val.Device.ID, "device detail", val)
 	}
 }
-
-const (
-	cardTypeMismatch                  = "CardTypeMismatch"
-	cardUUIDMismatch                  = "CardUuidMismatch"
-	cardTimeSlicingExhausted          = "CardTimeSlicingExhausted"
-	cardComputeUnitsExhausted         = "CardComputeUnitsExhausted"
-	cardInsufficientMemory            = "CardInsufficientMemory"
-	cardInsufficientCore              = "CardInsufficientCore"
-	numaNotFit                        = "NumaNotFit"
-	exclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
-	cardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
-	nodeInsufficientDevice            = "NodeInsufficientDevice"
-	allocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
-	nodeUnfitPod                      = "NodeUnfitPod"
-	nodeFitPod                        = "NodeFitPod"
-)
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
@@ -62,7 +49,7 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	return l
 }
 
-func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
+func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
 	//devmap := make(map[string]device.ContainerDevices)
 	devs := device.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
@@ -76,16 +63,15 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, anno
 	for _, k := range requests {
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
-			klog.V(5).InfoS(nodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
-			return false, nodeInsufficientDevice
+			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
+			return false, common.NodeInsufficientDevice
 		}
 		sort.Sort(node.Devices)
 		_, ok := device.GetDevices()[k.Type]
 		if !ok {
 			return false, "Device type not found"
 		}
-		fit, tmpDevs, devreason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, annos, pod, nodeInfo, devinput)
-		reason := "node:" + node.Node.Name + " " + "resaon:" + devreason
+		fit, tmpDevs, reason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
@@ -104,7 +90,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, anno
 						klog.Errorf("AddResourceUsage failed:%s", err.Error())
 						return false, "AddResourceUsage failed"
 					}
-					klog.Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
+					klog.V(5).Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
 			devs = append(devs, tmpDevs[k.Type]...)
@@ -116,10 +102,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, anno
 	return true, ""
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, annos map[string]string, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
-	if annos != nil {
-		if value, ok := annos[policy.NodeSchedulerPolicyAnnotationKey]; ok {
+	if task.GetAnnotations() != nil {
+		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
 			userNodePolicy = value
 		}
 	}
@@ -131,6 +117,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
+	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
 	for nodeID, node := range *nodes {
 		wg.Add(1)
@@ -149,9 +136,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			//This loop is for different container request
-			ctrfit := false
+			// Assume the node is a fit by default. This handles pods with no device
+			// requests, which should be schedulable on any node.
+			ctrfit := true
 			deviceType := ""
+			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
@@ -164,7 +153,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, annos, task, nodeInfo, &score.Devices)
+				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
 				// found certain deviceType, fill missing empty allocation for containers before this
 				for idx := range score.Devices {
 					deviceType = idx
@@ -177,9 +166,12 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 				ctrfit = fit
 				if !fit {
-					klog.V(4).InfoS(nodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
-					failedNodes[nodeID] = nodeUnfitPod
+					failedNodes[nodeID] = common.NodeUnfitPod
+					for reasonType := range common.ParseReason(reason) {
+						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+					}
 					failedNodesMutex.Unlock()
 					break
 				}
@@ -190,12 +182,21 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				res.NodeList = append(res.NodeList, &score)
 				fitNodesMutex.Unlock()
 				score.OverrideScore(snapshot, userNodePolicy)
-				klog.V(4).InfoS(nodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
+				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
 	}
 	wg.Wait()
 	close(errCh)
+
+	// only pod scheduler failure will record failure event
+	if len(res.NodeList) == 0 {
+		for reasonType, failureNodes := range failureReason {
+			sort.Strings(failureNodes)
+			reason := fmt.Errorf("%d nodes %s(%s)", len(failureNodes), reasonType, strings.Join(failureNodes, ","))
+			s.recordScheduleFilterResultEvent(task, EventReasonFilteringFailed, "", reason)
+		}
+	}
 
 	var errorsSlice []error
 	for e := range errCh {

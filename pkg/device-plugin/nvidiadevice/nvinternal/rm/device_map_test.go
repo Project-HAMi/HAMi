@@ -179,13 +179,13 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 			},
 			expectedDeviceMap: DeviceMap{
 				"replicated-resource1": Devices{
-					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0"},
-					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0"},
-					"1::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::0"}},
-					"1::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::1"}},
+					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0", Replicas: 2},
+					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0", Replicas: 2},
+					"1::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::0"}, Replicas: 2},
+					"1::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::1"}, Replicas: 2},
 				},
 				"resource2": Devices{
-					"2::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2::0"}},
+					"2::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2::0"}, Replicas: 1},
 				},
 				"resource3": Devices{
 					"3": &device3,
@@ -220,8 +220,8 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 			},
 			expectedDeviceMap: DeviceMap{
 				"replicated-resource1": Devices{
-					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0"},
-					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0"},
+					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0", Replicas: 2},
+					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0", Replicas: 2},
 				},
 				"resource1": Devices{
 					"1": &device1,
@@ -232,7 +232,7 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			devices, _ := updateDeviceMapWithReplicas(tc.config, tc.devices)
+			devices, _ := updateDeviceMapWithReplicas(&tc.config.Config.Sharing.TimeSlicing, tc.devices)
 			require.EqualValues(t, tc.expectedDeviceMap, devices)
 		})
 	}

@@ -22,14 +22,14 @@ import (
 	"strings"
 	"testing"
 
-	"gotest.tools/v3/assert"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+
+	"gotest.tools/v3/assert"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_addNode_ListNodes(t *testing.T) {
@@ -53,7 +53,7 @@ func Test_addNode_ListNodes(t *testing.T) {
 			},
 		},
 		{
-			name: "test vaild info",
+			name: "test valid info",
 			args: struct {
 				nodeID   string
 				nodeInfo device.NodeInfo
@@ -62,10 +62,10 @@ func Test_addNode_ListNodes(t *testing.T) {
 				nodeInfo: device.NodeInfo{
 					ID:   "node-01",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID: "node-01",
-						},
+						}},
 					},
 				},
 			},
@@ -73,10 +73,10 @@ func Test_addNode_ListNodes(t *testing.T) {
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID: "node-01",
-						},
+						}},
 					},
 				},
 			},
@@ -92,13 +92,13 @@ func Test_addNode_ListNodes(t *testing.T) {
 				nodeInfo: device.NodeInfo{
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "node-02",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 			},
@@ -106,25 +106,25 @@ func Test_addNode_ListNodes(t *testing.T) {
 				"node-01": {
 					ID:   "test123",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "GPU-0",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 				"node-02": {
 					ID:   "node-02",
 					Node: &corev1.Node{},
-					Devices: []device.DeviceInfo{
-						{
+					Devices: map[string][]device.DeviceInfo{
+						"vendor1": {{
 							ID:      "node-02",
 							Count:   int32(1),
 							Devcore: int32(1),
 							Devmem:  int32(2000),
-						},
+						}},
 					},
 				},
 			},
@@ -139,13 +139,13 @@ func Test_addNode_ListNodes(t *testing.T) {
 					"node-01": {
 						ID:   "test123",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"vendor1": {{
 								ID:      "GPU-0",
 								Count:   int32(1),
 								Devcore: int32(1),
 								Devmem:  int32(2000),
-							},
+							}},
 						},
 					},
 				},
@@ -175,18 +175,18 @@ func Test_GetNode(t *testing.T) {
 			err:  fmt.Errorf("node %v not found", "node-111"),
 		},
 		{
-			name: "test vaild info",
+			name: "test valid info",
 			args: "node-04",
 			want: &device.NodeInfo{
 				ID:   "node-04",
 				Node: &corev1.Node{},
-				Devices: []device.DeviceInfo{
-					{
+				Devices: map[string][]device.DeviceInfo{
+					"vendor1": {{
 						ID:      "GPU-0",
 						Count:   int32(1),
 						Devcore: int32(1),
 						Devmem:  int32(2000),
-					},
+					}},
 				},
 			},
 			err: nil,
@@ -199,13 +199,13 @@ func Test_GetNode(t *testing.T) {
 					"node-04": {
 						ID:   "node-04",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"vendor1": {{
 								ID:      "GPU-0",
 								Count:   int32(1),
 								Devcore: int32(1),
 								Devmem:  int32(2000),
-							},
+							}},
 						},
 					},
 				},
@@ -273,52 +273,52 @@ func Test_rmNodeDevices(t *testing.T) {
 					"node-05": {
 						ID:   "node-05",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"NVIDIA": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "NVIDIA",
-							},
+							}},
 						},
 					},
 					"node-06": {
 						ID:      "node-06",
 						Node:    &corev1.Node{},
-						Devices: []device.DeviceInfo{},
+						Devices: map[string][]device.DeviceInfo{},
 					},
 					"node-07": {
 						ID:   "node-17",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"test1": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "test",
-							},
+							}},
 						},
 					},
 					"node-08": {
 						ID:   "node-08",
 						Node: &corev1.Node{},
-						Devices: []device.DeviceInfo{
-							{
+						Devices: map[string][]device.DeviceInfo{
+							"NVIDIA": {{
 								ID:           "GPU-0",
 								Count:        int32(1),
 								Devcore:      int32(1),
 								Devmem:       int32(2000),
 								DeviceVendor: "NVIDIA",
 							},
-							{
-								ID:           "GPU-0",
-								Count:        int32(1),
-								Devcore:      int32(1),
-								Devmem:       int32(2000),
-								DeviceVendor: "NVIDIA",
-							},
+								{
+									ID:           "GPU-0",
+									Count:        int32(1),
+									Devcore:      int32(1),
+									Devmem:       int32(2000),
+									DeviceVendor: "NVIDIA",
+								}},
 						},
 					},
 				},
@@ -337,77 +337,86 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 	tests := []struct {
 		name string
 		args args
-		want []device.DeviceInfo
+		want map[string][]device.DeviceInfo
 	}{
 		{
 			name: "Test remove one device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: []device.DeviceInfo{},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
 		},
 		{
 			name: "Test remove two devices",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1, id2}, ",")}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1, id2}, ",")}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
 				},
 			},
-			want: []device.DeviceInfo{},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
 		},
 		{
 			name: "Test remove one device and keep one device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id2}, ",")}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id2}, ",")}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
 				},
 			},
-			want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			// want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test no removing device, case1",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			// want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test no removing device, case2",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id2}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id2}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			// want: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test removing metax device, case1",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
 				},
 			},
-			want: []device.DeviceInfo{},
+			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{}},
 		},
 		{
 			name: "Test removing metax device, case2",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
-					Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}},
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
 				},
 			},
-			want: []device.DeviceInfo{},
+			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{}},
 		},
 	}
 	for _, tt := range tests {

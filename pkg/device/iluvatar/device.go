@@ -17,126 +17,164 @@ limitations under the License.
 package iluvatar
 
 import (
+	"errors"
 	"flag"
 	"fmt"
-	"slices"
-	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
 
+var (
+	enableIluvatar bool
+)
+
 type IluvatarDevices struct {
+	config           IluvatarConfig
+	nodeRegisterAnno string
+	useUUIDAnno      string
+	noUseUUIDAnno    string
+	handshakeAnno    string
 }
 
-const (
-	IluvatarGPUDevice       = "Iluvatar"
-	IluvatarGPUCommonWord   = "Iluvatar"
-	IluvatarDeviceSelection = "iluvatar.ai/predicate-gpu-idx-"
-	// IluvatarUseUUID is user can use specify Iluvatar device for set Iluvatar UUID.
-	IluvatarUseUUID = "iluvatar.ai/use-gpuuuid"
-	// IluvatarNoUseUUID is user can not use specify Iluvatar device for set Iluvatar UUID.
-	IluvatarNoUseUUID = "iluvatar.ai/nouse-gpuuuid"
-)
-
-var (
-	IluvatarResourceCount  string
-	IluvatarResourceMemory string
-	IluvatarResourceCores  string
-)
-
 type IluvatarConfig struct {
+	CommonWord         string `yaml:"commonWord"`
+	ChipName           string `yaml:"chipName"`
 	ResourceCountName  string `yaml:"resourceCountName"`
 	ResourceMemoryName string `yaml:"resourceMemoryName"`
 	ResourceCoreName   string `yaml:"resourceCoreName"`
 }
 
-func InitIluvatarDevice(config IluvatarConfig) *IluvatarDevices {
-	IluvatarResourceCount = config.ResourceCountName
-	IluvatarResourceMemory = config.ResourceMemoryName
-	IluvatarResourceCores = config.ResourceCoreName
-	device.InRequestDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-to-allocate"
-	device.SupportDevices[IluvatarGPUDevice] = "hami.io/iluvatar-vgpu-devices-allocated"
-	return &IluvatarDevices{}
+func InitIluvatarDevice(config []IluvatarConfig) []*IluvatarDevices {
+	var devs []*IluvatarDevices
+	if !enableIluvatar {
+		return devs
+	}
+	for _, vgpu := range config {
+		commonWord := vgpu.CommonWord
+		dev := &IluvatarDevices{
+			config:           vgpu,
+			nodeRegisterAnno: fmt.Sprintf("hami.io/node-%s-register", commonWord),
+			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
+			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
+			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+		}
+		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+		util.HandshakeAnnos[commonWord] = dev.handshakeAnno
+		devs = append(devs, dev)
+		klog.Infof("load iluvatar gpu config %s: %v", commonWord, dev.config)
+	}
+	return devs
 }
 
 func (dev *IluvatarDevices) CommonWord() string {
-	return IluvatarGPUCommonWord
+	return dev.config.CommonWord
 }
 
 func ParseConfig(fs *flag.FlagSet) {
-	fs.StringVar(&IluvatarResourceCount, "iluvatar-name", "iluvatar.ai/vgpu", "iluvatar resource count")
-	fs.StringVar(&IluvatarResourceMemory, "iluvatar-memory", "iluvatar.ai/vcuda-memory", "iluvatar memory resource")
-	fs.StringVar(&IluvatarResourceCores, "iluvatar-cores", "iluvatar.ai/vcuda-core", "iluvatar core resource")
+	fs.BoolVar(&enableIluvatar, "enable-iluvatar", false, "enable iluvatar device")
 }
 
 func (dev *IluvatarDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	count, ok := ctr.Resources.Limits[corev1.ResourceName(IluvatarResourceCount)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCountName)]
 	if ok {
 		if count.Value() > 1 {
-			ctr.Resources.Limits[corev1.ResourceName(IluvatarResourceCores)] = *resource.NewQuantity(count.Value()*int64(100), resource.DecimalSI)
+			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)] = *resource.NewQuantity(count.Value()*int64(100), resource.DecimalSI)
+		}
+		hasEnv := false
+		for _, env := range ctr.Env {
+			if env.Name == "SOL_CONTINER_NAME" {
+				hasEnv = true
+				break
+			}
+		}
+		if !hasEnv && ctr.Name != "" {
+			envVar := corev1.EnvVar{
+				Name:  "SOL_CONTINER_NAME", // Note: This should be "SOL_CONTAINER_NAME", but keeping the incorrect "SOL_CONTINER_NAME" for backward compatibility
+				Value: ctr.Name,
+			}
+			if ctr.Env == nil {
+				ctr.Env = []corev1.EnvVar{envVar}
+			} else {
+				ctr.Env = append(ctr.Env, envVar)
+			}
 		}
 	}
 	return ok, nil
 }
 
 func (dev *IluvatarDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
-	nodedevices := []*device.DeviceInfo{}
-	i := 0
-	cards, ok := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceCores), resource.DecimalSI).AsInt64()
-	if !ok || cards == 0 {
-		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", IluvatarResourceCores)
+	devEncoded, ok := n.Annotations[dev.nodeRegisterAnno]
+	if !ok {
+		return []*device.DeviceInfo{}, errors.New("annos not found " + dev.nodeRegisterAnno)
 	}
-	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(IluvatarResourceMemory), resource.DecimalSI).AsInt64()
-	for int64(i)*100 < cards {
-		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-iluvatar-" + fmt.Sprint(i),
-			Count:   100,
-			Devmem:  int32(memoryTotal * 256 * 100 / cards),
-			Devcore: 100,
-			Type:    IluvatarGPUDevice,
-			Numa:    0,
-			Health:  true,
-		})
-		i++
+	nodedevices, err := device.DecodeNodeDevices(devEncoded)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
+		return []*device.DeviceInfo{}, err
 	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = dev.config.CommonWord
+	}
+	if len(nodedevices) == 0 {
+		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
+		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+
+	devDecoded := device.EncodeNodeDevices(nodedevices)
+	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
 	return nodedevices, nil
 }
 
 func (dev *IluvatarDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
-	devlist, ok := pd[IluvatarGPUDevice]
+	commonWord := dev.CommonWord()
+	devlist, ok := pd[commonWord]
 	if ok && len(devlist) > 0 {
-		(*annoinput)[device.InRequestDevices[IluvatarGPUDevice]] = device.EncodePodSingleDevice(devlist)
-		(*annoinput)[device.SupportDevices[IluvatarGPUDevice]] = device.EncodePodSingleDevice(devlist)
-		(*annoinput)["iluvatar.ai/gpu-assigned"] = "false"
-		(*annoinput)["iluvatar.ai/predicate-time"] = strconv.FormatInt(time.Now().UnixNano(), 10)
-		for idx, dp := range devlist {
-			annoKey := IluvatarDeviceSelection + fmt.Sprint(idx)
-			value := ""
-			for _, val := range dp {
-				value = value + fmt.Sprint(val.Idx) + ","
-			}
-			if len(value) > 0 {
-				(*annoinput)[annoKey] = strings.TrimRight(value, ",")
-			}
-		}
+		deviceStr := device.EncodePodSingleDevice(devlist)
+		(*annoinput)[device.InRequestDevices[commonWord]] = deviceStr
+		(*annoinput)[device.SupportDevices[commonWord]] = deviceStr
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[commonWord], deviceStr)
+		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[commonWord], deviceStr)
 	}
 	return *annoinput
 }
 
 func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+
+	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
 }
 
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
@@ -144,40 +182,21 @@ func (dev *IluvatarDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *IluvatarDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, IluvatarGPUDevice) == 0 {
+	if strings.Compare(n.Type, dev.config.CommonWord) == 0 {
 		return true, true, false
 	}
 	return false, false, false
 }
 
-func (dev *IluvatarDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[IluvatarUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[IluvatarNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return true, true
+	return device.CheckHealth(devType, n)
 }
 
 func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count iluvatar devices for container ", ctr.Name)
-	iluvatarResourceCount := corev1.ResourceName(IluvatarResourceCount)
-	iluvatarResourceMem := corev1.ResourceName(IluvatarResourceMemory)
-	iluvatarResourceCores := corev1.ResourceName(IluvatarResourceCores)
+	iluvatarResourceCount := corev1.ResourceName(dev.config.ResourceCountName)
+	iluvatarResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
+	iluvatarResourceCores := corev1.ResourceName(dev.config.ResourceCoreName)
 	v, ok := ctr.Resources.Limits[iluvatarResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[iluvatarResourceCount]
@@ -215,7 +234,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
-				Type:             IluvatarGPUDevice,
+				Type:             dev.config.CommonWord,
 				Memreq:           int32(memnum),
 				MemPercentagereq: int32(mempnum),
 				Coresreq:         corenum,
@@ -236,7 +255,7 @@ func (dev *IluvatarDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUs
 	return nil
 }
 
-func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -244,11 +263,11 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := 0; i < len(devices); i++ {
+	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := ilu.checkType(annos, *dev, k)
+		_, found, numa := ilu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -263,7 +282,7 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !ilu.checkUUID(annos, *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, ilu.useUUIDAnno, ilu.noUseUUIDAnno, ilu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -331,4 +350,12 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *IluvatarDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  dev.config.ResourceCountName,
+		ResourceMemoryName: dev.config.ResourceMemoryName,
+		ResourceCoreName:   dev.config.ResourceCoreName,
+	}
 }

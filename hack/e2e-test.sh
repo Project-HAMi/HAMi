@@ -25,16 +25,6 @@ KUBE_CONF=${2:-""}
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 source "${REPO_ROOT}"/hack/util.sh
 
-if util::cmd_exist ginkgo; then
-  echo "Using ginkgo version:"
-  ginkgo version
-else
-  go install github.com/onsi/ginkgo/v2/ginkgo
-  go get github.com/onsi/gomega/...
-  ginkgo version
-fi
-
-
 if [ -z "${KUBE_CONF}" ]; then
    echo "Error: KUBE_CONF environment variable is not set."
    return 1
@@ -42,7 +32,13 @@ fi
 
 # Run e2e
 if [ "${E2E_TYPE}" == "pullrequest" ] || [ "${E2E_TYPE}" == "release" ]; then
-   ginkgo -v -r --fail-fast  ./test/e2e/ --kubeconfig="${KUBE_CONF}"
+   GINKGO_VERSION=$(go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
+   if [ -z "${GINKGO_VERSION}" ]; then
+       echo "Error: could not determine ginkgo version from go.mod" >&2
+       return 1
+   fi
+   go run "github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}" \
+      run -v -r --fail-fast ./test/e2e/ -- --kubeconfig="${KUBE_CONF}"
    if [ $? -ne 0 ]; then
        echo "Error: ginkgo command failed."
        return 1

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -28,6 +29,8 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type Devices interface {
@@ -35,6 +38,7 @@ type Devices interface {
 	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error
+	GetResourceNames() ResourceNames
 	GetNodeDevices(n corev1.Node) ([]*DeviceInfo, error)
 	LockNode(n *corev1.Node, p *corev1.Pod) error
 	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
@@ -42,17 +46,19 @@ type Devices interface {
 	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
 	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32
 	AddResourceUsage(pod *corev1.Pod, n *DeviceUsage, ctr *ContainerDevice) error
-	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
+	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
 type MigTemplate struct {
 	Name   string `yaml:"name"`
+	Core   int32  `yaml:"core"`
 	Memory int32  `yaml:"memory"`
 	Count  int32  `yaml:"count"`
 }
 
 type MigTemplateUsage struct {
 	Name   string `json:"name,omitempty"`
+	Core   int32  `json:"core,omitempty"`
 	Memory int32  `json:"memory,omitempty"`
 	InUse  bool   `json:"inuse,omitempty"`
 }
@@ -86,6 +92,7 @@ type DeviceUsage struct {
 	Numa        int
 	Type        string
 	Health      bool
+	PodInfos    []*PodInfo
 	CustomInfo  map[string]any
 }
 
@@ -114,10 +121,10 @@ type DevicePairScore struct {
 type NodeInfo struct {
 	ID      string
 	Node    *corev1.Node
-	Devices []DeviceInfo
+	Devices map[string][]DeviceInfo
 }
 
-type ResoureNames struct {
+type ResourceNames struct {
 	ResourceCountName  string
 	ResourceMemoryName string
 	ResourceCoreName   string
@@ -158,10 +165,6 @@ const (
 )
 
 var (
-	HandshakeAnnos     = map[string]string{}
-	RegisterAnnos      = map[string]string{}
-	configFile         string
-	DebugMode          bool
 	GPUSchedulerPolicy string
 	InRequestDevices   map[string]string
 	SupportDevices     map[string]string
@@ -199,15 +202,15 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					index, _ = strconv.Atoi(items[7])
 					mode = items[8]
 				}
-				count32, err := safecast.ToInt32(count)
+				count32, err := safecast.Convert[int32](count)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devmem32, err := safecast.ToInt32(devmem)
+				devmem32, err := safecast.Convert[int32](devmem)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
-				devcore32, err := safecast.ToInt32(devcore)
+				devcore32, err := safecast.Convert[int32](devcore)
 				if err != nil {
 					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
 				}
@@ -267,8 +270,23 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	return tmp
 }
 
+// MarshalNodeDevices will only marshal general information, customInfo is neglected.
 func MarshalNodeDevices(dlist []*DeviceInfo) string {
-	data, err := json.Marshal(dlist)
+	devAnnos := []*DeviceInfo{}
+	for _, val := range dlist {
+		devAnnos = append(devAnnos, &DeviceInfo{
+			ID:      val.ID,
+			Count:   val.Count,
+			Devmem:  val.Devmem,
+			Devcore: val.Devcore,
+			Type:    val.Type,
+			Numa:    val.Numa,
+			Health:  val.Health,
+			Index:   val.Index,
+			Mode:    val.Mode,
+		})
+	}
+	data, err := json.Marshal(devAnnos)
 	if err != nil {
 		return ""
 	}
@@ -374,7 +392,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			pd[devID] = append(pd[devID], cd)
 		}
 	}
-	klog.InfoS("Decoded pod annos", "poddevices", pd)
+	klog.V(5).InfoS("Decoded pod annos", "poddevices", pd)
 	return pd, nil
 }
 
@@ -383,13 +401,14 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	for _, val := range templates[templateIdx] {
 		count := 0
 		for count < int(val.Count) {
-			n.Index, err = safecast.ToInt32(templateIdx)
+			n.Index, err = safecast.Convert[int32](templateIdx)
 			if err != nil {
 				continue
 			}
 			n.UsageList = append(n.UsageList, MigTemplateUsage{
 				Name:   val.Name,
 				Memory: val.Memory,
+				Core:   val.Core,
 				InUse:  false,
 			})
 			count++
@@ -405,14 +424,29 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	return uuids
 }
 
-func CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	handshake := n.Annotations[HandshakeAnnos[devType]]
+func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
+	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
 	} else {
+		_, ok := util.HandshakeAnnos[devType]
+		if ok {
+			tmppat := make(map[string]string)
+			tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
+			klog.V(5).InfoS("New timestamp for annotation", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
+			n, err := util.GetNode(node.Name)
+			if err != nil {
+				klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
+				return true, false
+			}
+			klog.V(5).InfoS("Patching node annotations", "nodeName", node.Name, "annotations", tmppat)
+			if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
+				klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
+			}
+		}
 		return true, true
 	}
 }
@@ -477,4 +511,23 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 		klog.V(4).InfoS("Resource requirements collected", "pod", klog.KObj(pod), "requests", counts)
 	}
 	return counts
+}
+
+func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
+	userUUID, ok := annos[useKey]
+	if ok {
+		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
+		// use , symbol to connect multiple uuid
+		userUUIDs := strings.Split(userUUID, ",")
+		return slices.Contains(userUUIDs, id)
+	}
+
+	noUserUUID, ok := annos[noUseKey]
+	if ok {
+		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
+		// use , symbol to connect multiple uuid
+		noUserUUIDs := strings.Split(noUserUUID, ",")
+		return !slices.Contains(noUserUUIDs, id)
+	}
+	return true
 }

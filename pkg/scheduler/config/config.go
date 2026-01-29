@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
@@ -63,6 +64,11 @@ var (
 
 	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
 	ForceOverwriteDefaultScheduler bool
+
+	HostName                     string
+	LeaderElect                  bool
+	LeaderElectResourceName      string
+	LeaderElectResourceNamespace string
 )
 
 type Config struct {
@@ -71,10 +77,11 @@ type Config struct {
 	HygonConfig     hygon.HygonConfig         `yaml:"hygon"`
 	CambriconConfig cambricon.CambriconConfig `yaml:"cambricon"`
 	MthreadsConfig  mthreads.MthreadsConfig   `yaml:"mthreads"`
-	IluvatarConfig  iluvatar.IluvatarConfig   `yaml:"iluvatar"`
+	IluvatarConfig  []iluvatar.IluvatarConfig `yaml:"iluvatars"`
 	EnflameConfig   enflame.EnflameConfig     `yaml:"enflame"`
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
+	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -106,7 +113,7 @@ func InitDevicesWithConfig(config *Config) error {
 			initErrors = append(initErrors, fmt.Errorf("%s: %v", commonWord, err))
 			return
 		}
-		device.DevicesMap[deviceType] = dev
+		device.DevicesMap[dev.CommonWord()] = dev
 		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
 		klog.Infof("%s device initialized successfully", commonWord)
 	}
@@ -118,10 +125,10 @@ func InitDevicesWithConfig(config *Config) error {
 		initFunc   func(any) (device.Devices, error)
 		config     any
 	}{
-		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUCommonWord, func(cfg any) (device.Devices, error) {
+		{nvidia.NvidiaGPUDevice, nvidia.NvidiaGPUDevice, func(cfg any) (device.Devices, error) {
 			nvidiaConfig, ok := cfg.(nvidia.NvidiaConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", nvidia.NvidiaGPUDevice)
 			}
 			return nvidia.InitNvidiaDevice(nvidiaConfig), nil
 		}, config.NvidiaConfig},
@@ -139,17 +146,17 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return hygon.InitDCUDevice(hygonConfig), nil
 		}, config.HygonConfig},
-		{iluvatar.IluvatarGPUDevice, iluvatar.IluvatarGPUCommonWord, func(cfg any) (device.Devices, error) {
-			iluvatarConfig, ok := cfg.(iluvatar.IluvatarConfig)
-			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", iluvatar.IluvatarGPUCommonWord)
-			}
-			return iluvatar.InitIluvatarDevice(iluvatarConfig), nil
-		}, config.IluvatarConfig},
-		{enflame.EnflameGPUDevice, enflame.EnflameGPUCommonWord, func(cfg any) (device.Devices, error) {
+		{enflame.EnflameGCUDevice, enflame.EnflameGCUCommonWord, func(cfg any) (device.Devices, error) {
 			enflameConfig, ok := cfg.(enflame.EnflameConfig)
 			if !ok {
-				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGPUCommonWord)
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameGCUCommonWord)
+			}
+			return enflame.InitGCUDevice(enflameConfig), nil
+		}, config.EnflameConfig},
+		{enflame.EnflameVGCUDevice, enflame.EnflameVGCUCommonWord, func(cfg any) (device.Devices, error) {
+			enflameConfig, ok := cfg.(enflame.EnflameConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", enflame.EnflameVGCUCommonWord)
 			}
 			return enflame.InitEnflameDevice(enflameConfig), nil
 		}, config.EnflameConfig},
@@ -181,6 +188,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return kunlun.InitKunlunDevice(kunlunConfig), nil
 		}, config.KunlunConfig},
+		{kunlun.XPUDevice, kunlun.XPUCommonWord, func(cfg any) (device.Devices, error) {
+			kunlunConfig, ok := cfg.(kunlun.KunlunConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", kunlun.XPUDevice)
+			}
+			return kunlun.InitKunlunVDevice(kunlunConfig), nil
+		}, config.KunlunConfig},
 		{awsneuron.AWSNeuronDevice, awsneuron.AWSNeuronCommonWord, func(cfg any) (device.Devices, error) {
 			awsneuronConfig, ok := cfg.(awsneuron.AWSNeuronConfig)
 			if !ok {
@@ -188,6 +202,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return awsneuron.InitAWSNeuronDevice(awsneuronConfig), nil
 		}, config.AWSNeuronConfig},
+		{amd.AMDDevice, amd.AMDCommonWord, func(cfg any) (device.Devices, error) {
+			amdGPUConfig, ok := cfg.(amd.AMDConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", amd.AMDCommonWord)
+			}
+			return amd.InitAMDGPUDevice(amdGPUConfig), nil
+		}, config.AMDGPUConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
@@ -203,6 +224,14 @@ func InitDevicesWithConfig(config *Config) error {
 		klog.Infof("Ascend device %s initialized", commonWord)
 	}
 
+	// Initialize Iluvatar devices
+	for _, dev := range iluvatar.InitIluvatarDevice(config.IluvatarConfig) {
+		commonWord := dev.CommonWord()
+		device.DevicesMap[commonWord] = dev
+		device.DevicesToHandle = append(device.DevicesToHandle, commonWord)
+		klog.Infof("Iluvatar device %s initialized", commonWord)
+	}
+
 	if len(initErrors) > 0 {
 		return fmt.Errorf("errors occurred during initialization: %v", initErrors)
 	}
@@ -213,22 +242,20 @@ func InitDevicesWithConfig(config *Config) error {
 
 // validateConfig validates the configuration object to ensure it is complete.
 func validateConfig(config *Config) error {
-	var hasAnyConfig bool
-
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.IluvatarConfig, iluvatar.IluvatarConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{})
-	hasAnyConfig = hasAnyConfig || !reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{})
-	hasAnyConfig = hasAnyConfig || len(config.VNPUs) > 0
-
-	if !hasAnyConfig {
-		return fmt.Errorf("all configurations are empty")
+	if !reflect.DeepEqual(config.NvidiaConfig, nvidia.NvidiaConfig{}) ||
+		!reflect.DeepEqual(config.CambriconConfig, cambricon.CambriconConfig{}) ||
+		!reflect.DeepEqual(config.HygonConfig, hygon.HygonConfig{}) ||
+		len(config.IluvatarConfig) > 0 ||
+		!reflect.DeepEqual(config.MthreadsConfig, mthreads.MthreadsConfig{}) ||
+		!reflect.DeepEqual(config.MetaxConfig, metax.MetaxConfig{}) ||
+		!reflect.DeepEqual(config.KunlunConfig, kunlun.KunlunConfig{}) ||
+		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
+		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
+		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
+		len(config.VNPUs) > 0 {
+		return nil
 	}
-	return nil
+	return fmt.Errorf("all configurations are empty")
 }
 
 func InitDevices() {
@@ -274,15 +301,36 @@ mthreads:
   resourceCountName: "mthreads.com/vgpu"
   resourceMemoryName: "mthreads.com/sgpu-memory"
   resourceCoreName: "mthreads.com/sgpu-core"
-iluvatar: 
-  resourceCountName: "iluvatar.ai/vgpu"
-  resourceMemoryName: "iluvatar.ai/vcuda-memory"
-  resourceCoreName: "iluvatar.ai/vcuda-core"
+iluvatars:
+  - chipName: MR-V100
+    commonWord: MR-V100
+    resourceCountName: iluvatar.ai/MR-V100-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V100.vMem
+    resourceCoreName: iluvatar.ai/MR-V100.vCore
+  - chipName: MR-V50
+    commonWord: MR-V50
+    resourceCountName: iluvatar.ai/MR-V50-vgpu
+    resourceMemoryName: iluvatar.ai/MR-V50.vMem
+    resourceCoreName: iluvatar.ai/MR-V50.vCore
+  - chipName: BI-V150
+    commonWord: BI-V150
+    resourceCountName: iluvatar.ai/BI-V150-vgpu
+    resourceMemoryName: iluvatar.ai/BI-V150.vMem
+    resourceCoreName: iluvatar.ai/BI-V150.vCore
+  - chipName: BI-V100
+    commonWord: BI-V100
+    resourceCountName: iluvatar.ai/BI-V100-vgpu
+    resourceMemoryName: iluvatar.ai/BI-V100.vMem
+    resourceCoreName: iluvatar.ai/BI-V100.vCore
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
+  resourceVCountName: "kunlunxin.com/vxpu"
+  resourceVMemoryName: "kunlunxin.com/vxpu-memory"
 awsneuron:
   resourceCountName: "aws.amazon.com/neuron"
   resourceCoreName: "aws.amazon.com/neuroncore"
+amd:
+  resourceCountName: "amd.com/gpu"
 vnpus:
   - chipName: "910A"
     commonWord: "Ascend910A"

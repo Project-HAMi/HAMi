@@ -90,6 +90,6 @@ func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
 	useScore := float32(used) / float32(total)
 	coreScore := float32(usedCore) / float32(totalCore)
 	memScore := float32(usedMem) / float32(totalMem)
-	ns.Score = float32(Weight) * (useScore + coreScore + memScore)
+	ns.Score = float32(util.Weight) * (useScore + coreScore + memScore)
 	klog.V(2).Infof("node %s computer default score is %f", ns.NodeID, ns.Score)
 }

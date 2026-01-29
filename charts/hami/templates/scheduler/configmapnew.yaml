@@ -1,4 +1,4 @@
-{{- if .Values.scheduler.kubeScheduler.enabled }}
+{{- if and .Values.scheduler.kubeScheduler.enabled (not .Values.dra.enabled) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -20,15 +20,20 @@ data:
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
+    {{- if .Values.scheduler.admissionWebhook.enabled }}
     - urlPrefix: "https://127.0.0.1:443"
+      enableHTTPS: true
+      tlsConfig:
+        insecure: true
+    {{- else }}
+    - urlPrefix: "http://127.0.0.1:80"
+      enableHTTPS: false
+    {{- end }}
       filterVerb: filter
       bindVerb: bind
       nodeCacheCapable: true
       weight: 1
       httpTimeout: 30s
-      enableHTTPS: true
-      tlsConfig:
-        insecure: true
       managedResources:
       - name: {{ .Values.resourceName }}
         ignoredByScheduler: true
@@ -47,8 +52,6 @@ data:
       - name: {{ .Values.dcuResourceMem }}
         ignoredByScheduler: true
       - name: {{ .Values.dcuResourceCores }}
-        ignoredByScheduler: true
-      - name: {{ .Values.iluvatarResourceName }}
         ignoredByScheduler: true
       - name: "metax-tech.com/gpu"
         ignoredByScheduler: true
@@ -83,6 +86,16 @@ data:
       {{- end }}
       {{- end }}
       {{- range .Values.devices.awsneuron.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- if .Values.devices.iluvatar.enabled }}
+      {{- range .Values.devices.iluvatar.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
+      {{- range .Values.devices.amd.customresources }}
       - name: {{ . }}
         ignoredByScheduler: true
       {{- end }}

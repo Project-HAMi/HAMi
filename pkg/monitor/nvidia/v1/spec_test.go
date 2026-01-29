@@ -114,6 +114,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -150,6 +151,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -205,6 +207,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -241,6 +244,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -296,6 +300,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -332,6 +337,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -387,6 +393,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -423,6 +430,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -478,6 +486,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -514,6 +523,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								used: [16]deviceMemory{
@@ -569,6 +579,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 				idx: int(0),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								deviceUtil: [16]deviceUtilization{
@@ -605,6 +616,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 				idx: int(1),
 				spec: &Spec{
 					sr: &sharedRegionT{
+						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
 								deviceUtil: [16]deviceUtilization{
@@ -688,7 +700,7 @@ func Test_IsValidUUID(t *testing.T) {
 		want bool
 	}{
 		{
-			name: "set vaild uuid",
+			name: "set valid uuid",
 			args: struct {
 				idx  int
 				spec *Spec
@@ -709,7 +721,7 @@ func Test_IsValidUUID(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "set invaild uuid",
+			name: "set invalid uuid",
 			args: struct {
 				idx  int
 				spec *Spec
@@ -1023,7 +1035,7 @@ func Test_GetUtilizationSwitch(t *testing.T) {
 		want int32
 	}{
 		{
-			name: "get utilzation switch",
+			name: "get utilization switch",
 			args: Spec{
 				sr: &sharedRegionT{
 					utilizationSwitch: int32(1234),
@@ -1050,7 +1062,7 @@ func Test_SetUtilizationSwitch(t *testing.T) {
 		want int32
 	}{
 		{
-			name: "set utilzation switch",
+			name: "set utilization switch",
 			args: struct {
 				v    int32
 				spec Spec

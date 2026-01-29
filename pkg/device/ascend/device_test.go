@@ -43,7 +43,7 @@ func Test_InitDevices(t *testing.T) {
 		want         []*Devices
 	}{
 		{
-			name:         "test with vaild configuration",
+			name:         "test with valid configuration",
 			enableAscend: true,
 			args: []VNPUConfig{
 				{
@@ -399,99 +399,6 @@ func Test_checkType(t *testing.T) {
 	}
 }
 
-func Test_checkUUID(t *testing.T) {
-	dev := Devices{
-		useUUIDAnno:   "hami.io/use-Ascend910A-uuid",
-		noUseUUIDAnno: "hami.io/no-use-Ascend910A-uuid",
-	}
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "don't set GPUUseUUID,GPUNoUseUUID and annotation",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{},
-				d:     device.DeviceUsage{},
-			},
-			want: true,
-		},
-		{
-			name: "set GPUUseUUID,don't set GPUNoUseUUID,annotation and device match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					dev.useUUIDAnno: "test123,111",
-				},
-				d: device.DeviceUsage{
-					ID: "test123",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "don't set GPUUseUUID, set GPUNoUseUUID,annotation and device match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					dev.noUseUUIDAnno: "test123,222",
-				},
-				d: device.DeviceUsage{
-					ID: "test123",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "set GPUUseUUID, don't set GPUNoUseUUID,annotation and device not match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					dev.useUUIDAnno: "test123,222",
-				},
-				d: device.DeviceUsage{
-					ID: "test456",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "don't set GPUUseUUID, set GPUNoUseUUID,annotation and device not match",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					dev.noUseUUIDAnno: "test123,222",
-				},
-				d: device.DeviceUsage{
-					ID: "test456",
-				},
-			},
-			want: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
-		})
-	}
-}
-
 func Test_CheckHealth(t *testing.T) {
 	dev := Devices{}
 	tests := []struct {
@@ -797,6 +704,150 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			}
 			result := dev.GenerateResourceRequests(&test.args)
 
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_GenerateResourceRequestsFactor(t *testing.T) {
+	req := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
+			},
+			Requests: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
+			},
+		},
+	}
+	tests := []struct {
+		name string
+		dev  Devices
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "factor 10",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(10),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(2184),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "factor 100",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(100),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(17476),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "factor 0",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(0),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(2184),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&req)
 			assert.Equal(t, result, test.want)
 		})
 	}
@@ -1360,6 +1411,61 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{"dev-0"},
 			wantReason: "",
 		},
+		{
+			name: "fit success. schedule by NetworkID",
+			devices: []*device.DeviceUsage{
+				{
+					ID:         "dev-0",
+					Index:      0,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(0)},
+				},
+				{
+					ID:         "dev-1",
+					Index:      0,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(1)},
+				},
+				{
+					ID:         "dev-2",
+					Index:      0,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(1)},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    2,
+			wantDevIDs: []string{"dev-2", "dev-1"},
+			wantReason: "",
+		},
 	}
 
 	for _, dev := range devs {
@@ -1379,7 +1485,38 @@ func TestDevices_Fit(t *testing.T) {
 
 			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
 				allocated := &device.PodDevices{}
-				fit, result, reason := dev.Fit(test.devices, test.request, test.annos, &corev1.Pod{}, &device.NodeInfo{}, allocated)
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: test.annos,
+					},
+				}
+				nodeInfo := &device.NodeInfo{
+					ID: "node1",
+					Devices: map[string][]device.DeviceInfo{
+						dev.config.CommonWord: {
+							{
+								ID:         "dev-0",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
+							},
+							{
+								ID:         "dev-1",
+								Index:      0,
+								Numa:       0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(1)},
+							},
+							{
+								ID:         "dev-2",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(1)},
+							},
+						},
+					},
+				}
+				fit, result, reason := dev.Fit(test.devices, test.request, pod, nodeInfo, allocated)
 				if fit != test.wantFit {
 					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 				}

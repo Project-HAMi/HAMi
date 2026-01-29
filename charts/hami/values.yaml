@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.6.0"
+  imageTag: "v2.8.0"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -38,19 +38,20 @@ dcuResourceName: "hygon.com/dcunum"
 dcuResourceMem: "hygon.com/dcumem"
 dcuResourceCores: "hygon.com/dcucores"
 
-#Iluvatar GPU Parameters
-iluvatarResourceName: "iluvatar.ai/vgpu"
-iluvatarResourceMem: "iluvatar.ai/vcuda-memory"
-iluvatarResourceCore: "iluvatar.ai/vcuda-core"
-
 #Metax sGPU Parameters
 metaxResourceName: "metax-tech.com/sgpu"
 metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
 metaxsGPUTopologyAware: "false"
 
+#Enflame VGCU Parameters
+enflameResourceNameVGCU: "enflame.com/vgcu"
+enflameResourceNameVGCUPercentage: "enflame.com/vgcu-percentage"
+
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
+kunlunResourceVCountName: "kunlunxin.com/vxpu"
+kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
 schedulerName: "hami-scheduler"
 
@@ -231,11 +232,15 @@ scheduler:
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: 9395
+    httpTargetPort: 443
     labels: {}
     annotations: {}
 
 devicePlugin:
   enabled: true
+  gpuOperatorToolkitReady:
+    enabled: false
+    hostPath: "/run/nvidia/validations"
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
@@ -281,9 +286,45 @@ devicePlugin:
       pullSecrets: []
     ctrPath: /usr/local/vgpu/containers
     resyncInterval: "5m"
+    extraArgs:
+      - -v=4
+    extraEnvs: {}
+    resources: {}
+      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
+      # and remove the curly braces after 'resources:'.
+#      limits:
+#        cpu: 1000m
+#        memory: 1000Mi
+#      requests:
+#        cpu: 100m
+#        memory: 100Mi
+
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Node configuration for device plugin, Priority: externalConfigName > config > default config
+  nodeConfiguration:
+    # If you want to use a custom config.json, you can set the content here.
+    # If this is set, it will override the default config.json(An example is as follows).
+    config: |
+      {
+        "nodeconfig": [
+          {
+            "name": "your-node-name",
+            "operatingmode": "hami-core",
+            "devicememoryscaling": 1,
+            "devicesplitcount": 10,
+            "migstrategy": "none",
+            "filterdevices": {
+              "uuid": [],
+              "index": []
+            }
+          }
+        ]
+      }
+    # If you want to use an existing ConfigMap, you can set the name here.
+    # If this is set, the chart will not create the ConfigMap and will use the existing one.
+    externalConfigName: ""
   # The runtime class name to be used by the device plugin, and added to the pod.spec.runtimeClassName of applications utilizing NVIDIA GPUs
   runtimeClassName: ""
   # Whether to create runtime class, name comes from runtimeClassName when it is set
@@ -291,9 +332,16 @@ devicePlugin:
   migStrategy: "none"
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false
+  deviceListStrategy: "envvar"
+  nvidiaHookPath: null
+  nvidiaDriverRoot: null
+  gdrcopyEnabled: null
+  gdsEnabled: null
+  mofedEnabled: null
+
   extraArgs:
     - -v=4
-
+  extraEnvs: {}
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 31992
@@ -304,7 +352,7 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
-  nvidianodeSelector:
+  nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
   # The updateStrategy for DevicePlugin DaemonSet.
@@ -326,18 +374,47 @@ devicePlugin:
 #      cpu: 100m
 #      memory: 100Mi
 
-  vgpuMonitor:
-    resources: {}
-      # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
-      # and remove the curly braces after 'resources:'.
-#      limits:
-#        cpu: 1000m
-#        memory: 1000Mi
-#      requests:
-#        cpu: 100m
-#        memory: 100Mi
+mockDevicePlugin:
+  enabled: false
+  image:
+    registry: "docker.io"
+    repository: "projecthami/mock-device-plugin"
+    tag: "1.0.1"
+    ## Specify a imagePullPolicy
+    ## Defaults to 'Always' if image tag is 'latest', else set to 'IfNotPresent'
+    ## ref: https://kubernetes.io/docs/user-guide/images/#pre-pulling-images
+    ##
+    pullPolicy: IfNotPresent
+    ## Optionally specify an array of imagePullSecrets.
+    ## Secrets must be manually created in the namespace.
+    ## Example:
+    ## pullSecrets:
+    ##   - myRegistryKeySecretName
+    ##
+    pullSecrets: []
+# If this option is enabled, the DRA will be installed and the scheduler extender will not be installed.
+dra:
+  enabled: false
+
+# Configuration for the hami-dra subchart, which includes DRA drivers.
+# This is part of config for DRA, please refer to the DRA documentation for more details.
+hami-dra:
+  monitor:
+    enabled: true
+  drivers:
+    nvidia:
+      enabled: true
+      # If you are using gpu driver on host, you need to set this to false
+      containerDriver: true
+      image:
+        repository: projecthami/k8s-dra-driver
+        tag: "v0.0.1-dev"
 
 devices:
+  amd:
+    customresources:
+      - amd.com/gpu
+      - amd.com/gpu-memory
   awsneuron:
     customresources:
       - aws.amazon.com/neuron
@@ -346,11 +423,14 @@ devices:
     enabled: true
     customresources:
       - kunlunxin.com/xpu
+      - kunlunxin.com/vxpu
+      - kunlunxin.com/vxpu-memory
   enflame:
     enabled: true
     customresources:
       - enflame.com/vgcu
       - enflame.com/vgcu-percentage
+      - enflame.com/gcu
   mthreads:
     enabled: true
     customresources:
@@ -375,6 +455,25 @@ devices:
       - huawei.com/Ascend910B3-memory
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
+      - huawei.com/Ascend910B4-1
+      - huawei.com/Ascend910B4-1-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+  iluvatar:
+    enabled: false
+    customresources:
+      - iluvatar.ai/BI-V100-vgpu
+      - iluvatar.ai/BI-V100.vCore
+      - iluvatar.ai/BI-V100.vMem
+      - iluvatar.ai/BI-V150-vgpu
+      - iluvatar.ai/BI-V150.vCore
+      - iluvatar.ai/BI-V150.vMem
+      - iluvatar.ai/MR-V100-vgpu
+      - iluvatar.ai/MR-V100.vCore
+      - iluvatar.ai/MR-V100.vMem
+      - iluvatar.ai/MR-V50-vgpu
+      - iluvatar.ai/MR-V50.vCore
+      - iluvatar.ai/MR-V50.vMem
 
+prometheus:
+  enabled: false

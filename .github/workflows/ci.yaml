@@ -26,9 +26,9 @@ jobs:
     runs-on: ubuntu-22.04
     steps:
       - name: checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - name: verify license
@@ -36,9 +36,9 @@ jobs:
       - name: go tidy
         run: make tidy
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v7
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.0
+          version: v2.8.0
       - name: import alias
         run: hack/verify-import-aliases.sh
 
@@ -50,7 +50,7 @@ jobs:
       e2e_run: ${{ steps.parse_code.outputs.e2e_run }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 3
 
@@ -90,14 +90,14 @@ jobs:
     if: needs.get_info.outputs.e2e_run == 'true' || github.ref == 'refs/heads/master'
     steps:
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@v1.0.1
         with:
           basePath: # optional, default is .
           submodulePath: libvgpu
       - name: Install Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: make tidy
@@ -123,7 +123,6 @@ jobs:
     runs-on: ubuntu-22.04
     if: needs.get_info.outputs.e2e_run == 'true'
     steps:
-      - uses: actions/checkout@master
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
         run: |
@@ -135,7 +134,7 @@ jobs:
           df -h
 
       - name: Checkout code
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
 
@@ -167,7 +166,7 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.24.6-bullseye
+            GOLANG_IMAGE=golang:1.25.5-bookworm
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
@@ -184,7 +183,7 @@ jobs:
           docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
       - name: Upload image.tar as artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: hami-image
           path: image.tar
@@ -200,7 +199,7 @@ jobs:
       HELM_VERSION: v3.8.1
     steps:
       - name: Checkout
-        uses: actions/checkout@v5
+        uses: actions/checkout@v6
         with:
           fetch-depth: 0
           ref: ${{ needs.get_ref.outputs.ref }}
@@ -214,6 +213,10 @@ jobs:
         uses: azure/setup-helm@v4
         with:
           version: ${{ env.HELM_VERSION }}
+
+      - name: Build helm dependencies
+        run: |
+          helm dependency build charts/hami
 
       - name: Lint helm chart
         run: |
@@ -236,7 +239,7 @@ jobs:
           mv charts/*.tgz tmp
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v4.4.3
+        uses: actions/upload-artifact@v6
         with:
           name: chart_package_artifact
           path: tmp/*

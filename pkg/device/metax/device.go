@@ -46,8 +46,11 @@ var (
 
 func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 	MetaxResourceCount = config.ResourceCountName
-	device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
-	device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	_, ok := device.InRequestDevices[MetaxGPUDevice]
+	if !ok {
+		device.InRequestDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-to-allocate"
+		device.SupportDevices[MetaxGPUDevice] = "hami.io/metax-gpu-devices-allocated"
+	}
 	return &MetaxDevices{}
 }
 
@@ -69,14 +72,15 @@ func (dev *MetaxDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, er
 	}
 	for int64(i) < count {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
-			Index:   uint(i),
-			ID:      n.Name + "-metax-" + fmt.Sprint(i),
-			Count:   1,
-			Devmem:  65536,
-			Devcore: 100,
-			Type:    MetaxGPUDevice,
-			Numa:    0,
-			Health:  true,
+			Index:        uint(i),
+			ID:           n.Name + "-metax-" + fmt.Sprint(i),
+			Count:        1,
+			Devmem:       65536,
+			Devcore:      100,
+			Type:         MetaxGPUDevice,
+			Numa:         0,
+			Health:       true,
+			DeviceVendor: MetaxGPUCommonWord,
 		})
 		i++
 	}
@@ -215,7 +219,7 @@ func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage
 	return nil
 }
 
-func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, annos map[string]string, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	prevnuma := -1
@@ -227,7 +231,7 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := mat.checkType(annos, *dev, k)
+		_, found, numa := mat.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -242,7 +246,7 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !mat.checkUUID(annos, *dev) {
+		if !mat.checkUUID(pod.GetAnnotations(), *dev) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -316,4 +320,12 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+func (dev *MetaxDevices) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  MetaxResourceCount,
+		ResourceMemoryName: "",
+		ResourceCoreName:   "",
+	}
 }
