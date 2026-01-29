@@ -112,6 +112,7 @@ type NvidiaConfig struct {
 	DefaultMemory                int32  `yaml:"defaultMemory"`
 	DefaultCores                 int32  `yaml:"defaultCores"`
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
+	PreConfiguredDeviceMemory    int64  `yaml:"preConfiguredDeviceMemory"`
 	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
 	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
