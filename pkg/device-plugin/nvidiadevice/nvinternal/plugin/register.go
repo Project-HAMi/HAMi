@@ -108,9 +108,23 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
-		if ret == nvml.SUCCESS {
+		switch ret {
+		case nvml.SUCCESS:
 			memoryTotal = int(memory.Total)
-		} else {
+		case nvml.ERROR_NOT_SUPPORTED:
+			// Unified memory architecture GPUs (e.g., NVIDIA GB10/DGX Spark) don't support
+			// traditional memory queries. Use DefaultDeviceMemory from config as fallback.
+			if plugin.schedulerConfig.DefaultDeviceMemory > 0 {
+				memoryTotal = int(plugin.schedulerConfig.DefaultDeviceMemory) * 1024 * 1024
+				klog.Warningf("GetMemoryInfo not supported for device %s, using configured DefaultDeviceMemory: %d MB",
+					UUID, plugin.schedulerConfig.DefaultDeviceMemory)
+			} else {
+				klog.Errorf("GetMemoryInfo not supported for device %s (unified memory architecture) "+
+					"and DefaultDeviceMemory not configured. Skipping this device. "+
+					"Set 'defaultDeviceMemory' in nvidia config to the total GPU memory in MB.", UUID)
+				continue
+			}
+		default:
 			klog.Error("nvml get memory error ret=", ret)
 			panic(0)
 		}
