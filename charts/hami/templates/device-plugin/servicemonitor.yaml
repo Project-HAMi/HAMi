@@ -1,4 +1,4 @@
-{{- if and (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") .Values.prometheus.enabled }}
+{{- if and .Values.devicePlugin.enabled (not .Values.dra.enabled) (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") .Values.prometheus.enabled }}
 # Prometheus Service Monitor
 apiVersion: monitoring.coreos.com/v1
 kind: ServiceMonitor
@@ -17,6 +17,6 @@ spec:
       app.kubernetes.io/component: hami-device-plugin
       {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
   endpoints:
-  - port: monitorport
+  - port: monitor
     path: "/metrics"
 {{- end }}
