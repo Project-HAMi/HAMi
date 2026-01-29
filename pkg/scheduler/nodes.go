@@ -76,7 +76,7 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	} else {
 		m.nodes[nodeID] = nodeInfo
 	}
-	nodeInfo.Devices = rmDeviceByNodeAnnotation(m.nodes[nodeID])
+	m.nodes[nodeID].Devices = rmDeviceByNodeAnnotation(m.nodes[nodeID])
 }
 
 func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.DeviceInfo {
@@ -105,7 +105,7 @@ func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.Dev
 	}
 	newDeviceMap := make(map[string][]device.DeviceInfo)
 	for deviceName, deviceList := range nodeInfo.Devices {
-		newDeviceList := make([]device.DeviceInfo, 0)
+		newDeviceList := make([]device.DeviceInfo, 0, len(deviceList))
 		for _, d := range deviceList {
 			if disableGPUUUIDMap, ok := vendorWithDisableGPUUUIDMap[d.DeviceVendor]; ok {
 				if disabled := disableGPUUUIDMap[d.ID]; disabled {
