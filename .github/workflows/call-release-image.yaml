@@ -79,7 +79,7 @@ jobs:
           make lint_dockerfile
 
       - name: Docker Login
-        uses: docker/login-action@v3.6.0
+        uses: docker/login-action@v3.7.0
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
