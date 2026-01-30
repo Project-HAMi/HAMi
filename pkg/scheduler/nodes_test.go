@@ -344,60 +344,60 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1 + " ", " " + id2 + " "}, ",")}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
 		},
 		{
 			name: "Test remove one device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
 		},
 		{
 			name: "Test remove two devices",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1, id2}, ",")}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
 		},
 		{
 			name: "Test remove one device and keep one device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id2}, ",")}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test no removing device, case1",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test no removing device, case2",
 			args: args{
 				nodeInfo: &device.NodeInfo{
 					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id2}}},
-					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
 		},
 		{
 			name: "Test removing metax device, case1",
@@ -405,10 +405,10 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 				nodeInfo: &device.NodeInfo{
 					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
 					// Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}},
-					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: {{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: {}},
 		},
 		{
 			name: "Test removing metax sgpu device",
@@ -418,7 +418,7 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 					Devices: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: {{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: {}},
 		},
 	}
 	for _, tt := range tests {
