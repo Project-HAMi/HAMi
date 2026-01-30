@@ -19,7 +19,6 @@ package amd
 import (
 	"flag"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -135,25 +134,6 @@ func (dev *AMDDevices) checkType(n device.ContainerDeviceRequest) (bool, bool, b
 	return false, false, false
 }
 
-func (dev *AMDDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[AMDUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for AMD GPU user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[AMDNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for AMD GPU no-use uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *AMDDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return true, true
 }
@@ -224,7 +204,7 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
 		}
-		if !amddevice.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, AMDUseUUID, AMDNoUseUUID, amddevice.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

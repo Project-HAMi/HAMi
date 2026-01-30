@@ -19,7 +19,6 @@ package hygon
 import (
 	"errors"
 	"flag"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -41,9 +40,9 @@ const (
 	HygonDCUCommonWord = "DCU"
 	DCUInUse           = "hygon.com/use-dcutype"
 	DCUNoUse           = "hygon.com/nouse-dcutype"
-	// DCUUseUUID is user can use specify DCU device for set DCU UUID.
+	// DCUUseUUID annotation specifies a comma-separated list of DCU UUIDs to use.
 	DCUUseUUID = "hygon.com/use-gpuuuid"
-	// DCUNoUseUUID is user can not use specify DCU device for set DCU UUID.
+	// DCUNoUseUUID annotation specifies a comma-separated list of DCU UUIDs to exclude.
 	DCUNoUseUUID = "hygon.com/nouse-gpuuuid"
 
 	// NodeLockDCU should same with device plugin node lock name
@@ -192,25 +191,6 @@ func (dev *DCUDevices) checkType(annos map[string]string, d device.DeviceUsage, 
 	return false, false, false
 }
 
-func (dev *DCUDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[DCUUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for dcu user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[DCUNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for dcu not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	klog.Info("Start to count dcu devices for container ", ctr.Name)
 	dcuResourceCount := corev1.ResourceName(HygonResourceCount)
@@ -318,7 +298,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !dcu.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, DCUUseUUID, DCUNoUseUUID, dcu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

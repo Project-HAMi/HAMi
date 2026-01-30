@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -189,25 +188,6 @@ func (dev *IluvatarDevices) checkType(annos map[string]string, d device.DeviceUs
 	return false, false, false
 }
 
-func (dev *IluvatarDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[dev.useUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[dev.noUseUUIDAnno]
-	if ok {
-		klog.V(5).Infof("check uuid for Iluvatar not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
-}
-
 func (dev *IluvatarDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
 	return device.CheckHealth(devType, n)
 }
@@ -283,7 +263,7 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := range devices {
+	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
@@ -302,7 +282,7 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !ilu.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, ilu.useUUIDAnno, ilu.noUseUUIDAnno, ilu.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue

@@ -62,7 +62,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Denied("pod has no containers")
 	}
 	if pod.Spec.SchedulerName != "" &&
-		pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler &&
+		(pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler) &&
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
 		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")

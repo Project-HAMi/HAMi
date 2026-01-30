@@ -136,9 +136,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			//This loop is for different container request
-			ctrfit := false
+			// Assume the node is a fit by default. This handles pods with no device
+			// requests, which should be schedulable on any node.
+			ctrfit := true
 			deviceType := ""
+			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {

@@ -314,108 +314,6 @@ func Test_checkType(t *testing.T) {
 	}
 }
 
-func Test_checkUUID(t *testing.T) {
-	tests := []struct {
-		name string
-		args struct {
-			annos map[string]string
-			d     device.DeviceUsage
-		}
-		want bool
-	}{
-		{
-			name: "useid is same as the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hami.io/use-MR-V100-uuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "useid is different from the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hami.io/use-MR-V100-uuid": "test2",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "no annos",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{},
-				d: device.DeviceUsage{
-					ID: "test3",
-				},
-			},
-			want: true,
-		},
-		{
-			name: "nouseid is same as the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hami.io/no-use-MR-V100-uuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test1",
-				},
-			},
-			want: false,
-		},
-		{
-			name: "nouseid is different from the device id",
-			args: struct {
-				annos map[string]string
-				d     device.DeviceUsage
-			}{
-				annos: map[string]string{
-					"hami.io/no-use-MR-V100-uuid": "test1",
-				},
-				d: device.DeviceUsage{
-					ID: "test2",
-				},
-			},
-			want: true,
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			dev := IluvatarDevices{
-				config: IluvatarConfig{
-					CommonWord:         "MR-V100",
-					ChipName:           "MR-V100",
-					ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
-					ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
-					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
-				},
-				useUUIDAnno:   "hami.io/use-MR-V100-uuid",
-				noUseUUIDAnno: "hami.io/no-use-MR-V100-uuid",
-			}
-			result := dev.checkUUID(test.args.annos, test.args.d)
-			assert.Equal(t, result, test.want)
-		})
-	}
-}
-
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
@@ -556,7 +454,7 @@ func Test_Fit(t *testing.T) {
 			annos:      map[string]string{},
 			wantOK:     true,
 			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
+			wantDevIDs: []string{"dev-1"},
 		},
 		{
 			name: "fit fail: memory not enough",
