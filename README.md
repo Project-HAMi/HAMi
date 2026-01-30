@@ -10,9 +10,10 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 [![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
-[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#contact)
-[![discord](https://img.shields.io/badge/discord-5865F2?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
-[![website](https://img.shields.io/badge/website-green?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
+[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#meeting--contact)
+[![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=googlechat)](https://cloud-native.slack.com/archives/C07T10BU4R2)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
+[![website](https://img.shields.io/badge/website-blue?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
 
 ## Project-HAMi: Heterogeneous AI Computing Virtualization Middleware
 
