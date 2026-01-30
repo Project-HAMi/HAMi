@@ -93,7 +93,7 @@ func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.Dev
 							if vendorWithDisableGPUUUIDMap[vendor] == nil {
 								vendorWithDisableGPUUUIDMap[vendor] = make(map[string]bool)
 							}
-							vendorWithDisableGPUUUIDMap[vendor][disableGPUUUID] = true
+							vendorWithDisableGPUUUIDMap[vendor][id] = true
 						}
 					}
 				}

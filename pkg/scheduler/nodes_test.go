@@ -340,6 +340,17 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 		want map[string][]device.DeviceInfo
 	}{
 		{
+			name: "Test space condition",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1 + " ", " " + id2 + " "}, ",")}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: []device.DeviceInfo{}},
+		},
+		{
 			name: "Test remove one device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
@@ -408,15 +419,14 @@ func Test_rmDeviceByNodeAnnotation(t *testing.T) {
 			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{}},
 		},
 		{
-			name: "Test removing metax device, case2",
+			name: "Test removing metax sgpu device",
 			args: args{
 				nodeInfo: &device.NodeInfo{
-					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
-					// Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}},
-					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: {{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}}},
 				},
 			},
-			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: []device.DeviceInfo{}},
+			want: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: []device.DeviceInfo{}},
 		},
 	}
 	for _, tt := range tests {
