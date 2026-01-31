@@ -106,8 +106,8 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
-		"Container device memory description (Deprecated: use vGPU_device_memory_usage_in_bytes instead)",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		`Container device memory description (The label "context", "module", "data" and "offset" will be deprecated in v2.10.0, use vGPU_device_memory_context_size_bytes, vGPU_device_memory_module_size_bytes and vGPU_device_memory_buffer_size_bytes instead)`,
+		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"Device_utilization_desc_of_container",
