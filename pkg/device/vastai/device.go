@@ -34,7 +34,7 @@ type VastaiDevices struct {
 
 const (
 	HandshakeAnnos   = "hami.io/node-handshake-va"
-	RegisterAnnos    = "hami.io/node-varegister"
+	RegisterAnnos    = "hami.io/node-va-register"
 	VastaiDevice     = "Vastai"
 	VastaiCommonWord = "Vastai"
 	VastaiInUse      = "vastaitech.com/use-va"
