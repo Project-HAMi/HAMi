@@ -407,5 +407,13 @@ data:
           memory: 12288
           aiCore: 4
           aiCPU: 4
+    - chipName: Ascend910
+      commonWord: Ascend910C
+      resourceName: huawei.com/Ascend910C
+      resourceMemoryName: huawei.com/Ascend910C-memory
+      memoryAllocatable: 65536
+      memoryCapacity: 65536
+      aiCore: 20
+      aiCPU: 7
   {{ end }}
 {{- end }}
