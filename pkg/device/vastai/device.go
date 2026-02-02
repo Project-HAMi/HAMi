@@ -71,7 +71,7 @@ func (dev *VastaiDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 	if !ok {
 		return []*device.DeviceInfo{}, errors.New("annos not found " + RegisterAnnos)
 	}
-	nodedevices, err := device.DecodeNodeDevices(devEncoded)
+	nodedevices, err := device.UnMarshalNodeDevices(devEncoded)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
@@ -136,40 +136,17 @@ func (dev *VastaiDevices) CheckHealth(devType string, n *corev1.Node) (bool, boo
 }
 
 func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Info("Start to count vastai devices for container ", ctr.Name)
+	klog.V(5).Info("Start to count vastai devices for container ", ctr.Name)
 	vastaiResourceCount := corev1.ResourceName(VastaiResourceCount)
-	vastaiResourceMem := corev1.ResourceName(VastaiResourceMemory)
-	vastaiResourceCores := corev1.ResourceName(VastaiResourceCores)
 	v, ok := ctr.Resources.Limits[vastaiResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[vastaiResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			klog.Info("Found dcu devices")
+			klog.Info("Found vastai devices")
 			memnum := 0
-			mem, ok := ctr.Resources.Limits[vastaiResourceMem]
-			if !ok {
-				mem, ok = ctr.Resources.Requests[vastaiResourceMem]
-			}
-			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					memnum = int(memnums)
-				}
-			}
-			corenum := int32(100)
-			core, ok := ctr.Resources.Limits[vastaiResourceCores]
-			if !ok {
-				core, ok = ctr.Resources.Requests[vastaiResourceCores]
-			}
-			if ok {
-				corenums, ok := core.AsInt64()
-				if ok {
-					corenum = int32(corenums)
-				}
-			}
-
+			corenum := int32(0)
 			mempnum := 0
 			if memnum == 0 {
 				mempnum = 100
