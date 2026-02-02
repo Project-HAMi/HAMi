@@ -18,14 +18,30 @@ package scheduler
 
 import (
 	"fmt"
+	"strings"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
+	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
+	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
+
+var vendorNoUseAnnoKeyMap = map[string][]string{
+	nvidia.GPUNoUseUUID:        {nvidia.NvidiaGPUDevice},
+	cambricon.MLUNoUseUUID:     {cambricon.CambriconMLUDevice},
+	hygon.DCUNoUseUUID:         {hygon.HygonDCUDevice},
+	mthreads.MthreadsNoUseUUID: {mthreads.MthreadsGPUDevice},
+	metax.MetaxNoUseUUID:       {metax.MetaxGPUDevice, metax.MetaxSGPUDevice},
+	kunlun.KunlunNoUseUUID:     {kunlun.KunlunGPUDevice},
+}
 
 type NodeUsage struct {
 	Node    *corev1.Node
@@ -60,6 +76,51 @@ func (m *nodeManager) addNode(nodeID string, nodeInfo *device.NodeInfo) {
 	} else {
 		m.nodes[nodeID] = nodeInfo
 	}
+	m.nodes[nodeID].Devices = rmDeviceByNodeAnnotation(m.nodes[nodeID])
+}
+
+func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.DeviceInfo {
+	if nodeInfo == nil {
+		return nil
+	}
+	vendorWithDisableGPUUUIDMap := make(map[string]map[string]bool)
+	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
+		for annoKey, vendors := range vendorNoUseAnnoKeyMap {
+			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annoKey, vendors)
+			if value, ok := nodeInfo.Node.Annotations[annoKey]; ok {
+				disableGPUUUIDList := strings.Split(value, ",")
+				klog.V(5).Infof("Disable gpu uuid list is: %v", disableGPUUUIDList)
+				for _, disableGPUUUID := range disableGPUUUIDList {
+					if id := strings.TrimSpace(disableGPUUUID); id != "" {
+						for _, vendor := range vendors {
+							if vendorWithDisableGPUUUIDMap[vendor] == nil {
+								vendorWithDisableGPUUUIDMap[vendor] = make(map[string]bool)
+							}
+							vendorWithDisableGPUUUIDMap[vendor][id] = true
+						}
+					}
+				}
+			}
+		}
+	}
+	if len(vendorWithDisableGPUUUIDMap) == 0 {
+		return nodeInfo.Devices
+	}
+	newDeviceMap := make(map[string][]device.DeviceInfo)
+	for deviceName, deviceList := range nodeInfo.Devices {
+		newDeviceList := make([]device.DeviceInfo, 0, len(deviceList))
+		for _, d := range deviceList {
+			if disableGPUUUIDMap, ok := vendorWithDisableGPUUUIDMap[d.DeviceVendor]; ok {
+				if disabled := disableGPUUUIDMap[d.ID]; disabled {
+					klog.V(5).Infof("Disable gpu uuid is : %s", d.ID)
+					continue
+				}
+			}
+			newDeviceList = append(newDeviceList, d)
+		}
+		newDeviceMap[deviceName] = newDeviceList
+	}
+	return newDeviceMap
 }
 
 func (m *nodeManager) rmNodeDevices(nodeID string, deviceVendor string) {
