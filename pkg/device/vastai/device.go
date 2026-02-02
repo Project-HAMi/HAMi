@@ -18,6 +18,7 @@ package vastai
 
 import (
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 
@@ -59,6 +60,13 @@ func InitVastaiDevice(config VastaiConfig) *VastaiDevices {
 	VastaiResourceCores = config.ResourceCoreName
 	VastaiResourceMemory = config.ResourceMemoryName
 	VastaiResourceCount = config.ResourceCountName
+	commonWord := VastaiCommonWord
+	_, ok := device.InRequestDevices[commonWord]
+	if !ok {
+		device.InRequestDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-to-allocate", commonWord)
+		device.SupportDevices[commonWord] = fmt.Sprintf("hami.io/%s-devices-allocated", commonWord)
+		util.HandshakeAnnos[commonWord] = HandshakeAnnos
+	}
 	return &VastaiDevices{}
 }
 
