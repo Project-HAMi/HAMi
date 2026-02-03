@@ -444,15 +444,15 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		}
 
 		if err := sendMetric(ch, ctrDeviceMemoryContextDesc, prometheus.GaugeValue, float64(memoryContextSize), labels...); err != nil {
-			klog.Errorf("Failed to send context size metric: %v", err)
+			klog.Errorf("Failed to send Device Memory context size metric: %v", err)
 			return err
 		}
 		if err := sendMetric(ch, ctrDeviceMemoryModuleDesc, prometheus.GaugeValue, float64(memoryModuleSize), labels...); err != nil {
-			klog.Errorf("Failed to send module size metric: %v", err)
+			klog.Errorf("Failed to send Device Memory module size metric: %v", err)
 			return err
 		}
 		if err := sendMetric(ch, ctrDeviceMemoryBufferDesc, prometheus.GaugeValue, float64(memoryBufferSize), labels...); err != nil {
-			klog.Errorf("Failed to send buffer size metric: %v", err)
+			klog.Errorf("Failed to send Device Memory buffer size metric: %v", err)
 			return err
 		}
 
