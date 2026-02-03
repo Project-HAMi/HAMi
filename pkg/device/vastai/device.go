@@ -19,12 +19,12 @@ package vastai
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -45,20 +45,14 @@ const (
 )
 
 var (
-	VastaiResourceCount  string
-	VastaiResourceMemory string
-	VastaiResourceCores  string
+	VastaiResourceCount string
 )
 
 type VastaiConfig struct {
-	ResourceCountName  string `yaml:"resourceCountName"`
-	ResourceMemoryName string `yaml:"resourceMemoryName"`
-	ResourceCoreName   string `yaml:"resourceCoreName"`
+	ResourceCountName string `yaml:"resourceCountName"`
 }
 
 func InitVastaiDevice(config VastaiConfig) *VastaiDevices {
-	VastaiResourceCores = config.ResourceCoreName
-	VastaiResourceMemory = config.ResourceMemoryName
 	VastaiResourceCount = config.ResourceCountName
 	commonWord := VastaiCommonWord
 	_, ok := device.InRequestDevices[commonWord]
@@ -91,8 +85,10 @@ func (dev *VastaiDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
 	}
-	devDecoded := device.EncodeNodeDevices(nodedevices)
-	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
+	if klog.V(5).Enabled() {
+		devDecoded := device.EncodeNodeDevices(nodedevices)
+		klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
+	}
 	return nodedevices, nil
 }
 
@@ -102,11 +98,31 @@ func (dev *VastaiDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) 
 }
 
 func (dev *VastaiDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *VastaiDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	return nil
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
+	}
+	if !found {
+		return nil
+	}
+	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
 }
 
 func (dev *VastaiDevices) NodeCleanUp(nn string) error {
@@ -118,25 +134,6 @@ func (dev *VastaiDevices) checkType(annos map[string]string, d device.DeviceUsag
 		return true, true, false
 	}
 	return false, false, false
-}
-
-func (dev *VastaiDevices) checkUUID(annos map[string]string, d device.DeviceUsage) bool {
-	userUUID, ok := annos[VastaiUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for vastai user uuid [%s], device id is %s", userUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, d.ID)
-	}
-
-	noUserUUID, ok := annos[VastaiNoUseUUID]
-	if ok {
-		klog.V(5).Infof("check uuid for vastai not user uuid [%s], device id is %s", noUserUUID, d.ID)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, d.ID)
-	}
-	return true
 }
 
 func (dev *VastaiDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
@@ -222,7 +219,7 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			prevnuma = dev.Numa
 			tmpDevs = make(map[string]device.ContainerDevices)
 		}
-		if !va.checkUUID(pod.GetAnnotations(), *dev) {
+		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, VastaiUseUUID, VastaiNoUseUUID, VastaiCommonWord) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -294,8 +291,6 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 
 func (dev *VastaiDevices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
-		ResourceCountName:  VastaiResourceCount,
-		ResourceMemoryName: VastaiResourceMemory,
-		ResourceCoreName:   VastaiResourceCores,
+		ResourceCountName: VastaiResourceCount,
 	}
 }
