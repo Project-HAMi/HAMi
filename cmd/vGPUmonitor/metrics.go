@@ -284,6 +284,10 @@ func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.M
 
 func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
 	memory, ret := hdev.GetMemoryInfo()
+	if ret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
+		return nil
+	}
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("nvml get memory error ret=%d", ret)
 	}
