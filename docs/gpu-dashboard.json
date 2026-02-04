@@ -531,13 +531,13 @@
           },
           "editorMode": "code",
           "exemplar": false,
-          "expr": "nodeGPUOverview{nodeid=~\"${node_name}\",deviceuuid=~\"${uuid}\"}",
+          "expr": "node_gpu_overview{nodeid=~\"${node_name}\",deviceuuid=~\"${uuid}\"}",
           "instant": true,
           "range": false,
           "refId": "A"
         }
       ],
-      "title": "nodeGPUOverview",
+      "title": "Node GPU Overview",
       "transformations": [
         {
           "id": "labelsToFields",
@@ -1345,7 +1345,7 @@
             "uid": "${DS_ALL}"
           },
           "exemplar": true,
-          "expr": "count by (node_name) (vGPU_device_memory_usage_in_bytes{node_name=~\"${node_name}\"})",
+          "expr": "count by (node_name) (vgpu_device_memory_limit_bytes{node_name=~\"${node_name}\"})",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
@@ -1612,7 +1612,7 @@
             "uid": "${DS_ALL}"
           },
           "exemplar": true,
-          "expr": "HostGPUMemoryUsage{node_name=~\"${node_name}\",deviceuuid=~\"${uuid}\"}",
+          "expr": "host_gpu_memory_usage_bytes{node_name=~\"${node_name}\",deviceuuid=~\"${uuid}\"}",
           "interval": "",
           "legendFormat": "{{node_name}} uid:{{deviceuuid}}",
           "refId": "A"
@@ -1762,14 +1762,14 @@
           "type": "prometheus",
           "uid": "${DS_ALL}"
         },
-        "definition": "label_values({__name__=~\"DCGM_FI_DEV_FB_FREE|vGPU_device_memory_limit_in_bytes\"}, node_name)",
+        "definition": "label_values({__name__=~\"DCGM_FI_DEV_FB_FREE|vgpu_device_memory_limit_bytes\"}, node_name)",
         "hide": 0,
         "includeAll": true,
         "multi": true,
         "name": "node_name",
         "options": [],
         "query": {
-          "query": "label_values({__name__=~\"DCGM_FI_DEV_FB_FREE|vGPU_device_memory_limit_in_bytes\"}, node_name)",
+          "query": "label_values({__name__=~\"DCGM_FI_DEV_FB_FREE|vgpu_device_memory_limit_bytes\"}, node_name)",
           "refId": "StandardVariableQuery"
         },
         "refresh": 1,
