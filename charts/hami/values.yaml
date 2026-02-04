@@ -302,6 +302,10 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
+  # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
+  # Can be overridden per-node via nodeConfiguration.config.
+  preConfiguredDeviceMemory: 0
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
@@ -314,6 +318,7 @@ devicePlugin:
             "operatingmode": "hami-core",
             "devicememoryscaling": 1,
             "devicesplitcount": 10,
+            "preconfigureddevicememory": 0,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
