@@ -1345,7 +1345,7 @@
             "uid": "${DS_ALL}"
           },
           "exemplar": true,
-          "expr": "count by (node_name) (vgpu_device_memory_limit_bytes{node_name=~\"${node_name}\"})",
+          "expr": "count by (node_name) (vgpu_device_memory_usage_bytes{node_name=~\"${node_name}\"})",
           "format": "time_series",
           "interval": "",
           "intervalFactor": 1,
