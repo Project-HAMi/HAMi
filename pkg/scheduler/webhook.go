@@ -29,6 +29,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
@@ -96,10 +97,62 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			return admission.Denied("pod has node assigned")
 		}
 	}
+	if !fitResourceQuota(pod) {
+		return admission.Denied("exceeding resource quota")
+	}
 	marshaledPod, err := json.Marshal(pod)
 	if err != nil {
 		klog.Errorf(template+" - Failed to marshal pod, error: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+func fitResourceQuota(pod *corev1.Pod) bool {
+	for deviceName, dev := range device.GetDevices() {
+		// Only supports NVIDIA
+		if deviceName != nvidia.NvidiaGPUDevice {
+			continue
+		}
+		memoryFactor := nvidia.MemoryFactor
+		resourceNames := dev.GetResourceNames()
+		resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
+		memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)
+		coreResourceName := corev1.ResourceName(resourceNames.ResourceCoreName)
+		var memoryReq int64 = 0
+		var coresReq int64 = 0
+		getRequest := func(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
+			v, ok := ctr.Resources.Limits[resName]
+			if !ok {
+				v, ok = ctr.Resources.Requests[resName]
+			}
+			if ok {
+				if n, ok := v.AsInt64(); ok {
+					return n, true
+				}
+			}
+			return 0, false
+		}
+		for _, ctr := range pod.Spec.Containers {
+			req, ok := getRequest(&ctr, resourceName)
+			if ok && req == 1 {
+				if memReq, ok := getRequest(&ctr, memResourceName); ok {
+					memoryReq += memReq
+				}
+				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
+					coresReq += coreReq
+				}
+			}
+		}
+		if memoryFactor > 1 {
+			oriMemReq := memoryReq
+			memoryReq = memoryReq * int64(memoryFactor)
+			klog.V(5).Infof("Adjusting memory request for quota check: oriMemReq %d, memoryReq %d, factor %d", oriMemReq, memoryReq, memoryFactor)
+		}
+		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
+			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
+			return false
+		}
+	}
+	return true
 }
