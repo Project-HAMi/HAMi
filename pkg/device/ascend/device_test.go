@@ -1755,12 +1755,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 			if !strings.Contains(test.name, "type mismatch") {
 				test.request.Type = dev.config.CommonWord
 			}
-			if strings.Contains(test.name, "user assign use uuid mismatch") {
-				test.annos["hami.io/use-"+dev.config.CommonWord+"-uuid"] = "dev-0"
-			}
-			if strings.Contains(test.name, "user assign no use uuid match") {
-				test.annos["hami.io/no-use-"+dev.config.CommonWord+"-uuid"] = "dev-0"
-			}
+
 			for _, d := range test.devices {
 				d.Type = dev.config.CommonWord
 			}
@@ -1787,13 +1782,13 @@ func TestDevices_Fit_910C(t *testing.T) {
 								Index:      0,
 								Numa:       0,
 								Health:     true,
-								CustomInfo: map[string]any{"NetworkID": float64(1)},
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
 							},
 							{
 								ID:         "dev-2",
 								Index:      0,
 								Health:     true,
-								CustomInfo: map[string]any{"NetworkID": float64(1)},
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
 							},
 						},
 					},
