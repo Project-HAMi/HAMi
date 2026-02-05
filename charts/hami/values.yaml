@@ -447,6 +447,7 @@ devices:
     enabled: true
     customresources:
       - vastaitech.com/va
+      - vastaitech.com/va-die
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
