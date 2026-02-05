@@ -82,6 +82,14 @@ data:
                     },
                     {{- end }}
                     {{- end }}
+                    {{- if .Values.devices.vastai.enabled }}
+                    {{- range .Values.devices.vastai.customresources }}
+                    {
+                      "name": "{{ . }}",
+                      "ignoredByScheduler": true
+                    },
+                    {{- end }}
+                    {{- end }}
                     {
                         "name": "{{ .Values.resourceName }}",
                         "ignoredByScheduler": true
@@ -116,10 +124,6 @@ data:
                     },
                     {
                         "name": "{{ .Values.dcuResourceCores }}",
-                        "ignoredByScheduler": true
-                    },
-                    {
-                        "name": "{{ .Values.vastaiResourceCores }}",
                         "ignoredByScheduler": true
                     },
                     {

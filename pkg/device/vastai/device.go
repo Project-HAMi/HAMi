@@ -78,16 +78,13 @@ func (dev *VastaiDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 		klog.ErrorS(err, "failed to decode node devices", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, err
 	}
+	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devEncoded)
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = VastaiCommonWord
 	}
 	if len(nodedevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
-	}
-	if klog.V(5).Enabled() {
-		devDecoded := device.EncodeNodeDevices(nodedevices)
-		klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devDecoded)
 	}
 	return nodedevices, nil
 }
@@ -152,10 +149,7 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device
 			klog.Info("Found vastai devices")
 			memnum := 0
 			corenum := int32(0)
-			mempnum := 0
-			if memnum == 0 {
-				mempnum = 100
-			}
+			mempnum := 100
 
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
@@ -197,10 +191,9 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	var tmpDevs map[string]device.ContainerDevices
-	tmpDevs = make(map[string]device.ContainerDevices)
+	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := 0; i < len(devices); i++ {
+	for i := range len(devices) {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
@@ -234,13 +227,11 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		if k.Coresreq > 100 {
 			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Coresreq = 100
-			//return false, tmpDevs
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq
 		}
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
-			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
