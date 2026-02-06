@@ -39,6 +39,7 @@ import (
 const (
 	NodeLockAscend         = "hami.io/mutex.lock"
 	Ascend910Prefix        = "Ascend910"
+	Ascend910CType         = "Ascend910C"
 	Ascend910NetworkWeight = 10
 )
 
@@ -114,6 +115,25 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	if !ok {
 		return false, nil
 	}
+
+	reqNum := count.Value()
+	if dev.config.CommonWord == Ascend910CType {
+		if reqNum == 1 {
+			// Since the minimum allocation unit is one physical module (2 NPUs), round up the limits and requests to 2.
+			klog.InfoS("Adjusted Ascend910C device request from 1 to 2 (minimum allocation unit)", "pod", klog.KObj(p))
+			reqNum = 2
+			ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)] = *resource.NewQuantity(reqNum, resource.DecimalExponent)
+			if _, exists := ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceName)]; exists {
+				ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceName)] = *resource.NewQuantity(reqNum, resource.DecimalExponent)
+			}
+		} else if reqNum%2 != 0 {
+			// Reject any other odd-numbered request (e.g., 3, 5, 7...)
+			errMsg := fmt.Sprintf("Ascend910C device request must be 1 or 2*n, got %d", reqNum)
+			klog.ErrorS(nil, errMsg, "pod", klog.KObj(p))
+			return false, errors.New(errMsg)
+		}
+	}
+
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
@@ -431,7 +451,13 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				tmpDevs[k.Type] = device.ContainerDevices{tmpDevs[k.Type][0]}
 			} else {
 				// If requesting multiple devices, select the best combination of cards.
-				combination := npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
+				var combination device.ContainerDevices
+				if k.Type == Ascend910CType {
+					// Use topology-aware allocation for Ascend910C: only select full modules (2 NPUs per card).
+					combination = npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
+				} else {
+					combination = npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
+				}
 				tmpDevs[k.Type] = combination
 			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
@@ -501,5 +527,67 @@ func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum 
 			}
 		}
 	}
+	return result
+}
+
+func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
+	// Build a mapping from NPU index to device object for quick lookup.
+	indexToDevice := make(map[int]device.ContainerDevice)
+	var npuIndices []int
+	for _, dev := range containerDevices {
+		idx := int(dev.Idx)
+		indexToDevice[idx] = dev
+		npuIndices = append(npuIndices, idx)
+	}
+
+	// Each physical card hosts exactly 2 NPUs (Ascend 910C module design).
+	const MaxCardNPUNum = 2
+
+	// Group NPU indices by the module and Sort
+	cardTopology := make(map[int][]int)
+	for _, idx := range npuIndices {
+		cardId := idx / MaxCardNPUNum
+		cardTopology[cardId] = append(cardTopology[cardId], idx)
+	}
+
+	// Convert the card topology map into a slice for sorting.
+	cardTopSlice := make([][]int, 0, len(cardTopology))
+	for _, card := range cardTopology {
+		cardTopSlice = append(cardTopSlice, card)
+	}
+
+	// Sort cards by the number of available NPUs in ascending order.
+	sort.Slice(cardTopSlice, func(i, j int) bool {
+		return len(cardTopSlice[i]) < len(cardTopSlice[j])
+	})
+
+	// Select NPUs card by card, preferring full cards.
+	var selectedIndices []int
+	taskNPUNum := reqNum
+
+	for _, card := range cardTopSlice {
+		if taskNPUNum <= 0 {
+			break
+		}
+
+		// Only consider cards that have both NPUs available (full card).
+		if len(card) == MaxCardNPUNum {
+			selectedIndices = append(selectedIndices, card...)
+			taskNPUNum -= MaxCardNPUNum
+		}
+	}
+
+	result := make(device.ContainerDevices, 0, len(selectedIndices))
+	for _, idx := range selectedIndices {
+		if dev, ok := indexToDevice[idx]; ok {
+			result = append(result, dev)
+		}
+	}
+
+	klog.V(4).InfoS("910C selected devices by card module topology",
+		"requested", reqNum,
+		"selected", len(result),
+		"indices", selectedIndices)
+
 	return result
 }
