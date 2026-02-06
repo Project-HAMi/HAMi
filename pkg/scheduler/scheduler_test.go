@@ -39,6 +39,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -120,6 +121,79 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+func TestInspectAllNodesUsageReturnsSnapshot(t *testing.T) {
+	s := NewScheduler()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+		},
+	}
+
+	s.statusLock.Lock()
+	s.overviewstatus = map[string]*NodeUsage{
+		"node1": {
+			Node: node,
+			Devices: policy.DeviceUsageList{
+				Policy: util.GPUSchedulerPolicySpread.String(),
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Score: 1,
+						Device: &device.DeviceUsage{
+							ID:       "dev1",
+							Used:     0,
+							Count:    1,
+							Health:   true,
+							PodInfos: []*device.PodInfo{},
+							CustomInfo: map[string]any{
+								"key": "value",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+	s.statusLock.Unlock()
+
+	snapshot := s.InspectAllNodesUsage()
+	snapshotNode := (*snapshot)["node1"]
+	if snapshotNode == nil {
+		t.Fatalf("expected snapshot to contain node1")
+	}
+	snapshotNode.Node.Name = "node1-updated"
+	snapshotNode.Devices.DeviceLists[0].Device.Used = 7
+	snapshotNode.Devices.DeviceLists[0].Device.CustomInfo["key"] = "changed"
+	(*snapshot)["node2"] = &NodeUsage{}
+	delete(*snapshot, "node1")
+
+	s.statusLock.RLock()
+	originalNode, hasOriginal := s.overviewstatus["node1"]
+	_, hasInjected := s.overviewstatus["node2"]
+	s.statusLock.RUnlock()
+
+	if !hasOriginal {
+		t.Fatalf("expected original overviewstatus to remain intact")
+	}
+	if hasInjected {
+		t.Fatalf("expected snapshot changes to not affect internal overviewstatus")
+	}
+	if originalNode.Node == snapshotNode.Node {
+		t.Fatalf("expected node to be deep-copied")
+	}
+	if originalNode.Devices.DeviceLists[0].Device == snapshotNode.Devices.DeviceLists[0].Device {
+		t.Fatalf("expected device usage to be deep-copied")
+	}
+	if originalNode.Node.Name != "node1" {
+		t.Fatalf("expected original node name to remain unchanged")
+	}
+	if originalNode.Devices.DeviceLists[0].Device.Used != 0 {
+		t.Fatalf("expected original device usage to remain unchanged")
+	}
+	if originalNode.Devices.DeviceLists[0].Device.CustomInfo["key"] != "value" {
+		t.Fatalf("expected original custom info to remain unchanged")
+	}
 }
 
 // test case matrix
