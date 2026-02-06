@@ -38,6 +38,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -82,6 +83,7 @@ type Config struct {
 	KunlunConfig    kunlun.KunlunConfig       `yaml:"kunlun"`
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
+	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -209,6 +211,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return amd.InitAMDGPUDevice(amdGPUConfig), nil
 		}, config.AMDGPUConfig},
+		{vastai.VastaiDevice, vastai.VastaiCommonWord, func(cfg any) (device.Devices, error) {
+			vastaiConfig, ok := cfg.(vastai.VastaiConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", vastai.VastaiCommonWord)
+			}
+			return vastai.InitVastaiDevice(vastaiConfig), nil
+		}, config.VastaiConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
