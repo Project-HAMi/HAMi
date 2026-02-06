@@ -124,9 +124,10 @@ type NvidiaConfig struct {
 
 // These configs can be specified for each node by using Nodeconfig.
 type NodeDefaultConfig struct {
-	DeviceSplitCount    *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
-	DeviceMemoryScaling *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
-	DeviceCoreScaling   *float64 `yaml:"deviceCoreScaling" json:"devicecorescaling"`
+	DeviceSplitCount          *uint    `yaml:"deviceSplitCount" json:"devicesplitcount"`
+	DeviceMemoryScaling       *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
+	DeviceCoreScaling         *float64 `yaml:"deviceCoreScaling" json:"devicecorescaling"`
+	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
 }
