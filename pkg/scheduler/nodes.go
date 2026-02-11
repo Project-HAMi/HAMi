@@ -25,6 +25,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/kunlun"
@@ -85,6 +86,7 @@ func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.Dev
 	}
 	vendorWithDisableGPUUUIDMap := make(map[string]map[string]bool)
 	if nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
+		// Process known vendor annotations
 		for annoKey, vendors := range vendorNoUseAnnoKeyMap {
 			klog.V(5).Infof("Current annokey is %s, and vendor is %v", annoKey, vendors)
 			if value, ok := nodeInfo.Node.Annotations[annoKey]; ok {
@@ -98,6 +100,27 @@ func rmDeviceByNodeAnnotation(nodeInfo *device.NodeInfo) map[string][]device.Dev
 							}
 							vendorWithDisableGPUUUIDMap[vendor][id] = true
 						}
+					}
+				}
+			}
+		}
+		// Process Ascend device annotations dynamically
+		// Ascend devices use format: hami.io/no-use-{CommonWord}-uuid
+		for annoKey, value := range nodeInfo.Node.Annotations {
+			if strings.HasPrefix(annoKey, ascend.AscendNoUseUUIDPrefix) && strings.HasSuffix(annoKey, ascend.AscendNoUseUUIDSuffix) {
+				klog.V(5).Infof("Processing Ascend annotation: %s", annoKey)
+				disableGPUUUIDList := strings.Split(value, ",")
+				klog.V(5).Infof("Disable Ascend device uuid list is: %v", disableGPUUUIDList)
+				// Extract the device type from the annotation key
+				// Format: hami.io/no-use-{DeviceType}-uuid
+				deviceType := strings.TrimPrefix(annoKey, ascend.AscendNoUseUUIDPrefix)
+				deviceType = strings.TrimSuffix(deviceType, ascend.AscendNoUseUUIDSuffix)
+				for _, disableGPUUUID := range disableGPUUUIDList {
+					if id := strings.TrimSpace(disableGPUUUID); id != "" {
+						if vendorWithDisableGPUUUIDMap[deviceType] == nil {
+							vendorWithDisableGPUUUIDMap[deviceType] = make(map[string]bool)
+						}
+						vendorWithDisableGPUUUIDMap[deviceType][id] = true
 					}
 				}
 			}

@@ -40,6 +40,11 @@ const (
 	NodeLockAscend         = "hami.io/mutex.lock"
 	Ascend910Prefix        = "Ascend910"
 	Ascend910NetworkWeight = 10
+	// Ascend device vendor identifier.
+	AscendDevice = "Ascend"
+	// Ascend NoUse UUID annotation key prefix and suffix.
+	AscendNoUseUUIDPrefix = "hami.io/no-use-"
+	AscendNoUseUUIDSuffix = "-uuid"
 )
 
 type Devices struct {
