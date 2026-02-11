@@ -24,6 +24,10 @@ webhooks:
     matchPolicy: Equivalent
     name: vgpu.hami.io
     namespaceSelector:
+      {{- if .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels }}
+      matchLabels:
+        {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
+      {{- end }}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
@@ -35,12 +39,22 @@ webhooks:
         values:
         {{- toYaml .Values.scheduler.admissionWebhook.whitelistNamespaces | nindent 10 }}
       {{- end }}
+      {{- if .Values.scheduler.admissionWebhook.namespaceSelector.matchExpressions }}
+      {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchExpressions | nindent 6 }}
+      {{- end }}
     objectSelector:
+      {{- if .Values.scheduler.admissionWebhook.objectSelector.matchLabels }}
+      matchLabels:
+        {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchLabels | nindent 8 }}
+      {{- end }}
       matchExpressions:
       - key: hami.io/webhook
         operator: NotIn
         values:
         - ignore
+      {{- if .Values.scheduler.admissionWebhook.objectSelector.matchExpressions }}
+      {{- toYaml .Values.scheduler.admissionWebhook.objectSelector.matchExpressions | nindent 6 }}
+      {{- end }}
     reinvocationPolicy: {{ .Values.scheduler.admissionWebhook.reinvocationPolicy }}
     rules:
       - apiGroups:
