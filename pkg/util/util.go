@@ -95,7 +95,9 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 		if phase, ok := p.Annotations[DeviceBindPhase]; !ok {
 			continue
 		} else {
-			if strings.Compare(phase, DeviceBindAllocating) != 0 {
+			// Allow both "allocating" and "success" phases for multi-container pods
+			// where some containers have already been allocated but others are still pending
+			if strings.Compare(phase, DeviceBindAllocating) != 0 && strings.Compare(phase, DeviceBindSuccess) != 0 {
 				continue
 			}
 		}

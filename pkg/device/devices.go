@@ -386,9 +386,11 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 			if err != nil {
 				return PodDevices{}, nil
 			}
-			if len(cd) == 0 {
-				continue
-			}
+			// IMPORTANT: Do NOT skip empty ContainerDevices!
+			// We must preserve the index mapping between annotation entries and pod containers.
+			// The annotation format is: "dev1:;dev2:;;dev3:;" where ; separates containers
+			// If we skip empty entries, the index mapping will be broken for multi-container pods
+			// (especially pods with init containers where some containers don't use devices)
 			pd[devID] = append(pd[devID], cd)
 		}
 	}
@@ -484,24 +486,48 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 }
 
 func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
-	counts = make(PodDeviceRequests, len(pod.Spec.Containers))
+	// Total containers = init containers + regular containers
+	totalContainers := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
+	counts = make(PodDeviceRequests, totalContainers)
 	klog.V(4).InfoS("Processing resource requirements",
 		"pod", klog.KObj(pod),
-		"containerCount", len(pod.Spec.Containers))
+		"initContainerCount", len(pod.Spec.InitContainers),
+		"containerCount", len(pod.Spec.Containers),
+		"totalContainers", totalContainers)
 	//Count Nvidia GPU
 	cnt := int32(0)
-	for i := range pod.Spec.Containers {
+	
+	// Process init containers first (indices 0 to len(InitContainers)-1)
+	for i := range pod.Spec.InitContainers {
 		devices := GetDevices()
 		counts[i] = make(ContainerDeviceRequests)
-		klog.V(5).InfoS("Processing container resources",
+		klog.V(5).InfoS("Processing init container resources",
 			"pod", klog.KObj(pod),
 			"containerIndex", i,
+			"containerName", pod.Spec.InitContainers[i].Name)
+		for idx, val := range devices {
+			request := val.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			if request.Nums > 0 {
+				cnt += request.Nums
+				counts[i][idx] = request
+			}
+		}
+	}
+	
+	// Process regular containers (indices len(InitContainers) to totalContainers-1)
+	initContainerOffset := len(pod.Spec.InitContainers)
+	for i := range pod.Spec.Containers {
+		devices := GetDevices()
+		counts[initContainerOffset+i] = make(ContainerDeviceRequests)
+		klog.V(5).InfoS("Processing container resources",
+			"pod", klog.KObj(pod),
+			"containerIndex", initContainerOffset+i,
 			"containerName", pod.Spec.Containers[i].Name)
 		for idx, val := range devices {
 			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if request.Nums > 0 {
 				cnt += request.Nums
-				counts[i][idx] = request
+				counts[initContainerOffset+i][idx] = request
 			}
 		}
 	}
