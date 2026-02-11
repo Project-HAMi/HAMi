@@ -169,6 +169,32 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
+      # - ssdl-anonymization
+    # namespaceSelector controls which namespaces the webhook will be applied to.
+    # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter namespaces.
+    namespaceSelector:
+      matchLabels:
+        # app.kubernetes.io/part-of: kubeflow-profile
+      matchExpressions: []
+      # Example: exclude namespaces with specific labels
+      # - key: environment
+      #   operator: In
+      #   values:
+      #   - development
+      #   - staging
+    # objectSelector controls which pods the webhook will be applied to.
+    # The default matchExpressions exclude pods with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter pods.
+    objectSelector:
+      # matchLabels:
+      #   app.kubernetes.io/managed-by: hami
+      matchExpressions: []
+      # Example: only apply to pods with specific labels
+      # - key: hami.io/enable
+      #   operator: In
+      #   values:
+      #   - "true"
     reinvocationPolicy: Never
     failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
