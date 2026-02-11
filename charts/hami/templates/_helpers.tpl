@@ -161,3 +161,197 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- define "hami.scheduler.patch.new.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.imageNew) "global" .Values.global) }}
 {{- end -}}
+
+{{/*
+Get Kubernetes minor version as integer
+*/}}
+{{- define "hami-vgpu.k8sMinorVersion" -}}
+{{- regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int -}}
+{{- end -}}
+
+{{/*
+Check if K8s version >= 1.22 (uses KubeSchedulerConfiguration)
+*/}}
+{{- define "hami-vgpu.useNewSchedulerConfig" -}}
+{{- ge (include "hami-vgpu.k8sMinorVersion" . | int) 22 -}}
+{{- end -}}
+
+{{/*
+Managed resources list for scheduler extender (YAML format for K8s >= 1.22)
+*/}}
+{{- define "hami-vgpu.scheduler.managedResources.yaml" -}}
+- name: {{ .Values.resourceName }}
+  ignoredByScheduler: true
+- name: {{ .Values.resourceMem }}
+  ignoredByScheduler: true
+- name: {{ .Values.resourceCores }}
+  ignoredByScheduler: true
+- name: {{ .Values.resourceMemPercentage }}
+  ignoredByScheduler: true
+- name: {{ .Values.resourcePriority }}
+  ignoredByScheduler: true
+- name: {{ .Values.mluResourceName }}
+  ignoredByScheduler: true
+- name: {{ .Values.dcuResourceName }}
+  ignoredByScheduler: true
+- name: {{ .Values.dcuResourceMem }}
+  ignoredByScheduler: true
+- name: {{ .Values.dcuResourceCores }}
+  ignoredByScheduler: true
+- name: "metax-tech.com/gpu"
+  ignoredByScheduler: true
+- name: {{ .Values.metaxResourceName }}
+  ignoredByScheduler: true
+- name: {{ .Values.metaxResourceCore }}
+  ignoredByScheduler: true
+- name: {{ .Values.metaxResourceMem }}
+  ignoredByScheduler: true
+{{- if .Values.devices.ascend.enabled }}
+{{- range .Values.devices.ascend.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end }}
+{{- if .Values.devices.mthreads.enabled }}
+{{- range .Values.devices.mthreads.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end }}
+{{- if .Values.devices.enflame.enabled }}
+{{- range .Values.devices.enflame.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end }}
+{{- if .Values.devices.kunlun.enabled }}
+{{- range .Values.devices.kunlun.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end }}
+{{- range .Values.devices.awsneuron.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- if .Values.devices.iluvatar.enabled }}
+{{- range .Values.devices.iluvatar.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end }}
+{{- range .Values.devices.amd.customresources }}
+- name: {{ . }}
+  ignoredByScheduler: true
+{{- end }}
+{{- end -}}
+
+{{/*
+Managed resources list for scheduler extender (JSON format for K8s < 1.22)
+*/}}
+{{- define "hami-vgpu.scheduler.managedResources.json" -}}
+{{- range .Values.devices.amd.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- if .Values.devices.ascend.enabled }}
+{{- range .Values.devices.ascend.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- end }}
+{{- if .Values.devices.mthreads.enabled }}
+{{- range .Values.devices.mthreads.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- end }}
+{{- if .Values.devices.enflame.enabled }}
+{{- range .Values.devices.enflame.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- end }}
+{{- if .Values.devices.kunlun.enabled }}
+{{- range .Values.devices.kunlun.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- end }}
+{{- range .Values.devices.awsneuron.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- if .Values.devices.iluvatar.enabled }}
+{{- range .Values.devices.iluvatar.customresources }}
+{
+  "name": "{{ . }}",
+  "ignoredByScheduler": true
+},
+{{- end }}
+{{- end }}
+{
+    "name": "{{ .Values.resourceName }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.resourceMem }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.resourceCores }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.resourceMemPercentage }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.resourcePriority }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.mluResourceName }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.dcuResourceName }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.dcuResourceMem }}",
+    "ignoredByScheduler": true 
+},
+{
+    "name": "{{ .Values.dcuResourceCores }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "metax-tech.com/gpu",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.metaxResourceName }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.metaxResourceCore }}",
+    "ignoredByScheduler": true
+},
+{
+    "name": "{{ .Values.metaxResourceMem }}",
+    "ignoredByScheduler": true
+}
+{{- end -}}
