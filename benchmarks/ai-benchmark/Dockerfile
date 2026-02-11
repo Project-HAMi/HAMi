@@ -1,7 +1,7 @@
 # This Dockerfile is used to build a Docker image for running the AI Benchmark.
 # It is based on the tensorflow/tensorflow:latest-gpu image.
 
-FROM tensorflow/tensorflow:2.20.0rc0-gpu
+FROM tensorflow/tensorflow:2.21.0rc0-gpu
 
 # Set the working directory to /ai-benchmark
 WORKDIR ai-benchmark
