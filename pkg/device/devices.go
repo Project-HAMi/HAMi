@@ -496,7 +496,7 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 		"totalContainers", totalContainers)
 	//Count Nvidia GPU
 	cnt := int32(0)
-	
+
 	// Process init containers first (indices 0 to len(InitContainers)-1)
 	for i := range pod.Spec.InitContainers {
 		devices := GetDevices()
@@ -513,7 +513,7 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 			}
 		}
 	}
-	
+
 	// Process regular containers (indices len(InitContainers) to totalContainers-1)
 	initContainerOffset := len(pod.Spec.InitContainers)
 	for i := range pod.Spec.Containers {
