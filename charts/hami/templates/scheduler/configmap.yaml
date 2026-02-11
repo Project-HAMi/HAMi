@@ -1,0 +1,73 @@
+{{- if and .Values.scheduler.kubeScheduler.enabled (not .Values.dra.enabled) -}}
+{{- $k8sMinor := regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int -}}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+data:
+{{- if ge $k8sMinor 22 }}
+  {{/* K8s >= 1.22: Use KubeSchedulerConfiguration API */}}
+  config.yaml: |
+    {{- if gt $k8sMinor 25 }}
+    apiVersion: kubescheduler.config.k8s.io/v1
+    {{- else }}
+    apiVersion: kubescheduler.config.k8s.io/v1beta2
+    {{- end }}
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: false
+    profiles:
+    - schedulerName: {{ .Values.schedulerName }}
+    extenders:
+    {{- if .Values.scheduler.admissionWebhook.enabled }}
+    - urlPrefix: "https://127.0.0.1:443"
+      enableHTTPS: true
+      tlsConfig:
+        insecure: true
+    {{- else }}
+    - urlPrefix: "http://127.0.0.1:80"
+      enableHTTPS: false
+    {{- end }}
+      filterVerb: filter
+      bindVerb: bind
+      nodeCacheCapable: true
+      weight: 1
+      httpTimeout: 30s
+      managedResources:
+      {{- include "hami-vgpu.scheduler.managedResources.yaml" . | nindent 6 }}
+{{- else }}
+  {{/* K8s < 1.22: Use legacy Policy API */}}
+  config.json: |
+    {
+        "kind": "Policy",
+        "apiVersion": "v1",
+        "extenders": [
+            {
+                {{- if .Values.scheduler.admissionWebhook.enabled }}
+                "urlPrefix": "https://127.0.0.1:443",
+                "enableHttps": true,
+                "tlsConfig": {
+                    "insecure": true
+                },
+                {{- else }}
+                "urlPrefix": "http://127.0.0.1:80",
+                "enableHttps": false,
+                {{- end }}
+                "filterVerb": "filter",
+                "bindVerb": "bind",
+                "weight": 1,
+                "nodeCacheCapable": true,
+                "httpTimeout": 30000000000,
+                "managedResources": [
+                    {{- include "hami-vgpu.scheduler.managedResources.json" . | nindent 20 }}
+                ],
+                "ignoreable": false
+            }
+        ]
+    }
+{{- end }}
+{{- end }}
