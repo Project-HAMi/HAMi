@@ -61,9 +61,27 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	if !ok {
 		return corev1.Container{}, res, errors.New("device request not found")
 	}
+	
+	// The annotation format follows the order: init containers first, then regular containers
+	// Index mapping:
+	//   0 to len(InitContainers)-1: init containers
+	//   len(InitContainers) to len(InitContainers)+len(Containers)-1: regular containers
+	initContainerCount := len(p.Spec.InitContainers)
+	
 	for ctridx, ctrDevice := range pd {
 		if len(ctrDevice) > 0 {
-			return p.Spec.Containers[ctridx], ctrDevice, nil
+			if ctridx < initContainerCount {
+				// This is an init container
+				klog.Infof("Found device request in init container at index %d, name: %s", ctridx, p.Spec.InitContainers[ctridx].Name)
+				return p.Spec.InitContainers[ctridx], ctrDevice, nil
+			} else {
+				// This is a regular container
+				regularContainerIdx := ctridx - initContainerCount
+				if regularContainerIdx < len(p.Spec.Containers) {
+					klog.Infof("Found device request in container at index %d (original idx: %d), name: %s", regularContainerIdx, ctridx, p.Spec.Containers[regularContainerIdx].Name)
+					return p.Spec.Containers[regularContainerIdx], ctrDevice, nil
+				}
+			}
 		}
 	}
 	return corev1.Container{}, res, errors.New("device request not found")
