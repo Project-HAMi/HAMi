@@ -105,7 +105,7 @@ jobs:
             images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@v6.19.1
+        uses: docker/build-push-action@v6.19.2
         with:
             context: .
             file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile.hamimaster
