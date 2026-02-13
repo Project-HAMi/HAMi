@@ -82,62 +82,62 @@ type ClusterManagerCollector struct {
 // Descriptors used by the ClusterManagerCollector below.
 var (
 	hostGPUdesc = prometheus.NewDesc(
-		"HostGPUMemoryUsage",
+		"host_gpu_memory_usage_bytes",
 		"GPU device memory usage",
 		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
-		"HostCoreUtilization",
+		"host_gpu_core_utilization",
 		"GPU core utilization",
 		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
-		"vGPU_device_memory_usage_in_bytes",
+		"vgpu_device_memory_usage_bytes",
 		"vGPU device usage",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 
 	ctrvGPUlimitdesc = prometheus.NewDesc(
-		"vGPU_device_memory_limit_in_bytes",
+		"vgpu_device_memory_limit_bytes",
 		"vGPU device limit",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
-		"Device_memory_desc_of_container",
-		`Container device memory description (The label "context", "module", "data" and "offset" will be deprecated in v2.10.0, use vGPU_device_memory_context_size_bytes, vGPU_device_memory_module_size_bytes and vGPU_device_memory_buffer_size_bytes instead)`,
+		"container_device_memory_usage_bytes",
+		`Container device memory description (The label "context", "module", "data" and "offset" will be deprecated in v2.10.0, use vgpu_device_memory_context_size_bytes, vgpu_device_memory_module_size_bytes and vgpu_device_memory_buffer_size_bytes instead)`,
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
-		"Device_utilization_desc_of_container",
+		"container_device_utilization",
 		"Container device utilization description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	ctrDeviceLastKernelDesc = prometheus.NewDesc(
-		"Device_last_kernel_of_container",
+		"container_device_last_kernel_seconds",
 		"Container device last kernel description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
-		"MigInfo",
+		"mig_device_info",
 		"Mig device information for container",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
 	)
 	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
-		"vGPU_device_memory_context_size_bytes",
+		"vgpu_device_memory_context_size_bytes",
 		"Container device memory context size",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 
 	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
-		"vGPU_device_memory_module_size_bytes",
+		"vgpu_device_memory_module_size_bytes",
 		"Container device memory module size",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 
 	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
-		"vGPU_device_memory_buffer_size_bytes",
+		"vgpu_device_memory_buffer_size_bytes",
 		"Container device memory buffer size",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
