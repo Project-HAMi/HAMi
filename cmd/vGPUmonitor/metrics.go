@@ -80,66 +80,68 @@ type ClusterManagerCollector struct {
 }
 
 // Descriptors used by the ClusterManagerCollector below.
+// Metric and label names follow Prometheus naming best practices:
+// https://prometheus.io/docs/practices/naming/
 var (
 	hostGPUdesc = prometheus.NewDesc(
-		"HostGPUMemoryUsage",
-		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		"hami_host_gpu_memory_used_bytes",
+		"GPU device memory usage in bytes",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
-		"HostCoreUtilization",
-		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		"hami_host_gpu_utilization_ratio",
+		"GPU core utilization ratio (0-100)",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
-		"vGPU_device_memory_usage_in_bytes",
-		"vGPU device usage",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_vgpu_memory_used_bytes",
+		"vGPU device memory usage in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrvGPUlimitdesc = prometheus.NewDesc(
-		"vGPU_device_memory_limit_in_bytes",
-		"vGPU device limit",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_vgpu_memory_limit_bytes",
+		"vGPU device memory limit in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
-		"Device_memory_desc_of_container",
-		`Container device memory description (The label "context", "module", "data" and "offset" will be deprecated in v2.10.0, use vGPU_device_memory_context_size_bytes, vGPU_device_memory_module_size_bytes and vGPU_device_memory_buffer_size_bytes instead)`,
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
+		"hami_container_device_memory_bytes",
+		`Container device memory usage breakdown in bytes (The label "context_size", "module_size", "buffer_size" and "offset" will be deprecated in v2.10.0, use hami_vgpu_memory_context_bytes, hami_vgpu_memory_module_bytes and hami_vgpu_memory_buffer_bytes instead)`,
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "context_size", "module_size", "buffer_size", "offset"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
-		"Device_utilization_desc_of_container",
-		"Container device utilization description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_container_device_utilization_ratio",
+		"Container device SM utilization ratio",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceLastKernelDesc = prometheus.NewDesc(
-		"Device_last_kernel_of_container",
-		"Container device last kernel description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_container_last_kernel_elapsed_seconds",
+		"Seconds since last kernel execution in container",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
-		"MigInfo",
-		"Mig device information for container",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
+		"hami_mig_device_info",
+		"MIG device information for container",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
 	)
 	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
-		"vGPU_device_memory_context_size_bytes",
-		"Container device memory context size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_vgpu_memory_context_bytes",
+		"Container device memory context size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
-		"vGPU_device_memory_module_size_bytes",
-		"Container device memory module size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_vgpu_memory_module_bytes",
+		"Container device memory module size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
-		"vGPU_device_memory_buffer_size_bytes",
-		"Container device memory buffer size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		"hami_vgpu_memory_buffer_bytes",
+		"Container device memory buffer size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 )
 
