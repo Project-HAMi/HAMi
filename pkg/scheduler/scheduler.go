@@ -589,15 +589,18 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
-	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
+
+	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get pod", "pod", args.PodName, "namespace", args.PodNamespace)
+		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
+
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
+
+	node, err := s.nodeLister.Get(args.Node)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node", "node", args.Node)
+		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
