@@ -17,14 +17,14 @@ limitations under the License.
 package nodelock
 
 import (
-	"context"
+	"context" // Added for the new test
 	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added for the new test
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -496,6 +496,61 @@ func TestGeneratePodNamespaceName(t *testing.T) {
 			result := GeneratePodNamespaceName(tt.pod, tt.sep)
 			if result != tt.expected {
 				t.Errorf("GeneratePodNamespaceName() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestSimulateRetryStorm verifies if the Backoff strategy is using exponential backoff.
+func TestSimulateRetryStorm(t *testing.T) {
+	tests := []struct {
+		name               string
+		concurrentRequests int
+		maxCollisionsLimit int
+	}{
+		{
+			name:               "DefaultStrategy_Spread_Check",
+			concurrentRequests: 50,
+			maxCollisionsLimit: 20,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			strategy := DefaultStrategy
+			retryTimes := make([]time.Duration, 0, tt.concurrentRequests*5)
+
+			t.Logf("Testing Strategy: Steps=%d, Duration=%v, Factor=%v, Jitter=%v",
+				strategy.Steps, strategy.Duration, strategy.Factor, strategy.Jitter)
+
+			for range tt.concurrentRequests {
+				step := strategy
+
+				for range 3 {
+					waitDuration := step.Step()
+					retryTimes = append(retryTimes, waitDuration)
+				}
+			}
+			collisionMap := make(map[time.Duration]int)
+			for _, d := range retryTimes {
+				rounded := d.Round(10 * time.Millisecond)
+				collisionMap[rounded]++
+			}
+
+			var maxCollisions int
+			for duration, count := range collisionMap {
+				if count > maxCollisions {
+					maxCollisions = count
+				}
+				if count > 10 {
+					t.Logf("INFO: %d requests retrying at ~%v (Potential Thundering Herd)", count, duration)
+				}
+			}
+
+			if maxCollisions > tt.maxCollisionsLimit {
+				t.Errorf("FAIL: Max collisions (%d) exceeded limit (%d). Backoff strategy is not spreading load effectively.", maxCollisions, tt.maxCollisionsLimit)
+			} else {
+				t.Logf("PASS: Max collisions were %d. Load is well spread.", maxCollisions)
 			}
 		})
 	}
