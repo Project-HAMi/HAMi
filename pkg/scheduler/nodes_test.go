@@ -18,13 +18,18 @@ package scheduler
 
 import (
 	"fmt"
+	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/metax"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_addNode_ListNodes(t *testing.T) {
@@ -319,6 +324,138 @@ func Test_rmNodeDevices(t *testing.T) {
 				},
 			}
 			m.rmNodeDevices(test.args.nodeID, test.args.deviceVendor)
+		})
+	}
+}
+
+func Test_rmDeviceByNodeAnnotation(t *testing.T) {
+	id1 := "60151478-4709-4242-a8c1-a944252d194b"
+	id2 := "33c00a52-72ab-4b61-a7ce-43107588835b"
+	type args struct {
+		nodeInfo *device.NodeInfo
+	}
+	tests := []struct {
+		name string
+		args args
+		want map[string][]device.DeviceInfo
+	}{
+		{
+			name: "Test space condition",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1 + " ", " " + id2 + " "}, ",")}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
+		},
+		{
+			name: "Test remove one device",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id1}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
+		},
+		{
+			name: "Test remove two devices",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id1, id2}, ",")}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {}},
+		},
+		{
+			name: "Test remove one device and keep one device",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: strings.Join([]string{id2}, ",")}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}, {DeviceVendor: nvidia.NvidiaGPUDevice, ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+		},
+		{
+			name: "Test no removing device, case1",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"test-key": ""}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+		},
+		{
+			name: "Test no removing device, case2",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.GPUNoUseUUID: id2}}},
+					Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{DeviceVendor: nvidia.NvidiaGPUDevice, ID: id1}}},
+		},
+		{
+			name: "Test removing metax device, case1",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					// Devices: []device.DeviceInfo{{DeviceVendor: metax.MetaxGPUDevice, ID: id1}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: {{DeviceVendor: metax.MetaxGPUDevice, ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{metax.MetaxGPUDevice: {}},
+		},
+		{
+			name: "Test removing metax sgpu device",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{metax.MetaxNoUseUUID: id1}}},
+					Devices: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: {{DeviceVendor: metax.MetaxSGPUDevice, ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{metax.MetaxSGPUDevice: {}},
+		},
+		{
+			name: "Test removing ascend device with dynamic annotation",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hami.io/no-use-Ascend910B-uuid": id1}}},
+					Devices: map[string][]device.DeviceInfo{"Ascend910B": {{DeviceVendor: "Ascend910B", ID: id1}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{"Ascend910B": {}},
+		},
+		{
+			name: "Test removing ascend device and keep one device",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hami.io/no-use-Ascend910A-uuid": id2}}},
+					Devices: map[string][]device.DeviceInfo{"Ascend910A": {{DeviceVendor: "Ascend910A", ID: id1}, {DeviceVendor: "Ascend910A", ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{"Ascend910A": {{DeviceVendor: "Ascend910A", ID: id1}}},
+		},
+		{
+			name: "Test removing multiple ascend devices",
+			args: args{
+				nodeInfo: &device.NodeInfo{
+					Node:    &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{"hami.io/no-use-Ascend310P-uuid": strings.Join([]string{id1, id2}, ",")}}},
+					Devices: map[string][]device.DeviceInfo{"Ascend310P": {{DeviceVendor: "Ascend310P", ID: id1}, {DeviceVendor: "Ascend310P", ID: id2}}},
+				},
+			},
+			want: map[string][]device.DeviceInfo{"Ascend310P": {}},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := rmDeviceByNodeAnnotation(tt.args.nodeInfo); !reflect.DeepEqual(got, tt.want) {
+				t.Errorf("rmDeviceByNodeAnnotation() = %v, want %v", got, tt.want)
+			}
 		})
 	}
 }

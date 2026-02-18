@@ -41,6 +41,11 @@ const (
 	Ascend910Prefix        = "Ascend910"
 	Ascend910CType         = "Ascend910C"
 	Ascend910NetworkWeight = 10
+	// Ascend device vendor identifier.
+	AscendDevice = "Ascend"
+	// Ascend NoUse UUID annotation key prefix and suffix.
+	AscendNoUseUUIDPrefix = "hami.io/no-use-"
+	AscendNoUseUUIDSuffix = "-uuid"
 )
 
 type Devices struct {
