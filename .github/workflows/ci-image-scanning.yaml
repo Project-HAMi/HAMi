@@ -50,7 +50,7 @@ jobs:
         # Prevent running from the forked repository that doesn't need to upload coverage.
         # In addition, running on the forked repository would fail as missing the necessary secret.
         if: ${{ github.repository == 'Project-HAMi/HAMi' }}
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
           format: "table"
@@ -59,7 +59,7 @@ jobs:
           vuln-type: "os,library"
           trivyignores: .trivyignore
       - name: Run Trivy vulnerability scanner (SARIF)
-        uses: aquasecurity/trivy-action@0.33.1
+        uses: aquasecurity/trivy-action@0.34.0
         with:
           image-ref: "projecthami/hami:${{ steps.runtime-tag.outputs.tag }}"
           format: "sarif"
