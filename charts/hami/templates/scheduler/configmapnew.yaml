@@ -85,6 +85,12 @@ data:
         ignoredByScheduler: true
       {{- end }}
       {{- end }}
+      {{- if .Values.devices.vastai.enabled }}
+      {{- range .Values.devices.vastai.customresources }}
+      - name: {{ . }}
+        ignoredByScheduler: true
+      {{- end }}
+      {{- end }}
       {{- range .Values.devices.awsneuron.customresources }}
       - name: {{ . }}
         ignoredByScheduler: true
