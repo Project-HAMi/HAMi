@@ -64,16 +64,16 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				// Poll may return false when context is cancelled
 				err := fmt.Errorf("context cancelled")
 				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			extenderFilterResult, err = s.Filter(extenderArgs)
-			if err != nil {
-				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 				extenderFilterResult = &extenderv1.ExtenderFilterResult{
 					Error: err.Error(),
+				}
+			} else {
+				extenderFilterResult, err = s.Filter(extenderArgs)
+				if err != nil {
+					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
+					extenderFilterResult = &extenderv1.ExtenderFilterResult{
+						Error: err.Error(),
+					}
 				}
 			}
 		}
@@ -82,7 +82,11 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: fmt.Sprintf("Failed to marshal extender filter result: %s", err.Error()),
+			}
+			resultBody, _ = json.Marshal(extenderFilterResult)
+			w.Write(resultBody)
 		} else {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -120,8 +124,11 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
-			w.Write([]byte(errMsg))
+			extenderBindingResult = &extenderv1.ExtenderBindingResult{
+				Error: fmt.Sprintf("Failed to marshal binding result: %s", err.Error()),
+			}
+			response, _ := json.Marshal(extenderBindingResult)
+			w.Write(response)
 		} else {
 			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
