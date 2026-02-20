@@ -30,11 +30,7 @@ spec:
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
         hami.io/webhook: ignore
       annotations:
-        {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
-        checksum/hami-scheduler-newversion-config: {{ include (print $.Template.BasePath "/scheduler/configmapnew.yaml") . | sha256sum }}
-        {{- else }}
         checksum/hami-scheduler-config: {{ include (print $.Template.BasePath "/scheduler/configmap.yaml") . | sha256sum }}
-        {{- end }}
         checksum/hami-scheduler-device-config: {{ include (print $.Template.BasePath "/scheduler/device-configmap.yaml") . | sha256sum }}
       {{- if .Values.scheduler.podAnnotations }}
         {{- toYaml .Values.scheduler.podAnnotations | nindent 8 }}
@@ -206,11 +202,7 @@ spec:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
-            {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
-            name: {{ template "hami-vgpu.scheduler" . }}-newversion
-            {{- else }}
             name: {{ template "hami-vgpu.scheduler" . }}
-            {{- end }}
         {{- end }}
         - name: device-config
           configMap:
