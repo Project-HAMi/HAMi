@@ -183,7 +183,7 @@ jobs:
           docker save ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }} -o image.tar
 
       - name: Upload image.tar as artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: hami-image
           path: image.tar
@@ -239,7 +239,7 @@ jobs:
           mv charts/*.tgz tmp
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: chart_package_artifact
           path: tmp/*
