@@ -103,16 +103,16 @@ func Test_GetNodeDevices(t *testing.T) {
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Annotations: map[string]string{
-						"hami.io/node-va-register": "[{\"id\":\"7-0-batch-0\",\"count\":1,\"type\":\"Vastai\",\"health\":true,\"devicepairscore\":{}}]",
+						"hami.io/node-va-register": "[{\"id\":\"7-0\",\"count\":1,\"devmem\":32768,\"type\":\"Vastai\",\"health\":true,\"devicepairscore\":{}}]",
 					},
 				},
 			},
 			want: []*device.DeviceInfo{
 				{
-					ID:           "7-0-batch-0",
+					ID:           "7-0",
 					Count:        int32(1),
-					Devmem:       int32(0),
-					Devcore:      int32(0),
+					Devmem:       int32(32768),
+					Devcore:      int32(100),
 					Type:         dev.CommonWord(),
 					Numa:         0,
 					Health:       true,
@@ -833,6 +833,122 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 				if tt.deviceUsage.Used != tt.wantUsage.Used {
 					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
+				}
+			}
+		})
+	}
+}
+
+func TestComputeBestCombination(t *testing.T) {
+	tests := []struct {
+		name             string
+		reqNum           int
+		containerDevices device.ContainerDevices
+		expected         device.ContainerDevices
+		expectedCount    int
+	}{
+		{
+			name:   "single AIC group, sufficient to meet demand",
+			reqNum: 2,
+			containerDevices: device.ContainerDevices{
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "1"}},
+			},
+			expected: device.ContainerDevices{
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+			},
+			expectedCount: 2,
+		},
+		{
+			name:   "multiple AIC groups, select by count after sorting",
+			reqNum: 3,
+			containerDevices: device.ContainerDevices{
+				// aic1 group has 3 devices
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "1"}},
+				// aic2 group has 2 devices
+				{Idx: 4, UUID: "dev4", CustomInfo: map[string]any{"AIC": "2"}},
+				{Idx: 5, UUID: "dev5", CustomInfo: map[string]any{"AIC": "2"}},
+				// aic3 group has 1 device
+				{Idx: 6, UUID: "dev6", CustomInfo: map[string]any{"AIC": "3"}},
+			},
+			expected: device.ContainerDevices{
+				// Should take from the group with the highest count (aic1)
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "1"}},
+			},
+			expectedCount: 3,
+		},
+		{
+			name:   "multiple AIC groups, need to take across groups",
+			reqNum: 4,
+			containerDevices: device.ContainerDevices{
+				// aic1 group has 3 devices
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "1"}},
+				// aic2 group has 2 devices
+				{Idx: 4, UUID: "dev4", CustomInfo: map[string]any{"AIC": "2"}},
+				{Idx: 5, UUID: "dev5", CustomInfo: map[string]any{"AIC": "2"}},
+				// aic3 group has 1 device
+				{Idx: 6, UUID: "dev6", CustomInfo: map[string]any{"AIC": "3"}},
+			},
+			expected: device.ContainerDevices{
+				// Take all 3 from aic1 group first
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "1"}},
+				// Then take 1 from aic2 group
+				{Idx: 4, UUID: "dev4", CustomInfo: map[string]any{"AIC": "2"}},
+			},
+			expectedCount: 4,
+		},
+		{
+			name:   "request number exceeds available devices",
+			reqNum: 5,
+			containerDevices: device.ContainerDevices{
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "2"}},
+			},
+			expected: device.ContainerDevices{
+				{Idx: 1, UUID: "dev1", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 2, UUID: "dev2", CustomInfo: map[string]any{"AIC": "1"}},
+				{Idx: 3, UUID: "dev3", CustomInfo: map[string]any{"AIC": "2"}},
+			},
+			expectedCount: 3,
+		},
+	}
+	compareFunc := func(a, b device.ContainerDevices) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i].UUID != b[i].UUID {
+				return false
+			}
+		}
+		return true
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &VastaiDevices{} // Assume this is your struct
+			result := dev.computeBestCombination(tt.reqNum, tt.containerDevices)
+
+			// Check result count
+			if len(result) != tt.expectedCount {
+				t.Errorf("Expected %d devices, got %d", tt.expectedCount, len(result))
+			}
+
+			// If expected result is not empty, check specific content
+			if tt.expectedCount > 0 {
+				if !compareFunc(result, tt.expected) {
+					t.Errorf("Device list does not match\nExpected: %+v\nGot: %+v", tt.expected, result)
 				}
 			}
 		})

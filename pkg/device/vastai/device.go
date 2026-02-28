@@ -19,6 +19,7 @@ package vastai
 import (
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -81,9 +82,10 @@ func (dev *VastaiDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 	klog.V(5).InfoS("nodes device information", "node", n.Name, "nodedevices", devEncoded)
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = VastaiCommonWord
+		nodedevices[idx].Devcore = 100 // only for calscore use
 	}
 	if len(nodedevices) == 0 {
-		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", devEncoded)
+		klog.InfoS("no vastai device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
 	}
 	return nodedevices, nil
@@ -176,7 +178,43 @@ func (dev *VastaiDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[strin
 }
 
 func (dev *VastaiDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
-	return 0
+	score := float32(0)
+	for _, containerDevices := range podDevices {
+		if len(containerDevices) == 0 {
+			continue
+		}
+		cntMap := make(map[string]int)
+		for _, device := range containerDevices {
+			if device.CustomInfo == nil {
+				return 0
+			}
+			if strategy, ok := device.CustomInfo["DeviceStrategy"]; ok {
+				if val, ok := strategy.(string); ok && val != "die" {
+					return 0
+				}
+			}
+			if AIC, ok := device.CustomInfo["AIC"]; ok {
+				if id, ok := AIC.(string); ok {
+					cntMap[id]++
+				}
+			} else {
+				return 0
+			}
+		}
+		maxCnt, totalCnt := 0, 0
+		for _, cnt := range cntMap {
+			if cnt > maxCnt {
+				maxCnt = cnt
+			}
+			totalCnt += cnt
+		}
+		if totalCnt == 0 {
+			continue
+		}
+		score += float32(maxCnt) / float32(totalCnt)
+	}
+	klog.V(4).InfoS("ScoreNode", "node", node.Name, "deviceType", dev.CommonWord(), "score", score)
+	return score
 }
 
 func (dev *VastaiDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
@@ -189,28 +227,19 @@ func (dev *VastaiDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsag
 func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
-	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	dieMode := isDieMode(devices)
 	for i := range len(devices) {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, numa := va.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, _ := va.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
 			continue
-		}
-		if numa && prevnuma != dev.Numa {
-			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
-				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
-			}
-			k.Nums = originReq
-			prevnuma = dev.Numa
-			tmpDevs = make(map[string]device.ContainerDevices)
 		}
 		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, VastaiUseUUID, VastaiNoUseUUID, VastaiCommonWord) {
 			reason[common.CardUUIDMismatch]++
@@ -218,60 +247,45 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			continue
 		}
 
-		memreq := int32(0)
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
 			continue
 		}
-		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Coresreq = 100
-		}
-		if k.Memreq > 0 {
-			memreq = k.Memreq
-		}
-		if k.MemPercentagereq != 101 && k.Memreq == 0 {
-			memreq = dev.Totalmem * k.MemPercentagereq / 100
-		}
-		if dev.Totalmem-dev.Usedmem < memreq {
-			reason[common.CardInsufficientMemory]++
-			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
-			continue
-		}
-		if dev.Totalcore-dev.Usedcores < k.Coresreq {
-			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
-			continue
-		}
-		// Coresreq=100 indicates it want this card exclusively
-		if dev.Totalcore == 100 && k.Coresreq == 100 && dev.Used > 0 {
-			reason[common.ExclusiveDeviceAllocateConflict]++
-			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
-			continue
-		}
-		// You can't allocate core=0 job to an already full GPU
-		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
-			reason[common.CardComputeUnitsExhausted]++
-			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
-			continue
-		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Nums--
+			if !dieMode {
+				k.Nums--
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
-				Idx:       int(dev.Index),
-				UUID:      dev.ID,
-				Type:      k.Type,
-				Usedmem:   memreq,
-				Usedcores: k.Coresreq,
+				Idx:        int(dev.Index),
+				UUID:       dev.ID,
+				Type:       k.Type,
+				Usedcores:  k.Coresreq,
+				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 {
+		if k.Nums == 0 && !dieMode {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
 
+	}
+
+	if dieMode {
+		if len(tmpDevs[k.Type]) == int(originReq) {
+			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
+			return true, tmpDevs, ""
+		} else if len(tmpDevs[k.Type]) > int(originReq) {
+			if originReq == 1 {
+				tmpDevs[k.Type] = device.ContainerDevices{tmpDevs[k.Type][0]}
+			} else {
+				// If requesting multiple devices, select the best combination of cards.
+				tmpDevs[k.Type] = va.computeBestCombination(int(originReq), tmpDevs[k.Type])
+			}
+			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+			return true, tmpDevs, ""
+		}
 	}
 	if len(tmpDevs) > 0 {
 		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
@@ -284,4 +298,60 @@ func (dev *VastaiDevices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
 		ResourceCountName: VastaiResourceCount,
 	}
+}
+
+func (dev *VastaiDevices) computeBestCombination(reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
+	deviceMap := make(map[string]device.ContainerDevices)
+	for _, dev := range containerDevices {
+		if dev.CustomInfo != nil {
+			if AIC, ok := dev.CustomInfo["AIC"]; ok {
+				if id, ok := AIC.(string); ok {
+					deviceMap[id] = append(deviceMap[id], dev)
+				}
+			}
+		}
+	}
+
+	type DeviceCount struct {
+		ID    string
+		Count int
+	}
+	var sortedDevices []DeviceCount
+	for id, devices := range deviceMap {
+		sortedDevices = append(sortedDevices, DeviceCount{
+			ID:    id,
+			Count: len(devices),
+		})
+	}
+
+	sort.SliceStable(sortedDevices, func(i, j int) bool {
+		return sortedDevices[i].Count > sortedDevices[j].Count
+	})
+	result := device.ContainerDevices{}
+	for _, item := range sortedDevices {
+		devices := deviceMap[item.ID]
+		for _, dev := range devices {
+			result = append(result, dev)
+			if len(result) == reqNum {
+				return result
+			}
+		}
+	}
+	return result
+}
+
+func isDieMode(devices []*device.DeviceUsage) bool {
+	if len(devices) == 0 {
+		return false
+	}
+	dev := devices[0]
+	if dev.CustomInfo == nil {
+		return false
+	}
+	if strategy, ok := dev.CustomInfo["DeviceStrategy"]; ok {
+		if val, ok := strategy.(string); ok && val == "die" {
+			return true
+		}
+	}
+	return false
 }
