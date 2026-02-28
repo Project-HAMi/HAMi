@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -353,11 +354,45 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	// Only do registration when we are leader
-	if !s.leaderManager.IsLeader() {
+
+	isLeader := s.leaderManager.IsLeader()
+	pod, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).Get(os.Getenv("POD_NAME"))
+	if err != nil {
+		klog.Fatal(err, "Failed to get hami scheduler pod from lister", "namespace", os.Getenv("POD_NAMESPACE"), "pod", os.Getenv("POD_NAME"))
+	}
+	if isLeader {
+		// Current pod is leader, add or change the role label to leader
+		if pod.Labels == nil || pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueLeader {
+			err := util.PatchPodLabels(
+				os.Getenv("POD_NAMESPACE"),
+				os.Getenv("POD_NAME"),
+				map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueLeader},
+			)
+			if err != nil {
+				klog.ErrorS(err, "Failed to patch leader label to pod", "namespace", os.Getenv("POD_NAMESPACE"), "pod", os.Getenv("POD_NAME"))
+			} else {
+				klog.V(4).InfoS("Successfully patched leader label to hami scheduler pod", "namespace", os.Getenv("POD_NAMESPACE"), "pod", os.Getenv("POD_NAME"))
+			}
+		}
+	} else {
+		// Current pod is not leader, add or change the role label to follower
+		if pod.Labels != nil && pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueFollower {
+			err := util.PatchPodLabels(
+				os.Getenv("POD_NAMESPACE"),
+				os.Getenv("POD_NAME"),
+				map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueFollower},
+			)
+			if err != nil {
+				klog.ErrorS(err, "Failed to patch leader label from pod", "namespace", os.Getenv("POD_NAMESPACE"), "pod", os.Getenv("POD_NAME"))
+			} else {
+				klog.V(4).InfoS("Successfully add follower label to hami scheduler pod", "namespace", os.Getenv("POD_NAMESPACE"), "pod", os.Getenv("POD_NAME"))
+			}
+		}
+		// Only do registration when we are leader
 		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
 		return
 	}
+
 	rawNodes, err := s.nodeLister.List(labelSelector)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())

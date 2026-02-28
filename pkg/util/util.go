@@ -183,6 +183,33 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	return err
 }
 
+func PatchPodLabels(namespace, name string, labels map[string]string) error {
+	type patchMetadata struct {
+		Labels map[string]string `json:"labels,omitempty"`
+	}
+	type patchPod struct {
+		Metadata patchMetadata `json:"metadata"`
+	}
+
+	p := patchPod{
+		Metadata: patchMetadata{
+			Labels: labels,
+		},
+	}
+
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	klog.V(5).InfoS("Patching pod labels", "namespace", namespace, "name", name, "labels", labels)
+	_, err = client.GetClient().CoreV1().Pods(namespace).
+		Patch(context.Background(), name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to patch pod labels", "namespace", namespace, "name", name)
+	}
+	return err
+}
+
 func InitKlogFlags() *flag.FlagSet {
 	// Init log flags
 	flagset := flag.NewFlagSet("klog", flag.ExitOnError)

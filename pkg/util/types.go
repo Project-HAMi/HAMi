@@ -38,6 +38,13 @@ const (
 	NodeNameEnvName = "NODE_NAME"
 	TaskPriority    = "CUDA_TASK_PRIORITY"
 	CoreLimitSwitch = "GPU_CORE_UTILIZATION_POLICY"
+
+	// LeaderRoleLabel is the label key used to identify the leader pod.
+	HAMiRoleLabel = "hami.io/scheduler-role"
+	// LeaderRoleLabelValueLeader is the label value used to identify the leader pod.
+	HAMiRoleLabelValueLeader = "leader"
+	// LeaderRoleLabelValueFollower is the label value used to identify the follower pod.
+	HAMiRoleLabelValueFollower = "follower"
 )
 
 var (
