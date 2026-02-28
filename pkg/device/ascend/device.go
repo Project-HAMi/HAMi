@@ -454,9 +454,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				var combination device.ContainerDevices
 				if k.Type == Ascend910CType {
 					// Use topology-aware allocation for Ascend910C: only select full modules (2 NPUs per card).
-					combination = npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
+					combination = npu.computeBestCombination910C(int(originReq), tmpDevs[k.Type])
 				} else {
-					combination = npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
+					combination = npu.computeBestCombination(int(originReq), tmpDevs[k.Type])
 				}
 				tmpDevs[k.Type] = combination
 			}
@@ -484,19 +484,13 @@ func hasNetworkID(devices []*device.DeviceUsage) bool {
 	return true
 }
 
-func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
-	deviceMap := make(map[string]*device.DeviceInfo)
-	for _, dev := range nodeInfo.Devices[npudev.config.CommonWord] {
-		deviceMap[dev.ID] = &dev
-	}
+func (npudev *Devices) computeBestCombination(reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
 	networkDeviceMap := make(map[int]device.ContainerDevices)
-	for _, containerDevice := range containerDevices {
-		if dev, ok := deviceMap[containerDevice.UUID]; ok {
-			if dev.CustomInfo != nil {
-				if networkID, ok := dev.CustomInfo["NetworkID"]; ok {
-					if id, ok := networkID.(float64); ok {
-						networkDeviceMap[int(id)] = append(networkDeviceMap[int(id)], containerDevice)
-					}
+	for _, dev := range containerDevices {
+		if dev.CustomInfo != nil {
+			if networkID, ok := dev.CustomInfo["NetworkID"]; ok {
+				if id, ok := networkID.(float64); ok {
+					networkDeviceMap[int(id)] = append(networkDeviceMap[int(id)], dev)
 				}
 			}
 		}
@@ -530,7 +524,7 @@ func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum 
 	return result
 }
 
-func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
+func (npudev *Devices) computeBestCombination910C(reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
 	// Build a mapping from NPU index to device object for quick lookup.
 	indexToDevice := make(map[int]device.ContainerDevice)
 	var npuIndices []int
