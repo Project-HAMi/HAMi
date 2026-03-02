@@ -38,7 +38,7 @@ data:
       weight: 1
       httpTimeout: 30s
       managedResources:
-      {{- include "hami-vgpu.scheduler.managedResources.yaml" . | nindent 6 }}
+      {{- include "hami-vgpu.scheduler.managedResources" . | nindent 6 }}
 {{- else }}
   {{/* K8s < 1.22: Use legacy Policy API */}}
   config.json: |
@@ -62,9 +62,7 @@ data:
                 "weight": 1,
                 "nodeCacheCapable": true,
                 "httpTimeout": 30000000000,
-                "managedResources": [
-                    {{- include "hami-vgpu.scheduler.managedResources.json" . | nindent 20 }}
-                ],
+                "managedResources": {{ include "hami-vgpu.scheduler.managedResources" . | fromYamlArray | toJson }},
                 "ignoreable": false
             }
         ]
