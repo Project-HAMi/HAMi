@@ -169,7 +169,6 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
-      # - ssdl-anonymization
     # namespaceSelector controls which namespaces the webhook will be applied to.
     # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
     # You can add additional matchLabels or matchExpressions to further filter namespaces.
