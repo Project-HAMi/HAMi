@@ -131,6 +131,9 @@ spec:
               {{- $first = false -}}
               {{- end -}}
             {{- end }}
+            {{- if .Values.legacyMetrics }}
+            - --legacy-metrics=true
+            {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
             {{- end }}
