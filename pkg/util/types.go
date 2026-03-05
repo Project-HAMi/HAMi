@@ -45,6 +45,11 @@ const (
 	HAMiRoleLabelValueLeader = "leader"
 	// LeaderRoleLabelValueFollower is the label value used to identify the follower pod.
 	HAMiRoleLabelValueFollower = "follower"
+
+	// HAMiSchedulerLabelValue is the label key to identify the component of HAMi in Kubernetes.
+	HAMiComponentLabel = "app.kubernetes.io/component"
+	// HAMiComponentScheduler the label value for hami-scheduler.
+	HAMiComponentScheduler = "hami-scheduler"
 )
 
 var (
