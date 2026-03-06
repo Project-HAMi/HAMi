@@ -153,14 +153,11 @@ func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
 		klog.Infoln("Readiness check endpoint hit")
 
-		ok := s.GetLeaderManager().IsLeader()
-		if !ok {
-			klog.Infoln("Not leader yet")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
+		if s.GetLeaderManager().IsLeader() {
+			klog.Infoln("This scheduler extender replica is the leader")
+		} else {
+			klog.Infoln("This scheduler extender replica has not become the leader yet")
 		}
-
-		klog.Infoln("Scheduler extender is leader")
 		w.WriteHeader(http.StatusOK)
 	}
 }
