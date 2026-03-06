@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: vastai-pod
+spec:
+  containers:
+    - name: test
+      image: harbor.vastaitech.com/ai_deliver/vllm_vacc:VVI-25.12.SP2
+      command: ["sleep", "infinity"]
+      resources:
+        limits:
+          vastaitech.com/va: 1

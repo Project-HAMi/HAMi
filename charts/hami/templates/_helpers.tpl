@@ -233,6 +233,12 @@ Returns a YAML list that can be used directly or converted to JSON via fromYaml 
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
 {{- end -}}
 {{- end -}}
+{{/* Vastai resources */}}
+{{- if .Values.devices.vastai.enabled -}}
+{{- range .Values.devices.vastai.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
 {{/* AMD resources */}}
 {{- range .Values.devices.amd.customresources -}}
 {{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}

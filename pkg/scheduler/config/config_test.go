@@ -39,6 +39,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/metax"
 	"github.com/Project-HAMi/HAMi/pkg/device/mthreads"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/device/vastai"
 )
 
 func loadTestConfig() string {
@@ -426,6 +427,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		kunlun.XPUDevice:             kunlun.XPUCommonWord,
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 		amd.AMDDevice:                amd.AMDDevice,
+		vastai.VastaiDevice:          vastai.VastaiCommonWord,
 	}
 
 	return expectedDevices, device.DevicesMap
