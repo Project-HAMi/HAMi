@@ -128,11 +128,20 @@ func TestPodDevicesCoding(t *testing.T) {
 	tests := []struct {
 		name string
 		args PodDevices
+		// want is the expected result after encode->decode roundtrip
+		// Due to the annotation format ending with ";", decode will produce an extra empty ContainerDevices
+		want PodDevices
 	}{
 		{
 			name: "one pod one container use zero device",
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{},
+			},
+			// Empty PodSingleDevice encodes to "", which decodes back to empty (no trailing ";")
+			want: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{},
+				},
 			},
 		},
 		{
@@ -142,6 +151,15 @@ func TestPodDevicesCoding(t *testing.T) {
 					ContainerDevices{
 						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
 					},
+				},
+			},
+			// Encodes to "UUID1,Type1,1000,30:;", trailing ";" produces extra empty ContainerDevices
+			want: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+					},
+					ContainerDevices{},
 				},
 			},
 		},
@@ -157,6 +175,18 @@ func TestPodDevicesCoding(t *testing.T) {
 					},
 				},
 			},
+			// Encodes to "UUID1,Type1,1000,30:;UUID1,Type1,1000,30:;", trailing ";" produces extra empty ContainerDevices
+			want: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+					},
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+					},
+					ContainerDevices{},
+				},
+			},
 		},
 		{
 			name: "one pod one container use two devices",
@@ -168,6 +198,16 @@ func TestPodDevicesCoding(t *testing.T) {
 					},
 				},
 			},
+			// Encodes to "UUID1,Type1,1000,30:UUID2,Type1,1000,30:;", trailing ";" produces extra empty ContainerDevices
+			want: PodDevices{
+				"NVIDIA": PodSingleDevice{
+					ContainerDevices{
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
+					},
+					ContainerDevices{},
+				},
+			},
 		},
 	}
 	for _, test := range tests {
@@ -175,7 +215,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			s := EncodePodDevices(inRequestDevices, test.args)
 			fmt.Println(s)
 			got, _ := DecodePodDevices(inRequestDevices, s)
-			assert.DeepEqual(t, test.args, got)
+			assert.DeepEqual(t, test.want, got)
 		})
 	}
 }
@@ -217,6 +257,7 @@ func Test_DecodePodDevices(t *testing.T) {
 					SupportDevices["NVIDIA"]:   "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:;GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,NVIDIA,500,3:;",
 				},
 			},
+			// Trailing ";" produces an extra empty ContainerDevices
 			want: PodDevices{
 				"NVIDIA": {
 					{
@@ -235,6 +276,7 @@ func Test_DecodePodDevices(t *testing.T) {
 							Usedcores: 3,
 						},
 					},
+					{},
 				},
 			},
 			wantErr: nil,
