@@ -146,7 +146,7 @@ var (
 	)
 )
 
-// Legacy metric descriptors (populated only when --legacy-metrics is enabled)
+// Legacy metric descriptors (populated only when --legacy-metrics is enabled).
 var (
 	legacyHostGPUdesc              *prometheus.Desc
 	legacyHostGPUUtilizationdesc   *prometheus.Desc
