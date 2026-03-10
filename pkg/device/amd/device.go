@@ -240,3 +240,6 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
+func add(a, b int) int {
+	return a + b
+}
