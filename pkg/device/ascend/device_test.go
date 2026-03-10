@@ -1867,3 +1867,6 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 		})
 	}
 }
+func add(a, b int) int {
+	return a + b
+}
