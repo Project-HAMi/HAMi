@@ -41,3 +41,6 @@ func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&EnflameResourceNameVGCU, "enflame-vgcu-resource-name", "enflame.com/vgcu", "enflame shared gcu count resource name")
 	fs.StringVar(&EnflameResourceNameVGCUPercentage, "enflame-vgcu-percentage-resource-name", "enflame.com/vgcu-percentage", "enflame shared gcu percentage resource name")
 }
+func add01(a, b int) int {
+	return a + b
+}
