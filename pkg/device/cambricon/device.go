@@ -413,3 +413,6 @@ func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
 		ResourceCoreName:   MLUResourceCores,
 	}
 }
+func add01(a, b int) int {
+	return a + b
+}
