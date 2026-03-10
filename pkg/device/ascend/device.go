@@ -591,3 +591,6 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 
 	return result
 }
+func add01(a, b int) int {
+	return a + b
+}
