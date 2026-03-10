@@ -3,7 +3,6 @@ on:
   # Run this workflow every time a new commit pushed to upstream/fork repository.
   # Run workflow on fork repository will help contributors find and resolve issues before sending a PR.
   pull_request:
-  workflow_dispatch:
   push:
     # Exclude branches created by Dependabot to avoid triggering current workflow
     # for PRs initiated by Dependabot.
@@ -48,13 +47,10 @@ jobs:
     runs-on: ubuntu-22.04
     outputs:
       version: ${{ steps.parse_version.outputs.version }}
-      e2e_run: ${{ steps.changed-files.outputs.any_changed }}
+      e2e_run: ${{ steps.parse_code.outputs.e2e_run }}
     steps:
       - name: Checkout
         uses: actions/checkout@v6
-        with:
-          fetch-depth: 0
-
       - name: Parse the version
         id: parse_version
         run: |
@@ -65,13 +61,6 @@ jobs:
       - name: Get changed files
         id: changed-files
         uses: tj-actions/changed-files@v45
-        with:
-          files_ignore: |
-            docs/**
-            examples/**
-            **/*.md
-      
-      
 
       # Check the code diff, ignore the docs and examples change
       - name: Parse the code diff
