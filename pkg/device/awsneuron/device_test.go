@@ -857,3 +857,6 @@ func TestDevices_Fit(t *testing.T) {
 		})
 	}
 }
+func add01(a, b int) int {
+	return a + b
+}
