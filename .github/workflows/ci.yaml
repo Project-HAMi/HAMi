@@ -60,7 +60,7 @@ jobs:
           echo "version=${tag}" >> $GITHUB_OUTPUT
       - name: Get changed files
         id: changed-files
-        uses: tj-actions/changed-files@v45
+        uses: tj-actions/changed-files@v47
 
       # Check the code diff, ignore the docs and examples change
       - name: Parse the code diff
