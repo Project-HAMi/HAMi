@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -353,11 +354,16 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	// Only do registration when we are leader
-	if !s.leaderManager.IsLeader() {
+
+	// Only do registration when we are leader.
+	isLeader := s.leaderManager.IsLeader()
+	if isLeader {
+		s.updateSchedulerLabel()
+	} else {
 		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
 		return
 	}
+
 	rawNodes, err := s.nodeLister.List(labelSelector)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
@@ -422,6 +428,62 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced = true
+}
+
+func (s *Scheduler) updateSchedulerLabel() {
+	schedulerSelector := labels.Set(map[string]string{util.HAMiComponentLabel: util.HAMiComponentScheduler}).AsSelector()
+	schedulerPods, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).List(schedulerSelector)
+	if err != nil {
+		klog.Fatalf("Failed to list hami scheduler pods from lister: namespace %s selector %s",
+			os.Getenv("POD_NAMESPACE"),
+			schedulerSelector.String(),
+		)
+	}
+
+	for idx := range schedulerPods {
+		pod := schedulerPods[idx]
+		if pod.Name == os.Getenv("POD_NAME") {
+			// The pod is leader, apply the leader role label to it.
+			if pod.Labels == nil || pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueLeader {
+				err := util.PatchPodLabels(
+					pod.Namespace,
+					pod.Name,
+					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueLeader},
+				)
+				if err != nil {
+					klog.Fatalf("Failed to patch the leader label to hami scheduler pod: namespace %s pod %s",
+						pod.Namespace,
+						pod.Name,
+					)
+				} else {
+					klog.V(4).InfoS("Successfully patched leader label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				}
+			}
+		} else {
+			// The pod is not the leader, apply the follower role label to it.
+			if pod.Labels == nil || pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueFollower {
+				err := util.PatchPodLabels(
+					pod.Namespace,
+					pod.Name,
+					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueFollower},
+				)
+				if err != nil {
+					klog.ErrorS(err, "Failed to patch leader label from pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				} else {
+					klog.V(4).InfoS("Successfully patched follower label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				}
+			}
+		}
+	}
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
