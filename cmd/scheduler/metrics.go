@@ -65,43 +65,43 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for scheduler")
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
-		"GPUDeviceMemoryLimit",
+		"gpu_device_memory_limit_bytes",
 		"Device memory limit for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodevGPUCoreLimitDesc := prometheus.NewDesc(
-		"GPUDeviceCoreLimit",
+		"gpu_device_core_limit",
 		"Device memory core limit for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
-		"GPUDeviceMemoryAllocated",
+		"gpu_device_memory_allocated_bytes",
 		"Device memory allocated for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicetype"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
-		"GPUDeviceSharedNum",
+		"gpu_device_shared_containers",
 		"Number of containers sharing this GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
-		"GPUDeviceCoreAllocated",
+		"gpu_device_core_allocated",
 		"Device core allocated for a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
-		"nodeGPUOverview",
+		"node_gpu_overview",
 		"GPU overview on a certain node",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
-		"nodeGPUMemoryPercentage",
+		"node_gpu_memory_percentage",
 		"GPU Memory Allocated Percentage on a certain GPU",
 		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
-		"nodeGPUMigInstance",
+		"node_gpu_mig_instance",
 		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
 		[]string{"nodeid", "deviceuuid", "deviceidx", "migname"}, nil,
 	)
@@ -171,17 +171,17 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
-		"vGPUMemoryAllocated",
+		"vgpu_memory_allocated_bytes",
 		"vGPU memory allocated from a container",
 		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
-		"vGPUCoreAllocated",
+		"vgpu_core_allocated",
 		"vGPU core allocated from a container",
 		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
 	)
 	quotaUsedDesc := prometheus.NewDesc(
-		"QuotaUsed",
+		"quota_used",
 		"resourcequota usage for a certain device",
 		[]string{"quotanamespace", "quotaName", "limit"}, nil,
 	)
