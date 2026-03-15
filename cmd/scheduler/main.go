@@ -48,6 +48,7 @@ var (
 	tlsKeyFile      string
 	tlsCertFile     string
 	enableProfiling bool
+	legacyMetrics   bool
 	rootCmd         = &cobra.Command{
 		Use:   "scheduler",
 		Short: "kubernetes vgpu scheduler",
@@ -84,6 +85,7 @@ func init() {
 	rootCmd.Flags().BoolVar(&config.LeaderElect, "leader-elect", false, "The pod of hami-scheduler enable leader select")
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceNamespace, "leader-elect-resource-namespace", "", "The namespace of resource object that is used for leader election")
+	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
 
 	rootCmd.PersistentFlags().AddGoFlagSet(config.GlobalFlagSet())
 	rootCmd.AddCommand(version.VersionCmd)
@@ -139,7 +141,7 @@ func start() error {
 	defer sher.Stop()
 
 	// start monitor metrics
-	go initMetrics(config.MetricsBindAddress)
+	go initMetrics(config.MetricsBindAddress, legacyMetrics)
 
 	// start http server
 	router := httprouter.New()
