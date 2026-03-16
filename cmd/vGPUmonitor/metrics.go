@@ -437,7 +437,8 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			return err
 		}
 
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
+		memoryDescLabels := append(labels, "", "", "", "")
+		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryDescLabels...); err != nil {
 			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
