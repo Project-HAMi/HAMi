@@ -90,6 +90,53 @@ helm install vgpu vgpu-charts/vgpu --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`：字符串类型，预设值为 "spread" 表示 GPU 调度策略，
   "binpack"表示尽量将任务分配到同一个 GPU 上，"spread"表示尽量将任务分配到不同 GPU 上。
 
+**Webhook 选择器配置**
+
+准入 Webhook 支持通过 `namespaceSelector` 和 `objectSelector` 进行灵活的基于标签的过滤。默认情况下，Webhook 会排除带有标签 `hami.io/webhook: ignore` 的命名空间/Pod。你可以添加额外的过滤条件来控制 Webhook 应用于哪些命名空间和 Pod。
+
+* `scheduler.admissionWebhook.namespaceSelector.matchLabels`：Map 类型，默认为空。添加命名空间必须具有的标签才能使 Webhook 生效。例如，只将 Webhook 应用于具有特定标签的命名空间：
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      namespaceSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: kubeflow-profile
+  ```
+
+* `scheduler.admissionWebhook.namespaceSelector.matchExpressions`：数组类型，默认为空。添加标签选择器表达式来过滤命名空间。支持的操作符：`In`、`NotIn`、`Exists`、`DoesNotExist`。例如：
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      namespaceSelector:
+        matchExpressions:
+        - key: environment
+          operator: In
+          values:
+          - production
+          - staging
+  ```
+
+* `scheduler.admissionWebhook.objectSelector.matchLabels`：Map 类型，默认为空。添加 Pod 必须具有的标签才能使 Webhook 生效。例如，只将 Webhook 应用于由 HAMi 管理的 Pod：
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      objectSelector:
+        matchLabels:
+          app.kubernetes.io/managed-by: hami
+  ```
+
+* `scheduler.admissionWebhook.objectSelector.matchExpressions`：数组类型，默认为空。添加标签选择器表达式来过滤 Pod。例如，只应用于具有特定启用标签的 Pod：
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      objectSelector:
+        matchExpressions:
+        - key: hami.io/enable
+          operator: In
+          values:
+          - "true"
+  ```
+
 **Webhook TLS 证书配置**
 
 在 Kubernetes 中，为了让 API server 能够与 webhook 组件通信，webhook 需要一个 API server 信任的 TLS 证书。HAMi scheduler 提供了两种生成/配置所需 TLS 证书的方法。

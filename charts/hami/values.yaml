@@ -53,6 +53,9 @@ kunlunResourceName: "kunlunxin.com/xpu"
 kunlunResourceVCountName: "kunlunxin.com/vxpu"
 kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
+#Vastai Parameters
+vastaiResourceName: "vastaitech.com/va"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -169,6 +172,31 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
+    # namespaceSelector controls which namespaces the webhook will be applied to.
+    # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter namespaces.
+    namespaceSelector:
+      matchLabels:
+        # app.kubernetes.io/part-of: kubeflow-profile
+      matchExpressions: []
+      # Example: exclude namespaces with specific labels
+      # - key: environment
+      #   operator: In
+      #   values:
+      #   - development
+      #   - staging
+    # objectSelector controls which pods the webhook will be applied to.
+    # The default matchExpressions exclude pods with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter pods.
+    objectSelector:
+      # matchLabels:
+      #   app.kubernetes.io/managed-by: hami
+      matchExpressions: []
+      # Example: only apply to pods with specific labels
+      # - key: hami.io/enable
+      #   operator: In
+      #   values:
+      #   - "true"
     reinvocationPolicy: Never
     failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
@@ -440,6 +468,10 @@ devices:
     enabled: true
     customresources:
       - mthreads.com/vgpu
+  vastai:
+    enabled: true
+    customresources:
+      - vastaitech.com/va
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1

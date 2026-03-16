@@ -517,3 +517,95 @@ func Test_AllContainersCreated(t *testing.T) {
 		})
 	}
 }
+
+func TestPatchPodLabels(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+
+	// Create test pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels:    map[string]string{},
+		},
+	}
+
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+
+	tests := []struct {
+		name      string
+		namespace string
+		podName   string
+		labels    map[string]string
+		wantErr   bool
+	}{
+		{
+			name:      "patch with valid labels",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "update existing label",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueFollower,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "add multiple labels",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				"test-key1": "test-value1",
+				"test-key2": "test-value2",
+			},
+			wantErr: false,
+		},
+		{
+			name:      "patch non-existent pod",
+			namespace: "default",
+			podName:   "non-existent",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: true,
+		},
+		{
+			name:      "patch non-existent namespace",
+			namespace: "non-existent",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := PatchPodLabels(tt.namespace, tt.podName, tt.labels)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("PatchPodLabels() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			// If success, verify the labels were patched
+			if err == nil {
+				updatedPod, getErr := client.KubeClient.CoreV1().Pods(tt.namespace).Get(context.TODO(), tt.podName, metav1.GetOptions{})
+				if getErr != nil {
+					t.Errorf("Failed to get updated pod: %v", getErr)
+					return
+				}
+				for k, v := range tt.labels {
+					if updatedPod.Labels[k] != v {
+						t.Errorf("Label %s = %s, want %s", k, updatedPod.Labels[k], v)
+					}
+				}
+			}
+		})
+	}
+}

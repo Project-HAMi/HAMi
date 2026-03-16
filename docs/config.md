@@ -74,6 +74,53 @@ helm install hami hami-charts/hami --set devicePlugin.deviceMemoryScaling=5 ...
 * `scheduler.defaultSchedulerPolicy.nodeSchedulerPolicy`: String type, default value is "binpack", representing the GPU node scheduling policy. "binpack" means trying to allocate tasks to the same GPU node as much as possible, while "spread" means trying to allocate tasks to different GPU nodes as much as possible.
 * `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`: String type, default value is "spread", representing the GPU scheduling policy. "binpack" means trying to allocate tasks to the same GPU as much as possible, while "spread" means trying to allocate tasks to different GPUs as much as possible.
 
+**Webhook Selector Configs**
+
+The admission webhook supports flexible label-based filtering through `namespaceSelector` and `objectSelector`. By default, the webhook excludes namespaces/pods with the label `hami.io/webhook: ignore`. You can add additional filtering criteria to control which namespaces and pods the webhook applies to.
+
+* `scheduler.admissionWebhook.namespaceSelector.matchLabels`: Map type, default is empty. Add labels that namespaces must have for the webhook to apply. For example, to only apply the webhook to namespaces with a specific label:
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      namespaceSelector:
+        matchLabels:
+          app.kubernetes.io/part-of: kubeflow-profile
+  ```
+
+* `scheduler.admissionWebhook.namespaceSelector.matchExpressions`: Array type, default is empty. Add label selector expressions to filter namespaces. Supports operators: `In`, `NotIn`, `Exists`, `DoesNotExist`. For example:
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      namespaceSelector:
+        matchExpressions:
+        - key: environment
+          operator: In
+          values:
+          - production
+          - staging
+  ```
+
+* `scheduler.admissionWebhook.objectSelector.matchLabels`: Map type, default is empty. Add labels that pods must have for the webhook to apply. For example, to only apply the webhook to pods managed by HAMi:
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      objectSelector:
+        matchLabels:
+          app.kubernetes.io/managed-by: hami
+  ```
+
+* `scheduler.admissionWebhook.objectSelector.matchExpressions`: Array type, default is empty. Add label selector expressions to filter pods. For example, to only apply to pods with a specific opt-in label:
+  ```yaml
+  scheduler:
+    admissionWebhook:
+      objectSelector:
+        matchExpressions:
+        - key: hami.io/enable
+          operator: In
+          values:
+          - "true"
+  ```
+
 **Webhook TLS Certificate Configs**
 
 In Kubernetes, in order for the API server to communicate with the webhook component, the webhook requires a TLS certificate that the API server is configured to trust. HAMi scheduler provides two methods to generate/configure the required TLS certificate.

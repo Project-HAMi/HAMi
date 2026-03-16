@@ -32,5 +32,6 @@ spec:
       protocol: TCP
   selector:
     app.kubernetes.io/component: hami-scheduler
+    hami.io/scheduler-role: leader
     {{- include "hami-vgpu.selectorLabels" . | nindent 4 }}
 {{- end }}
