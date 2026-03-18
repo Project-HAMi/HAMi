@@ -160,6 +160,9 @@ spec:
           imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
           command:
             - "vGPUmonitor"
+            {{- if .Values.legacyMetrics }}
+            - "--legacy-metrics=true"
+            {{- end }}
             {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}

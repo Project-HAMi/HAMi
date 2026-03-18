@@ -512,5 +512,7 @@ devices:
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
 
+legacyMetrics: false
+
 prometheus:
   enabled: false

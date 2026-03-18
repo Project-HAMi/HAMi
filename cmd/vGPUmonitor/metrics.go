@@ -53,6 +53,7 @@ type ClusterManager struct {
 	// Contains many more fields not listed in this example.
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
+	LegacyMetrics   bool
 }
 
 // ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
@@ -80,68 +81,134 @@ type ClusterManagerCollector struct {
 }
 
 // Descriptors used by the ClusterManagerCollector below.
+// Metric and label names follow Prometheus naming best practices:
+// https://prometheus.io/docs/practices/naming/
 var (
 	hostGPUdesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_used_bytes",
+		"GPU device memory usage in bytes",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUUtilizationdesc = prometheus.NewDesc(
+		"hami_host_gpu_utilization_ratio",
+		"GPU core utilization ratio (0-100)",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	ctrvGPUdesc = prometheus.NewDesc(
+		"hami_vgpu_memory_used_bytes",
+		"vGPU device memory usage in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+
+	ctrvGPUlimitdesc = prometheus.NewDesc(
+		"hami_vgpu_memory_limit_bytes",
+		"vGPU device memory limit in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+	ctrDeviceMemorydesc = prometheus.NewDesc(
+		"hami_container_device_memory_bytes",
+		`Container device memory usage breakdown in bytes (The label "context_size", "module_size", "buffer_size" and "offset" will be deprecated in v2.10.0, use hami_vgpu_memory_context_bytes, hami_vgpu_memory_module_bytes and hami_vgpu_memory_buffer_bytes instead)`,
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "context_size", "module_size", "buffer_size", "offset"}, nil,
+	)
+	ctrDeviceUtilizationdesc = prometheus.NewDesc(
+		"hami_container_device_utilization_ratio",
+		"Container device SM utilization ratio",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+	ctrDeviceLastKernelDesc = prometheus.NewDesc(
+		"hami_container_last_kernel_elapsed_seconds",
+		"Seconds since last kernel execution in container",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+	ctrDeviceMigInfo = prometheus.NewDesc(
+		"hami_mig_device_info",
+		"MIG device information for container",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
+	)
+	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
+		"hami_vgpu_memory_context_bytes",
+		"Container device memory context size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+
+	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
+		"hami_vgpu_memory_module_bytes",
+		"Container device memory module size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+
+	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
+		"hami_vgpu_memory_buffer_bytes",
+		"Container device memory buffer size in bytes",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
+)
+
+// Legacy metric descriptors (populated only when --legacy-metrics is enabled).
+var (
+	legacyHostGPUdesc              *prometheus.Desc
+	legacyHostGPUUtilizationdesc   *prometheus.Desc
+	legacyCtrvGPUdesc              *prometheus.Desc
+	legacyCtrvGPUlimitdesc         *prometheus.Desc
+	legacyCtrDeviceMemorydesc      *prometheus.Desc
+	legacyCtrDeviceUtilizationdesc *prometheus.Desc
+	legacyCtrDeviceLastKernelDesc  *prometheus.Desc
+	legacyCtrDeviceMigInfo         *prometheus.Desc
+)
+
+func initLegacyDescriptors() {
+	legacyHostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
 		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
-
-	hostGPUUtilizationdesc = prometheus.NewDesc(
+	legacyHostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
 		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
-
-	ctrvGPUdesc = prometheus.NewDesc(
+	legacyCtrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
 		"vGPU device usage",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
-
-	ctrvGPUlimitdesc = prometheus.NewDesc(
+	legacyCtrvGPUlimitdesc = prometheus.NewDesc(
 		"vGPU_device_memory_limit_in_bytes",
 		"vGPU device limit",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
-	ctrDeviceMemorydesc = prometheus.NewDesc(
+	legacyCtrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
-		`Container device memory description (The label "context", "module", "data" and "offset" will be deprecated in v2.10.0, use vGPU_device_memory_context_size_bytes, vGPU_device_memory_module_size_bytes and vGPU_device_memory_buffer_size_bytes instead)`,
+		"Container device memory description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
-	ctrDeviceUtilizationdesc = prometheus.NewDesc(
+	legacyCtrDeviceUtilizationdesc = prometheus.NewDesc(
 		"Device_utilization_desc_of_container",
 		"Container device utilization description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
-	ctrDeviceLastKernelDesc = prometheus.NewDesc(
+	legacyCtrDeviceLastKernelDesc = prometheus.NewDesc(
 		"Device_last_kernel_of_container",
 		"Container device last kernel description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
-	ctrDeviceMigInfo = prometheus.NewDesc(
+	legacyCtrDeviceMigInfo = prometheus.NewDesc(
 		"MigInfo",
 		"Mig device information for container",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
 	)
-	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
-		"vGPU_device_memory_context_size_bytes",
-		"Container device memory context size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
-	)
+}
 
-	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
-		"vGPU_device_memory_module_size_bytes",
-		"Container device memory module size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
-	)
-
-	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
-		"vGPU_device_memory_buffer_size_bytes",
-		"Container device memory buffer size",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
-	)
-)
+func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) {
+	if desc == nil {
+		return
+	}
+	if err := sendMetric(ch, desc, valueType, value, labels...); err != nil {
+		klog.V(4).Infof("Failed to send legacy metric: %v", err)
+	}
+}
 
 // Describe is implemented with DescribeByCollect. That's possible because the
 // Collect method will always return the same two metrics with the same two
@@ -156,7 +223,17 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
-	//prometheus.DescribeByCollect(cc, ch)
+
+	if cc.ClusterManager.LegacyMetrics {
+		ch <- legacyHostGPUdesc
+		ch <- legacyHostGPUUtilizationdesc
+		ch <- legacyCtrvGPUdesc
+		ch <- legacyCtrvGPUlimitdesc
+		ch <- legacyCtrDeviceMemorydesc
+		ch <- legacyCtrDeviceUtilizationdesc
+		ch <- legacyCtrDeviceLastKernelDesc
+		ch <- legacyCtrDeviceMigInfo
+	}
 }
 
 //func parseidstr(podusage string) (string, string, error) {
@@ -311,6 +388,10 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		fmt.Sprint(index), uuid, deviceName,
 	)
 
+	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
 	return nil
 }
 
@@ -336,6 +417,10 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		hostGPUUtilizationdesc,
 		prometheus.GaugeValue,
 		float64(util.Gpu),
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
+	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
 		fmt.Sprint(index), uuid, deviceName,
 	)
 
@@ -431,21 +516,27 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			klog.Errorf("Failed to send memoryTotal metric: %v", err)
 			return err
 		}
+		sendLegacyMetric(ch, legacyCtrvGPUdesc, prometheus.GaugeValue, float64(memoryTotal), labels...)
 
 		if err := sendMetric(ch, ctrvGPUlimitdesc, prometheus.GaugeValue, float64(memoryLimit), labels...); err != nil {
 			klog.Errorf("Failed to send memoryLimit metric: %v", err)
 			return err
 		}
+		sendLegacyMetric(ch, legacyCtrvGPUlimitdesc, prometheus.GaugeValue, float64(memoryLimit), labels...)
 
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
+		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
+		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
+		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...); err != nil {
 			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
+		sendLegacyMetric(ch, legacyCtrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...)
 
 		if err := sendMetric(ch, ctrDeviceUtilizationdesc, prometheus.GaugeValue, float64(smUtil), labels...); err != nil {
 			klog.Errorf("Failed to send device utilization desc: %v", err)
 			return err
 		}
+		sendLegacyMetric(ch, legacyCtrDeviceUtilizationdesc, prometheus.GaugeValue, float64(smUtil), labels...)
 
 		if err := sendMetric(ch, ctrDeviceMemoryContextDesc, prometheus.GaugeValue, float64(memoryContextSize), labels...); err != nil {
 			klog.Errorf("Failed to send Device Memory context size metric: %v", err)
@@ -466,6 +557,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 				klog.Errorf("Failed to send last kernel time metric: %v", err)
 				return err
 			}
+			sendLegacyMetric(ch, legacyCtrDeviceLastKernelDesc, prometheus.GaugeValue, float64(lastSec), labels...)
 		}
 	}
 
@@ -512,6 +604,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							return err
 						}
+						sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1, labels...)
 					}
 				}
 			}
@@ -534,10 +627,14 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 // ClusterManager. Finally, it registers the ClusterManagerCollector with a
 // wrapping Registerer that adds the zone as a label. In this way, the metrics
 // collected by different ClusterManagerCollectors do not collide.
-func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister) *ClusterManager {
+func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
+	if legacyMetrics {
+		initLegacyDescriptors()
+	}
 	c := &ClusterManager{
 		Zone:            zone,
 		containerLister: containerLister,
+		LegacyMetrics:   legacyMetrics,
 	}
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
