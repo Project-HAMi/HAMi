@@ -207,6 +207,7 @@ func TestComputeScore(t *testing.T) {
 			name: "ContainerDeviceRequests has no data",
 			device: &device.DeviceUsage{
 				ID:        "test-device",
+				Type:      "type1",
 				Totalcore: 4,
 				Totalmem:  8192,
 				Count:     10,
@@ -215,12 +216,13 @@ func TestComputeScore(t *testing.T) {
 				Usedmem:   2048,
 			},
 			requests:      make(device.ContainerDeviceRequests),
-			expectedScore: 7,
+			expectedScore: 7.0,
 		},
 		{
-			name: "ContainerDeviceRequests has  data",
+			name: "Filter other device types and ignore Nums for slots",
 			device: &device.DeviceUsage{
 				ID:        "test-device",
+				Type:      "type1",
 				Totalcore: 4,
 				Totalmem:  8192,
 				Count:     10,
@@ -229,80 +231,45 @@ func TestComputeScore(t *testing.T) {
 				Usedmem:   2048,
 			},
 			requests: device.ContainerDeviceRequests{
-				"container1": {
-					Nums:             1,
+				"type1": {
+					Nums:             4,
 					Type:             "type1",
 					Memreq:           1024,
 					MemPercentagereq: 0,
 					Coresreq:         1,
 				},
-				"container2": {
+				"type2": {
 					Nums:             2,
 					Type:             "type2",
+					Memreq:           4096,
+					MemPercentagereq: 50,
+					Coresreq:         2,
+				},
+			},
+			expectedScore: 11.75,
+		},
+		{
+			name: "MemPercentagereq calculation evaluates correctly",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Totalcore: 10,
+				Totalmem:  10000,
+				Count:     10,
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+			},
+			requests: device.ContainerDeviceRequests{
+				"type1": {
+					Nums:             1,
+					Type:             "type1",
 					Memreq:           0,
 					MemPercentagereq: 50,
 					Coresreq:         2,
 				},
 			},
-			expectedScore: 18.75,
-		},
-		{
-			name: "ContainerDeviceRequests has  data",
-			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Totalcore: 4,
-				Totalmem:  8192,
-				Count:     10,
-				Used:      2,
-				Usedcores: 1,
-				Usedmem:   2048,
-			},
-			requests: device.ContainerDeviceRequests{
-				"container1": {
-					Nums:             1,
-					Type:             "type1",
-					Memreq:           1024,
-					MemPercentagereq: 30,
-					Coresreq:         1,
-				},
-				"container2": {
-					Nums:             2,
-					Type:             "type2",
-					Memreq:           200,
-					MemPercentagereq: 101,
-					Coresreq:         3,
-				},
-			},
-			expectedScore: 20.24414,
-		},
-		{
-			name: "ContainerDeviceRequests has  data",
-			device: &device.DeviceUsage{
-				ID:        "test-device",
-				Totalcore: 4,
-				Totalmem:  8192,
-				Count:     10,
-				Used:      2,
-				Usedcores: 1,
-				Usedmem:   2048,
-			},
-			requests: device.ContainerDeviceRequests{
-				"container1": {
-					Nums:             1,
-					Type:             "type1",
-					Memreq:           1024,
-					MemPercentagereq: 30,
-					Coresreq:         1,
-				},
-				"container2": {
-					Nums:             2,
-					Type:             "type2",
-					Memreq:           200,
-					MemPercentagereq: 30,
-					Coresreq:         3,
-				},
-			},
-			expectedScore: 20,
+			expectedScore: 8.0,
 		},
 	}
 
