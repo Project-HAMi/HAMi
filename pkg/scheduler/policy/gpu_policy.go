@@ -68,7 +68,7 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 		request += 1
 		core += container.Coresreq
 		if container.MemPercentagereq != 0 && container.MemPercentagereq != 101 {
-			mem += (ds.Device.Totalmem * container.MemPercentagereq) / 100
+			mem += int32((int64(ds.Device.Totalmem) * int64(container.MemPercentagereq)) / 100)
 			continue
 		}
 		mem += container.Memreq
