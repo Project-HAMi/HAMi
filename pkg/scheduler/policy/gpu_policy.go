@@ -59,9 +59,9 @@ func (l DeviceUsageList) Less(i, j int) bool {
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
 	request, core, mem := int32(0), int32(0), int32(0)
 	// Here we are required to use the same type device
-	for devType, container := range requests {
+	for _, container := range requests {
 
-		if devType != ds.Device.Type {
+		if container.Type != ds.Device.Type {
 			continue
 		}
 

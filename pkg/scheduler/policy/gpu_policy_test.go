@@ -271,6 +271,43 @@ func TestComputeScore(t *testing.T) {
 			},
 			expectedScore: 8.0,
 		},
+		{
+			name: "Filter other device types and aggregate same device types",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Totalcore: 10,
+				Totalmem:  10000,
+				Count:     10,
+				Used:      0,
+				Usedcores: 0,
+				Usedmem:   0,
+			},
+			requests: device.ContainerDeviceRequests{
+				"container1": {
+					Nums:             1,
+					Type:             "type1", // Matches device type
+					Memreq:           0,
+					MemPercentagereq: 10,
+					Coresreq:         1,
+				},
+				"container2": {
+					Nums:             1,
+					Type:             "type1", // Matches device type again
+					Memreq:           0,
+					MemPercentagereq: 20,
+					Coresreq:         2,
+				},
+				"container3": {
+					Nums:             1,
+					Type:             "type2", // Different type, will be ignored
+					Memreq:           1000,
+					MemPercentagereq: 50,
+					Coresreq:         5,
+				},
+			},
+			expectedScore: 8.0,
+		},
 	}
 
 	for _, tt := range tests {
