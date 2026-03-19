@@ -21,6 +21,7 @@ import (
 	"os"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
@@ -500,6 +501,10 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			return fmt.Errorf("invalid UUID length for device %d", i)
 		}
 		uuid = uuid[0:40] // Ensure UUID is truncated to 40 characters
+		if !utf8.ValidString(uuid) {
+			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
+			continue
+		}
 
 		// Collect device metrics
 		memoryTotal := c.Info.DeviceMemoryTotal(i)
