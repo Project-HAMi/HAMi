@@ -18,7 +18,7 @@ data:
       resourceMemoryPercentageName: {{ .Values.resourceMemPercentage }}
       resourceCoreName: {{ .Values.resourceCores }}
       resourcePriorityName: {{ .Values.resourcePriority }}
-      overwriteEnv: false
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       defaultMemory: 0
       defaultCores: 0
       defaultGPUNum: 1
