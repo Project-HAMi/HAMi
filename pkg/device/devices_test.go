@@ -24,6 +24,7 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -842,6 +843,281 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 			assert.Equal(t, got, tt.want)
 		})
 	}
+}
+
+// mockDevices is a minimal implementation of the Devices interface for testing Resourcereqs.
+type mockDevices struct {
+	resourceRequest ContainerDeviceRequest
+}
+
+func (m *mockDevices) CommonWord() string                                  { return "mock" }
+func (m *mockDevices) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (m *mockDevices) CheckHealth(_ string, _ *corev1.Node) (bool, bool) { return true, true }
+func (m *mockDevices) NodeCleanUp(_ string) error                        { return nil }
+func (m *mockDevices) GetResourceNames() ResourceNames                   { return ResourceNames{} }
+func (m *mockDevices) GetNodeDevices(_ corev1.Node) ([]*DeviceInfo, error) {
+	return nil, nil
+}
+func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error    { return nil }
+func (m *mockDevices) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest {
+	// Return the mock request only if the container has the resource annotation we look for
+	for rName := range ctr.Resources.Limits {
+		if string(rName) == "nvidia.com/gpu" {
+			return m.resourceRequest
+		}
+	}
+	return ContainerDeviceRequest{}
+}
+func (m *mockDevices) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ PodDevices) map[string]string {
+	return nil
+}
+func (m *mockDevices) ScoreNode(_ *corev1.Node, _ PodSingleDevice, _ []*DeviceUsage, _ string) float32 {
+	return 0
+}
+func (m *mockDevices) AddResourceUsage(_ *corev1.Pod, _ *DeviceUsage, _ *ContainerDevice) error {
+	return nil
+}
+func (m *mockDevices) Fit(_ []*DeviceUsage, _ ContainerDeviceRequest, _ *corev1.Pod, _ *NodeInfo, _ *PodDevices) (bool, map[string]ContainerDevices, string) {
+	return false, nil, ""
+}
+
+func TestResourcereqs_OnlyRegularContainers(t *testing.T) {
+	// Setup mock device
+	oldDevicesMap := DevicesMap
+	defer func() { DevicesMap = oldDevicesMap }()
+
+	DevicesMap = map[string]Devices{
+		"NVIDIA": &mockDevices{
+			resourceRequest: ContainerDeviceRequest{
+				Nums:    1,
+				Type:    "NVIDIA",
+				Memreq:  1000,
+				Coresreq: 10,
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name: "main",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	counts := Resourcereqs(pod)
+
+	// No init containers, so length == number of regular containers
+	assert.Equal(t, len(counts), 1)
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(1))
+}
+
+func TestResourcereqs_WithInitContainers(t *testing.T) {
+	oldDevicesMap := DevicesMap
+	defer func() { DevicesMap = oldDevicesMap }()
+
+	DevicesMap = map[string]Devices{
+		"NVIDIA": &mockDevices{
+			resourceRequest: ContainerDeviceRequest{
+				Nums:    1,
+				Type:    "NVIDIA",
+				Memreq:  1000,
+				Coresreq: 10,
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name: "init-no-gpu",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{},
+					},
+				},
+				{
+					Name: "init-with-gpu",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "main-with-gpu",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	counts := Resourcereqs(pod)
+
+	// Total containers = 2 init + 1 regular = 3
+	assert.Equal(t, len(counts), 3)
+
+	// Index 0: init-no-gpu - should have no device requests
+	_, hasNvidia0 := counts[0]["NVIDIA"]
+	assert.Equal(t, hasNvidia0, false)
+
+	// Index 1: init-with-gpu - should have device request
+	assert.Equal(t, counts[1]["NVIDIA"].Nums, int32(1))
+
+	// Index 2: main-with-gpu - should have device request (initContainerOffset=2, so index 2)
+	assert.Equal(t, counts[2]["NVIDIA"].Nums, int32(1))
+}
+
+func TestResourcereqs_NoDeviceRequests(t *testing.T) {
+	oldDevicesMap := DevicesMap
+	defer func() { DevicesMap = oldDevicesMap }()
+
+	DevicesMap = map[string]Devices{
+		"NVIDIA": &mockDevices{
+			resourceRequest: ContainerDeviceRequest{
+				Nums:    1,
+				Type:    "NVIDIA",
+				Memreq:  1000,
+				Coresreq: 10,
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name: "init-no-gpu",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "main-no-gpu",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{},
+					},
+				},
+			},
+		},
+	}
+
+	counts := Resourcereqs(pod)
+
+	// Total = 1 init + 1 regular = 2
+	assert.Equal(t, len(counts), 2)
+	// No GPU requests in either container
+	_, hasNvidia0 := counts[0]["NVIDIA"]
+	assert.Equal(t, hasNvidia0, false)
+	_, hasNvidia1 := counts[1]["NVIDIA"]
+	assert.Equal(t, hasNvidia1, false)
+}
+
+func TestResourcereqs_MultipleInitAndRegularContainers(t *testing.T) {
+	oldDevicesMap := DevicesMap
+	defer func() { DevicesMap = oldDevicesMap }()
+
+	DevicesMap = map[string]Devices{
+		"NVIDIA": &mockDevices{
+			resourceRequest: ContainerDeviceRequest{
+				Nums:    2,
+				Type:    "NVIDIA",
+				Memreq:  2000,
+				Coresreq: 20,
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name: "init1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("2"),
+						},
+					},
+				},
+				{
+					Name: "init2",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "main1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("2"),
+						},
+					},
+				},
+				{
+					Name: "main2",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"nvidia.com/gpu": resource.MustParse("2"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	counts := Resourcereqs(pod)
+
+	// Total = 2 init + 2 regular = 4
+	assert.Equal(t, len(counts), 4)
+
+	// Index 0: init1 with GPU
+	assert.Equal(t, counts[0]["NVIDIA"].Nums, int32(2))
+
+	// Index 1: init2 without GPU
+	_, hasNvidia1 := counts[1]["NVIDIA"]
+	assert.Equal(t, hasNvidia1, false)
+
+	// Index 2: main1 with GPU (offset=2)
+	assert.Equal(t, counts[2]["NVIDIA"].Nums, int32(2))
+
+	// Index 3: main2 with GPU (offset=2)
+	assert.Equal(t, counts[3]["NVIDIA"].Nums, int32(2))
 }
 
 func TestCheckUUID(t *testing.T) {
