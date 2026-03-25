@@ -99,7 +99,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			expectedPos:   1,
 			expectedReset: true,
 			expectedMig: map[string]int32{
-				"1g.5gb": 1,
+				"1g.5gb":  1,
 				"2g.10gb": 3,
 			},
 		},

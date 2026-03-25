@@ -850,7 +850,7 @@ type mockDevices struct {
 	resourceRequest ContainerDeviceRequest
 }
 
-func (m *mockDevices) CommonWord() string                                  { return "mock" }
+func (m *mockDevices) CommonWord() string { return "mock" }
 func (m *mockDevices) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
 	return false, nil
 }
@@ -860,7 +860,7 @@ func (m *mockDevices) GetResourceNames() ResourceNames                   { retur
 func (m *mockDevices) GetNodeDevices(_ corev1.Node) ([]*DeviceInfo, error) {
 	return nil, nil
 }
-func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error    { return nil }
+func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
 func (m *mockDevices) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
 func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest {
 	// Return the mock request only if the container has the resource annotation we look for
@@ -892,9 +892,9 @@ func TestResourcereqs_OnlyRegularContainers(t *testing.T) {
 	DevicesMap = map[string]Devices{
 		"NVIDIA": &mockDevices{
 			resourceRequest: ContainerDeviceRequest{
-				Nums:    1,
-				Type:    "NVIDIA",
-				Memreq:  1000,
+				Nums:     1,
+				Type:     "NVIDIA",
+				Memreq:   1000,
 				Coresreq: 10,
 			},
 		},
@@ -933,9 +933,9 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 	DevicesMap = map[string]Devices{
 		"NVIDIA": &mockDevices{
 			resourceRequest: ContainerDeviceRequest{
-				Nums:    1,
-				Type:    "NVIDIA",
-				Memreq:  1000,
+				Nums:     1,
+				Type:     "NVIDIA",
+				Memreq:   1000,
 				Coresreq: 10,
 			},
 		},
@@ -999,9 +999,9 @@ func TestResourcereqs_NoDeviceRequests(t *testing.T) {
 	DevicesMap = map[string]Devices{
 		"NVIDIA": &mockDevices{
 			resourceRequest: ContainerDeviceRequest{
-				Nums:    1,
-				Type:    "NVIDIA",
-				Memreq:  1000,
+				Nums:     1,
+				Type:     "NVIDIA",
+				Memreq:   1000,
 				Coresreq: 10,
 			},
 		},
@@ -1050,9 +1050,9 @@ func TestResourcereqs_MultipleInitAndRegularContainers(t *testing.T) {
 	DevicesMap = map[string]Devices{
 		"NVIDIA": &mockDevices{
 			resourceRequest: ContainerDeviceRequest{
-				Nums:    2,
-				Type:    "NVIDIA",
-				Memreq:  2000,
+				Nums:     2,
+				Type:     "NVIDIA",
+				Memreq:   2000,
 				Coresreq: 20,
 			},
 		},
