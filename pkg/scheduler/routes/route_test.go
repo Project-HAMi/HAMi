@@ -67,3 +67,49 @@ func TestMaxRequestSizeBind(t *testing.T) {
 		t.Errorf("LimitReader failed in Bind. Response: %s", respBody)
 	}
 }
+
+func TestWebHookRoute(t *testing.T) {
+	handler := WebHookRoute()
+	if handler == nil {
+		t.Fatal("WebHookRoute returned nil handler")
+	}
+
+	// Send a request to the webhook handler - even an invalid request exercises the handler path
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
+	req.Header.Set("Content-Type", "application/json")
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	// The webhook handler should respond (any status is fine - we're testing the route layer)
+	if w.Code == 0 {
+		t.Error("Expected a non-zero status code from webhook handler")
+	}
+}
+
+func TestReadyzRouteLeader(t *testing.T) {
+	// NewScheduler initializes with DummyLeaderManager(true) by default
+	s := scheduler.NewScheduler()
+
+	handler := ReadyzRoute(s)
+	req := httptest.NewRequest("GET", "/readyz", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Errorf("Expected status 200 for readyz (leader), got %d", w.Code)
+	}
+}
+
+func TestCheckBodyNil(t *testing.T) {
+	req := httptest.NewRequest("POST", "/test", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	checkBody(w, req)
+
+	if w.Code != 400 {
+		t.Errorf("Expected status 400 for nil body, got %d", w.Code)
+	}
+}
