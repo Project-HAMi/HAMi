@@ -47,7 +47,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 
 // Collect creates constant metrics for each host on the fly based on the returned data.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
-	klog.Info("Starting to collect metrics for scheduler")
+	klog.V(3).Info("Starting to collect metrics for scheduler")
 	legacy := cc.ClusterManager.LegacyMetrics
 
 	// New metric descriptors
@@ -169,7 +169,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		for _, devs := range val.Devices.DeviceLists {
 			if devs.Device.Mode == "mig" {
 				for idx, migs := range devs.Device.MigUsage.UsageList {
-					klog.Infoln("mig instances=", devs.Device.MigUsage)
+					klog.V(3).Infoln("mig instances=", devs.Device.MigUsage)
 					inuse := 0
 					if migs.InUse {
 						inuse = 1

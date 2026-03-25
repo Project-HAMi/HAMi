@@ -41,6 +41,18 @@ func TestMaxRequestSize(t *testing.T) {
 		t.Logf("Success! Caught expected error: %s", respBody)
 	}
 }
+func TestHealthzRoute(t *testing.T) {
+	req := httptest.NewRequest("GET", "/healthz", nil)
+	w := httptest.NewRecorder()
+
+	handler := HealthzRoute()
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Errorf("Expected status 200 for health check, got %d", w.Code)
+	}
+}
+
 func TestMaxRequestSizeBind(t *testing.T) {
 	hugePayload := strings.Repeat(" ", maxRequestSize+100)
 	req := httptest.NewRequest("POST", "/bind", strings.NewReader(hugePayload))
