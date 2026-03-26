@@ -476,7 +476,7 @@ func TestDevices_LockNode(t *testing.T) {
 			}
 
 			dev := InitBirenDevice(BirenConfig{
-				ResourceCountName: "birentech.com/gpua",
+				ResourceCountName: "birentech.com/gpu",
 			})
 			err = dev.LockNode(node, tt.pod)
 			if tt.expectError {

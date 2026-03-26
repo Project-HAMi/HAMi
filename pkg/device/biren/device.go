@@ -19,7 +19,6 @@ package biren
 import (
 	"errors"
 	"fmt"
-	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -128,7 +127,7 @@ func (dev *BirenDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *BirenDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
-	if strings.Compare(n.Type, BirenDevice) == 0 {
+	if n.Type == BirenDevice {
 		return true, true, false
 	}
 	return false, false, false
@@ -187,17 +186,17 @@ func (dev *BirenDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage
 	return nil
 }
 
-func (va *BirenDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+func (br *BirenDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := range len(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
-		_, found, _ := va.checkType(pod.GetAnnotations(), *dev, k)
+		_, found, _ := br.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, k.Type)
@@ -216,9 +215,7 @@ func (va *BirenDevices) Fit(devices []*device.DeviceUsage, request device.Contai
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			if !dieMode {
-				k.Nums--
-			}
+			k.Nums--
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
 				Idx:        int(dev.Index),
 				UUID:       dev.ID,
