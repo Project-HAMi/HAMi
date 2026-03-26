@@ -22,6 +22,7 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
 func TestMaxRequestSize(t *testing.T) {
@@ -99,6 +100,27 @@ func TestReadyzRouteLeader(t *testing.T) {
 
 	if w.Code != 200 {
 		t.Errorf("Expected status 200 for readyz (leader), got %d", w.Code)
+	}
+}
+
+func TestReadyzRouteNotLeader(t *testing.T) {
+	// Force NewScheduler to use real leader manager (no observed lease => IsLeader() == false)
+	origLeaderElect := config.LeaderElect
+	config.LeaderElect = true
+	t.Cleanup(func() {
+		config.LeaderElect = origLeaderElect
+	})
+
+	s := scheduler.NewScheduler()
+
+	handler := ReadyzRoute(s)
+	req := httptest.NewRequest("GET", "/readyz", nil)
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Errorf("Expected status 200 for readyz (not leader), got %d", w.Code)
 	}
 }
 
