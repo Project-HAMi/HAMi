@@ -148,6 +148,10 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            - name: deviceconfig
+              mountPath: /k8s-vgpu/lib/nvidia/ld.so.preload
+              subPath: ld.so.preload
+              readOnly: true
             {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
