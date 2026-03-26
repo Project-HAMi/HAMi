@@ -231,7 +231,7 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	dieMode := isDieMode(devices)
-	for i := range len(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
