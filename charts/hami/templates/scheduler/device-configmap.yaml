@@ -285,6 +285,8 @@ data:
       resourceCountName: "amd.com/gpu"
     vastai:
       resourceCountName: {{ .Values.vastaiResourceName }}
+    biren:
+      resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
     - chipName: 910A
       commonWord: Ascend910A
