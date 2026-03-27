@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"maps"
-	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -312,7 +311,9 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	// filter device
 	reason := make(map[string]int)
 	candidateDevices := []*device.DeviceUsage{}
-	for i, dev := range slices.Backward(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
+
 		if !mats.checkType(pod.GetAnnotations(), *dev, request) {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, request.Type)

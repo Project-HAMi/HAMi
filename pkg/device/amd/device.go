@@ -19,7 +19,6 @@ package amd
 import (
 	"flag"
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -189,7 +188,8 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i, dev := range slices.Backward(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)

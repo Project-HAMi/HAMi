@@ -272,7 +272,8 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i, dev := range slices.Backward(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type)

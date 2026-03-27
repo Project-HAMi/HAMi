@@ -18,7 +18,6 @@ package enflame
 
 import (
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -216,7 +215,8 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i, dev := range slices.Backward(devices) {
+	for i := len(devices) - 1; i >= 0; i-- {
+		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, numa := enf.checkType(pod.GetAnnotations(), *dev, k)
