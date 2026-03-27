@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"math/rand"
+	"slices"
 	"strings"
 	"time"
 
@@ -317,8 +318,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, numa := cam.checkType(pod.GetAnnotations(), *dev, k)

@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -357,8 +358,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
 		needTopology = true
 	}
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)
