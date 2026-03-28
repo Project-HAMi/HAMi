@@ -1,6 +1,6 @@
 # Quick Start: Verifying HAMi in a Real Kubernetes Environment
 
-This guide verifies that GPU workloads run correctly in a Kubernetes cluster with HAMi installed.
+This guide verifies that GPU workloads run correctly in a Kubernetes cluster with HAMi installed, focusing on actual runtime behavior rather than deployment success.
 
 It explains what is happening at each step, why it matters, and how to interpret the results.
 
@@ -34,13 +34,13 @@ Everything in this guide builds toward that proof.
 This guide was validated on a clean system:
 
 * Kubernetes: k3s
-* Version: v1.34.5+k3s1
+* Version: k3s (tested on a recent stable release)
 * GPU: NVIDIA L40S
 * Driver: 580.126.09
 * CUDA: 13.0
 
 Different Kubernetes distributions behave differently (especially k3s vs kubeadm).
-This guide confirms that HAMi works in a lightweight Kubernetes environment.
+This guide confirms that HAMi works in a lightweight Kubernetes environment such as k3s.
 
 ---
 
@@ -82,7 +82,11 @@ spec:
 Apply it:
 
 ```bash
+kubectl delete pod cuda-test --ignore-not-found
 kubectl apply -f cuda-test.yaml
+kubectl wait --for=condition=Ready pod/cuda-test --timeout=60s || true
+kubectl wait --for=condition=Succeeded pod/cuda-test --timeout=60s || true
+kubectl logs cuda-test
 ```
 
 ---
@@ -119,6 +123,8 @@ Completed
 ### Logs
 
 ```bash
+kubectl wait --for=condition=Ready pod/cuda-test --timeout=60s || true
+kubectl wait --for=condition=Succeeded pod/cuda-test --timeout=60s || true
 kubectl logs cuda-test
 ```
 
@@ -152,7 +158,7 @@ Most "HAMi issues" are actually GPU runtime or driver problems.
 ## Step 2: Verify GPU resources on the node
 
 ```bash
-kubectl describe node | grep -i nvidia
+kubectl get nodes -o jsonpath='{.items[*].status.allocatable}' | grep -i nvidia
 ```
 
 Expected:
@@ -201,7 +207,7 @@ Install HAMi using Helm:
 ```bash
 helm install hami hami-charts/hami \
   -n kube-system \
-  --set scheduler.kubeScheduler.imageTag=v1.34.5
+  --set scheduler.kubeScheduler.imageTag=<your-k8s-version>
 ```
 
 ---
@@ -249,7 +255,10 @@ It does NOT guarantee:
 ## Step 5: Re-run GPU workload under HAMi
 
 ```bash
+kubectl delete pod cuda-test --ignore-not-found
 kubectl apply -f cuda-test.yaml
+kubectl wait --for=condition=Ready pod/cuda-test --timeout=60s || true
+kubectl wait --for=condition=Succeeded pod/cuda-test --timeout=60s || true
 kubectl logs cuda-test
 ```
 
@@ -278,7 +287,7 @@ You still see valid `nvidia-smi` output.
 
 ---
 
-## Step 6: Attempt fractional GPU (expected failure)
+## Step 6: Attempt fractional GPU (expected to fail without additional configuration)
 
 Try using:
 
@@ -381,7 +390,7 @@ Always debug in this order:
 ## Cleanup
 
 ```bash
-kubectl delete pod cuda-test hami-test hami-share-1 hami-share-2
+kubectl delete pod cuda-test
 ```
 
 ---
