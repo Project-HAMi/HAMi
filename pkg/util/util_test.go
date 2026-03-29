@@ -609,3 +609,36 @@ func TestPatchPodLabels(t *testing.T) {
 		})
 	}
 }
+
+func Test_IsPodTerminating(t *testing.T) {
+	now := metav1.Now()
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "pod with deletion timestamp (terminating)",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &now,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod without deletion timestamp (normal)",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{},
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodTerminating(test.args)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}

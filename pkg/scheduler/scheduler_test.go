@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"maps"
 	"strings"
 	"testing"
 	"time"
@@ -1264,4 +1265,52 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 
 	close(stopCh)
 	<-done
+}
+
+func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
+	s := NewScheduler()
+
+	podDevces := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			[]device.ContainerDevice{
+				{Idx: 0, UUID: "GPU0", Usedmem: 1000, Usedcores: 10},
+			},
+		},
+	}
+
+	basePod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "1368-test-uid",
+			Name:      "test-terminating-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "node1",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+
+	encodedAnnotations := device.EncodePodDevices(device.SupportDevices, podDevces)
+	maps.Copy(basePod.Annotations, encodedAnnotations)
+	s.onAddPod(basePod)
+
+	_, ok := s.podManager.GetPod(basePod)
+	assert.Equal(t, true, ok, "Pod should be in cache after initial addition")
+
+	terminatingPod := basePod.DeepCopy()
+	now := metav1.Now()
+	terminatingPod.DeletionTimestamp = &now
+
+	s.onAddPod(terminatingPod)
+
+	_, ok = s.podManager.GetPod(terminatingPod)
+	assert.Equal(t, true, ok, "BUGFIX #1368: Pod should STILL be in cache while terminating (DeletionTimestamp != nil)")
+
+	terminatedPod := terminatingPod.DeepCopy()
+	terminatedPod.Status.Phase = corev1.PodSucceeded
+
+	s.onAddPod(terminatedPod)
+
+	_, ok = s.podManager.GetPod(terminatedPod)
+	assert.Equal(t, false, ok, "Pod should be removed from cache after reaching a terminal phase (Succeeded/Failed)")
 }
