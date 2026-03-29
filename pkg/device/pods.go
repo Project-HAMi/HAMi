@@ -80,6 +80,19 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	return !exists
 }
 
+func (m *PodManager) UpdatePod(pod *corev1.Pod) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if pi, exists := m.pods[pod.UID]; exists {
+		pi.Pod = pod
+		klog.V(5).InfoS("Pod object updated in cache (terminating state)",
+			"pod", klog.KRef(pod.Namespace, pod.Name),
+			"deletionTimestamp", pod.DeletionTimestamp,
+		)
+	}
+}
+
 func (m *PodManager) DelPod(pod *corev1.Pod) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
