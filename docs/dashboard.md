@@ -223,7 +223,7 @@ spec:
       limits:
         nvidia.com/vgpu: 2 # requesting 2 vGPUs
         nvidia.com/gpumem: 3000 # Each vGPU contains 3000m device memory （Optional,Integer）
-        nvidia.com/gpucores: 10 # Each vGPU uses 30% of the entire GPU （Optional,Integer)
+        nvidia.com/gpucores: 10 # Each vGPU uses 10% of the entire GPU （Optional,Integer)
 
 #apply the file gpu-pod.yaml
 root@controller01:~# kubectl apply -f gpu-pod.yaml
