@@ -19,7 +19,9 @@ data:
     {{- end }}
     kind: KubeSchedulerConfiguration
     leaderElection:
-      leaderElect: false
+      leaderElect: {{ .Values.scheduler.leaderElect }}
+      resourceName: {{ .Values.schedulerName }}
+      resourceNamespace: {{ include "hami-vgpu.namespace" . }}
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
