@@ -19,6 +19,7 @@ package vastai
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 
@@ -231,8 +232,7 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	dieMode := isDieMode(devices)
-	for i := range len(devices) {
-		dev := devices[i]
+	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, _ := va.checkType(pod.GetAnnotations(), *dev, k)

@@ -613,7 +613,7 @@ func TestDevices_Fit(t *testing.T) {
 			annos:      map[string]string{},
 			wantFit:    true,
 			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
+			wantDevIDs: []string{"dev-1"},
 			wantReason: "",
 		},
 		{
