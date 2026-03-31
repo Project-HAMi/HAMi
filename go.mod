@@ -4,10 +4,10 @@ go 1.25.5
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
-	github.com/NVIDIA/go-nvlib v0.9.0
-	github.com/NVIDIA/go-nvml v0.13.0-1
+	github.com/NVIDIA/go-nvlib v0.9.1-0.20251202135446-d0f42ba016dd
+	github.com/NVIDIA/go-nvml v0.13.0-1.0.20260212130905-92cf8c963449
 	github.com/NVIDIA/k8s-device-plugin v0.18.2
-	github.com/NVIDIA/nvidia-container-toolkit v1.18.2
+	github.com/NVIDIA/nvidia-container-toolkit v1.19.0
 	github.com/ccoveille/go-safecast v1.8.2
 	github.com/fsnotify/fsnotify v1.9.0
 	github.com/google/uuid v1.6.0
@@ -75,7 +75,7 @@ require (
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
 	github.com/prometheus/common v0.66.1 // indirect
-	github.com/prometheus/procfs v0.17.0 // indirect
+	github.com/prometheus/procfs v0.19.2 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xrash/smetrics v0.0.0-20240521201337-686a1a2994c1 // indirect
