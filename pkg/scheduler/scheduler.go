@@ -152,6 +152,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.DelPod(pod)
 		return
 	}
+	if util.IsPodTerminating(pod) {
+		klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
+		s.podManager.UpdatePod(pod)
+		return
+	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
