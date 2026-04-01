@@ -204,3 +204,31 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 		})
 	}
 }
+
+func TestRecordScheduleBindingResultEvent_NilRecorder(t *testing.T) {
+	// Initialize a scheduler with NO event recorder
+	s := &Scheduler{
+		kubeClient:    fake.NewSimpleClientset(),
+		eventRecorder: nil,
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+	}
+
+	s.recordScheduleBindingResultEvent(pod, "BindingSucceed", []string{"node-1"}, nil)
+}
+
+func TestRecordScheduleFilterResultEvent_NilRecorder(t *testing.T) {
+	// Initialize a scheduler with NO event recorder
+	s := &Scheduler{
+		kubeClient:    fake.NewSimpleClientset(),
+		eventRecorder: nil,
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+	}
+
+	s.recordScheduleFilterResultEvent(pod, "FilteringSucceed", "success", nil)
+}
