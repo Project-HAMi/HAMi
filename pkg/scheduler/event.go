@@ -27,6 +27,7 @@ import (
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	v1core "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/tools/record"
+	"k8s.io/klog/v2"
 )
 
 // Define events for ResourceBinding, ResourceFilter objects and their associated resources.
@@ -55,6 +56,10 @@ func (s *Scheduler) addAllEventHandlers() {
 
 func (s *Scheduler) recordScheduleBindingResultEvent(pod *corev1.Pod, eventReason string, nodeResult []string, schedulerErr error) {
 	if pod == nil {
+		return
+	}
+	if s.eventRecorder == nil {
+		klog.Warning("eventRecorder is nil, skipping event creation")
 		return
 	}
 	if schedulerErr == nil {

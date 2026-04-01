@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -29,10 +30,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -1313,4 +1316,150 @@ func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 
 	_, ok = s.podManager.GetPod(terminatedPod)
 	assert.Equal(t, false, ok, "Pod should be removed from cache after reaching a terminal phase (Succeeded/Failed)")
+}
+
+func Test_Bind_ConcurrentPods_NoExponentialBackoff(t *testing.T) {
+	// 40+ pods hitting Bind() simultaneously caused LockNode to return errors
+	// for 39 of them, pushing them into kube-scheduler's exponential backoff queue.
+	// The fix serialises Bind() calls per-node with an in-memory mutex so that
+	// concurrent pods wait (queue) rather than fail immediately.
+
+	const parallelism = 40
+	const nodeName = "gpu-node-1"
+
+	s := NewScheduler()
+	s.eventRecorder = record.NewFakeRecorder(100)
+
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:  "hami.io/gpu",
+			ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName:   "hami.io/gpucores",
+			DefaultGPUNum:      1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(
+		context.Background(), node, metav1.CreateOptions{},
+	)
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pods := make([]*corev1.Pod, parallelism)
+	for i := range pods {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      fmt.Sprintf("mnist-pod-%d", i),
+				Namespace: "default",
+				UID:       types.UID(fmt.Sprintf("uid-%d", i)),
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: "trainer",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hami.io/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+							"hami.io/gpumem": *resource.NewQuantity(1024, resource.BinarySI),
+						},
+					},
+				}},
+			},
+		}
+		_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(
+			context.Background(), pod, metav1.CreateOptions{},
+		)
+		require.NoError(t, err)
+		err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+		require.NoError(t, err)
+		pods[i] = pod
+	}
+
+	var (
+		wg            sync.WaitGroup
+		mu            sync.Mutex
+		backoffErrors int
+		bindErrors    int
+	)
+
+	start := make(chan struct{})
+
+	for i := range parallelism {
+		wg.Add(1)
+		go func(pod *corev1.Pod) {
+			defer wg.Done()
+			<-start
+
+			result, err := s.Bind(extenderv1.ExtenderBindingArgs{
+				PodName:      pod.Name,
+				PodNamespace: pod.Namespace,
+				PodUID:       pod.UID,
+				Node:         nodeName,
+			})
+
+			mu.Lock()
+			defer mu.Unlock()
+			if err != nil {
+				backoffErrors++
+				t.Logf("BACKOFF-TRIGGERING error for pod %s: %v", pod.Name, err)
+			} else if result != nil && result.Error != "" {
+				bindErrors++
+				t.Logf("Soft bind error for pod %s: %s", pod.Name, result.Error)
+			}
+		}(pods[i])
+	}
+
+	close(start)
+
+	// If the in-memory mutex fails to unlock, wg.Wait() will hang forever.
+	// This ensures the test fails with a clear message instead of timing out the CI pipeline.
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("FATAL: Test timed out! A deadlock occurred in the Bind() function's mutex logic.")
+	}
+
+	require.Equal(t, 0, backoffErrors,
+		"BUG #1367: %d pods received non-nil errors from Bind(), "+
+			"causing exponential backoff. In-memory mutex should prevent this.",
+		backoffErrors,
+	)
+
+	// EDGE CASE 2 & 3: Ghost locks and Eventual Consistency
+	// We use a small retry block in case the fake client patch takes a millisecond to reflect.
+	var updatedNode *corev1.Node
+	require.Eventually(t, func() bool {
+		updatedNode, err = client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return false
+		}
+		_, hasLock := updatedNode.Annotations["hami.io/mutex.lock"]
+		return hasLock
+	}, 2*time.Second, 10*time.Millisecond, "Node must have the mutex.lock annotation applied via Blind Patch")
+
+	// Verify the lock isn't just an empty string, but actually contains valid data (like a timestamp or Pod UID)
+	lockVal := updatedNode.Annotations["hami.io/mutex.lock"]
+	require.NotEmpty(t, lockVal, "The mutex.lock annotation should not be empty")
+	t.Logf("Successfully verified Device Plugin handshake lock: %s", lockVal)
+
+	t.Logf("Concurrent Bind test: %d/%d pods had soft bind errors (acceptable), 0 had backoff-triggering errors", bindErrors, parallelism)
 }

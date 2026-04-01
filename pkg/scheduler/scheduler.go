@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -650,6 +651,19 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	//In-Memory Lock (Queues concurrent pods instead of failing them)
+	release, ok := nodelockutil.AcquireBindLock(ctx, args.Node)
+	if !ok {
+		err := fmt.Errorf("timed out waiting for node bind lock: %s", args.Node)
+		klog.ErrorS(err, "Bind lock timeout")
+		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
+	}
+	defer release()
+
 	var res *extenderv1.ExtenderBindingResult
 
 	binding := &corev1.Binding{
@@ -671,6 +685,16 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
+	}
+
+	// NEW: BLIND API PATCH FOR DEVICE PLUGIN HANDSHAKE
+	// Use MergePatchType to update the node annotation WITHOUT the resourceVersion.
+	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"hami.io/mutex.lock":"%s"}}}`, string(current.UID))
+	_, err = s.kubeClient.CoreV1().Nodes().Patch(context.Background(), args.Node, types.MergePatchType, patchData, metav1.PatchOptions{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to apply blind patch to node for mutex lock", "node", args.Node)
+		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
+		return res, nil // Return soft error so scheduler can retry
 	}
 
 	tmppatch := map[string]string{
