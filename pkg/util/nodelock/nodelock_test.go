@@ -18,6 +18,7 @@ package nodelock
 
 import (
 	"context" // Added for the new test
+	"os"
 	"runtime"
 	"strings"
 	"testing"
@@ -585,4 +586,103 @@ func TestAcquireBindLock(t *testing.T) {
 		t.Errorf("Expected lock acquisition to timeout and fail, but it succeeded")
 	}
 	release3()
+}
+
+func TestParseNodeLock(t *testing.T) {
+	now := time.Now().Format(time.RFC3339)
+
+	tests := []struct {
+		name        string
+		value       string
+		wantErr     bool
+		expectedNs  string
+		expectedPod string
+	}{
+		{
+			name:        "Legacy format without separator",
+			value:       now,
+			wantErr:     false,
+			expectedNs:  "",
+			expectedPod: "",
+		},
+		{
+			name:        "Valid new format",
+			value:       now + NodeLockSep + "default" + NodeLockSep + "my-pod",
+			wantErr:     false,
+			expectedNs:  "default",
+			expectedPod: "my-pod",
+		},
+		{
+			name:    "Malformed format with wrong number of parts",
+			value:   now + NodeLockSep + "default",
+			wantErr: true,
+		},
+		{
+			name:    "Invalid time format",
+			value:   "not-a-timestamp" + NodeLockSep + "default" + NodeLockSep + "my-pod",
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, ns, podName, err := ParseNodeLock(tt.value)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("ParseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			if !tt.wantErr {
+				if ns != tt.expectedNs {
+					t.Errorf("ParseNodeLock() got ns = %v, want %v", ns, tt.expectedNs)
+				}
+				if podName != tt.expectedPod {
+					t.Errorf("ParseNodeLock() got podName = %v, want %v", podName, tt.expectedPod)
+				}
+			}
+		})
+	}
+}
+
+func TestSetupNodeLockTimeout(t *testing.T) {
+	originalTimeout := NodeLockTimeout
+	defer func() {
+		NodeLockTimeout = originalTimeout
+		os.Unsetenv("HAMI_NODELOCK_EXPIRE")
+	}()
+
+	// Test valid duration
+	os.Setenv("HAMI_NODELOCK_EXPIRE", "10m")
+	setupNodeLockTimeout()
+	if NodeLockTimeout != 10*time.Minute {
+		t.Errorf("Expected timeout to be 10m, got %v", NodeLockTimeout)
+	}
+
+	// Test invalid duration (should not crash, should retain previous/default value)
+	os.Setenv("HAMI_NODELOCK_EXPIRE", "invalid-duration")
+	setupNodeLockTimeout()
+	if NodeLockTimeout != 10*time.Minute {
+		t.Errorf("Expected timeout to remain 10m after invalid env var, got %v", NodeLockTimeout)
+	}
+}
+
+func TestGenerateNodeLockKeyByPod(t *testing.T) {
+	// Test with nil pod
+	keyNil := GenerateNodeLockKeyByPod(nil)
+	if strings.Contains(keyNil, NodeLockSep) {
+		t.Errorf("Expected key for nil pod to not contain separator, got %v", keyNil)
+	}
+
+	// Test with valid pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "test-ns",
+		},
+	}
+	keyValid := GenerateNodeLockKeyByPod(pod)
+	if !strings.Contains(keyValid, NodeLockSep) {
+		t.Errorf("Expected key for valid pod to contain separator, got %v", keyValid)
+	}
+	if !strings.HasSuffix(keyValid, NodeLockSep+"test-ns"+NodeLockSep+"test-pod") {
+		t.Errorf("Expected key to end with namespace and pod name, got %v", keyValid)
+	}
 }
