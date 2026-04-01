@@ -555,3 +555,34 @@ func TestSimulateRetryStorm(t *testing.T) {
 		})
 	}
 }
+
+func TestAcquireBindLock(t *testing.T) {
+	nodeName := "test-node-1"
+
+	ctx1, cancel1 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel1()
+
+	release, ok := AcquireBindLock(ctx1, nodeName)
+	if !ok {
+		t.Errorf("Expected to acquire lock, but failed")
+	}
+	release()
+
+	ctx2, cancel2 := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel2()
+
+	release2, ok2 := AcquireBindLock(ctx2, nodeName)
+	if !ok2 {
+		t.Fatalf("Expected to acquire lock for timeout test, but failed")
+	}
+	defer release2()
+
+	ctx3, cancel3 := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel3()
+
+	release3, ok3 := AcquireBindLock(ctx3, nodeName)
+	if ok3 {
+		t.Errorf("Expected lock acquisition to timeout and fail, but it succeeded")
+	}
+	release3()
+}
