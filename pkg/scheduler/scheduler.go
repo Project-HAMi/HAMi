@@ -687,10 +687,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return res, nil
 	}
 
-	// NEW: BLIND API PATCH FOR DEVICE PLUGIN HANDSHAKE
-	// Use MergePatchType to update the node annotation WITHOUT the resourceVersion.
-	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"hami.io/mutex.lock":"%s"}}}`, string(current.UID))
-	_, err = s.kubeClient.CoreV1().Nodes().Patch(context.Background(), args.Node, types.MergePatchType, patchData, metav1.PatchOptions{})
+	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, nodelockutil.NodeLockKey, string(current.UID))
+
+	_, err = s.kubeClient.CoreV1().Nodes().Patch(ctx, args.Node, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
 		klog.ErrorS(err, "Failed to apply blind patch to node for mutex lock", "node", args.Node)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}

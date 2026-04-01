@@ -56,7 +56,7 @@ var (
 
 var (
 	bindMu    sync.Mutex
-	bindLocks = map[string]*sync.Mutex{}
+	bindLocks = map[string]chan struct{}{}
 )
 
 // nodeLockManager manages locks on a per-node basis to allow concurrent
@@ -78,25 +78,17 @@ func newNodeLockManager() nodeLockManager {
 // Returns false if the context expires before the lock is available.
 func AcquireBindLock(ctx context.Context, nodeName string) (release func(), ok bool) {
 	bindMu.Lock()
-	mu, exists := bindLocks[nodeName]
+	ch, exists := bindLocks[nodeName]
 	if !exists {
-		mu = &sync.Mutex{}
-		bindLocks[nodeName] = mu
+		ch = make(chan struct{}, 1)
+		bindLocks[nodeName] = ch
 	}
 	bindMu.Unlock()
 
-	acquired := make(chan struct{}, 1)
-	go func() {
-		mu.Lock()
-		acquired <- struct{}{}
-	}()
-
 	select {
-	case <-acquired:
-		return mu.Unlock, true
+	case ch <- struct{}{}:
+		return func() { <-ch }, true
 	case <-ctx.Done():
-		// The goroutine may still acquire the lock after we return;
-		// that is fine — it will release on the next Bind call's defer.
 		return func() {}, false
 	}
 }
