@@ -64,10 +64,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	if pod.Spec.SchedulerName != "" &&
 		(pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler) &&
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
-		klog.Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
+		klog.V(3).Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
-	klog.Infof(template, pod.Namespace, pod.Name, pod.UID)
+	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
@@ -88,7 +88,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 
 	if !hasResource {
-		klog.Infof(template+" - Allowing admission for pod: no resource found", pod.Namespace, pod.Name, pod.UID)
+		klog.V(3).Infof(template+" - Allowing admission: no GPU resource found", pod.Namespace, pod.Name, pod.UID)
 		//return admission.Allowed("no resource found")
 	} else if len(config.SchedulerName) > 0 {
 		pod.Spec.SchedulerName = config.SchedulerName

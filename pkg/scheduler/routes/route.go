@@ -42,7 +42,7 @@ func checkBody(w http.ResponseWriter, r *http.Request) {
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infoln("Entering Predicate Route handler")
+		klog.V(5).Infoln("Entering Predicate Route handler")
 		checkBody(w, r)
 
 		var buf bytes.Buffer
@@ -93,7 +93,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		klog.Infoln("Entering Bind handler")
+		klog.V(5).Infoln("Entering Bind handler")
 		var buf bytes.Buffer
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)
@@ -137,26 +137,26 @@ func WebHookRoute() httprouter.Handle {
 		klog.ErrorS(err, "Failed to create new webhook")
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infof("Handling webhook request on %s", r.URL.Path)
+		klog.V(5).Infof("Handling webhook request on %s", r.URL.Path)
 		h.ServeHTTP(w, r)
 	}
 }
 
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infoln("Health check endpoint hit")
+		klog.V(5).Infoln("Health check endpoint hit")
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
 func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		klog.Infoln("Readiness check endpoint hit")
+		klog.V(5).Infoln("Readiness check endpoint hit")
 
 		if s.GetLeaderManager().IsLeader() {
-			klog.Infoln("This scheduler extender replica is the leader")
+			klog.V(5).Infoln("Scheduler extender is leader")
 		} else {
-			klog.Infoln("This scheduler extender replica has not become the leader yet")
+			klog.V(3).Infoln("Scheduler extender has not become leader yet")
 		}
 		w.WriteHeader(http.StatusOK)
 	}

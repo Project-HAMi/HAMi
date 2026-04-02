@@ -397,6 +397,127 @@ func TestFitResourceQuota(t *testing.T) {
 	}
 }
 
+func TestNonGPUPodAllowedAdmission(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+	})
+
+	config.SchedulerName = "hami-scheduler"
+	config.ForceOverwriteDefaultScheduler = false
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		klog.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	// Pod with NO GPU resources at all - should be allowed through
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "non-gpu-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{
+					Name:  "cpu-only",
+					Image: "busybox",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1"),
+							corev1.ResourceMemory: resource.MustParse("256Mi"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("Error encoding pod: %v", err)
+	}
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "non-gpu-uid",
+			Namespace: "default",
+			Name:      "non-gpu-pod",
+			Object: runtime.RawExtension{
+				Raw: podBytes,
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	resp := wh.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("Expected non-GPU pod to be allowed, but got denied: %v", resp.Result)
+	}
+}
+
+func TestEmptyContainersDenied(t *testing.T) {
+	// Pod with no containers should be denied
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "empty-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("Error encoding pod: %v", err)
+	}
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "empty-uid",
+			Namespace: "default",
+			Name:      "empty-pod",
+			Object: runtime.RawExtension{
+				Raw: podBytes,
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	resp := wh.Handle(context.Background(), req)
+	if resp.Allowed {
+		t.Errorf("Expected pod with no containers to be denied, but got allowed")
+	}
+}
+
 func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
 	prevSchedulerName := config.SchedulerName
 	prevForceOverwrite := config.ForceOverwriteDefaultScheduler

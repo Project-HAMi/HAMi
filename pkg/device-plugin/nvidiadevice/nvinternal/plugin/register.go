@@ -95,6 +95,13 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		panic(0)
 	}
 	res := make([]*device.DeviceInfo, 0, len(devs))
+
+	// Log mode-related warnings once per scan instead of per device
+	isMigMode := plugin.operatingMode == nvidia.MigMode
+	if isMigMode {
+		klog.V(3).Info("MIG mode enabled: memory scaling and core scaling are not applied")
+	}
+
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
@@ -135,11 +142,9 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
-		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && plugin.operatingMode != nvidia.MigMode {
+		if *plugin.schedulerConfig.DeviceMemoryScaling != 1 && !isMigMode {
 			registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
-			klog.Infoln("MemoryScaling=", plugin.schedulerConfig.DeviceMemoryScaling, "registeredmem=", registeredmem)
-		} else {
-			klog.Warningln("mig mode enabled, the memory scaling is not applied")
+			klog.V(3).Infof("Device id=%v: MemoryScaling=%v, registeredmem=%v", idx, *plugin.schedulerConfig.DeviceMemoryScaling, registeredmem)
 		}
 		health := true
 		for _, val := range devs {
@@ -164,10 +169,8 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			Model = fmt.Sprintf("NVIDIA-%s", Model)
 		}
 		devcore := int32(100)
-		if plugin.operatingMode != nvidia.MigMode {
+		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
-		} else {
-			klog.Warning("mig mode enabled, the core scaling is not applied")
 		}
 		res = append(res, &device.DeviceInfo{
 			ID:      UUID,
@@ -180,23 +183,30 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			Mode:    plugin.operatingMode,
 			Health:  health,
 		})
-		klog.Infof("nvml registered device id=%v, memory=%v, type=%v, numa=%v", idx, registeredmem, Model, numa)
+		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
 	return &res
 }
 
-func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
+// RegisterInAnnotation scans devices and patches node annotations.
+// Returns (changed, error) where changed indicates whether the annotation was actually updated.
+func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	devices := plugin.getAPIDevices()
-	klog.InfoS("start working on the devices", "devices", devices)
+
+	// Log compact summary at V(3); full details at V(5)
+	klog.V(3).Infof("Discovered %d device(s) for registration", len(*devices))
+	klog.V(5).InfoS("Device details", "devices", devices)
+
 	annos := make(map[string]string)
 	node, err := util.GetNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
-		return err
+		return false, err
 	}
 	encodeddevices := device.MarshalNodeDevices(*devices)
 	if encodeddevices == plugin.deviceCache {
-		return nil
+		klog.V(3).Info("Device info unchanged, skipping annotation update")
+		return false, nil
 	}
 	plugin.deviceCache = encodeddevices
 
@@ -205,26 +215,27 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() error {
 		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
-			return err
+			return false, err
 		}
 		data, err = json.Marshal(gpuScore)
 		if err != nil {
 			klog.ErrorS(err, "marshal gpu score error.")
-			return err
+			return false, err
 		}
 	}
-	klog.V(4).InfoS("patch nvidia  topo score to node", "hami.io/node-nvidia-score", string(data))
+	klog.V(4).InfoS("patch nvidia topo score to node", "hami.io/node-nvidia-score", string(data))
 	annos[nvidia.RegisterAnnos] = encodeddevices
 	if len(data) > 0 {
 		annos[nvidia.RegisterGPUPairScore] = string(data)
 	}
-	klog.Infof("patch node with the following annos %v", fmt.Sprintf("%v", annos))
+	klog.Infof("Updating node annotations with %d device(s)", len(*devices))
+	klog.V(3).Infof("Annotation content: %v", annos)
 	err = util.PatchNodeAnnotations(node, annos)
 
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
 	}
-	return err
+	return true, err
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
@@ -248,18 +259,21 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 		default:
 		}
 		if disableWatchAndRegister {
-			klog.Info("WatchAndRegister is disabled by disableWatchAndRegister signal, sleep a success interval")
+			klog.V(3).Info("WatchAndRegister is disabled, sleeping")
 			ackDisableWatchAndRegister <- true
 			time.Sleep(successSleepInterval)
 			continue
 		}
-		err := plugin.RegisterInAnnotation()
+		changed, err := plugin.RegisterInAnnotation()
 		if err != nil {
-			klog.Errorf("Failed to register annotation: %v", err)
-			klog.Infof("Retrying in %v seconds...", errorSleepInterval)
+			klog.Errorf("Failed to register annotation: %v. Retrying in %v...", err, errorSleepInterval)
 			time.Sleep(errorSleepInterval)
 		} else {
-			klog.Infof("Successfully registered annotation. Next check in %v seconds...", successSleepInterval)
+			if changed {
+				klog.Infof("Successfully updated node annotation. Next check in %v...", successSleepInterval)
+			} else {
+				klog.V(3).Infof("No device changes detected. Next check in %v...", successSleepInterval)
+			}
 			time.Sleep(successSleepInterval)
 		}
 	}
