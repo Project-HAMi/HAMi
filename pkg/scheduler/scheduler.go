@@ -687,6 +687,24 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return res, nil
 	}
 
+	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 25*time.Second, true, func(pollCtx context.Context) (bool, error) {
+		liveNode, getErr := s.kubeClient.CoreV1().Nodes().Get(pollCtx, args.Node, metav1.GetOptions{})
+		if getErr != nil {
+			return false, getErr
+		}
+		// If the node still has the lock annotation from a previous pod, keep waiting
+		if _, locked := liveNode.Annotations[nodelockutil.NodeLockKey]; locked {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		timeoutErr := fmt.Errorf("timed out waiting for device plugin to clear previous lock on node %s: %v", args.Node, err)
+		klog.ErrorS(timeoutErr, "Device plugin annotation lock timeout")
+		return &extenderv1.ExtenderBindingResult{Error: timeoutErr.Error()}, nil
+	}
+
 	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, nodelockutil.NodeLockKey, string(current.UID))
 
 	_, err = s.kubeClient.CoreV1().Nodes().Patch(ctx, args.Node, types.MergePatchType, patchData, metav1.PatchOptions{})
