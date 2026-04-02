@@ -705,7 +705,8 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return &extenderv1.ExtenderBindingResult{Error: timeoutErr.Error()}, nil
 	}
 
-	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, nodelockutil.NodeLockKey, string(current.UID))
+	lockValue := nodelockutil.GenerateNodeLockKeyByPod(current)
+	patchData := fmt.Appendf(nil, `{"metadata":{"annotations":{"%s":"%s"}}}`, nodelockutil.NodeLockKey, lockValue)
 
 	_, err = s.kubeClient.CoreV1().Nodes().Patch(ctx, args.Node, types.MergePatchType, patchData, metav1.PatchOptions{})
 	if err != nil {
