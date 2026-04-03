@@ -99,7 +99,7 @@ func TestGenerateMigTemplate(t *testing.T) {
 			expectedPos:   1,
 			expectedReset: true,
 			expectedMig: map[string]int32{
-				"1g.5gb": 1,
+				"1g.5gb":  1,
 				"2g.10gb": 3,
 			},
 		},
@@ -158,6 +158,210 @@ func TestGenerateMigTemplate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestGetNextDeviceRequest_DeviceInRegularContainer(t *testing.T) {
+	// Save and restore InRequestDevices
+	oldInRequestDevices := device.InRequestDevices
+	defer func() { device.InRequestDevices = oldInRequestDevices }()
+
+	device.InRequestDevices = map[string]string{
+		"NVIDIA": "hami.io/vgpu-devices-to-allocate",
+	}
+
+	// Pod with no init containers, one regular container with a device
+	// Annotation format: "UUID,Type,mem,cores:;"
+	// After split by ";", we get ["UUID,Type,mem,cores:", ""]
+	// Index 0 maps to regular container 0 (since no init containers)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-abc123,NVIDIA,1000,30:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "main-container"},
+			},
+		},
+	}
+
+	ctr, ctrDevices, err := GetNextDeviceRequest("NVIDIA", pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ctr.Name != "main-container" {
+		t.Errorf("expected container name 'main-container', got '%s'", ctr.Name)
+	}
+	if len(ctrDevices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(ctrDevices))
+	}
+	if ctrDevices[0].UUID != "GPU-abc123" {
+		t.Errorf("expected UUID 'GPU-abc123', got '%s'", ctrDevices[0].UUID)
+	}
+}
+
+func TestGetNextDeviceRequest_DeviceInInitContainer(t *testing.T) {
+	oldInRequestDevices := device.InRequestDevices
+	defer func() { device.InRequestDevices = oldInRequestDevices }()
+
+	device.InRequestDevices = map[string]string{
+		"NVIDIA": "hami.io/vgpu-devices-to-allocate",
+	}
+
+	// Pod with 1 init container (has device) and 1 regular container (no device)
+	// Annotation: "GPU-init1,NVIDIA,500,10:;;"
+	// After split by ";": ["GPU-init1,NVIDIA,500,10:", "", ""]
+	// Index 0 -> init container 0 (has device), Index 1 -> regular container 0 (empty)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-init",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-init1,NVIDIA,500,10:;;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{Name: "init-with-gpu"},
+			},
+			Containers: []corev1.Container{
+				{Name: "main-no-gpu"},
+			},
+		},
+	}
+
+	ctr, ctrDevices, err := GetNextDeviceRequest("NVIDIA", pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ctr.Name != "init-with-gpu" {
+		t.Errorf("expected container name 'init-with-gpu', got '%s'", ctr.Name)
+	}
+	if len(ctrDevices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(ctrDevices))
+	}
+	if ctrDevices[0].UUID != "GPU-init1" {
+		t.Errorf("expected UUID 'GPU-init1', got '%s'", ctrDevices[0].UUID)
+	}
+}
+
+func TestGetNextDeviceRequest_DeviceInRegularContainerWithInitOffset(t *testing.T) {
+	oldInRequestDevices := device.InRequestDevices
+	defer func() { device.InRequestDevices = oldInRequestDevices }()
+
+	device.InRequestDevices = map[string]string{
+		"NVIDIA": "hami.io/vgpu-devices-to-allocate",
+	}
+
+	// Pod with 2 init containers (no device) and 1 regular container (has device)
+	// Annotation: ";;GPU-main1,NVIDIA,2000,50:;"
+	// After split by ";": ["", "", "GPU-main1,NVIDIA,2000,50:", ""]
+	// Index 0 -> init container 0 (empty)
+	// Index 1 -> init container 1 (empty)
+	// Index 2 -> regular container 0 (has device, regularIdx = 2 - 2 = 0)
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-offset",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": ";;GPU-main1,NVIDIA,2000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{Name: "init1-no-gpu"},
+				{Name: "init2-no-gpu"},
+			},
+			Containers: []corev1.Container{
+				{Name: "main-with-gpu"},
+			},
+		},
+	}
+
+	ctr, ctrDevices, err := GetNextDeviceRequest("NVIDIA", pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if ctr.Name != "main-with-gpu" {
+		t.Errorf("expected container name 'main-with-gpu', got '%s'", ctr.Name)
+	}
+	if len(ctrDevices) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(ctrDevices))
+	}
+	if ctrDevices[0].UUID != "GPU-main1" {
+		t.Errorf("expected UUID 'GPU-main1', got '%s'", ctrDevices[0].UUID)
+	}
+}
+
+func TestGetNextDeviceRequest_NoDeviceFound(t *testing.T) {
+	oldInRequestDevices := device.InRequestDevices
+	defer func() { device.InRequestDevices = oldInRequestDevices }()
+
+	device.InRequestDevices = map[string]string{
+		"NVIDIA": "hami.io/vgpu-devices-to-allocate",
+	}
+
+	// Pod with annotation but all containers have empty devices
+	// Annotation: ";;"
+	// After split by ";": ["", "", ""]
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-empty",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": ";;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{Name: "init1"},
+			},
+			Containers: []corev1.Container{
+				{Name: "main1"},
+			},
+		},
+	}
+
+	_, _, err := GetNextDeviceRequest("NVIDIA", pod)
+	if err == nil {
+		t.Fatal("expected error 'device request not found', got nil")
+	}
+	if err.Error() != "device request not found" {
+		t.Errorf("expected error 'device request not found', got '%s'", err.Error())
+	}
+}
+
+func TestGetNextDeviceRequest_DeviceTypeNotFound(t *testing.T) {
+	oldInRequestDevices := device.InRequestDevices
+	defer func() { device.InRequestDevices = oldInRequestDevices }()
+
+	device.InRequestDevices = map[string]string{
+		"NVIDIA": "hami.io/vgpu-devices-to-allocate",
+	}
+
+	// Pod with annotation for NVIDIA, but we ask for a non-existent device type
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-notype",
+			Namespace: "default",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-abc,NVIDIA,1000,30:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "main"},
+			},
+		},
+	}
+
+	_, _, err := GetNextDeviceRequest("AMD", pod)
+	if err == nil {
+		t.Fatal("expected error 'device request not found', got nil")
 	}
 }
 
