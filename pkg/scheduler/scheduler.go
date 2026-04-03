@@ -688,9 +688,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 
 	err = wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 25*time.Second, true, func(pollCtx context.Context) (bool, error) {
-		liveNode, getErr := s.kubeClient.CoreV1().Nodes().Get(pollCtx, args.Node, metav1.GetOptions{})
+		// USE THE INFORMER CACHE INSTEAD OF DIRECT API CALL
+		liveNode, getErr := s.nodeLister.Get(args.Node)
 		if getErr != nil {
-			return false, getErr
+			// If the node is not found in the cache yet, don't fail immediately, just retry.
+			return false, nil
 		}
 		// If the node still has the lock annotation from a previous pod, keep waiting
 		if _, locked := liveNode.Annotations[nodelockutil.NodeLockKey]; locked {
