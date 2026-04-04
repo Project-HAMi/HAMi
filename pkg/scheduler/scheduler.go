@@ -47,6 +47,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
@@ -650,6 +651,10 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+
+	nodelock.LockNodeMemory(args.Node)
+	defer nodelock.UnlockNodeMemory(args.Node) // Safely releases even on goto ReleaseNodeLocks
+
 	var res *extenderv1.ExtenderBindingResult
 
 	binding := &corev1.Binding{
@@ -710,7 +715,6 @@ ReleaseNodeLocks:
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
-
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)

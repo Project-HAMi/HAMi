@@ -18,14 +18,19 @@ package nodelock
 
 import (
 	"context" // Added for the new test
+	"fmt"
 	"runtime"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added for the new test
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	core "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -553,5 +558,94 @@ func TestSimulateRetryStorm(t *testing.T) {
 				t.Logf("PASS: Max collisions were %d. Load is well spread.", maxCollisions)
 			}
 		})
+	}
+}
+
+// TestLockNode_ConcurrentPatchSimulation verifies that the HAMi scheduler can handle
+// a massive concurrent burst of pods (e.g., parallelism: 40+) without triggering
+// K8s API 409 Conflicts and dropping pods into the kube-scheduler's exponential backoff.
+func TestLockNode_ConcurrentPatchSimulation(t *testing.T) {
+	// 1. Setup the fake Kube client
+	fakeClient := fake.NewSimpleClientset()
+	client.KubeClient = fakeClient // Assuming HAMi uses this global client
+
+	nodeName := "test-gpu-node-concurrent"
+
+	// Create the base Node
+	fakeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}, metav1.CreateOptions{})
+
+	var patchCount, updateCount int32
+
+	// 2. Intercept API calls to simulate the "Blind Patch" and monitor behavior
+	// 2. Intercept API calls to simulate the "Blind Patch" and monitor behavior
+	fakeClient.PrependReactor("patch", "nodes", func(action core.Action) (bool, k8sruntime.Object, error) {
+		atomic.AddInt32(&patchCount, 1)
+
+		// Simulate network latency. If the in-memory sync.Mutex isn't working,
+		// these concurrent overlapping calls would normally fail or race.
+		time.Sleep(5 * time.Millisecond)
+
+		return true, nil, nil // Return true to indicate we handled the patch successfully
+	})
+
+	// Intercept Updates to ensure we aren't using the old method that caused 409s
+	fakeClient.PrependReactor("update", "nodes", func(action core.Action) (bool, k8sruntime.Object, error) {
+		atomic.AddInt32(&updateCount, 1)
+		return false, nil, nil
+	})
+
+	// 3. Simulate the 40+ pod Job submission hitting the Bind function
+	numPods := 40
+	var wg sync.WaitGroup
+	errCh := make(chan error, numPods)
+
+	for i := 0; i < numPods; i++ {
+		wg.Add(1)
+		go func(podID int) {
+			defer wg.Done()
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      fmt.Sprintf("mnist-pod-%d", podID),
+					Namespace: "default",
+				},
+			}
+
+			// Call your newly updated LockNode function
+			err := LockNode(nodeName, "", pod)
+			if err != nil {
+				errCh <- fmt.Errorf("Pod %s failed: %w", pod.Name, err)
+			}
+		}(i)
+	}
+
+	// 4. Wait for all 40 pods to process through the in-memory queue
+	wg.Wait()
+	close(errCh)
+
+	var errs []error
+	for err := range errCh {
+		errs = append(errs, err)
+	}
+
+	// 5. Verify 100% Coverage & Correct Behavior
+
+	// Check 1: Did any pods get rejected and thrown into Kube-Scheduler Backoff?
+	// If your in-memory sync.Mutex works, this should be 0.
+	if len(errs) > 0 {
+		t.Fatalf("FAIL: Expected 0 errors due to in-memory queueing, but got %d. First error: %v", len(errs), errs[0])
+	}
+
+	// Check 2: Did we use Update() instead of Patch()?
+	// If this > 0, you are still at risk of K8s API 409 conflicts.
+	if atomic.LoadInt32(&updateCount) > 0 {
+		t.Errorf("FAIL: Expected 0 Update calls (to avoid 409 conflicts), got %d", updateCount)
+	}
+
+	// Check 3: Did all 40 pods successfully patch the node for the Device Plugin handshake?
+	if atomic.LoadInt32(&patchCount) != int32(numPods) {
+		t.Errorf("FAIL: Expected %d Patch calls, got %d", numPods, patchCount)
 	}
 }

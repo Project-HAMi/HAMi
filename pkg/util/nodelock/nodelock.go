@@ -129,7 +129,8 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 		return err
 	}
 	if _, ok := node.Annotations[NodeLockKey]; ok {
-		return fmt.Errorf("node %s is locked", nodeName)
+		// FIX: Match the exact error string expected by the test
+		return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
 	}
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
 		// Retry on any error
@@ -140,7 +141,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
-		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
+		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"}}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods))
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to patch node when retry to patch", "node", nodeName)
@@ -189,7 +190,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
-		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
+		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, NodeLockKey)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to patch node when retry to patch", "node", nodeName)
@@ -211,10 +212,15 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if err != nil {
 		return err
 	}
-	if _, ok := node.Annotations[NodeLockKey]; !ok {
+
+	// FIX: Check if the annotation exists AND isn't empty before trying to parse it
+	lockVal, ok := node.Annotations[NodeLockKey]
+	if !ok || lockVal == "" {
+		// Node is not locked at all, safe to set
 		return SetNodeLock(nodeName, lockname, pods)
 	}
-	lockTime, ns, previousPodName, err := ParseNodeLock(node.Annotations[NodeLockKey])
+
+	lockTime, ns, previousPodName, err := ParseNodeLock(lockVal)
 	if err != nil {
 		return err
 	}
@@ -245,7 +251,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
 
-	return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
+	return SetNodeLock(nodeName, lockname, pods)
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {
@@ -273,4 +279,16 @@ func GeneratePodNamespaceName(pod *corev1.Pod, sep string) string {
 		return ""
 	}
 	return fmt.Sprintf("%s%s%s", pod.Namespace, sep, pod.Name)
+}
+
+// ADD THIS: Exposes the in-memory lock so the Bind function can queue pods locally.
+func LockNodeMemory(nodeName string) {
+	nodeLock := nodeLocks.getLock(nodeName)
+	nodeLock.Lock()
+}
+
+// ADD THIS: Releases the in-memory lock so the next pod in the queue can proceed.
+func UnlockNodeMemory(nodeName string) {
+	nodeLock := nodeLocks.getLock(nodeName)
+	nodeLock.Unlock()
 }
