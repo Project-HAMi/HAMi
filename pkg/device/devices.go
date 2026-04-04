@@ -302,14 +302,7 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 func EncodeContainerDevices(cd ContainerDevices) string {
 	var builder strings.Builder
 	for _, val := range cd {
-		builder.WriteString(val.UUID)
-		builder.WriteString(",")
-		builder.WriteString(val.Type)
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Usedmem)))
-		builder.WriteString(",")
-		builder.WriteString(strconv.Itoa(int(val.Usedcores)))
-		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
+		fmt.Fprintf(&builder, "%s,%s,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, OneContainerMultiDeviceSplitSymbol)
 	}
 	tmp := builder.String()
 	klog.Infof("Encoded container Devices: %s", tmp)
@@ -319,16 +312,12 @@ func EncodeContainerDevices(cd ContainerDevices) string {
 func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
 	var builder strings.Builder
 	for _, val := range cd {
-		if strings.Compare(val.Type, t) == 0 {
-			builder.WriteString(val.UUID)
-			builder.WriteString(",")
-			builder.WriteString(val.Type)
-			builder.WriteString(",")
-			builder.WriteString(strconv.Itoa(int(val.Usedmem)))
-			builder.WriteString(",")
-			builder.WriteString(strconv.Itoa(int(val.Usedcores)))
+		if val.Type == t {
+			if builder.Len() > 0 {
+				builder.WriteString(OneContainerMultiDeviceSplitSymbol)
+			}
+			fmt.Fprintf(&builder, "%s,%s,%d,%d", val.UUID, val.Type, val.Usedmem, val.Usedcores)
 		}
-		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
 	}
 	tmp := builder.String()
 	klog.Infof("Encoded container Certain Device type: %s->%s", t, tmp)

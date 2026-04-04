@@ -92,7 +92,11 @@ func (a *analyzer) collect(dir string) {
 		}
 		filePath := filepath.Join(dir, entry.Name())
 		f, parseErr := parser.ParseFile(a.fset, filePath, nil, parser.AllErrors|parser.ParseComments)
-		if parseErr == nil {
+		if parseErr != nil {
+			fmt.Fprintln(os.Stderr, "ERROR(parse)", logPrefix, parseErr)
+			a.failed = true
+		}
+		if f != nil {
 			files = append(files, f)
 		}
 	}
