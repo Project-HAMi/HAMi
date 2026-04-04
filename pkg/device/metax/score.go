@@ -62,7 +62,7 @@ func (devs LinkDevices) String() string {
 	var str strings.Builder
 	str.WriteString("[")
 	for _, dev := range devs {
-		str.WriteString(fmt.Sprintf("%v", *dev))
+		fmt.Fprintf(&str, "%v", *dev)
 	}
 	str.WriteString("]")
 

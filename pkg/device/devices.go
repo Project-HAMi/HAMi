@@ -300,23 +300,37 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 }
 
 func EncodeContainerDevices(cd ContainerDevices) string {
-	tmp := ""
+	var builder strings.Builder
 	for _, val := range cd {
-		tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores)) + OneContainerMultiDeviceSplitSymbol
+		builder.WriteString(val.UUID)
+		builder.WriteString(",")
+		builder.WriteString(val.Type)
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Usedmem)))
+		builder.WriteString(",")
+		builder.WriteString(strconv.Itoa(int(val.Usedcores)))
+		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
 	}
+	tmp := builder.String()
 	klog.Infof("Encoded container Devices: %s", tmp)
 	return tmp
-	//return strings.Join(cd, ",")
 }
 
 func EncodeContainerDeviceType(cd ContainerDevices, t string) string {
-	tmp := ""
+	var builder strings.Builder
 	for _, val := range cd {
 		if strings.Compare(val.Type, t) == 0 {
-			tmp += val.UUID + "," + val.Type + "," + strconv.Itoa(int(val.Usedmem)) + "," + strconv.Itoa(int(val.Usedcores))
+			builder.WriteString(val.UUID)
+			builder.WriteString(",")
+			builder.WriteString(val.Type)
+			builder.WriteString(",")
+			builder.WriteString(strconv.Itoa(int(val.Usedmem)))
+			builder.WriteString(",")
+			builder.WriteString(strconv.Itoa(int(val.Usedcores)))
 		}
-		tmp += OneContainerMultiDeviceSplitSymbol
+		builder.WriteString(OneContainerMultiDeviceSplitSymbol)
 	}
+	tmp := builder.String()
 	klog.Infof("Encoded container Certain Device type: %s->%s", t, tmp)
 	return tmp
 }
