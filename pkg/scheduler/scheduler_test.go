@@ -134,7 +134,7 @@ test case matrix.
 
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -245,7 +245,7 @@ test case matrix.
 */
 func Test_Filter(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -705,7 +705,7 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 				s := NewScheduler()
 				s.stopCh = make(chan struct{})
 				s.nodeNotify = make(chan struct{})
-				client.KubeClient = fake.NewSimpleClientset()
+				client.KubeClient = fake.NewClientset()
 				s.kubeClient = client.KubeClient
 				informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 				s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
@@ -800,7 +800,7 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 		s.stopCh = make(chan struct{})
 		s.nodeNotify = make(chan struct{})
 
-		client.KubeClient = fake.NewSimpleClientset()
+		client.KubeClient = fake.NewClientset()
 		s.kubeClient = client.KubeClient
 
 		informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
@@ -917,7 +917,7 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 
 func Test_ResourceQuota(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
