@@ -86,6 +86,8 @@ func init() {
 
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
+	kubeletdevicepluginv1beta1.UnimplementedDevicePluginServer
+
 	ctx                  context.Context
 	rm                   rm.ResourceManager
 	config               *nvidia.DeviceConfig
@@ -487,22 +489,22 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		// If the devices being allocated are replicas, then (conditionally)
 		// error out if more than one resource is being allocated.
 
-		if strings.Contains(req.DevicesIDs[0], "MIG") {
-			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
-				if len(req.DevicesIDs) > 1 {
+		if strings.Contains(req.DevicesIds[0], "MIG") {
+			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
+				if len(req.DevicesIds) > 1 {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
-					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIDs))
+					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
 				}
 			}
 
-			for _, id := range req.DevicesIDs {
+			for _, id := range req.DevicesIds {
 				if !plugin.rm.Devices().Contains(id) {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
-			response, err := plugin.getAllocateResponse(req.DevicesIDs)
+			response, err := plugin.getAllocateResponse(req.DevicesIds)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
@@ -515,7 +517,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
-			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
+			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIds) {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
@@ -675,7 +677,7 @@ func (plugin *NvidiaDevicePlugin) updateResponseForCDI(response *kubeletdevicepl
 			cdiDevice := kubeletdevicepluginv1beta1.CDIDevice{
 				Name: device,
 			}
-			response.CDIDevices = append(response.CDIDevices, &cdiDevice)
+			response.CdiDevices = append(response.CdiDevices, &cdiDevice)
 		}
 	}
 
