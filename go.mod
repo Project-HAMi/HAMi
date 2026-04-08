@@ -53,12 +53,8 @@ require (
 	github.com/go-openapi/jsonreference v0.20.4 // indirect
 	github.com/go-openapi/swag v0.23.0 // indirect
 	github.com/go-task/slim-sprig/v3 v3.0.0 // indirect
-	github.com/gogo/protobuf v1.3.2 // indirect
-	github.com/golang/groupcache v0.0.0-20210331224755-41bb18bfe9da // indirect
-	github.com/golang/protobuf v1.5.4 // indirect
 	github.com/google/gnostic-models v0.7.0 // indirect
 	github.com/google/go-cmp v0.7.0 // indirect
-	github.com/google/gofuzz v1.2.0 // indirect
 	github.com/google/pprof v0.0.0-20260115054156-294ebfa9ad83 // indirect
 	github.com/inconshreveable/mousetrap v1.1.0 // indirect
 	github.com/josharian/intern v1.0.0 // indirect
@@ -98,7 +94,6 @@ require (
 	k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 // indirect
 	sigs.k8s.io/json v0.0.0-20250730193827-2d320260d730 // indirect
 	sigs.k8s.io/randfill v1.0.0 // indirect
-	sigs.k8s.io/structured-merge-diff/v4 v4.6.0 // indirect
 	sigs.k8s.io/structured-merge-diff/v6 v6.3.0 // indirect
 	sigs.k8s.io/yaml v1.6.0 // indirect
 )
@@ -107,26 +102,26 @@ replace (
 	github.com/Project-HAMi/HAMi/pkg/api => ./pkg/api
 	github.com/Project-HAMi/HAMi/pkg/device-plugin => ./pkg/device-plugin
 	github.com/Project-HAMi/HAMi/test/utils => ./test/utils
-	k8s.io/api => k8s.io/api v0.31.10
-	k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.31.10
-	k8s.io/apimachinery => k8s.io/apimachinery v0.31.10
-	k8s.io/apiserver => k8s.io/apiserver v0.31.10
-	k8s.io/cli-runtime => k8s.io/cli-runtime v0.31.10
-	k8s.io/client-go => k8s.io/client-go v0.31.10
-	k8s.io/cloud-provider => k8s.io/cloud-provider v0.31.10
-	k8s.io/cluster-bootstrap => k8s.io/cluster-bootstrap v0.31.10
-	k8s.io/code-generator => k8s.io/code-generator v0.31.10
-	k8s.io/component-base => k8s.io/component-base v0.31.10
-	k8s.io/component-helpers => k8s.io/component-helpers v0.31.10
-	k8s.io/cri-api => k8s.io/cri-api v0.31.10
-	k8s.io/csi-translation-lib => k8s.io/csi-translation-lib v0.31.10
-	k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.31.10
-	k8s.io/kube-controller-manager => k8s.io/kube-controller-manager v0.31.10
-	k8s.io/kube-proxy => k8s.io/kube-proxy v0.31.10
-	k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.31.10
-	k8s.io/kubectl => k8s.io/kubectl v0.31.10
-	k8s.io/kubelet => k8s.io/kubelet v0.31.10
-	k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.31.10
-	k8s.io/metrics => k8s.io/metrics v0.31.10
-	k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.31.10
+//k8s.io/api => k8s.io/api v0.31.10
+//k8s.io/apiextensions-apiserver => k8s.io/apiextensions-apiserver v0.31.10
+//k8s.io/apimachinery => k8s.io/apimachinery v0.31.10
+//k8s.io/apiserver => k8s.io/apiserver v0.31.10
+//k8s.io/cli-runtime => k8s.io/cli-runtime v0.31.10
+//k8s.io/client-go => k8s.io/client-go v0.31.10
+//k8s.io/cloud-provider => k8s.io/cloud-provider v0.31.10
+//k8s.io/cluster-bootstrap => k8s.io/cluster-bootstrap v0.31.10
+//k8s.io/code-generator => k8s.io/code-generator v0.31.10
+//k8s.io/component-base => k8s.io/component-base v0.31.10
+//k8s.io/component-helpers => k8s.io/component-helpers v0.31.10
+//k8s.io/cri-api => k8s.io/cri-api v0.31.10
+//k8s.io/csi-translation-lib => k8s.io/csi-translation-lib v0.31.10
+//k8s.io/kube-aggregator => k8s.io/kube-aggregator v0.31.10
+//k8s.io/kube-controller-manager => k8s.io/kube-controller-manager v0.31.10
+//k8s.io/kube-proxy => k8s.io/kube-proxy v0.31.10
+//k8s.io/kube-scheduler => k8s.io/kube-scheduler v0.31.10
+//k8s.io/kubectl => k8s.io/kubectl v0.31.10
+//k8s.io/kubelet => k8s.io/kubelet v0.31.10
+//k8s.io/legacy-cloud-providers => k8s.io/legacy-cloud-providers v0.31.10
+//k8s.io/metrics => k8s.io/metrics v0.31.10
+//k8s.io/sample-apiserver => k8s.io/sample-apiserver v0.31.10
 )
