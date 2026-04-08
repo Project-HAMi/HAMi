@@ -367,7 +367,7 @@ func TestGetNextDeviceRequest_DeviceTypeNotFound(t *testing.T) {
 
 func Test_PodAllocationTrySuccess(t *testing.T) {
 	// Initialize fake clientset and pre-load test data
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "testpod",
@@ -403,7 +403,7 @@ func Test_PodAllocationTrySuccess(t *testing.T) {
 
 func Test_PodAllocationSuccess(t *testing.T) {
 	// Initialize fake clientset and pre-load test data
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "testpod",
@@ -442,7 +442,7 @@ func Test_PodAllocationSuccess(t *testing.T) {
 }
 func Test_PodAllocationFailed(t *testing.T) {
 
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:        "testpod",
