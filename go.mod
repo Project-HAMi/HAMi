@@ -28,12 +28,12 @@ require (
 	gopkg.in/yaml.v2 v2.4.0
 	gopkg.in/yaml.v3 v3.0.1
 	gotest.tools/v3 v3.5.2
-	k8s.io/api v0.35.2
+	k8s.io/api v0.35.3
 	k8s.io/apimachinery v0.35.3
-	k8s.io/client-go v0.35.2
+	k8s.io/client-go v0.35.3
 	k8s.io/klog/v2 v2.140.0
 	k8s.io/kube-scheduler v0.28.3
-	k8s.io/kubelet v0.35.2
+	k8s.io/kubelet v0.35.3
 	sigs.k8s.io/controller-runtime v0.23.3
 	tags.cncf.io/container-device-interface v1.1.0
 	tags.cncf.io/container-device-interface/specs-go v1.1.0
