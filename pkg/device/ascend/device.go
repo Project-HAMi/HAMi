@@ -113,6 +113,12 @@ func (dev *Devices) CommonWord() string {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
+		if dev.config.OverwriteEnv {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "ASCEND_VISIBLE_DEVICES",
+				Value: "",
+			})
+		}
 		return false, nil
 	}
 
