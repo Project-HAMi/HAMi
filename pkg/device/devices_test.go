@@ -930,16 +930,14 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 	oldDevicesMap := DevicesMap
 	defer func() { DevicesMap = oldDevicesMap }()
 
-	expectedReq := ContainerDeviceRequest{
-		Nums:     1,
-		Type:     "NVIDIA",
-		Memreq:   1000,
-		Coresreq: 10,
-	}
-
 	DevicesMap = map[string]Devices{
 		"NVIDIA": &mockDevices{
-			resourceRequest: expectedReq,
+			resourceRequest: ContainerDeviceRequest{
+				Nums:     1,
+				Type:     "NVIDIA",
+				Memreq:   1000,
+				Coresreq: 10,
+			},
 		},
 	}
 
