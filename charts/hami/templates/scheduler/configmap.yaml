@@ -20,8 +20,8 @@ data:
     kind: KubeSchedulerConfiguration
     leaderElection:
       leaderElect: {{ .Values.scheduler.leaderElect }}
-      resourceName: {{ .Values.schedulerName }}
-      resourceNamespace: {{ include "hami-vgpu.namespace" . }}
+      resourceName: {{ .Values.schedulerName | quote }}
+      resourceNamespace: {{ include "hami-vgpu.namespace" . | quote }}
     profiles:
     - schedulerName: {{ .Values.schedulerName }}
     extenders:
