@@ -393,6 +393,15 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
 			if !health {
+				existingNode, getNodeErr := s.GetNode(val.Name)
+				if getNodeErr != nil {
+					klog.V(5).InfoS("Skipping device cleanup for node not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+				if _, ok := existingNode.Devices[devhandsk]; !ok {
+					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
 				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
