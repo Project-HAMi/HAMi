@@ -87,18 +87,36 @@ Engineering and community practices that keep HAMi maintainable and safe to run 
 5. **Documentation and operability first**  
    - Ship user-facing docs, examples, and Helm values commentary alongside features so platforms can install, tune, and observe HAMi without reading the implementation. 
 
-- **Architecture requirements:** Core components include MutatingWebhook, Scheduler Extender, Device Plugins, and in-container control libraries.  
-  - Architecture and flow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md
-- **Environment differences:**  
-  - PoC/dev/test/prod: the core deployment model is the same (GPU-enabled Kubernetes with HAMi); production environments typically apply stricter node labeling, webhook TLS hardening, scheduler/device policy tuning, and monitoring integration.
-- **Service dependencies in cluster:** Kubernetes API server, kube-scheduler/Volcano scheduling integration, kubelet device plugin APIs, and (optionally) cert-manager for webhook certificates.
-- **IAM model:** Uses Kubernetes RBAC for component service accounts and least-required API operations for webhook patch jobs and scheduler operations.
-- **Sovereignty/compliance:** Data plane is cluster-local; no mandatory external telemetry service. Regional/organizational compliance posture depends on deployment choices.
-- **HA requirements:** Scheduler supports leader election and configurable replicas.
+#### Architecture requirements
+
+Core components include MutatingWebhook, Scheduler Extender, Device Plugins, and in-container control libraries.  
+- Architecture and flow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md
+
+#### Environment differences
+
+- PoC/dev/test/prod: the core deployment model is the same (GPU-enabled Kubernetes with HAMi); production environments typically apply stricter node labeling, webhook TLS hardening, scheduler/device policy tuning, and monitoring integration.
+
+#### Service dependencies in cluster
+
+Kubernetes API server, kube-scheduler/Volcano scheduling integration, kubelet device plugin APIs, and (optionally) cert-manager for webhook certificates.
+
+#### IAM model
+
+Uses Kubernetes RBAC for component service accounts and least-required API operations for webhook patch jobs and scheduler operations.
+
+#### Sovereignty/compliance
+
+Data plane is cluster-local; no mandatory external telemetry service. Regional/organizational compliance posture depends on deployment choices.
+
+#### HA requirements
+
+Scheduler supports leader election and configurable replicas.
   - Workload side: since HAMi v2.5, already-running tasks are designed to remain stable and are not expected to fail solely due to cluster-side events such as HAMi upgrades/uninstallations or transient Kubernetes/HAMi control-plane faults.
   - Scheduling side: since HAMi v2.8, multi-replica scheduler deployment with leader election is supported to provide high availability for scheduling decisions.
-- **Resource requirements (CPU/memory/network):** Configurable per component via Helm values. The chart leaves `resources` unset by default, so production clusters should set explicit requests/limits. The following estimates are practical planning baselines for HAMi v2.8.0 on Kubernetes 1.20+, with NVIDIA sharing enabled and normal scheduling churn.  
-  - **Assumptions for estimates:** 1 scheduler replica (`kube-scheduler` + HAMi extender), 1 device-plugin DaemonSet pod per GPU node (`device-plugin` + `vgpu-monitor`), Prometheus scraping every 15-30s, and no unusual pod-creation spikes.  
+#### Resource requirements (CPU/memory/network)
+
+Configurable per component via Helm values. The chart leaves `resources` unset by default, so production clusters should set explicit requests/limits. The following estimates are practical planning baselines for HAMi v2.8.0 on Kubernetes 1.20+, with NVIDIA sharing enabled and normal scheduling churn.  
+- **Assumptions for estimates:** 1 scheduler replica (`kube-scheduler` + HAMi extender), 1 device-plugin DaemonSet pod per GPU node (`device-plugin` + `vgpu-monitor`), Prometheus scraping every 15-30s, and no unusual pod-creation spikes.  
 
 | Component / scope | CPU (recommended request to typical peak) | Memory (recommended request to typical peak) | Network (control/observability plane) |
 |---|---|---|---|
@@ -108,8 +126,10 @@ Engineering and community practices that keep HAMi maintainable and safe to run 
 | Cluster total (N GPU nodes) | (0.3 to 0.8) + N * (0.15 to 0.6) cores | (0.5 to 2) + N * (0.25 to 1) GiB | Approximately linear with N based on per-node telemetry plus scheduler control traffic |
 | Example footprint (N=20 GPU nodes) | 3.3-12.8 cores | 5.5-22 GiB | 1.2-5 Mbps typical aggregate control/metrics traffic, with higher short bursts during large scheduling events |
 
-- **Storage requirements:** HAMi has no mandatory external database. Storage use is mainly image layers, logs/metrics buffers, and hostPath-mounted runtime paths used by scheduler/device-plugin components. The following are practical sizing estimates for production planning.  
-  - **Assumptions for estimates:** default image retention policy, standard Kubernetes/container runtime logging, and mixed training/inference workloads with normal pod churn.  
+#### Storage requirements
+
+HAMi has no mandatory external database. Storage use is mainly image layers, logs/metrics buffers, and hostPath-mounted runtime paths used by scheduler/device-plugin components. The following are practical sizing estimates for production planning.  
+- **Assumptions for estimates:** default image retention policy, standard Kubernetes/container runtime logging, and mixed training/inference workloads with normal pod churn.  
 
 | Component / scope | Estimated storage footprint | Notes |
 |---|---|---|
@@ -119,15 +139,19 @@ Engineering and community practices that keep HAMi maintainable and safe to run 
 | Cluster total (N GPU nodes, 1 scheduler replica) | approximately `(0.2 to 0.8) + N * (0.5 to 2.2)` GiB | Combines scheduler ephemeral + per-GPU-node pod + host runtime reserve |
 | Example footprint (N=20 GPU nodes) | approximately 10.2-44.8 GiB cluster-wide reserved capacity | Planning envelope for stable operations and upgrade headroom |
 
-- **API design:**  
-  - Uses Kubernetes native APIs (Pods, Nodes, annotations, admission webhooks, device plugin gRPC).  
-  - Defaults and optional configurations are exposed in Helm chart values and config docs.  
-  - No custom CRD is required for core workflows.
-  - Device-slice resource names are exposed as Kubernetes resources, so users can request and limit slices directly in `resources.limits` / `resources.requests`.
-  - GPU scheduling policies and advanced behaviors are expressed through Pod annotations.
-  - HAMi runtime behavior can be configured through scheduler and device-plugin ConfigMaps, with Helm values as the primary entry point.
-- **Release process:** Semantic versioning, tagged releases, release branches, automated image/chart/release-note workflows, with documented manual verification steps.  
-  - Release process doc: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/release-process.md
+#### API design
+
+- Uses Kubernetes native APIs (Pods, Nodes, annotations, admission webhooks, device plugin gRPC).  
+- Defaults and optional configurations are exposed in Helm chart values and config docs.  
+- No custom CRD is required for core workflows.
+- Device-slice resource names are exposed as Kubernetes resources, so users can request and limit slices directly in `resources.limits` / `resources.requests`.
+- GPU scheduling policies and advanced behaviors are expressed through Pod annotations.
+- HAMi runtime behavior can be configured through scheduler and device-plugin ConfigMaps, with Helm values as the primary entry point.
+
+#### Release process
+
+Semantic versioning, tagged releases, release branches, automated image/chart/release-note workflows, with documented manual verification steps.  
+- Release process doc: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/release-process.md
 
 ### Installation
 
@@ -154,7 +178,7 @@ kubectl get pods -n kube-system | grep -E "hami-scheduler|hami-device-plugin"
 
 ### Security
 
-See separate [document](https://github.com/cncf/toc/pull/2083对应的文件)
+See separate [document](https://github.com/cncf/toc/blob/main/projects/hami/security-assesment/self-assessment.md)
 
 ---
 
