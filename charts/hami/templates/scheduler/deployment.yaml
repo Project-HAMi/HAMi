@@ -55,10 +55,10 @@ spec:
             {{- range .Values.scheduler.kubeScheduler.extraArgs }}
             - {{ . }}
             {{- end }}
-            {{- end }}
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
+            {{- end }}
           resources:
           {{- toYaml .Values.scheduler.kubeScheduler.resources | nindent 12 }}
           volumeMounts:
