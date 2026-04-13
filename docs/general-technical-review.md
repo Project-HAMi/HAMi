@@ -186,8 +186,10 @@ See separate [document](https://github.com/cncf/toc/blob/main/projects/hami/secu
 
 ### Project Installation and Configuration
 
-- Installed with Helm chart, with settings for scheduler policy, resource naming, webhook selectors, TLS strategy, and device-plugin behavior.
-- Operational configuration can be updated through Helm values and ConfigMaps (e.g., scheduler/device policy config maps).
+- Installation uses the Helm chart, including configuration for scheduler policy, resource naming, webhook selectors, TLS strategy, and device-plugin behavior.  
+  - Installation guide: https://project-hami.io/docs/installation/online-installation
+- Operational behavior is configurable through Helm values and ConfigMaps (for example scheduler and device policy config maps).  
+  - Configuration guide: https://project-hami.io/docs/userguide/configure
 
 ### Project Enablement and Rollback
 
@@ -196,37 +198,22 @@ See separate [document](https://github.com/cncf/toc/blob/main/projects/hami/secu
   - Pod mutation for recognized device requests.  
   - Scheduling for device-sharing workloads routed through HAMi logic and policy.  
   - Device plugin allocation/mount/env handling for runtime enforcement.
-- **Testing enable/disable:** CI pipelines include lint, unit tests, chart lint/package, and e2e workflows.
+- **Testing enable/disable:** Deployment and uninstall paths are exercised through e2e workflows; PRs are expected to pass required e2e checks before merge.
 - **Resource cleanup:** Helm uninstall removes chart-managed resources; no core CRDs are introduced by default path.
 
 ### Rollout, Upgrade and Rollback Planning
 
-- **Compatibility cadence:** Kubernetes and dependencies are tracked through regular dependency updates and CI; versions are managed via SemVer and release workflows.
-- **Rollback procedures:** Helm rollback or release branch patching strategy, with release docs describing branch/tag mechanics.
+- **Compatibility cadence:** Kubernetes and related dependencies are tracked through CI and automated dependency updates (including Dependabot). Version evolution is governed by the documented release process and release workflows.
+- **Rollback procedures:** Use `helm rollback` for in-place rollback, or uninstall and redeploy with a previous chart version when a full re-provisioning path is preferred.
 - **How rollout/rollback can fail:**  
-  - Webhook cert misconfiguration  
-  - Runtime/driver mismatch  
-  - Device plugin registration issues  
-  - Policy/config incompatibilities
-- **Impact to running workloads:** Existing running pods are generally unaffected immediately; new scheduling/allocation decisions may be impacted.
-- **Rollback indicators:** Scheduler admission failures, increased pending pods, device registration anomalies, and critical vulnerability findings.
+  - Rolling back images without rolling back the matching chart/configuration revision.  
+  - Failing to roll back customized values and policy ConfigMaps together with workloads/images.  
+  - Performing multi-version jump rollbacks (for example two or more minor versions) without staged validation.
+- **Impact to running workloads:** Since HAMi v2.5, already-running pods are generally expected to remain unaffected by control-plane rollout actions; new scheduling/allocation decisions may still change during upgrades/rollbacks.
+- **Rollback indicators:** Primary indicators include admission/scheduling errors, abnormal pending-pod growth, device plugin registration issues, and policy mismatch symptoms. Operationally, the project recommends staying on recent supported releases whenever possible.
 - **Upgrade path testing:** Unit/e2e coverage exists; explicit long-chain upgrade->downgrade->upgrade matrices are still evolving and should be expanded for incubation.
-- **Deprecation communication:** Release notes, chart/release versioning, and repository documentation.
+- **Deprecation communication:** Deprecations are communicated in documentation and community meetings, with explicit in-doc annotations. A typical transition window keeps old and new APIs available for one subsequent release, followed by old API removal after the next release cycle.
 - **Alpha/beta capabilities:** Exposed by configuration flags and values; users opt in through chart values and documented settings.
 
 ---
 
-
-## Appendix: Key Project Links
-
-- README: https://github.com/Project-HAMi/HAMi/blob/master/README.md
-- Security policy: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY.md
-- Release process: https://github.com/Project-HAMi/HAMi/blob/master/docs/release-process.md
-- Configuration: https://github.com/Project-HAMi/HAMi/blob/master/docs/config.md
-- Design: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md
-- Roadmap (GitHub issues; example): https://github.com/Project-HAMi/HAMi/issues/1615  
-- Roadmap (supplementary doc): https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/roadmap.md
-- CI workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/ci.yaml
-- CodeQL workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/codeql-analysis.yml
-- Trivy image scanning workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/ci-image-scanning.yaml
-- Dependabot policy: https://github.com/Project-HAMi/HAMi/blob/master/.github/dependabot.yml
