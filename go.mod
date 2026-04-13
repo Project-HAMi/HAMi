@@ -32,7 +32,7 @@ require (
 	k8s.io/apimachinery v0.35.3
 	k8s.io/client-go v0.35.3
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-scheduler v0.28.3
+	k8s.io/kube-scheduler v0.35.3
 	k8s.io/kubelet v0.35.3
 	sigs.k8s.io/controller-runtime v0.23.3
 	tags.cncf.io/container-device-interface v1.1.0
