@@ -14,7 +14,7 @@
 ### Scope
 
 - **Roadmap and scope process:** Scope is defined through issues/PRs and maintainer review, with governance maintained in the HAMi community repo. The roadmap is maintained in GitHub issues (for example, per-version tracking such as https://github.com/Project-HAMi/HAMi/issues/1615). After each version is released, the next weekly community meeting discusses roadmap goals for upcoming releases in detail, and each goal is assigned an assignee on the issue. Community users can reply on those issues to add or request features.  
-  - Design docs: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md  
+  - Design docs: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md  
   - Governance: https://github.com/Project-HAMi/community/blob/main/governance.md  
 - **Target personas:**  
   - **Platform engineers:** Deploy HAMi as middleware on Kubernetes 1.20+ clusters with NVIDIA driver 440+ support for straightforward integration into existing platform products. GPU management and isolation are a common product differentiator that HAMi supports end to end.  
@@ -40,10 +40,10 @@
 
 - **UX/UI:** The default experience is Kubernetes-native: `kubectl`, the Pod/Node APIs, and YAML/Helm values. For graphical administration and monitoring, deploy the optional **HAMi WebUI**; Grafana-oriented examples are documented separately.  
   - HAMi WebUI user guide: https://project-hami.io/docs/userguide/hami-webui-user-guide  
-  - Dashboard examples: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/dashboard.md  
+  - Dashboard examples: https://github.com/Project-HAMi/HAMi/blob/master/docs/dashboard.md  
 
 - **Production integration:** HAMi is in-cluster middleware: teams must already run a supported Kubernetes cluster. In production it extends the control plane with a mutating admission webhook, scheduler extender integration (default `kube-scheduler` or the chart-managed scheduler), device plugins, and CDI-capable runtimes where applicable. Additional batch/AI scheduler ecosystems are documented or tracked as follows:  
-  - **Volcano:** Volcano-managed NVIDIA sharing via the Volcano vGPU device plugin (HAMi-core-based isolation)—see https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/how-to-use-volcano-vgpu.md  
+  - **Volcano:** Volcano-managed NVIDIA sharing via the Volcano vGPU device plugin (HAMi-core-based isolation)—see https://github.com/Project-HAMi/HAMi/blob/master/docs/how-to-use-volcano-vgpu.md  
   - **Koordinator:** End-to-end GPU sharing with HAMi—see https://koordinator.sh/docs/user-manuals/device-scheduling-gpu-share-with-hami  
   - **KAI Scheduler:** GPU sharing isolation design and implementation are still evolving—see https://github.com/kai-scheduler/KAI-Scheduler/pull/60  
 
@@ -51,7 +51,7 @@
 
 #### Design principles
 
-The following principles guide HAMi's architecture and feature trade-offs (see also the in-repo [design overview](https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md)):
+The following principles guide HAMi's architecture and feature trade-offs (see also the in-repo [design overview](https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md)):
 
 1. **Kubernetes-native control paths**  
    - Accelerators are requested, scheduled, and allocated through standard Kubernetes surfaces: Pod specs, the scheduler extender protocol, the device plugin gRPC API, and admission webhooks.  
@@ -90,7 +90,7 @@ Engineering and community practices that keep HAMi maintainable and safe to run 
 #### Architecture requirements
 
 Core components include MutatingWebhook, Scheduler Extender, Device Plugins, and in-container control libraries.  
-- Architecture and flow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md
+- Architecture and flow: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md
 
 #### Environment differences
 
@@ -151,7 +151,7 @@ HAMi has no mandatory external database. Storage use is mainly image layers, log
 #### Release process
 
 Semantic versioning, tagged releases, release branches, automated image/chart/release-note workflows, with documented manual verification steps.  
-- Release process doc: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/release-process.md
+- Release process doc: https://github.com/Project-HAMi/HAMi/blob/master/docs/release-process.md
 
 ### Installation
 
@@ -219,14 +219,14 @@ See separate [document](https://github.com/cncf/toc/blob/main/projects/hami/secu
 
 ## Appendix: Key Project Links
 
-- README: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/README.md
-- Security policy: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/SECURITY.md
-- Release process: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/release-process.md
-- Configuration: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/config.md
-- Design: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/design.md
+- README: https://github.com/Project-HAMi/HAMi/blob/master/README.md
+- Security policy: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY.md
+- Release process: https://github.com/Project-HAMi/HAMi/blob/master/docs/release-process.md
+- Configuration: https://github.com/Project-HAMi/HAMi/blob/master/docs/config.md
+- Design: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md
 - Roadmap (GitHub issues; example): https://github.com/Project-HAMi/HAMi/issues/1615  
-- Roadmap (supplementary doc): https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/docs/develop/roadmap.md
-- CI workflow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/.github/workflows/ci.yaml
-- CodeQL workflow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/.github/workflows/codeql-analysis.yml
-- Trivy image scanning workflow: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/.github/workflows/ci-image-scanning.yaml
-- Dependabot policy: https://github.com/Project-HAMi/HAMi/blob/fb8b805edc3e52849ac52a5f53ace32ef6061c25/.github/dependabot.yml
+- Roadmap (supplementary doc): https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/roadmap.md
+- CI workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/ci.yaml
+- CodeQL workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/codeql-analysis.yml
+- Trivy image scanning workflow: https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/ci-image-scanning.yaml
+- Dependabot policy: https://github.com/Project-HAMi/HAMi/blob/master/.github/dependabot.yml
