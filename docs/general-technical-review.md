@@ -17,7 +17,7 @@
   - Design docs: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md  
   - Governance: https://github.com/Project-HAMi/community/blob/main/governance.md  
 - **Target personas:**  
-  - **Platform engineers:** Deploy HAMi as middleware on Kubernetes 1.20+ clusters with NVIDIA driver 440+ support for straightforward integration into existing platform products. GPU management and isolation are a common product differentiator that HAMi supports end to end.  
+  - **Platform engineers:** Deploy HAMi as middleware on Kubernetes 1.23+ clusters with NVIDIA driver 440+ support for straightforward integration into existing platform products. GPU management and isolation are a common product differentiator that HAMi supports end to end.  
   - **MLOps teams:** Use GPU virtualization to reduce job wait times; rely on topology-aware scheduling and device-type selection to place training and inference workloads efficiently.  
   - **Individual AI workload owners:** Often operate a small GPU footprint; use sharing and multiplexing to improve utilization without changing application code.  
   - **IT operations teams:** Raise cluster utilization through GPU sharing; consolidate heterogeneous accelerators with integrated monitoring in a single cluster to lower maintenance cost.  
@@ -156,7 +156,7 @@ Semantic versioning, tagged releases, release branches, automated image/chart/re
 ### Installation
 
 - **Installation and validation:** Helm-based install with node labeling and chart value customization.  
-  - Quick start:https://project-hami.io/docs/installation/online-installation
+  - Quick start: https://project-hami.io/docs/installation/online-installation
   - Example deployment commands:
 ```bash
 # 1) Label GPU nodes for HAMi management
