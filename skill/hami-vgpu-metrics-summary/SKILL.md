@@ -179,7 +179,7 @@ curl -s http://127.0.0.1:9090/metrics
 
 **G. Alternative: port-forward the scheduler pod directly**
 ```bash
-SCHED_POD=$(kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> get pods -n $HAMI_NS -l app.kubernetes.io/component=hami-scheduler -o jsonpath='{.items[0].metadata.name}')
+SCHED_POD=$(kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> get pods -n $HAMI_NS -l app.kubernetes.io/component=hami-scheduler,hami.io/role=leader -o jsonpath='{.items[0].metadata.name}')
 kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> port-forward -n $HAMI_NS pod/$SCHED_POD 9090:9395
 curl -s http://127.0.0.1:9090/metrics
 ```
