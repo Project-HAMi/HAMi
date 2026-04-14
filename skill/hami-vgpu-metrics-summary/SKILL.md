@@ -55,7 +55,7 @@ If live collection is needed, first inspect local kubeconfigs, validate them, an
 #### 1.1 File Discovery
 List all files matching `kubeconfig-gardenlogin--ait--*.yaml` in the kubeconfig directory:
 ```bash
-ls -lh ~/.kube/kubeconfig-gardenlogin--ait--*.yaml
+ls -lh ~/.kube/*.yaml
 ```
 
 #### 1.2 YAML Syntax Validation
