@@ -46,7 +46,7 @@ If live collection is needed, first inspect local kubeconfigs, validate them, an
 #### 1.1 File Discovery
 List all files matching `*.yaml` in the kubeconfig directory:
 ```bash
-ls -lh ~/.kube/*.yaml
+ls -lh ~/.kube/
 ```
 
 #### 1.2 YAML Syntax Validation
