@@ -21,3 +21,4 @@ jobs:
           exempt-draft-pr: true
           enable-statistics: true
           ascending: true
+          operations-per-run: 300
