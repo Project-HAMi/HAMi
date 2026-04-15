@@ -1,3 +1,8 @@
+> [!WARNING]
+> **This document is outdated and no longer reflects current HAMi performance.**
+> It was written for Kubernetes v1.12.9 + Tesla V100 (2018). Current baselines are A100/H100 on Kubernetes v1.28+.
+> Do not use these numbers for evaluation. A replacement benchmark is tracked in [GitHub Issues](https://github.com/Project-HAMi/HAMi/issues).
+
 ## Benchmarks
 
 Three instances from ai-benchmark have been used to evaluate vGPU-device-plugin performance as follows:
