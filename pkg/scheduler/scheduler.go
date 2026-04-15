@@ -180,6 +180,7 @@ func (s *Scheduler) onDelPod(obj any) {
 			klog.V(4).InfoS("Pod tombstone deleted, cleaning up cache", "pod", t.Key)
 		} else {
 			klog.Errorf("Received tombstone for non-pod object on pod delete")
+			return
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
