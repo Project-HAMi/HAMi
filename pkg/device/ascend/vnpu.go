@@ -28,6 +28,7 @@ type VNPUConfig struct {
 	ChipName           string     `yaml:"chipName"`
 	ResourceName       string     `yaml:"resourceName"`
 	ResourceMemoryName string     `yaml:"resourceMemoryName"`
+	ResourceCoreName   string     `yaml:"resourceCoreName"`
 	MemoryAllocatable  int64      `yaml:"memoryAllocatable"`
 	MemoryCapacity     int64      `yaml:"memoryCapacity"`
 	MemoryFactor       int32      `yaml:"memoryFactor"`
