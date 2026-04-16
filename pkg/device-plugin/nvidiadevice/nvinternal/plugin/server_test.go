@@ -44,6 +44,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -488,5 +490,172 @@ func Test_configOverride(t *testing.T) {
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
+	}
+}
+
+func TestIsExclusiveAllocation(t *testing.T) {
+	scalingOne := float64(1)
+	scalingTwo := float64(2)
+
+	defaultConfig := nvidia.NvidiaConfig{
+		NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceMemoryScaling: &scalingOne,
+		},
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+	}
+
+	tests := []struct {
+		name           string
+		container      corev1.Container
+		schedulerConfig nvidia.NvidiaConfig
+		expected       bool
+	}{
+		{
+			name: "exclusive: only nvidia.com/gpu specified",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        true,
+		},
+		{
+			name: "not exclusive: nvidia.com/gpumem specified",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"):    resource.MustParse("1"),
+						corev1.ResourceName("nvidia.com/gpumem"): resource.MustParse("8000"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        false,
+		},
+		{
+			name: "not exclusive: nvidia.com/gpucores specified",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"):     resource.MustParse("1"),
+						corev1.ResourceName("nvidia.com/gpucores"): resource.MustParse("30"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        false,
+		},
+		{
+			name: "not exclusive: nvidia.com/gpumem-percentage specified and not 100",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"):              resource.MustParse("1"),
+						corev1.ResourceName("nvidia.com/gpumem-percentage"): resource.MustParse("50"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        false,
+		},
+		{
+			name: "exclusive: nvidia.com/gpumem-percentage equals 100",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"):              resource.MustParse("1"),
+						corev1.ResourceName("nvidia.com/gpumem-percentage"): resource.MustParse("100"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        true,
+		},
+		{
+			name: "not exclusive: DeviceMemoryScaling > 1 (oversubscription)",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+					},
+				},
+			},
+			schedulerConfig: nvidia.NvidiaConfig{
+				NodeDefaultConfig: nvidia.NodeDefaultConfig{
+					DeviceMemoryScaling: &scalingTwo,
+				},
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourceCoreName:             "nvidia.com/gpucores",
+			},
+			expected: false,
+		},
+		{
+			name: "exclusive: multiple GPUs without memory/core constraints",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("8"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        true,
+		},
+		{
+			name: "not exclusive: gpumem in requests",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpumem"): resource.MustParse("8000"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        false,
+		},
+		{
+			name: "not exclusive: gpucores in requests",
+			container: corev1.Container{
+				Name: "test-container",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpucores"): resource.MustParse("30"),
+					},
+					Limits: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse("1"),
+					},
+				},
+			},
+			schedulerConfig: defaultConfig,
+			expected:        false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isExclusiveAllocation(tt.container, tt.schedulerConfig)
+			if result != tt.expected {
+				t.Errorf("isExclusiveAllocation() = %v, expected %v", result, tt.expected)
+			}
+		})
 	}
 }

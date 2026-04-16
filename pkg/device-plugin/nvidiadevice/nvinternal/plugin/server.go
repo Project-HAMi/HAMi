@@ -53,6 +53,7 @@ import (
 	"github.com/imdario/mergo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
+	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -533,72 +534,91 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 
 			if plugin.operatingMode != "mig" {
-				for i, dev := range devreq {
-					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
-					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
-				}
-				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
-				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
-					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
-				}
-				if *plugin.schedulerConfig.LogLevel != "" {
-					response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
-				}
-				if plugin.schedulerConfig.DisableCoreLimit {
-					response.Envs[util.CoreLimitSwitch] = "disable"
-				}
-				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-				os.RemoveAll(cacheFileHostDirectory)
-
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
-				os.MkdirAll("/tmp/vgpulock", 0777)
-				os.Chmod("/tmp/vgpulock", 0777)
-				response.Mounts = append(response.Mounts,
-					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
-						HostPath: GetLibPath(),
-						ReadOnly: true},
-					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
-						HostPath: cacheFileHostDirectory,
-						ReadOnly: false},
-					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
-						HostPath: "/tmp/vgpulock",
-						ReadOnly: false},
-				)
-				found := false
-				for _, val := range currentCtr.Env {
-					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
-						// if env existed but is set to false or can not be parsed, ignore
-						t, _ := strconv.ParseBool(val.Value)
-						if !t {
-							continue
+					// Determine if CUDA control should be disabled.
+					// CUDA control is unnecessary for exclusive GPU allocations where
+					// the container requests only nvidia.com/gpu without memory/core
+					// constraints. Disabling it avoids libvgpu.so intercepting CUDA
+					// calls (which can cause segfaults with NCCL in multi-process
+					// frameworks like vLLM) when no limits would actually be enforced.
+					disableCUDAControl := false
+	
+					// Check if user explicitly set CUDA_DISABLE_CONTROL=true
+					for _, val := range currentCtr.Env {
+						if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
+							t, _ := strconv.ParseBool(val.Value)
+							if t {
+								disableCUDAControl = true
+							}
+							break
 						}
-						// only env existed and set to true, we mark it "found"
-						found = true
-						break
+					}
+	
+					// Auto-detect exclusive allocation if user didn't explicitly disable control
+					if !disableCUDAControl && isExclusiveAllocation(currentCtr, plugin.schedulerConfig) {
+						disableCUDAControl = true
+						klog.InfoS("Exclusive GPU allocation detected, auto-disabling CUDA control",
+							"pod", klog.KObj(current), "container", currentCtr.Name)
+					}
+	
+					if disableCUDAControl {
+						// For exclusive allocations, no CUDA control is needed.
+						// Set the env var so libvgpu.so (if present) knows to skip interception,
+						// and skip all limit env vars and libvgpu mounts entirely.
+						response.Envs["CUDA_DISABLE_CONTROL"] = "true"
+					} else {
+						// Set per-device memory limits
+						for i, dev := range devreq {
+							limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
+							response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
+						}
+						response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
+						response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
+						if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
+							response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+						}
+						if *plugin.schedulerConfig.LogLevel != "" {
+							response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
+						}
+						if plugin.schedulerConfig.DisableCoreLimit {
+							response.Envs[util.CoreLimitSwitch] = "disable"
+						}
+						cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
+						os.RemoveAll(cacheFileHostDirectory)
+	
+						os.MkdirAll(cacheFileHostDirectory, 0777)
+						os.Chmod(cacheFileHostDirectory, 0777)
+						os.MkdirAll("/tmp/vgpulock", 0777)
+						os.Chmod("/tmp/vgpulock", 0777)
+						response.Mounts = append(response.Mounts,
+							&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
+								HostPath: GetLibPath(),
+								ReadOnly: true},
+							&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
+								HostPath: cacheFileHostDirectory,
+								ReadOnly: false},
+							&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
+								HostPath: "/tmp/vgpulock",
+								ReadOnly: false},
+						)
+						response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
+							HostPath: hostHookPath + "/vgpu/ld.so.preload",
+							ReadOnly: true},
+						)
+						_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
+						if err == nil {
+							response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+								ContainerPath: "/tmp/license",
+								HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
+								ReadOnly:      true,
+							})
+							response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+								ContainerPath: "/usr/bin/vgpuvalidator",
+								HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
+								ReadOnly:      true,
+							})
+						}
 					}
 				}
-				if !found {
-					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
-						HostPath: hostHookPath + "/vgpu/ld.so.preload",
-						ReadOnly: true},
-					)
-				}
-				_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
-				if err == nil {
-					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-						ContainerPath: "/tmp/license",
-						HostPath:      fmt.Sprintf("%s/vgpu/license", hostHookPath),
-						ReadOnly:      true,
-					})
-					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
-						ContainerPath: "/usr/bin/vgpuvalidator",
-						HostPath:      fmt.Sprintf("%s/vgpu/vgpuvalidator", hostHookPath),
-						ReadOnly:      true,
-					})
-				}
-			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		}
 	}
@@ -874,4 +894,64 @@ func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia
 	}
 
 	return transformConfigs()
+}
+
+// isExclusiveAllocation determines whether the container is requesting whole
+// GPUs exclusively (i.e., only nvidia.com/gpu is specified without explicit
+// memory or core constraints). In this case CUDA control via libvgpu.so is
+// unnecessary because no limits would actually be enforced, and the
+// interception layer can cause issues (e.g., NCCL segfaults in vLLM).
+//
+// An allocation is considered exclusive when ALL of the following are true:
+//   - nvidia.com/gpumem is NOT specified (defaults to 100% of device memory)
+//   - nvidia.com/gpumem-percentage is NOT specified (or equals 100)
+//   - nvidia.com/gpucores is NOT specified (or equals 0, meaning no limit)
+//   - DeviceMemoryScaling <= 1 (no oversubscription; if oversubscribed, limits
+//     are needed to enforce virtual memory boundaries)
+func isExclusiveAllocation(ctr corev1.Container, schedulerConfig nvidia.NvidiaConfig) bool {
+	// If memory oversubscription is enabled, we must keep CUDA control
+	// to enforce virtual memory limits.
+	if schedulerConfig.DeviceMemoryScaling != nil && *schedulerConfig.DeviceMemoryScaling > 1 {
+		return false
+	}
+
+	resourceMem := corev1.ResourceName(schedulerConfig.ResourceMemoryName)
+	resourceMemPercentage := corev1.ResourceName(schedulerConfig.ResourceMemoryPercentageName)
+	resourceCores := corev1.ResourceName(schedulerConfig.ResourceCoreName)
+
+	// If nvidia.com/gpumem is explicitly specified, this is a partial allocation
+	if _, ok := ctr.Resources.Limits[resourceMem]; ok {
+		return false
+	}
+	if _, ok := ctr.Resources.Requests[resourceMem]; ok {
+		return false
+	}
+
+	// If nvidia.com/gpumem-percentage is explicitly specified and not 100,
+	// this is a partial allocation
+	if memp, ok := ctr.Resources.Limits[resourceMemPercentage]; ok {
+		if val, ok := memp.AsInt64(); ok && val != 100 {
+			return false
+		}
+	}
+	if memp, ok := ctr.Resources.Requests[resourceMemPercentage]; ok {
+		if val, ok := memp.AsInt64(); ok && val != 100 {
+			return false
+		}
+	}
+
+	// If nvidia.com/gpucores is explicitly specified and not 0,
+	// this is a partial allocation (core limiting needs CUDA control)
+	if cores, ok := ctr.Resources.Limits[resourceCores]; ok {
+		if val, ok := cores.AsInt64(); ok && val != 0 {
+			return false
+		}
+	}
+	if cores, ok := ctr.Resources.Requests[resourceCores]; ok {
+		if val, ok := cores.AsInt64(); ok && val != 0 {
+			return false
+		}
+	}
+
+	return true
 }
