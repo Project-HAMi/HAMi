@@ -479,6 +479,7 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
