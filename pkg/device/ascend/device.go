@@ -42,7 +42,7 @@ const (
 	Ascend910CType         = "Ascend910C"
 	Ascend910NetworkWeight = 10
 	VNPUModeAnnotation     = "huawei.com/vnpu-mode"
-    VNPUModeHamiCore       = "hami-core"
+	VNPUModeHamiCore       = "hami-core"
 )
 
 type Devices struct {
@@ -115,7 +115,7 @@ func (dev *Devices) CommonWord() string {
 }
 
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-    count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
 		return false, nil
 	}
@@ -156,7 +156,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
                     Command: []string{
                         "bash",
                         "-c",
-                        "export RUST_LOG=info\n/hami-vnpu-core/target/debug/limiter > /tmp/inst1_manager.log 2>&1 &",
+                        "export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
                     },
                 },
             }
@@ -309,21 +309,28 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			}
 			if ok {
 				memnums, _ := mem.AsInt64()
-				
-				// If "core" is requested, it explicitly indicates the use of soft-partitioning.
-				isCoreRequested := false
-				if ascendResourceCore != "" {
-					_, isCoreRequested = ctr.Resources.Limits[ascendResourceCore]
-					if !isCoreRequested {
-						_, isCoreRequested = ctr.Resources.Requests[ascendResourceCore]
+				if ok {
+					if dev.config.MemoryFactor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * int64(dev.config.MemoryFactor)
+						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
-				}
+					// If "core" is requested, it explicitly indicates the use of soft-partitioning.
+					isCoreRequested := false
+					if ascendResourceCore != "" {
+						_, isCoreRequested = ctr.Resources.Limits[ascendResourceCore]
+						if !isCoreRequested {
+							_, isCoreRequested = ctr.Resources.Requests[ascendResourceCore]
+						}
+					}
 
-				if isCoreRequested {
-					// Soft-partitioning: Use the raw value directly.
-					memnum = int(memnums)
-				} else {
-					m, _ := dev.trimMemory(memnums)
+					if isCoreRequested {
+						// Soft-partitioning: Use the raw value directly.
+						memnum = int(memnums)
+					} else {
+						m, _ := dev.trimMemory(memnums)
+						memnum = int(m)
+					}
 					memnum = int(m)
 				}
 			}
