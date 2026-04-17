@@ -294,6 +294,8 @@ data:
       memoryCapacity: 32768
       memoryFactor: 1
       aiCore: 30
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         - name: vir02
           memory: 2184
@@ -316,6 +318,8 @@ data:
       memoryFactor: 1
       aiCore: 24
       aiCPU: 6
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         - name: vir03_1c_8g
           memory: 8192
@@ -338,6 +342,8 @@ data:
       memoryFactor: 1
       aiCore: 20
       aiCPU: 7
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         - name: vir05_1c_16g
           memory: 16384
@@ -356,6 +362,8 @@ data:
       memoryFactor: 1
       aiCore: 20
       aiCPU: 7
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
         # The memory is used for scheduling so the correct values must be set.
@@ -378,6 +386,8 @@ data:
       memoryFactor: 1
       aiCore: 20
       aiCPU: 7
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         - name: vir05_1c_8g
           memory: 8192
@@ -396,6 +406,8 @@ data:
       memoryFactor: 1
       aiCore: 8
       aiCPU: 7
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
       templates:
         - name: vir01
           memory: 3072
@@ -417,5 +429,7 @@ data:
       memoryCapacity: 65536
       aiCore: 20
       aiCPU: 7
+      runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+      overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
   {{ end }}
 {{- end }}
