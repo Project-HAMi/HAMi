@@ -186,6 +186,7 @@ go.opentelemetry.io/auto/sdk v1.2.1 h1:jXsnJ4Lmnqd11kwkBV2LgLoFMZKizbCi5fNZ/ipaZ
 go.opentelemetry.io/auto/sdk v1.2.1/go.mod h1:KRTj+aOaElaLi+wW1kO/DZRXwkF4C5xPbEe3ZiIhN7Y=
 go.opentelemetry.io/otel v1.39.0 h1:8yPrr/S0ND9QEfTfdP9V+SiwT4E0G7Y5MO7p85nis48=
 go.opentelemetry.io/otel v1.39.0/go.mod h1:kLlFTywNWrFyEdH0oj2xK0bFYZtHRYUdv1NklR/tgc8=
+go.opentelemetry.io/otel v1.41.0 h1:YlEwVsGAlCvczDILpUXpIpPSL/VPugt7zHThEMLce1c=
 go.opentelemetry.io/otel/metric v1.39.0 h1:d1UzonvEZriVfpNKEVmHXbdf909uGTOQjA0HF0Ls5Q0=
 go.opentelemetry.io/otel/metric v1.39.0/go.mod h1:jrZSWL33sD7bBxg1xjrqyDjnuzTUB0x1nBERXd7Ftcs=
 go.opentelemetry.io/otel/sdk v1.39.0 h1:nMLYcjVsvdui1B/4FRkwjzoRVsMK8uL/cj0OyhKzt18=
@@ -194,6 +195,7 @@ go.opentelemetry.io/otel/sdk/metric v1.39.0 h1:cXMVVFVgsIf2YL6QkRF4Urbr/aMInf+2W
 go.opentelemetry.io/otel/sdk/metric v1.39.0/go.mod h1:xq9HEVH7qeX69/JnwEfp6fVq5wosJsY1mt4lLfYdVew=
 go.opentelemetry.io/otel/trace v1.39.0 h1:2d2vfpEDmCJ5zVYz7ijaJdOF59xLomrvj7bjt6/qCJI=
 go.opentelemetry.io/otel/trace v1.39.0/go.mod h1:88w4/PnZSazkGzz/w84VHpQafiU4EtqqlVdxWy+rNOA=
+go.opentelemetry.io/otel/trace v1.41.0 h1:Vbk2co6bhj8L59ZJ6/xFTskY+tGAbOnCtQGVVa9TIN0=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
 go.uber.org/goleak v1.3.0/go.mod h1:CoHD4mav9JJNrW/WLlf7HGZPjdw8EucARQHekz1X6bE=
 go.uber.org/multierr v1.11.0 h1:blXXJkSxSSfBVBlC76pxqeO+LN3aDfLQo+309xJstO0=
@@ -291,6 +293,8 @@ k8s.io/kube-scheduler v0.28.3 h1:sCvDOzRSDGCZ4whVykNoh/HbAZbwBMhbJ9xFab4QUCI=
 k8s.io/kube-scheduler v0.28.3/go.mod h1:bZ0V8rlDE2eoLl2At4mSdGBKe9k6cA9P0+AuJ6aG+Os=
 k8s.io/kube-scheduler v0.35.3 h1:57rjOGXeVcM12z0BMyCQc22FbuAwXVOqbM4Ff+bEivM=
 k8s.io/kube-scheduler v0.35.3/go.mod h1:Z4hn+Uo1EFI5D0ijg8iyBWSEZcluH+Ol8UTt4+BDiD4=
+k8s.io/kube-scheduler v0.35.4 h1:sM+xoIfF/meMxD26NxfojQsfgWUReJdPxZALaLOUxAU=
+k8s.io/kube-scheduler v0.35.4/go.mod h1:BgLKclWmOqm7Iaa7ymRItMsIZaoLec1k49aO9BBOVGs=
 k8s.io/kubelet v0.35.2 h1:qF9jOe1j6vT4bVQZ6nnTTA5uu5NCnyR10o9IkW8Z0JQ=
 k8s.io/kubelet v0.35.2/go.mod h1:2pyCVLDfm7ErNwWZw2mutCloAXX76gfOToIMCHCq/8s=
 k8s.io/kubelet v0.35.3 h1:Y6b9+U/aTBmou9JZ6qv18O4dpFbJOfl7cBe+ZksT7RY=
