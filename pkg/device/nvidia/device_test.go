@@ -1987,7 +1987,7 @@ func TestCustomFilterRule_Mig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			devusage := &device.DeviceUsage{
-				Mode:    MigMode,
+				Mode:     MigMode,
 				MigUsage: device.MigInUse{UsageList: tt.usageList},
 			}
 			req := device.ContainerDeviceRequest{Memreq: tt.memreq}
@@ -2285,7 +2285,7 @@ func TestGetNodeDevices_PairScores(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-topo",
 			Annotations: map[string]string{
-				RegisterAnnos:      `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true},{"id":"GPU-1","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true}]`,
+				RegisterAnnos:        `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true},{"id":"GPU-1","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true}]`,
 				RegisterGPUPairScore: `[{"uuid":"GPU-0","score":{"GPU-1":100}},{"uuid":"GPU-1","score":{"GPU-0":100}}]`,
 			},
 		},
@@ -2302,7 +2302,7 @@ func TestGetNodeDevices_InvalidPairScores(t *testing.T) {
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-bad-scores",
 			Annotations: map[string]string{
-				RegisterAnnos:      `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"V100","health":true}]`,
+				RegisterAnnos:        `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"V100","health":true}]`,
 				RegisterGPUPairScore: `not-valid-json`,
 			},
 		},
