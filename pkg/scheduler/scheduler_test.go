@@ -500,6 +500,55 @@ func Test_Filter(t *testing.T) {
 			wantPodAnnotationDeviceID: "device4",
 		},
 		{
+			name: "pod with init containers fits correctly using max resource logic (Binpack)",
+			args: extenderv1.ExtenderArgs{
+				Pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-init-containers",
+						UID:  "test-init-uid",
+						Annotations: map[string]string{
+							util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+							util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+						},
+					},
+					Spec: corev1.PodSpec{
+						InitContainers: []corev1.Container{
+							{
+								Name:  "init-1",
+								Image: "busybox",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(20, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(5000, resource.BinarySI),
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "app-1",
+								Image: "chrstnhntschl/gpu_burn",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(20, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+				NodeNames: &[]string{"node1", "node2"},
+			},
+			wantErr: nil,
+			want: &extenderv1.ExtenderFilterResult{
+				NodeNames: &[]string{"node2"},
+			},
+			wantPodAnnotationDeviceID: "device3",
+		},
+		{
 			name: "node use binpack gpu use spread policy",
 			args: extenderv1.ExtenderArgs{
 				Pod: &corev1.Pod{
