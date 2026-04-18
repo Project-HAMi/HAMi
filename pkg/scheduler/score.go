@@ -120,6 +120,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	failedNodesMutex := sync.Mutex{}
 	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
+
 	for nodeID, node := range *nodes {
 		wg.Add(1)
 		go func(nodeID string, node *NodeUsage) {
@@ -137,24 +138,35 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			// Assume the node is a fit by default. This handles pods with no device
-			// requests, which should be schedulable on any node.
 			ctrfit := true
 			deviceType := ""
 
 			numInitContainers := len(task.Spec.InitContainers)
 
-			// Snapshot the node's initial state so init containers don't drain the pool
-			initialNodeBytes, err := json.Marshal(node)
-			if err != nil {
-				klog.ErrorS(err, "Failed to marshal node state for cloning", "nodeID", nodeID)
-				errCh <- err
-				return
-			}
+			var initialNodeBytes []byte
+			var appContainersNode *NodeUsage
 
-			// This shared state will be drained by regular app containers
-			appContainersNode := &NodeUsage{}
-			json.Unmarshal(initialNodeBytes, appContainersNode)
+			if numInitContainers > 0 {
+				var err error
+				// Snapshot the node's initial state so init containers don't drain the pool
+				initialNodeBytes, err = json.Marshal(node)
+				if err != nil {
+					klog.ErrorS(err, "Failed to marshal node state for cloning", "nodeID", nodeID)
+					errCh <- err
+					return
+				}
+
+				// This shared state will be drained by regular app containers
+				appContainersNode = &NodeUsage{}
+				if err := json.Unmarshal(initialNodeBytes, appContainersNode); err != nil {
+					klog.ErrorS(err, "Failed to unmarshal node state", "nodeID", nodeID)
+					errCh <- err
+					return
+				}
+			} else {
+				// Avoid expensive JSON operations if there are no init containers
+				appContainersNode = node
+			}
 
 			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
@@ -175,7 +187,12 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				if ctrid < numInitContainers {
 					// Init containers get a fresh reset of the node's capacity
 					workingNode = &NodeUsage{}
-					json.Unmarshal(initialNodeBytes, workingNode)
+
+					if err := json.Unmarshal(initialNodeBytes, workingNode); err != nil {
+						klog.ErrorS(err, "Failed to unmarshal node state for init container", "nodeID", nodeID)
+						errCh <- err
+						return
+					}
 				} else {
 					// Regular containers deduct from the shared app capacity
 					workingNode = appContainersNode
