@@ -180,7 +180,8 @@ func (s *Scheduler) onDelPod(obj any) {
 		if pod, ok = t.Obj.(*corev1.Pod); ok {
 			klog.V(4).InfoS("Pod tombstone deleted, cleaning up cache", "pod", t.Key)
 		} else {
-			klog.Errorf("Received tombstone for non-pod object on pod delete")
+			klog.V(4).InfoS("Received tombstone for non-pod object on pod delete", "type", fmt.Sprintf("%T", t.Obj))
+			return
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
@@ -394,6 +395,15 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
 			if !health {
+				existingNode, getNodeErr := s.GetNode(val.Name)
+				if getNodeErr != nil {
+					klog.V(5).InfoS("Skipping device cleanup for node not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+				if _, ok := existingNode.Devices[devhandsk]; !ok {
+					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
 				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {

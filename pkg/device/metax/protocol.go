@@ -77,8 +77,8 @@ func (ni NodeMetaxSDeviceInfo) String() string {
 	str.WriteString("\n")
 
 	for _, i := range ni {
-		str.WriteString(fmt.Sprintf("MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t, QosPolicy=%s, LinkZone=%d\n",
-			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy, i.QosPolicy, i.LinkZone))
+		fmt.Fprintf(&str, "MetaxSDeviceInfo[%s]: TotalDevCount=%d, TotalCompute=%d, TotalVRam=%d, Numa=%d, Healthy=%t, QosPolicy=%s, LinkZone=%d\n",
+			i.UUID, i.TotalDevCount, i.TotalCompute, i.TotalVRam, i.Numa, i.Healthy, i.QosPolicy, i.LinkZone)
 	}
 
 	return str.String()
@@ -89,11 +89,10 @@ func (sdev *PodMetaxSDevice) String() string {
 	str.WriteString("\nPodMetaxSDevice:\n")
 
 	for ctrIdx, ctrDevices := range *sdev {
-		str.WriteString(fmt.Sprintf("  container[%d]:\n", ctrIdx))
-
+		fmt.Fprintf(&str, "  container[%d]:\n", ctrIdx)
 		for _, device := range ctrDevices {
-			str.WriteString(fmt.Sprintf("    SDevice[%s]: Compute=%d, VRam=%d\n",
-				device.UUID, device.Compute, device.VRam))
+			fmt.Fprintf(&str, "    SDevice[%s]: Compute=%d, VRam=%d\n",
+				device.UUID, device.Compute, device.VRam)
 		}
 	}
 

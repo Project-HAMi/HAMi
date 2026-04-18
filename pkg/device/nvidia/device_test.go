@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"errors"
 	"strconv"
 	"strings"
@@ -26,9 +27,12 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func Test_DefaultResourceNum(t *testing.T) {
@@ -1506,4 +1510,1071 @@ func TestFitQuota(t *testing.T) {
 			assert.Equal(t, tt.expectedResult, result, tt.name)
 		})
 	}
+}
+
+func TestParseConfig(t *testing.T) {
+	// ParseConfig is intentionally a no-op; just verify it is callable.
+	ParseConfig(nil)
+}
+
+func TestScoreNode(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{ResourceCountName: "nvidia.com/gpu"})
+	score := dev.ScoreNode(nil, nil, nil, "")
+	assert.Equal(t, score, float32(0))
+}
+
+func TestAssertNuma(t *testing.T) {
+	tests := []struct {
+		name  string
+		annos map[string]string
+		want  bool
+	}{
+		{
+			name:  "NumaBind=true enforces numa",
+			annos: map[string]string{NumaBind: "true"},
+			want:  true,
+		},
+		{
+			name:  "NumaBind=false does not enforce",
+			annos: map[string]string{NumaBind: "false"},
+			want:  false,
+		},
+		{
+			name:  "NumaBind invalid value",
+			annos: map[string]string{NumaBind: "notabool"},
+			want:  false,
+		},
+		{
+			name:  "NumaBind key absent",
+			annos: map[string]string{},
+			want:  false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, assertNuma(tt.annos), tt.want)
+		})
+	}
+}
+
+func TestCheckHealth(t *testing.T) {
+	config := NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}
+
+	tests := []struct {
+		name          string
+		current       int64
+		reported      int64
+		wantHealthy   bool
+		wantNeedReset bool
+	}{
+		{
+			name:          "current=0 reported=0: no devices registered yet",
+			current:       0,
+			reported:      0,
+			wantHealthy:   true,
+			wantNeedReset: false,
+		},
+		{
+			name:          "current=0 reported>0: devices disappeared",
+			current:       0,
+			reported:      2,
+			wantHealthy:   false,
+			wantNeedReset: false,
+		},
+		{
+			name:          "current>0 reported differs: count changed",
+			current:       4,
+			reported:      2,
+			wantHealthy:   true,
+			wantNeedReset: true,
+		},
+		{
+			name:          "current>0 reported same: stable",
+			current:       4,
+			reported:      4,
+			wantHealthy:   true,
+			wantNeedReset: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := InitNvidiaDevice(config)
+			allocatable := corev1.ResourceList{}
+			if tt.current > 0 {
+				allocatable[corev1.ResourceName(config.ResourceCountName)] = *resource.NewQuantity(tt.current, resource.DecimalSI)
+			}
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				Status:     corev1.NodeStatus{Allocatable: allocatable},
+			}
+			if tt.reported > 0 {
+				dev.ReportedGPUNum["test-node"] = tt.reported
+			}
+			healthy, needReset := dev.CheckHealth("NVIDIA", node)
+			assert.Equal(t, healthy, tt.wantHealthy)
+			assert.Equal(t, needReset, tt.wantNeedReset)
+		})
+	}
+}
+
+func TestGenerateResourceRequests(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+
+	tests := []struct {
+		name string
+		ctr  *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "gpu count only — defaults to 100% memory",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + explicit memory",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(2, resource.BinarySI),
+						"nvidia.com/gpumem": *resource.NewQuantity(4096, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2,
+				Type:             NvidiaGPUDevice,
+				Memreq:           4096,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 50,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + explicit cores",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(50, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         50,
+			},
+		},
+		{
+			name: "no gpu resource — returns empty request",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu in Requests (not Limits) — falls back to Requests",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dev.GenerateResourceRequests(tt.ctr)
+			assert.DeepEqual(t, result, tt.want)
+		})
+	}
+}
+
+func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 2,
+	}
+	dev := InitNvidiaDevice(config)
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/gpumem": *resource.NewQuantity(1024, resource.DecimalSI),
+			},
+		},
+	}
+	result := dev.GenerateResourceRequests(ctr)
+	assert.Equal(t, result.Memreq, int32(2048))
+}
+
+func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		DefaultMemory:                512,
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	result := dev.GenerateResourceRequests(ctr)
+	assert.Equal(t, result.Memreq, int32(512))
+	assert.Equal(t, result.MemPercentagereq, int32(101))
+}
+
+func TestMigNeedsReset(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+
+	tests := []struct {
+		name      string
+		usage     *device.DeviceUsage
+		want      bool
+		wantEmpty bool
+	}{
+		{
+			name:  "empty UsageList — needs reset",
+			usage: &device.DeviceUsage{MigUsage: device.MigInUse{UsageList: device.MIGS{}}},
+			want:  true,
+		},
+		{
+			name: "all entries not InUse — resets and clears list",
+			usage: &device.DeviceUsage{
+				MigUsage: device.MigInUse{
+					UsageList: device.MIGS{
+						{Memory: 10, InUse: false},
+						{Memory: 20, InUse: false},
+					},
+				},
+			},
+			want:      true,
+			wantEmpty: true,
+		},
+		{
+			name: "one entry InUse=true — no reset",
+			usage: &device.DeviceUsage{
+				MigUsage: device.MigInUse{
+					UsageList: device.MIGS{
+						{Memory: 10, InUse: true},
+						{Memory: 20, InUse: false},
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dev.migNeedsReset(tt.usage)
+			assert.Equal(t, result, tt.want)
+			if tt.wantEmpty {
+				assert.Equal(t, len(tt.usage.MigUsage.UsageList), 0)
+			}
+		})
+	}
+}
+
+func TestGenerateCombinations(t *testing.T) {
+	devs := device.ContainerDevices{
+		{UUID: "gpu0"},
+		{UUID: "gpu1"},
+		{UUID: "gpu2"},
+		{UUID: "gpu3"},
+	}
+	tmpDevs := map[string]device.ContainerDevices{NvidiaGPUDevice: devs}
+
+	tests := []struct {
+		name    string
+		nums    int32
+		wantLen int
+	}{
+		{name: "C(4,1)=4", nums: 1, wantLen: 4},
+		{name: "C(4,2)=6", nums: 2, wantLen: 6},
+		{name: "C(4,3)=4", nums: 3, wantLen: 4},
+		{name: "C(4,4)=1", nums: 4, wantLen: 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{Nums: tt.nums, Type: NvidiaGPUDevice}
+			result := generateCombinations(req, tmpDevs)
+			assert.Equal(t, len(result), tt.wantLen)
+			for _, combo := range result {
+				assert.Equal(t, len(combo), int(tt.nums))
+			}
+		})
+	}
+}
+
+func TestGetDevicePairScoreMap(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{
+					ID: "gpu0",
+					DevicePairScore: device.DevicePairScore{
+						ID:     "gpu0",
+						Scores: map[string]int{"gpu1": 100, "gpu2": 200},
+					},
+				},
+				{
+					ID: "gpu1",
+					DevicePairScore: device.DevicePairScore{
+						ID:     "gpu1",
+						Scores: map[string]int{"gpu0": 100, "gpu2": 150},
+					},
+				},
+			},
+		},
+	}
+
+	result := getDevicePairScoreMap(nodeInfo)
+	assert.Equal(t, len(result), 2)
+	assert.Equal(t, result["gpu0"].Scores["gpu1"], 100)
+	assert.Equal(t, result["gpu1"].Scores["gpu2"], 150)
+}
+
+// gpu0 total=300, gpu1 total=250, gpu2 total=350 — worst is gpu1.
+func TestComputeWorstSingleCard(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu1": 100, "gpu2": 200}}},
+				{ID: "gpu1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu0": 100, "gpu2": 150}}},
+				{ID: "gpu2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu0": 200, "gpu1": 150}}},
+			},
+		},
+	}
+	tmpDevs := map[string]device.ContainerDevices{
+		NvidiaGPUDevice: {{UUID: "gpu0"}, {UUID: "gpu1"}, {UUID: "gpu2"}},
+	}
+	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice}
+	result := computeWorstSingleCard(nodeInfo, req, tmpDevs)
+	assert.Equal(t, len(result), 1)
+	assert.Equal(t, result[0].UUID, "gpu1")
+}
+
+// [gpu0,gpu1]=100, [gpu0,gpu2]=200, [gpu1,gpu2]=150 — best is [gpu0,gpu2].
+func TestComputeBestCombination(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu1": 100, "gpu2": 200}}},
+				{ID: "gpu1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu0": 100, "gpu2": 150}}},
+				{ID: "gpu2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"gpu0": 200, "gpu1": 150}}},
+			},
+		},
+	}
+	combinations := []device.ContainerDevices{
+		{{UUID: "gpu0"}, {UUID: "gpu1"}},
+		{{UUID: "gpu0"}, {UUID: "gpu2"}},
+		{{UUID: "gpu1"}, {UUID: "gpu2"}},
+	}
+	result := computeBestCombination(nodeInfo, combinations)
+	assert.Equal(t, len(result), 2)
+	assert.Equal(t, result[0].UUID, "gpu0")
+	assert.Equal(t, result[1].UUID, "gpu2")
+}
+
+func TestCustomFilterRule_NonMig(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	devusage := &device.DeviceUsage{Mode: ""}
+	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage)
+	assert.Equal(t, result, true)
+}
+
+func TestCustomFilterRule_Mig(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+
+	tests := []struct {
+		name       string
+		usageList  device.MIGS
+		toAllocate device.ContainerDevices
+		memreq     int32
+		want       bool
+	}{
+		{
+			name: "slot available after allocating toAllocate",
+			usageList: device.MIGS{
+				{Memory: 1000, InUse: false},
+				{Memory: 1000, InUse: false},
+			},
+			toAllocate: device.ContainerDevices{{Usedmem: 500}},
+			memreq:     500,
+			want:       true,
+		},
+		{
+			name: "no remaining slot after allocating toAllocate",
+			usageList: device.MIGS{
+				{Memory: 1000, InUse: false},
+			},
+			toAllocate: device.ContainerDevices{{Usedmem: 500}},
+			memreq:     500,
+			want:       false,
+		},
+		{
+			name: "toAllocate does not fit any slot",
+			usageList: device.MIGS{
+				{Memory: 100, InUse: false},
+			},
+			toAllocate: device.ContainerDevices{{Usedmem: 500}},
+			memreq:     500,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			devusage := &device.DeviceUsage{
+				Mode:     MigMode,
+				MigUsage: device.MigInUse{UsageList: tt.usageList},
+			}
+			req := device.ContainerDeviceRequest{Memreq: tt.memreq}
+			result := dev.CustomFilterRule(nil, req, tt.toAllocate, devusage)
+			assert.Equal(t, result, tt.want)
+		})
+	}
+}
+
+func TestNodeCleanUp(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node",
+			Annotations: map[string]string{HandshakeAnnos: "ready"},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	dev := InitNvidiaDevice(NvidiaConfig{ResourceCountName: "nvidia.com/gpu"})
+	err = dev.NodeCleanUp("test-node")
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	anno := updated.Annotations[HandshakeAnnos]
+	assert.Assert(t, strings.HasPrefix(anno, "Deleted_"), "expected annotation to start with 'Deleted_', got %q", anno)
+}
+
+func TestLockNode(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name: "no GPU containers — skip lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-gpu", Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			},
+			hasLock: false,
+		},
+		{
+			name: "has GPU container — acquires lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "gpu-app",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+				},
+			},
+			hasLock: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "test-node",
+					Annotations: map[string]string{},
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			dev := InitNvidiaDevice(config)
+			err = dev.LockNode(node, tt.pod)
+			assert.NilError(t, err)
+
+			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := updated.Annotations[nodelock.NodeLockKey]
+			assert.Equal(t, ok, tt.hasLock)
+		})
+	}
+}
+
+func TestMutateAdmission_Priority(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourcePriority:             "nvidia.com/priority",
+			DefaultGPUNum:                1,
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/priority": *resource.NewQuantity(5, resource.DecimalSI),
+			},
+		},
+	}
+	got, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.NilError(t, err)
+	assert.Equal(t, got, true)
+	found := false
+	for _, env := range ctr.Env {
+		if env.Name == util.TaskPriority {
+			assert.Equal(t, env.Value, "5")
+			found = true
+		}
+	}
+	assert.Assert(t, found, "expected TaskPriority env to be set")
+}
+
+func TestMutateAdmission_CorePolicy(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			DefaultGPUNum:                1,
+			GPUCorePolicy:                "force",
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	dev.MutateAdmission(ctr, &corev1.Pod{})
+	found := false
+	for _, env := range ctr.Env {
+		if env.Name == util.CoreLimitSwitch {
+			assert.Equal(t, env.Value, "force")
+			found = true
+		}
+	}
+	assert.Assert(t, found, "expected CoreLimitSwitch env to be set")
+}
+
+func TestMutateAdmission_RuntimeClassName(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			DefaultGPUNum:                1,
+			RuntimeClassName:             "nvidia",
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{}
+	dev.MutateAdmission(ctr, pod)
+	assert.Assert(t, pod.Spec.RuntimeClassName != nil)
+	assert.Equal(t, *pod.Spec.RuntimeClassName, "nvidia")
+}
+
+func TestMutateAdmission_OverwriteEnv(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			OverwriteEnv:                 true,
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{},
+		},
+	}
+	got, _ := dev.MutateAdmission(ctr, &corev1.Pod{})
+	assert.Equal(t, got, false)
+	found := false
+	for _, env := range ctr.Env {
+		if env.Name == "NVIDIA_VISIBLE_DEVICES" && env.Value == "none" {
+			found = true
+		}
+	}
+	assert.Assert(t, found, "expected NVIDIA_VISIBLE_DEVICES=none env")
+}
+
+func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
+	dev := &NvidiaGPUDevices{config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu", ResourceCoreName: "nvidia.com/gpucores"}}
+	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
+}
+
+func TestResourceValue_NilAndEmpty(t *testing.T) {
+	v, ok := resourceValue(nil, "nvidia.com/gpu")
+	assert.Equal(t, v, int64(0))
+	assert.Equal(t, ok, false)
+
+	v, ok = resourceValue(&corev1.Container{}, "")
+	assert.Equal(t, v, int64(0))
+	assert.Equal(t, ok, false)
+}
+
+func TestResourcePresent_NilAndEmpty(t *testing.T) {
+	assert.Equal(t, resourcePresent(nil, "nvidia.com/gpu"), false)
+	assert.Equal(t, resourcePresent(&corev1.Container{}, ""), false)
+}
+
+func TestCheckGPUtype_NoUse(t *testing.T) {
+	annos := map[string]string{
+		GPUNoUse: "A100",
+	}
+	assert.Equal(t, checkGPUtype(annos, "NVIDIA-A100"), false)
+	assert.Equal(t, checkGPUtype(annos, "NVIDIA-V100"), true)
+}
+
+func TestCheckType_AllocateMode(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice}
+
+	// AllocateMode does not contain device mode → typeCheck false
+	annos := map[string]string{AllocateMode: "mps"}
+	d := device.DeviceUsage{Type: "NVIDIA-A100", Mode: "hami-core"}
+	ok, _ := dev.checkType(annos, d, req)
+	assert.Equal(t, ok, false)
+
+	// AllocateMode contains device mode → typeCheck true
+	annos2 := map[string]string{AllocateMode: "hami-core"}
+	ok2, _ := dev.checkType(annos2, d, req)
+	assert.Equal(t, ok2, true)
+}
+
+func TestGetNodeDevices_InvalidJSON(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node-bad",
+			Annotations: map[string]string{RegisterAnnos: "not-valid-json"},
+		},
+	}
+	_, err := dev.GetNodeDevices(node)
+	assert.Assert(t, err != nil)
+}
+
+func TestGetNodeDevices_MigTemplate(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			MigGeometriesList: []device.AllowedMigGeometries{
+				{
+					Models: []string{"A100"},
+					Geometries: []device.Geometry{
+						{
+							{Name: "1g.5gb", Memory: 5120, Core: 14, Count: 7},
+						},
+					},
+				},
+			},
+		},
+	}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-mig",
+			Annotations: map[string]string{
+				RegisterAnnos: `[{"id":"GPU-0","count":7,"devmem":40960,"devcore":100,"type":"NVIDIA-A100-SXM4-40GB","numa":0,"health":true,"mode":"mig"}]`,
+			},
+		},
+	}
+	result, err := dev.GetNodeDevices(node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 1)
+	assert.Equal(t, len(result[0].MIGTemplate), 1)
+	assert.Equal(t, result[0].MIGTemplate[0][0].Name, "1g.5gb")
+}
+
+func TestGetNodeDevices_PairScores(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-topo",
+			Annotations: map[string]string{
+				RegisterAnnos:        `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true},{"id":"GPU-1","count":1,"devmem":8192,"devcore":100,"type":"NVIDIA-V100","health":true}]`,
+				RegisterGPUPairScore: `[{"uuid":"GPU-0","score":{"GPU-1":100}},{"uuid":"GPU-1","score":{"GPU-0":100}}]`,
+			},
+		},
+	}
+	result, err := dev.GetNodeDevices(node)
+	assert.NilError(t, err)
+	assert.Equal(t, len(result), 2)
+	assert.Equal(t, result[0].DevicePairScore.Scores["GPU-1"], 100)
+}
+
+func TestGetNodeDevices_InvalidPairScores(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	node := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-bad-scores",
+			Annotations: map[string]string{
+				RegisterAnnos:        `[{"id":"GPU-0","count":1,"devmem":8192,"devcore":100,"type":"V100","health":true}]`,
+				RegisterGPUPairScore: `not-valid-json`,
+			},
+		},
+	}
+	_, err := dev.GetNodeDevices(node)
+	assert.Assert(t, err != nil)
+}
+
+func TestAddResourceUsage_MigNonReset(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	usage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigUsage: device.MigInUse{
+			Index: 0,
+			UsageList: device.MIGS{
+				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: true},
+				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: false},
+			},
+		},
+	}
+	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096, Usedcores: 10}
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
+	assert.NilError(t, err)
+	assert.Assert(t, usage.MigUsage.UsageList[1].InUse)
+	assert.Equal(t, ctr.Usedmem, int32(5120))
+	assert.Assert(t, strings.Contains(ctr.UUID, "["))
+}
+
+func TestAddResourceUsage_MigNonResetNoSlot(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	usage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigUsage: device.MigInUse{
+			UsageList: device.MIGS{
+				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: true},
+			},
+		},
+	}
+	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096}
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
+	assert.Assert(t, err != nil)
+	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+}
+
+func TestCustomFilterRule_MigEmptyUsageWithTemplate(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	devusage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigUsage: device.MigInUse{
+			UsageList: device.MIGS{},
+		},
+		MigTemplate: []device.Geometry{
+			{
+				{Name: "1g.5gb", Memory: 5120, Core: 14, Count: 2},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Memreq: 4096}
+	result := dev.CustomFilterRule(nil, req, nil, devusage)
+	assert.Equal(t, result, true)
+}
+
+func TestCustomFilterRule_MigEmptyUsageNoFitTemplate(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	devusage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigUsage: device.MigInUse{
+			UsageList: device.MIGS{},
+		},
+		MigTemplate: []device.Geometry{
+			{
+				{Name: "1g.5gb", Memory: 100, Core: 14, Count: 1},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Memreq: 4096}
+	result := dev.CustomFilterRule(nil, req, nil, devusage)
+	assert.Equal(t, result, false)
+}
+
+func TestReleaseNodeLock(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name: "no GPU containers — skip release, lock remains",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-gpu", Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+			},
+			hasLock: true,
+		},
+		{
+			name: "has GPU container — releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "gpu-app",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+				},
+			},
+			hasLock: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: "lock-values,default,pod-gpu",
+					},
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			dev := InitNvidiaDevice(config)
+			err = dev.ReleaseNodeLock(node, tt.pod)
+			assert.NilError(t, err)
+
+			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := updated.Annotations[nodelock.NodeLockKey]
+			assert.Equal(t, ok, tt.hasLock)
+		})
+	}
+}
+
+func TestCheckGPUtype_InUseMismatch(t *testing.T) {
+	annos := map[string]string{GPUInUse: "A100"}
+	assert.Equal(t, checkGPUtype(annos, "NVIDIA-V100"), false)
+}
+
+func TestFit_NumaSwitching(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+
+	// Iterated in reverse: dev-2(NUMA 0) → dev-1(NUMA 1) → dev-0(NUMA 1)
+	// dev-2 collected first, then NUMA switch at dev-1 resets progress.
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{NumaBind: "true"},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-1")
+	assert.Equal(t, result[NvidiaGPUDevice][1].UUID, "dev-0")
+}
+
+func TestFit_TopologyExactMatch(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+}
+
+func TestFit_TopologyWorstSingleCard(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100, "dev-2": 200}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100, "dev-2": 150}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 200, "dev-1": 150}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-1")
+}
+
+func TestFit_TopologyBestCombination(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 100, "dev-2": 200}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 100, "dev-2": 150}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 200, "dev-1": 150}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	uuids := map[string]bool{}
+	for _, d := range result[NvidiaGPUDevice] {
+		uuids[d.UUID] = true
+	}
+	assert.Assert(t, uuids["dev-0"])
+	assert.Assert(t, uuids["dev-2"])
 }

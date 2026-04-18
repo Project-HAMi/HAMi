@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -29,6 +30,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -134,7 +136,7 @@ test case matrix.
 
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -245,7 +247,7 @@ test case matrix.
 */
 func Test_Filter(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -705,7 +707,7 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 				s := NewScheduler()
 				s.stopCh = make(chan struct{})
 				s.nodeNotify = make(chan struct{})
-				client.KubeClient = fake.NewSimpleClientset()
+				client.KubeClient = fake.NewClientset()
 				s.kubeClient = client.KubeClient
 				informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 				s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
@@ -800,7 +802,7 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 		s.stopCh = make(chan struct{})
 		s.nodeNotify = make(chan struct{})
 
-		client.KubeClient = fake.NewSimpleClientset()
+		client.KubeClient = fake.NewClientset()
 		s.kubeClient = client.KubeClient
 
 		informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
@@ -915,9 +917,132 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 	}
 }
 
+type registerMockDevice struct {
+	nodeDevices   []*device.DeviceInfo
+	getNodeErr    error
+	health        bool
+	needUpdate    bool
+	nodeCleanedUp int
+}
+
+func (m *registerMockDevice) CommonWord() string { return "mock-vendor" }
+func (m *registerMockDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (m *registerMockDevice) CheckHealth(_ string, _ *corev1.Node) (bool, bool) {
+	return m.health, m.needUpdate
+}
+func (m *registerMockDevice) NodeCleanUp(_ string) error {
+	m.nodeCleanedUp++
+	return nil
+}
+func (m *registerMockDevice) GetResourceNames() device.ResourceNames { return device.ResourceNames{} }
+func (m *registerMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+	return m.nodeDevices, m.getNodeErr
+}
+func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
+func (m *registerMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
+	return device.ContainerDeviceRequest{}
+}
+func (m *registerMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
+	return nil
+}
+func (m *registerMockDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
+	return 0
+}
+func (m *registerMockDevice) AddResourceUsage(_ *corev1.Pod, _ *device.DeviceUsage, _ *device.ContainerDevice) error {
+	return nil
+}
+func (m *registerMockDevice) Fit(_ []*device.DeviceUsage, _ device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return false, nil, ""
+}
+
+func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	mockDev := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{},
+		health:      false,
+		needUpdate:  true,
+	}
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": mockDev,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-1",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:           "GPU-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         nvidia.NvidiaGPUDevice,
+				Health:       true,
+				DeviceVendor: nvidia.NvidiaGPUDevice,
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+	s.register(labels.Everything(), map[string]bool{})
+
+	assert.Equal(t, mockDev.nodeCleanedUp, 0)
+
+	nodeInfo, err := s.GetNode("node-1")
+	require.NoError(t, err)
+	_, ok := nodeInfo.Devices[nvidia.NvidiaGPUDevice]
+	assert.Equal(t, ok, true)
+	_, ok = nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, ok, false)
+}
+
 func Test_ResourceQuota(t *testing.T) {
 	s := NewScheduler()
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()

@@ -824,7 +824,7 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 				{UUID: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10},
 			},
 			t:    "NVIDIA",
-			want: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313,NVIDIA,1000,10:",
+			want: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313,NVIDIA,1000,10",
 		},
 		{
 			name: "multiple devices with type match",
@@ -834,7 +834,7 @@ func TestEncodeContainerDeviceType(t *testing.T) {
 				{UUID: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4", Type: "NVIDIA", Usedmem: 3000, Usedcores: 30},
 			},
 			t:    "NVIDIA",
-			want: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313,NVIDIA,1000,10::GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,NVIDIA,3000,30:",
+			want: "GPU-936619fc-f6a1-74a8-0bc6-ecf6b3269313,NVIDIA,1000,10:GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,NVIDIA,3000,30",
 		},
 	}
 	for _, tt := range tests {
@@ -943,7 +943,7 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
+			Name:      "test-pod-init",
 			Namespace: "default",
 		},
 		Spec: corev1.PodSpec{
@@ -978,18 +978,32 @@ func TestResourcereqs_WithInitContainers(t *testing.T) {
 
 	counts := Resourcereqs(pod)
 
-	// Total containers = 2 init + 1 regular = 3
-	assert.Equal(t, len(counts), 3)
+	assert.Equal(t, len(counts), 3, "Should have 3 container request maps")
 
-	// Index 0: init-no-gpu - should have no device requests
-	_, hasNvidia0 := counts[0]["NVIDIA"]
-	assert.Equal(t, hasNvidia0, false)
+	_, ok := counts[0]["NVIDIA"]
+	assert.Assert(t, !ok, "Container 0 should not have NVIDIA requests")
 
-	// Index 1: init-with-gpu - should have device request
-	assert.Equal(t, counts[1]["NVIDIA"].Nums, int32(1))
+	t.Run("Check Init Container GPU reqs", func(t *testing.T) {
+		req, ok := counts[1]["NVIDIA"]
+		assert.Assert(t, ok, "Container 1 should have NVIDIA requests")
+		assert.Equal(t, req.Nums, int32(1))
+		assert.Equal(t, req.Memreq, int32(1000))
+		assert.Equal(t, req.Coresreq, int32(10))
+	})
 
-	// Index 2: main-with-gpu - should have device request (initContainerOffset=2, so index 2)
-	assert.Equal(t, counts[2]["NVIDIA"].Nums, int32(1))
+	t.Run("Check Main Container GPU reqs", func(t *testing.T) {
+		req, ok := counts[2]["NVIDIA"]
+		assert.Assert(t, ok, "Container 2 should have NVIDIA requests")
+		assert.Equal(t, req.Nums, int32(1))
+		assert.Equal(t, req.Memreq, int32(1000))
+		assert.Equal(t, req.Coresreq, int32(10))
+	})
+}
+
+func TestResourcereqs_EmptyPod(t *testing.T) {
+	pod := &corev1.Pod{Spec: corev1.PodSpec{}}
+	counts := Resourcereqs(pod)
+	assert.Equal(t, len(counts), 0)
 }
 
 func TestResourcereqs_NoDeviceRequests(t *testing.T) {

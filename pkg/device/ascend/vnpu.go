@@ -33,5 +33,7 @@ type VNPUConfig struct {
 	MemoryFactor       int32      `yaml:"memoryFactor"`
 	AICore             int32      `yaml:"aiCore"`
 	AICPU              int32      `yaml:"aiCPU"`
+	RuntimeClassName   string     `yaml:"runtimeClassName"`
+	OverwriteEnv       bool       `yaml:"overwriteEnv"`
 	Templates          []Template `yaml:"templates"`
 }
