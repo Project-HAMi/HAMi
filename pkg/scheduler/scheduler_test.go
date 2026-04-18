@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"testing"
@@ -456,11 +457,11 @@ func Test_Filter(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                      string
-		args                      extenderv1.ExtenderArgs
-		want                      *extenderv1.ExtenderFilterResult
-		wantPodAnnotationDeviceID string
-		wantErr                   error
+		name                       string
+		args                       extenderv1.ExtenderArgs
+		want                       *extenderv1.ExtenderFilterResult
+		wantPodAnnotationDeviceIDs []string
+		wantErr                    error
 	}{
 		{
 			name: "node use binpack gpu use binpack policy",
@@ -497,7 +498,7 @@ func Test_Filter(t *testing.T) {
 			want: &extenderv1.ExtenderFilterResult{
 				NodeNames: &[]string{"node2"},
 			},
-			wantPodAnnotationDeviceID: "device4",
+			wantPodAnnotationDeviceIDs: []string{"device4"},
 		},
 		{
 			name: "pod with init containers fits correctly using max resource logic (Binpack)",
@@ -546,7 +547,7 @@ func Test_Filter(t *testing.T) {
 			want: &extenderv1.ExtenderFilterResult{
 				NodeNames: &[]string{"node2"},
 			},
-			wantPodAnnotationDeviceID: "device3",
+			wantPodAnnotationDeviceIDs: []string{"device3"},
 		},
 		{
 			name: "node use binpack gpu use spread policy",
@@ -583,7 +584,7 @@ func Test_Filter(t *testing.T) {
 			want: &extenderv1.ExtenderFilterResult{
 				NodeNames: &[]string{"node2"},
 			},
-			wantPodAnnotationDeviceID: "device3",
+			wantPodAnnotationDeviceIDs: []string{"device3", "device4"}, // Both are acceptable due to tie
 		},
 		{
 			name: "node use spread gpu use binpack policy",
@@ -620,7 +621,7 @@ func Test_Filter(t *testing.T) {
 			want: &extenderv1.ExtenderFilterResult{
 				NodeNames: &[]string{"node1"},
 			},
-			wantPodAnnotationDeviceID: "device1",
+			wantPodAnnotationDeviceIDs: []string{"device1"},
 		},
 		{
 			name: "node use spread gpu use spread policy",
@@ -657,7 +658,7 @@ func Test_Filter(t *testing.T) {
 			want: &extenderv1.ExtenderFilterResult{
 				NodeNames: &[]string{"node1"},
 			},
-			wantPodAnnotationDeviceID: "device2",
+			wantPodAnnotationDeviceIDs: []string{"device2"},
 		},
 	}
 
@@ -670,7 +671,12 @@ func Test_Filter(t *testing.T) {
 			assert.DeepEqual(t, test.want, got)
 			getPod, _ := client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Get(context.Background(), test.args.Pod.Name, metav1.GetOptions{})
 			podDevices, _ := device.DecodePodDevices(device.SupportDevices, getPod.Annotations)
-			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
+
+			actualUUID := podDevices["NVIDIA"][0][0].UUID
+
+			if !slices.Contains(test.wantPodAnnotationDeviceIDs, actualUUID) {
+				t.Errorf("expected one of %v, got %s", test.wantPodAnnotationDeviceIDs, actualUUID)
+			}
 		})
 	}
 }
