@@ -724,12 +724,32 @@ ReleaseNodeLocks:
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
-	resourceReqTotal := 0
-	for _, n := range resourceReqs {
-		for _, k := range n {
-			resourceReqTotal += int(k.Nums)
+
+	initReqTotal := 0
+	appReqTotal := 0
+	numInitContainers := len(args.Pod.Spec.InitContainers)
+
+	for i := range numInitContainers {
+		currentInitReq := 0
+		for _, k := range resourceReqs[i] {
+			currentInitReq += int(k.Nums)
+		}
+		if currentInitReq > initReqTotal {
+			initReqTotal = currentInitReq
 		}
 	}
+
+	// 2. Calculate the SUM of requests among Regular Containers
+	for i := numInitContainers; i < len(resourceReqs); i++ {
+		for _, k := range resourceReqs[i] {
+			appReqTotal += int(k.Nums)
+		}
+	}
+
+	// 3. The effective total request is the MAX of (InitContainers, RegularContainers)
+	resourceReqTotal := appReqTotal
+	resourceReqTotal = max(resourceReqTotal, initReqTotal)
+
 	if resourceReqTotal == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)

@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -140,6 +141,21 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			// requests, which should be schedulable on any node.
 			ctrfit := true
 			deviceType := ""
+
+			numInitContainers := len(task.Spec.InitContainers)
+
+			// Snapshot the node's initial state so init containers don't drain the pool
+			initialNodeBytes, err := json.Marshal(node)
+			if err != nil {
+				klog.ErrorS(err, "Failed to marshal node state for cloning", "nodeID", nodeID)
+				errCh <- err
+				return
+			}
+
+			// This shared state will be drained by regular app containers
+			appContainersNode := &NodeUsage{}
+			json.Unmarshal(initialNodeBytes, appContainersNode)
+
 			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
@@ -153,7 +169,20 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
+
+				// Determine which node state to pass to fitInDevices
+				var workingNode *NodeUsage
+				if ctrid < numInitContainers {
+					// Init containers get a fresh reset of the node's capacity
+					workingNode = &NodeUsage{}
+					json.Unmarshal(initialNodeBytes, workingNode)
+				} else {
+					// Regular containers deduct from the shared app capacity
+					workingNode = appContainersNode
+				}
+
+				fit, reason := fitInDevices(workingNode, n, task, nodeInfo, &score.Devices)
+
 				// found certain deviceType, fill missing empty allocation for containers before this
 				for idx := range score.Devices {
 					deviceType = idx
