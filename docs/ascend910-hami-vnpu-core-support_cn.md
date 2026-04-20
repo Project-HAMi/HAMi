@@ -28,8 +28,8 @@
 1. **创建共享目录**
 
    ```
-   sudo mkdir -p /tmp/hami-shared-region
-   sudo chmod 777 /tmp/hami-shared-region
+   sudo mkdir -p /usr/local/hami-shared-region
+   sudo chmod 777 /usr/local/hami-shared-region
    ```
 
 2. **部署 hami-vnpu-core 组件** 

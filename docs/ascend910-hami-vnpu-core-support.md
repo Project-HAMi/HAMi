@@ -26,8 +26,8 @@ Before launching any containers, the **Global Shared Memory (SHM) Region** must 
 #### 1. Create the Shared Directory
 
 ```bash
-sudo mkdir -p /tmp/hami-shared-region
-sudo chmod 777 /tmp/hami-shared-region
+sudo mkdir -p /usr/local/hami-shared-region
+sudo chmod 777 /usr/local/hami-shared-region
 ```
 
 #### 2. Deploy hami-vnpu-core Components
