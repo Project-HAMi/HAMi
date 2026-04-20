@@ -331,7 +331,6 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						m, _ := dev.trimMemory(memnums)
 						memnum = int(m)
 					}
-					memnum = int(m)
 				}
 			}
 			
