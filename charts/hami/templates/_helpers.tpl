@@ -118,16 +118,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ regexReplaceAll "^(v[0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" .Capabilities.KubeVersion.Version "$1" }}
 {{- end -}}
 
+{{/*
+  Per-component image tag takes precedence over global.imageTag (trimmed non-empty imageRoot.tag wins).
+*/}}
+{{- define "hami.imageTagOrGlobal" -}}
+{{- $t := .imageRoot.tag | default "" | toString | trim -}}
+{{- if ne $t "" -}}
+{{- $t -}}
+{{- else -}}
+{{- .global.imageTag | default "" | toString | trim -}}
+{{- end -}}
+{{- end -}}
+
 {{- define "hami.scheduler.kubeScheduler.image" -}}
 {{ include "common.images.image" (dict "imageRoot" .Values.scheduler.kubeScheduler.image "global" .Values.global "tag" (include "resolvedKubeSchedulerTag" .)) }}
 {{- end -}}
 
 {{- define "hami.scheduler.extender.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global "tag" (include "hami.imageTagOrGlobal" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global))) }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global "tag" (include "hami.imageTagOrGlobal" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global))) }}
 {{- end -}}
 
 {{- define "hami.mockDevicePlugin.image" -}}
@@ -135,7 +147,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.monitor.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global "tag" (include "hami.imageTagOrGlobal" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global))) }}
 {{- end -}}
 
 {{- define "hami.scheduler.patch.image" -}}
