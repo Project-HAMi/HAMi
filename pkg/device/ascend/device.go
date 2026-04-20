@@ -54,10 +54,10 @@ type Devices struct {
 }
 
 type RuntimeInfo struct {
-	UUID     string `json:"UUID,omitempty"`
-	Temp     string `json:"temp,omitempty"`
-	Memory   int64  `json:"memory,omitempty"` 
-	Core     int32  `json:"core,omitempty"` 
+	UUID   string `json:"UUID,omitempty"`
+	Temp   string `json:"temp,omitempty"`
+	Memory int64  `json:"memory,omitempty"`
+	Core   int32  `json:"core,omitempty"`
 }
 
 var (
@@ -119,7 +119,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	if !ok {
 		return false, nil
 	}
- 
+
 	reqNum := count.Value()
 	if dev.config.CommonWord == Ascend910CType {
 		if reqNum == 1 {
@@ -140,29 +140,29 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 
 	// Check if hami-core is declared
 	vnpuMode := p.Annotations[VNPUModeAnnotation]
-    isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
 	if isHAMiCore {
-        klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
-        
-        if ctr.Lifecycle == nil {
-            ctr.Lifecycle = &corev1.Lifecycle{}
-        }
-        
-        // Inject PostStart hook to start the limiter process
-        if ctr.Lifecycle.PostStart == nil {
-            ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
-                Exec: &corev1.ExecAction{
-                    Command: []string{
-                        "bash",
-                        "-c",
-                        "export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
-                    },
-                },
-            }
-        }
-    }
- 
+		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
+
+		if ctr.Lifecycle == nil {
+			ctr.Lifecycle = &corev1.Lifecycle{}
+		}
+
+		// Inject PostStart hook to start the limiter process
+		if ctr.Lifecycle.PostStart == nil {
+			ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{
+						"bash",
+						"-c",
+						"export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
+					},
+				},
+			}
+		}
+	}
+
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
@@ -231,7 +231,7 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 					_, temp := dev.trimMemory(int64(val.Usedmem))
 					info.Temp = temp
 				}
-	
+
 				rtInfo = append(rtInfo, info)
 			}
 		}
@@ -308,7 +308,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 				mem, ok = ctr.Resources.Requests[ascendResourceMem]
 			}
 			if ok {
-				memnums, _ := mem.AsInt64()
+				memnums, ok := mem.AsInt64()
 				if ok {
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
@@ -333,7 +333,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 					}
 				}
 			}
-			
+
 			// Process Core Resources
 			corenum := int32(0)
 			if ascendResourceCore != "" {
@@ -419,7 +419,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
-	
+
 	vnpuMode := ""
 	if pod != nil && pod.Annotations != nil {
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
