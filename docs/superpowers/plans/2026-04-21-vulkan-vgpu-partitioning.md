@@ -6,9 +6,22 @@
 
 **Architecture:** HAMi-core(`libvgpu.so`)에 Vulkan implicit layer를 추가해 `vkAllocateMemory` / `vkFreeMemory` / `vkGetPhysicalDeviceMemoryProperties[2]` / `vkQueueSubmit[2]`를 가로챈다. 기존 CUDA 훅이 사용하는 per-device 메모리 카운터와 SM throttle 유틸을 그대로 재사용한다. HAMi(Go)의 `MutateAdmission`은 annotation을 감지해 `NVIDIA_DRIVER_CAPABILITIES`에 `graphics`를 합치고 `HAMI_VULKAN_ENABLE=1`을 주입한다.
 
-**Tech Stack:** Go 1.22+ (HAMi), C11 + Vulkan 1.3 headers + pthread + NVML (HAMi-core), Docker multi-stage 빌드.
+**Tech Stack:** Go 1.22+ (HAMi), C11 + Vulkan 1.3 headers + pthread + NVML (HAMi-core), CMake, Docker multi-stage 빌드.
 
 **Reference Spec:** `docs/superpowers/specs/2026-04-21-vulkan-vgpu-partitioning-design.md`
+
+**Layout Notes:** `docs/superpowers/plans/notes/hami-core-layout.md` — Task 0.2에서 확보한 HAMi-core 실제 API 시그니처.
+
+## 중요 개정 사항 (탐색 결과 반영)
+
+Task 0.2에서 HAMi-core 실제 구조를 확인한 결과, 초기 플랜의 일부 가정이 실제와 달라 Task 1.3~1.8을 다음과 같이 개정합니다:
+
+1. **VRAM 카운터는 atomic reserve가 아니라 check-only**. 실제 API는 `oom_check(dev,size)`(체크만, `1`=OOM) + `add_gpu_device_memory_usage(pid,dev,size,type)`(커밋). CUDA 경로와 동일한 2단계 사용.
+2. **SM throttle은 이미 추출 형태**. `rate_limiter(grids,blocks)` 소비자(토큰 버킷) + `utilization_watcher` pthread 생산자. 별도 추출 Task 불필요 → **Task 1.4 삭제**, Vulkan 훅에서 직접 `rate_limiter(1,1)` 호출.
+3. **빌드는 CMake + OBJECT 라이브러리 구조**. `libvgpu/src/vulkan/` 신규 서브디렉토리에 자체 `CMakeLists.txt`를 두고 OBJECT lib `vulkan_mod`를 정의해 루트에서 링크. Makefile 직접 수정은 불필요 (`make build` → `./build.sh` → `cmake` 흐름 유지).
+4. **`-fvisibility=hidden`(Release)**. 레이어 엔트리포인트는 Vulkan SDK 헤더의 `VK_LAYER_EXPORT` 매크로가 이미 `__attribute__((visibility("default")))`를 적용하므로 추가 조치 불필요.
+5. **`limit==0` 센티넬 = unlimited**. 버짓 어댑터가 이를 그대로 전달해 clamp/예약 로직이 0이면 훅을 건너뛰도록 한다.
+6. **단위 테스트 프레임워크 없음**. 기존 `test/*.c` 샘플 스타일대로 stand-alone binary로 작성하거나, HAMi(Go) 쪽에서 cgo 미사용이면 C 테스트는 `test/vulkan/`에 `assert.h` 기반 프로그램으로 추가하고 CMake `test/CMakeLists.txt`의 glob이 자동으로 컴파일하도록 한다.
 
 ---
 
@@ -659,7 +672,9 @@ git commit -m "feat(vulkan): clamp device-local heap size to pod budget"
 
 ---
 
-### Task 1.3: `vkAllocateMemory` / `vkFreeMemory` 버짓 강제
+### Task 1.3: `vkAllocateMemory` / `vkFreeMemory` 버짓 강제 (개정)
+
+**API 주의:** HAMi-core의 실제 카운터는 `oom_check` (체크만, `1`=OOM) + `add_gpu_device_memory_usage(pid,dev,size,type)` / `rm_gpu_device_memory_usage(pid,dev,size,type)` 2단계. `type` 파라미터는 allocator.c가 CUDA 경로에서 `2`를 사용함. 원자성은 CUDA와 동일 수준(느슨한 TOCTOU). 어댑터는 Task 1.6에서 추가되므로, 이 Task는 Vulkan 훅이 참조할 **공개 어댑터 시그니처**를 사용한다: `int hami_budget_reserve(int dev, size_t size)` / `void hami_budget_release(int dev, size_t size)` / `size_t hami_budget_of(int dev)`. 구현은 Task 1.6.
 
 **Files:**
 - Create: `libvgpu/src/vulkan/hooks_alloc.c`
@@ -671,21 +686,22 @@ Create `libvgpu/test/vulkan/test_alloc.c`:
 ```c
 #include <assert.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <vulkan/vulkan.h>
 #include "../../src/vulkan/dispatch.h"
 
-size_t hami_pod_memory_budget(int dev_idx) { (void)dev_idx; return 1ull << 30; /* 1 GiB */ }
-
-/* Simple in-memory accounting stub shared with the layer. */
+/* Budget adapter stubs (real implementation arrives in Task 1.6). */
 static size_t g_used = 0;
+static const size_t BUDGET = 1ull << 30; /* 1 GiB */
 
-int  hami_reserve_device_memory(int dev, size_t size) {
+size_t hami_budget_of(int dev) { (void)dev; return BUDGET; }
+int    hami_budget_reserve(int dev, size_t size) {
     (void)dev;
-    if (g_used + size > hami_pod_memory_budget(dev)) return 0;
+    if (g_used + size > BUDGET) return 0;  /* 0 = refuse */
     g_used += size;
-    return 1;
+    return 1;                               /* 1 = granted */
 }
-void hami_release_device_memory(int dev, size_t size) { (void)dev; g_used -= size; }
+void   hami_budget_release(int dev, size_t size) { (void)dev; g_used -= size; }
 
 static VkResult VKAPI_CALL fake_alloc(VkDevice d, const VkMemoryAllocateInfo *i,
                                       const VkAllocationCallbacks *a, VkDeviceMemory *m) {
@@ -719,16 +735,15 @@ int main(void) {
 }
 ```
 
-- [ ] **Step 2: 테스트 실패 확인 (함수 미구현 → 링크 에러 또는 stub이 모두 실패 반환)**
+- [ ] **Step 2: 테스트 빌드 실패 확인**
 
-Run:
+Run (from `libvgpu/`):
 ```bash
-cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT \
+cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT -I./src \
    src/vulkan/layer.c src/vulkan/dispatch.c src/vulkan/hooks_memory.c \
    test/vulkan/test_alloc.c -lpthread
-/tmp/ta
 ```
-Expected: `VK_ERROR_OUT_OF_DEVICE_MEMORY` assertion 위반(stub이 항상 OOM 반환).
+Expected: 링크 에러 또는 실행 시 assertion 위반 (stub이 모두 OOM 반환).
 
 - [ ] **Step 3: `hooks_alloc.c` 작성**
 
@@ -737,10 +752,15 @@ Create `libvgpu/src/vulkan/hooks_alloc.c`:
 #include "dispatch.h"
 #include <pthread.h>
 #include <stdlib.h>
-#include <string.h>
+#include <stdint.h>
 
-int  hami_reserve_device_memory(int dev_idx, size_t size);
-void hami_release_device_memory(int dev_idx, size_t size);
+/* Public budget-adapter API. Implemented in Task 1.6 (src/vulkan/budget.c)
+ * and stubbed by unit tests here. The adapter encapsulates HAMi-core's
+ * oom_check / add_gpu_device_memory_usage / rm_gpu_device_memory_usage
+ * 2-step protocol so Vulkan hooks see a single atomic reserve/release. */
+int    hami_budget_reserve(int dev, size_t size);   /* 1 = granted, 0 = refused */
+void   hami_budget_release(int dev, size_t size);
+size_t hami_budget_of(int dev);                     /* 0 = unlimited */
 
 typedef struct mem_entry {
     VkDeviceMemory handle;
@@ -752,6 +772,8 @@ typedef struct mem_entry {
 static mem_entry_t *g_mem_head = NULL;
 static pthread_mutex_t g_mem_lock = PTHREAD_MUTEX_INITIALIZER;
 
+/* Provisional device-index heuristic (pointer hash). Replaced with
+ * NVML UUID lookup when the adapter in Task 1.6 lands. */
 static int device_to_index(VkDevice d) {
     return (int)(((uintptr_t)d >> 4) & 0xff);
 }
@@ -763,12 +785,12 @@ hami_vkAllocateMemory(VkDevice device, const VkMemoryAllocateInfo *pInfo,
     if (!d || !d->AllocateMemory) return VK_ERROR_INITIALIZATION_FAILED;
 
     int idx = device_to_index(device);
-    if (!hami_reserve_device_memory(idx, pInfo->allocationSize))
+    if (!hami_budget_reserve(idx, pInfo->allocationSize))
         return VK_ERROR_OUT_OF_DEVICE_MEMORY;
 
     VkResult r = d->AllocateMemory(device, pInfo, pAlloc, pMem);
     if (r != VK_SUCCESS) {
-        hami_release_device_memory(idx, pInfo->allocationSize);
+        hami_budget_release(idx, pInfo->allocationSize);
         return r;
     }
 
@@ -796,7 +818,7 @@ hami_vkFreeMemory(VkDevice device, VkDeviceMemory mem, const VkAllocationCallbac
         mem_entry_t *victim = *pp;
         *pp = victim->next;
         pthread_mutex_unlock(&g_mem_lock);
-        hami_release_device_memory(victim->dev_idx, victim->size);
+        hami_budget_release(victim->dev_idx, victim->size);
         free(victim);
         return;
     }
@@ -806,15 +828,25 @@ hami_vkFreeMemory(VkDevice device, VkDeviceMemory mem, const VkAllocationCallbac
 void hami_vk_hook_device(hami_device_dispatch_t *d) { (void)d; }
 ```
 
+Also update `hooks_memory.c` (from Task 1.2) to use the new budget adapter name — change the `hami_pod_memory_budget` call to `hami_budget_of` and the forward declaration accordingly. If Task 1.2's file used `hami_pod_memory_budget`, rename:
+```c
+/* was: extern size_t hami_pod_memory_budget(int); */
+extern size_t hami_budget_of(int);
+...
+size_t budget = hami_budget_of(physdev_index(p));
+if (budget == 0) return;  /* 0 = unlimited sentinel; skip clamp */
+```
+And update `test/vulkan/test_memprops.c` test stubs to `hami_budget_of` accordingly.
+
 - [ ] **Step 4: layer.c의 allocate/free stub 제거**
 
-Modify `libvgpu/src/vulkan/layer.c` — 파일 끝 `#ifndef` 블록에서 `hami_vkAllocateMemory`, `hami_vkFreeMemory`, `hami_vk_hook_device` stub 삭제 (QueueSubmit stub은 Task 1.5까지 유지).
+Modify `libvgpu/src/vulkan/layer.c` — 파일 끝 `#ifndef HAMI_VK_HOOKS_PRESENT` 블록에서 `hami_vkAllocateMemory`, `hami_vkFreeMemory`, `hami_vk_hook_device` stub 삭제 (QueueSubmit stub은 Task 1.5까지 유지).
 
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run:
 ```bash
-cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT \
+cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT -I./src \
    src/vulkan/layer.c src/vulkan/dispatch.c src/vulkan/hooks_memory.c src/vulkan/hooks_alloc.c \
    test/vulkan/test_alloc.c -lpthread
 /tmp/ta
@@ -824,140 +856,107 @@ Expected: `ok: allocate/free budget enforced`.
 - [ ] **Step 6: 커밋**
 
 ```bash
-git add src/vulkan/hooks_alloc.c src/vulkan/layer.c test/vulkan/test_alloc.c
+git add src/vulkan/hooks_alloc.c src/vulkan/hooks_memory.c src/vulkan/layer.c test/vulkan/test_alloc.c test/vulkan/test_memprops.c
 git commit -m "feat(vulkan): enforce pod memory budget on vkAllocateMemory/vkFreeMemory"
 ```
 
 ---
 
-### Task 1.4: 공통 SM throttle 유틸 추출
+### Task 1.4: Vulkan용 throttle 어댑터 (개정 — 추출 불필요)
+
+**이 Task는 초기 플랜에서 "throttle 폴링 루프 추출"이었으나, Task 0.2 탐색 결과 HAMi-core는 이미 토큰 버킷 구조(`rate_limiter` 소비자 + `utilization_watcher` 생산자 스레드)로 모듈화되어 있어 추출할 필요가 없습니다. 대신, Vulkan TU가 기존 `rate_limiter`를 호출할 수 있도록 얇은 어댑터 1개만 추가합니다.**
 
 **Files:**
-- Create: `libvgpu/src/common/throttle.h`
-- Create: `libvgpu/src/common/throttle.c`
-- Modify: 기존 CUDA launch 래퍼 (Task 0.2 노트에서 확보한 파일/함수)
+- Create: `libvgpu/src/vulkan/throttle_adapter.h`
+- Create: `libvgpu/src/vulkan/throttle_adapter.c`
 
-이 Task는 **기존 CUDA 경로에서 쓰이는 throttle 폴링 루프를 함수로 추출하여 공통화**하는 리팩토링이다. Vulkan과 CUDA 양쪽에서 호출한다.
+- [ ] **Step 1: 실패 테스트 작성 (어댑터 호출 가능성 검증)**
 
-- [ ] **Step 1: 기존 throttle 루프 복사 원본 확인**
-
-`docs/superpowers/plans/notes/hami-core-layout.md`의 Step 3 결과에서 throttle 함수 위치를 열람.
-
-Run (예시, 실제 경로는 노트 기반):
-```bash
-sed -n '60,110p' libvgpu/src/cuda/launch.c
-```
-Expected: 폴링 + `usleep` 루프가 보임.
-
-- [ ] **Step 2: 실패 테스트 작성 (호출 가능성만 검증)**
-
-Create `libvgpu/test/common/test_throttle.c`:
+Create `libvgpu/test/vulkan/test_throttle_adapter.c`:
 ```c
 #include <assert.h>
 #include <stdio.h>
-#include <time.h>
-#include "../../src/common/throttle.h"
+#include "../../src/vulkan/throttle_adapter.h"
+
+/* Stub of HAMi-core's rate_limiter so this test links without the full lib. */
+static int g_rl_calls = 0;
+void rate_limiter(int grids, int blocks) { (void)grids;(void)blocks; g_rl_calls++; }
 
 int main(void) {
-    /* dev_idx = 0, util_limit = 100 (사실상 폴링 즉시 종료) */
-    struct timespec a, b;
-    clock_gettime(CLOCK_MONOTONIC, &a);
-    hami_throttle_wait(0, 100);
-    clock_gettime(CLOCK_MONOTONIC, &b);
-    double dur = (b.tv_sec - a.tv_sec) + (b.tv_nsec - a.tv_nsec)/1e9;
-    assert(dur < 0.5); /* util_limit=100 → 즉시 통과 */
-    printf("ok: throttle returns quickly at util_limit=100\n");
+    hami_vulkan_throttle();
+    hami_vulkan_throttle();
+    assert(g_rl_calls == 2);
+    printf("ok: adapter forwards to rate_limiter\n");
     return 0;
 }
 ```
 
-- [ ] **Step 3: 테스트 실패 확인**
+- [ ] **Step 2: 빌드 실패 확인**
 
-Run:
+Run (from `libvgpu/`):
 ```bash
-cc -o /tmp/tt test/common/test_throttle.c
+cc -o /tmp/ttha -I./src test/vulkan/test_throttle_adapter.c
 ```
-Expected: `throttle.h` 없음 → 컴파일 실패.
+Expected: `throttle_adapter.h` 없음 → 컴파일 실패.
 
-- [ ] **Step 4: `throttle.h` / `throttle.c` 작성**
+- [ ] **Step 3: 어댑터 헤더/구현 작성**
 
-Create `libvgpu/src/common/throttle.h`:
+Create `libvgpu/src/vulkan/throttle_adapter.h`:
 ```c
-#ifndef HAMI_COMMON_THROTTLE_H
-#define HAMI_COMMON_THROTTLE_H
+#ifndef HAMI_VK_THROTTLE_ADAPTER_H
+#define HAMI_VK_THROTTLE_ADAPTER_H
 
-/* Block until NVML reports GPU utilization <= util_limit (percent) or
- * HAMI_THROTTLE_MAX_ITER polls are exhausted. Fail-open on NVML errors. */
-void hami_throttle_wait(int dev_idx, int util_limit);
+/* Consume one "compute unit" token from the HAMi-core SM rate limiter.
+ * When the HAMi SM limit is 0 or >= 100 (unlimited), this is a no-op
+ * inherited from the underlying rate_limiter. Call once per Vulkan
+ * vkQueueSubmit/vkQueueSubmit2 before forwarding to the next layer. */
+void hami_vulkan_throttle(void);
 
 #endif
 ```
 
-Create `libvgpu/src/common/throttle.c`:
+Create `libvgpu/src/vulkan/throttle_adapter.c`:
 ```c
-#include "throttle.h"
-#include <unistd.h>
+#include "throttle_adapter.h"
 
-/* Forward-declare NVML bits the existing CUDA path already links against.
- * Keep this file header-independent to avoid ordering constraints with the
- * rest of the codebase. Real NVML header names/symbols should be reused
- * from the include path established for the CUDA wrappers. */
-typedef struct { unsigned int gpu; unsigned int memory; } nvmlUtilization_t;
-typedef void *nvmlDevice_t;
-extern int  nvmlDeviceGetHandleByIndex_v2(unsigned int idx, nvmlDevice_t *out);
-extern int  nvmlDeviceGetUtilizationRates(nvmlDevice_t dev, nvmlUtilization_t *u);
+/* Defined in libvgpu/src/multiprocess/multiprocess_utilization_watcher.c
+ * (linked into the same libvgpu.so at final link time). Default-visibility
+ * is preserved via file-local linkage inside the library regardless of the
+ * release -fvisibility=hidden setting, because both TUs are in the same
+ * shared object. */
+extern void rate_limiter(int grids, int blocks);
 
-#define HAMI_THROTTLE_POLL_US 500
-#define HAMI_THROTTLE_MAX_ITER 2000
-
-void hami_throttle_wait(int dev_idx, int util_limit) {
-    if (util_limit >= 100) return;
-    nvmlDevice_t h = NULL;
-    if (nvmlDeviceGetHandleByIndex_v2((unsigned)dev_idx, &h) != 0) return;
-    for (int i = 0; i < HAMI_THROTTLE_MAX_ITER; ++i) {
-        nvmlUtilization_t u = {0};
-        if (nvmlDeviceGetUtilizationRates(h, &u) != 0) return;
-        if ((int)u.gpu < util_limit) return;
-        usleep(HAMI_THROTTLE_POLL_US);
-    }
+void hami_vulkan_throttle(void) {
+    /* Consume one token — represents "one queue submission". The
+     * rate_limiter interprets (grids*blocks) as the claim size; we use
+     * the smallest unit (1,1) so Vulkan submits compete fairly with
+     * tiny CUDA kernel launches. */
+    rate_limiter(1, 1);
 }
 ```
 
-- [ ] **Step 5: 기존 CUDA throttle 루프를 `hami_throttle_wait` 호출로 치환**
-
-Modify the CUDA launch file identified in Step 1 (예: `libvgpu/src/cuda/launch.c`). 기존 블록:
-```c
-/* old inline polling loop replaced */
-for (...) { ...nvmlDeviceGetUtilizationRates...; usleep(...); }
-```
-을 다음으로 교체:
-```c
-#include "../common/throttle.h"
-...
-hami_throttle_wait(dev_idx, sm_limit_percent);
-```
-정확한 변수명(`dev_idx`, `sm_limit_percent`)은 기존 파일의 로컬 네이밍에 맞춘다.
-
-- [ ] **Step 6: 테스트 및 기존 CUDA 유닛 테스트 통과 확인**
+- [ ] **Step 4: 테스트 통과 확인**
 
 Run:
 ```bash
-cc -o /tmp/tt src/common/throttle.c test/common/test_throttle.c
-/tmp/tt
-make -C libvgpu test 2>/dev/null || cc -o /tmp/existing libvgpu/test/cuda/*.c libvgpu/src/cuda/*.c libvgpu/src/common/throttle.c -ldl -lpthread
+cc -o /tmp/ttha -I./src \
+   src/vulkan/throttle_adapter.c test/vulkan/test_throttle_adapter.c
+/tmp/ttha
 ```
-Expected: 새 테스트 PASS. 기존 테스트가 있으면 여전히 PASS.
+Expected: `ok: adapter forwards to rate_limiter`.
 
-- [ ] **Step 7: 커밋**
+- [ ] **Step 5: 커밋**
 
 ```bash
-git add src/common/throttle.h src/common/throttle.c src/cuda/launch.c test/common/test_throttle.c
-git commit -m "refactor(common): extract SM throttle polling into shared util"
+git add src/vulkan/throttle_adapter.h src/vulkan/throttle_adapter.c test/vulkan/test_throttle_adapter.c
+git commit -m "feat(vulkan): thin adapter forwarding queue submit throttling to rate_limiter"
 ```
+
+**주의사항 (노트 참조):** `rate_limiter`는 `sm_limit==0` / `sm_limit>=100` / `get_utilization_switch()==0` 조건에서 사일런트 no-op 합니다. 사용자가 Vulkan만 SM 분할하려 할 때 별도 스위치가 필요하면 후속 Task(v2)에서 `HAMI_VULKAN_SM_SWITCH` env를 추가하도록 남겨둡니다.
 
 ---
 
-### Task 1.5: `vkQueueSubmit[2]` throttle 훅
+### Task 1.5: `vkQueueSubmit[2]` throttle 훅 (개정)
 
 **Files:**
 - Create: `libvgpu/src/vulkan/hooks_submit.c`
@@ -969,6 +968,7 @@ Create `libvgpu/test/vulkan/test_submit.c`:
 ```c
 #include <assert.h>
 #include <stdio.h>
+#include <stdint.h>
 #include <vulkan/vulkan.h>
 #include "../../src/vulkan/dispatch.h"
 
@@ -977,21 +977,21 @@ static VkResult VKAPI_CALL fake_submit(VkQueue q, uint32_t n, const VkSubmitInfo
     (void)q;(void)n;(void)s;(void)f; g_submit_called++; return VK_SUCCESS;
 }
 
-/* throttle stub — check it's called */
+/* Throttle adapter stub — verifies the hook calls the adapter exactly once
+ * per submit before forwarding to the next layer. */
 static int g_throttle_called = 0;
-void hami_throttle_wait(int dev, int util) { (void)dev;(void)util; g_throttle_called++; }
+void hami_vulkan_throttle(void) { g_throttle_called++; }
 
-/* device→queue not needed; hook keys on device */
-extern VKAPI_ATTR VkResult VKAPI_CALL hami_vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
+extern VKAPI_ATTR VkResult VKAPI_CALL
+hami_vkQueueSubmit(VkQueue, uint32_t, const VkSubmitInfo*, VkFence);
+extern void hami_vk_register_queue(VkQueue q, VkDevice d);
 
 int main(void) {
-    /* Map queue back to device via a small test helper. */
-    extern void hami_vk_test_register_queue(VkQueue q, VkDevice d);
     VkDevice dev = (VkDevice)0x11;
     VkQueue  q   = (VkQueue)0x22;
     hami_device_dispatch_t *d = hami_device_register(dev, (VkPhysicalDevice)0, NULL);
     d->QueueSubmit = fake_submit;
-    hami_vk_test_register_queue(q, dev);
+    hami_vk_register_queue(q, dev);
 
     VkResult r = hami_vkQueueSubmit(q, 0, NULL, VK_NULL_HANDLE);
     assert(r == VK_SUCCESS);
@@ -1004,35 +1004,31 @@ int main(void) {
 
 - [ ] **Step 2: 테스트 빌드 실패 확인**
 
-Run:
+Run (from `libvgpu/`):
 ```bash
-cc -o /tmp/ts -DHAMI_VK_HOOKS_PRESENT \
+cc -o /tmp/ts -DHAMI_VK_HOOKS_PRESENT -I./src \
    src/vulkan/layer.c src/vulkan/dispatch.c src/vulkan/hooks_memory.c src/vulkan/hooks_alloc.c \
    test/vulkan/test_submit.c -lpthread
 ```
-Expected: `hami_vk_test_register_queue` 미정의 + submit stub이 throttle 호출 안 함.
+Expected: `hami_vk_register_queue` 미정의 + layer.c의 QueueSubmit stub이 throttle 호출 안 함.
 
 - [ ] **Step 3: `hooks_submit.c` 작성**
 
 Create `libvgpu/src/vulkan/hooks_submit.c`:
 ```c
 #include "dispatch.h"
-#include "../common/throttle.h"
+#include "throttle_adapter.h"
 #include <pthread.h>
 #include <stdlib.h>
 
-/* Queue → Device registry.
- * Vulkan apps get queues via vkGetDeviceQueue. We don't hook that (yet);
- * instead we resolve the owning device by walking dispatch table entries
- * whose QueueSubmit returns VK_SUCCESS on a dry-run is unreliable. For v1
- * we use a simple map populated by vkGetDeviceQueue hook. */
-
+/* Queue → Device registry populated by a future vkGetDeviceQueue hook. For
+ * now we expose a public register function used by both the layer's
+ * vkGetDeviceQueue wrapper (added in Task 1.5 Step 4) and by unit tests. */
 typedef struct q_entry { VkQueue q; VkDevice d; struct q_entry *next; } q_entry_t;
 static q_entry_t *g_q_head = NULL;
 static pthread_mutex_t g_q_lock = PTHREAD_MUTEX_INITIALIZER;
 
-void hami_vk_test_register_queue(VkQueue q, VkDevice d);
-void hami_vk_test_register_queue(VkQueue q, VkDevice d) {
+void hami_vk_register_queue(VkQueue q, VkDevice d) {
     q_entry_t *e = calloc(1, sizeof(*e));
     e->q = q; e->d = d;
     pthread_mutex_lock(&g_q_lock);
@@ -1049,23 +1045,12 @@ static VkDevice device_for_queue(VkQueue q) {
     return d;
 }
 
-/* Supplied by the Go webhook via NVIDIA_CORE_LIMIT_SWITCH env (existing path).
- * For now read HAMI_VULKAN_CORES env (0-100). Missing → 100 (no throttle). */
-static int queue_util_limit(void) {
-    const char *v = getenv("HAMI_VULKAN_CORES");
-    if (!v) return 100;
-    int n = atoi(v);
-    return (n <= 0 || n > 100) ? 100 : n;
-}
-
-static int device_to_index(VkDevice d) { return (int)(((uintptr_t)d >> 4) & 0xff); }
-
 VKAPI_ATTR VkResult VKAPI_CALL
 hami_vkQueueSubmit(VkQueue queue, uint32_t n, const VkSubmitInfo *p, VkFence f) {
     VkDevice d = device_for_queue(queue);
     hami_device_dispatch_t *dd = hami_device_lookup(d);
     if (!dd || !dd->QueueSubmit) return VK_ERROR_INITIALIZATION_FAILED;
-    hami_throttle_wait(device_to_index(d), queue_util_limit());
+    hami_vulkan_throttle();
     return dd->QueueSubmit(queue, n, p, f);
 }
 
@@ -1074,20 +1059,47 @@ hami_vkQueueSubmit2(VkQueue queue, uint32_t n, const VkSubmitInfo2 *p, VkFence f
     VkDevice d = device_for_queue(queue);
     hami_device_dispatch_t *dd = hami_device_lookup(d);
     if (!dd || !dd->QueueSubmit2) return VK_ERROR_INITIALIZATION_FAILED;
-    hami_throttle_wait(device_to_index(d), queue_util_limit());
+    hami_vulkan_throttle();
     return dd->QueueSubmit2(queue, n, p, f);
 }
 ```
 
-- [ ] **Step 4: layer.c의 남은 stub (QueueSubmit/QueueSubmit2) 제거**
+- [ ] **Step 4: layer.c에 `vkGetDeviceQueue` / `vkGetDeviceQueue2` 훅 추가 + 잔여 stub 제거**
 
-`#ifndef HAMI_VK_HOOKS_PRESENT` 블록 전체 삭제.
+Modify `libvgpu/src/vulkan/layer.c` — `hami_vkDestroyDevice` 다음에 추가:
+```c
+extern void hami_vk_register_queue(VkQueue q, VkDevice d);
+
+static VKAPI_ATTR void VKAPI_CALL
+hami_vkGetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue *pQueue) {
+    hami_device_dispatch_t *d = hami_device_lookup(device);
+    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    PFN_vkGetDeviceQueue next = (PFN_vkGetDeviceQueue)d->next_gdpa(device, "vkGetDeviceQueue");
+    next(device, family, index, pQueue);
+    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+}
+
+static VKAPI_ATTR void VKAPI_CALL
+hami_vkGetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2 *pInfo, VkQueue *pQueue) {
+    hami_device_dispatch_t *d = hami_device_lookup(device);
+    if (!d) { *pQueue = VK_NULL_HANDLE; return; }
+    PFN_vkGetDeviceQueue2 next = (PFN_vkGetDeviceQueue2)d->next_gdpa(device, "vkGetDeviceQueue2");
+    next(device, pInfo, pQueue);
+    if (*pQueue) hami_vk_register_queue(*pQueue, device);
+}
+```
+그리고 `hami_vkGetDeviceProcAddr` 내부의 `HAMI_HOOK(...)` 목록에 추가:
+```c
+    HAMI_HOOK(GetDeviceQueue);
+    HAMI_HOOK(GetDeviceQueue2);
+```
+마지막으로 `#ifndef HAMI_VK_HOOKS_PRESENT` 블록 **전체를 삭제** (모든 훅이 이제 실제 구현됨).
 
 - [ ] **Step 5: 테스트 통과 확인**
 
 Run:
 ```bash
-cc -o /tmp/ts -DHAMI_VK_HOOKS_PRESENT \
+cc -o /tmp/ts -DHAMI_VK_HOOKS_PRESENT -I./src \
    src/vulkan/layer.c src/vulkan/dispatch.c \
    src/vulkan/hooks_memory.c src/vulkan/hooks_alloc.c src/vulkan/hooks_submit.c \
    test/vulkan/test_submit.c -lpthread
@@ -1099,102 +1111,123 @@ Expected: `ok: submit hook throttles then forwards`.
 
 ```bash
 git add src/vulkan/hooks_submit.c src/vulkan/layer.c test/vulkan/test_submit.c
-git commit -m "feat(vulkan): throttle vkQueueSubmit[2] using shared SM util loop"
+git commit -m "feat(vulkan): throttle vkQueueSubmit[2] via rate_limiter adapter"
 ```
 
 ---
 
-### Task 1.6: 버짓 카운터를 HAMi-core 본체와 통합
+### Task 1.6: 버짓 어댑터 구현 (개정 — 실제 HAMi-core API 반영)
 
 **Files:**
-- Modify: `libvgpu/src/vulkan/hooks_alloc.c`, `hooks_memory.c` (stub `hami_reserve_device_memory` / `hami_pod_memory_budget` 제거)
-- Modify: 기존 메모리 모듈 (Task 0.2 노트 경로)
+- Create: `libvgpu/src/vulkan/budget.c`
+- Create: `libvgpu/src/vulkan/budget.h`
 
-- [ ] **Step 1: 기존 CUDA 예약 함수 시그니처 확인**
+Vulkan 훅(Task 1.2, 1.3)이 의존하는 3개 공개 API(`hami_budget_reserve` / `hami_budget_release` / `hami_budget_of`)의 실제 구현. HAMi-core의 실제 함수(`oom_check`, `add_gpu_device_memory_usage`, `rm_gpu_device_memory_usage`, `get_current_device_memory_limit`)를 감싼다. CUDA 경로와 동일한 2단계(체크 → 커밋) 프로토콜을 사용.
 
-노트 파일을 읽고, CUDA 경로가 사용하는 예약/반환/버짓 조회 함수의 실제 이름을 적는다. 예: `int oom_check(int dev, size_t)`, `void add_allocated(int, size_t)`, `size_t get_limit(int)`.
+- [ ] **Step 1: 헤더 파일 작성**
 
-- [ ] **Step 2: 어댑터 작성 (공통 API로 노출)**
-
-Modify `libvgpu/src/common/budget.h` (create if not exists):
+Create `libvgpu/src/vulkan/budget.h`:
 ```c
-#ifndef HAMI_COMMON_BUDGET_H
-#define HAMI_COMMON_BUDGET_H
+#ifndef HAMI_VK_BUDGET_H
+#define HAMI_VK_BUDGET_H
 #include <stddef.h>
 
-/* Reserve size bytes on dev. Returns 1 on success, 0 if over budget. */
-int    hami_reserve_device_memory(int dev, size_t size);
-void   hami_release_device_memory(int dev, size_t size);
-size_t hami_pod_memory_budget(int dev);
+/* Reserve `size` bytes on device `dev` for a Vulkan allocation.
+ * Returns 1 when the allocation fits the pod budget and the usage
+ * counter has been incremented; 0 when the request would exceed the
+ * budget (caller must return VK_ERROR_OUT_OF_DEVICE_MEMORY). If the
+ * budget is unlimited (HAMi-core limit sentinel == 0), always grants. */
+int  hami_budget_reserve(int dev, size_t size);
+
+/* Inverse of a successful reserve — decrements the usage counter. */
+void hami_budget_release(int dev, size_t size);
+
+/* Current per-device budget in bytes. Returns 0 when unlimited. */
+size_t hami_budget_of(int dev);
 
 #endif
 ```
 
-Create `libvgpu/src/common/budget.c`:
+- [ ] **Step 2: 구현 파일 작성**
+
+Create `libvgpu/src/vulkan/budget.c`:
 ```c
 #include "budget.h"
+#include <stdint.h>
+#include <unistd.h>   /* getpid */
 
-/* Adapt to the existing CUDA memory module's names (replace with actual
-   symbols documented in notes/hami-core-layout.md). */
-extern int    oom_check(int dev, size_t size);
-extern void   add_allocated(int dev, size_t size);
-extern void   sub_allocated(int dev, size_t size);
-extern size_t get_memory_limit(int dev);
+/* HAMi-core internal symbols — linked from the same libvgpu.so.
+ * See docs/superpowers/plans/notes/hami-core-layout.md for semantics. */
+extern int      oom_check(const int dev, size_t addon);                  /* 1 = OOM, 0 = OK */
+extern int      add_gpu_device_memory_usage(int32_t pid, int dev,
+                                            size_t usage, int type);     /* 0 = success, 1 = failure */
+extern int      rm_gpu_device_memory_usage(int32_t pid, int dev,
+                                            size_t usage, int type);     /* 0 = success */
+extern uint64_t get_current_device_memory_limit(const int dev);           /* 0 = unlimited */
 
-int hami_reserve_device_memory(int dev, size_t size) {
-    if (!oom_check(dev, size)) return 0;
-    add_allocated(dev, size);
-    return 1;
+/* Use type=2 matching the existing CUDA allocator path (src/allocator/allocator.c).
+ * HAMi-core's shared-region accounting tracks usage by (pid, dev) regardless of
+ * type, so reusing this tag keeps Vulkan and CUDA allocations in the same bucket. */
+#define HAMI_MEM_TYPE_DEVICE 2
+
+int hami_budget_reserve(int dev, size_t size) {
+    if (get_current_device_memory_limit(dev) == 0) {
+        /* Unlimited — skip check, but still bump the counter so metrics remain
+         * accurate. add_gpu_device_memory_usage returns 0 on success; on
+         * failure (shared region full etc.) treat as OOM. */
+        return add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE) == 0;
+    }
+    if (oom_check(dev, size)) return 0;   /* would exceed budget */
+    return add_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE) == 0;
 }
 
-void hami_release_device_memory(int dev, size_t size) {
-    sub_allocated(dev, size);
+void hami_budget_release(int dev, size_t size) {
+    rm_gpu_device_memory_usage(getpid(), dev, size, HAMI_MEM_TYPE_DEVICE);
 }
 
-size_t hami_pod_memory_budget(int dev) {
-    return get_memory_limit(dev);
+size_t hami_budget_of(int dev) {
+    return (size_t)get_current_device_memory_limit(dev);
 }
 ```
 
-**주의**: `oom_check` / `add_allocated` / `get_memory_limit` 이름은 Task 0.2에서 확보한 실제 이름으로 교체. 다른 이름이면 `budget.c`만 수정하여 어댑터 역할을 유지.
+- [ ] **Step 3: Vulkan hook 소스에서 선언 일관화**
 
-- [ ] **Step 3: Vulkan TU에서 로컬 stub 선언 제거, 공통 헤더 include**
-
-Modify `libvgpu/src/vulkan/hooks_alloc.c:4-5`:
+기존 `hooks_alloc.c` (Task 1.3 Step 3)의 상단 3줄 forward declaration을 삭제하고 `#include "budget.h"`로 교체:
 ```c
-#include "../common/budget.h"
+#include "budget.h"
 ```
-그리고 파일 상단의 `extern int hami_reserve_device_memory(...); extern void hami_release_device_memory(...);` 선언 2줄 제거.
+(Task 1.3의 원래 파일에는 이미 `int hami_budget_reserve(...)` 등의 extern 선언이 있으므로 그 3줄을 지우고 헤더 include로 대체).
 
-Modify `libvgpu/src/vulkan/hooks_memory.c` 상단:
-```c
-#include "../common/budget.h"
-```
-그리고 `size_t hami_pod_memory_budget(int);` 전방 선언 제거.
+마찬가지로 `hooks_memory.c` (Task 1.2)의 `extern size_t hami_budget_of(int);` 선언 대신 `#include "budget.h"`.
 
-- [ ] **Step 4: 단위 테스트는 어댑터와 충돌하지 않도록 조정**
+- [ ] **Step 4: 실 라이브러리 빌드 시만 `budget.c` 포함, 단위 테스트는 제외**
 
-기존 `test/vulkan/test_alloc.c`, `test_memprops.c`에는 테스트용 `hami_pod_memory_budget` / `hami_reserve_device_memory` 가 정의되어 있다. 테스트 실행 시 `budget.c`를 **제외**하고 빌드한다(중복 심볼 방지). 테스트 빌드 커맨드 확인:
+단위 테스트(`test/vulkan/test_alloc.c`, `test_memprops.c`)에는 이미 `hami_budget_reserve` / `hami_budget_release` / `hami_budget_of` 스텁이 정의되어 있음. 테스트 바이너리 빌드 커맨드에 `budget.c`를 **포함하지 않는다** (중복 정의 방지). 실 `libvgpu.so` 빌드(Task 1.8)에는 포함.
+
+- [ ] **Step 5: 기존 모든 단위 테스트 회귀 없음 확인**
+
 ```bash
-cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT \
+cc -o /tmp/tm -DHAMI_VK_HOOKS_PRESENT -I./src \
+   src/vulkan/layer.c src/vulkan/dispatch.c src/vulkan/hooks_memory.c \
+   test/vulkan/test_memprops.c -lpthread && /tmp/tm
+cc -o /tmp/ta -DHAMI_VK_HOOKS_PRESENT -I./src \
    src/vulkan/layer.c src/vulkan/dispatch.c \
    src/vulkan/hooks_memory.c src/vulkan/hooks_alloc.c \
-   test/vulkan/test_alloc.c -lpthread
+   test/vulkan/test_alloc.c -lpthread && /tmp/ta
+cc -o /tmp/ts -DHAMI_VK_HOOKS_PRESENT -I./src \
+   src/vulkan/layer.c src/vulkan/dispatch.c \
+   src/vulkan/hooks_memory.c src/vulkan/hooks_alloc.c src/vulkan/hooks_submit.c \
+   test/vulkan/test_submit.c -lpthread && /tmp/ts
+cc -o /tmp/ttha -I./src \
+   src/vulkan/throttle_adapter.c test/vulkan/test_throttle_adapter.c && /tmp/ttha
 ```
-위 명령에 `budget.c`가 없어야 함. 실 라이브러리(.so) 빌드는 `budget.c`를 포함.
-
-- [ ] **Step 5: 기존 + 신규 테스트 모두 PASS 확인**
-
-```bash
-/tmp/tm && /tmp/ta && /tmp/ts
-```
-Expected: 3개 모두 `ok:`.
+Expected: 4개 모두 `ok:...`.
 
 - [ ] **Step 6: 커밋**
 
 ```bash
-git add src/common/budget.h src/common/budget.c src/vulkan/hooks_alloc.c src/vulkan/hooks_memory.c
-git commit -m "feat(vulkan): integrate shared VRAM budget with existing CUDA counter"
+git add src/vulkan/budget.h src/vulkan/budget.c src/vulkan/hooks_alloc.c src/vulkan/hooks_memory.c
+git commit -m "feat(vulkan): budget adapter bridges hook layer to HAMi-core counters"
 ```
 
 ---
@@ -1240,80 +1273,132 @@ git commit -m "feat(vulkan): ship implicit layer manifest gated by HAMI_VULKAN_E
 
 ---
 
-### Task 1.8: Makefile / Dockerfile 통합
+### Task 1.8: CMake / Dockerfile 통합 (개정 — CMake OBJECT 라이브러리 패턴)
+
+**빌드 실체:** HAMi-core는 Makefile이 `./build.sh`를 호출하고, `build.sh`가 `cmake`로 `src/`와 `test/` 서브디렉토리를 빌드. 각 `src/<모듈>/CMakeLists.txt`는 OBJECT 라이브러리를 만들어 루트 `CMakeLists.txt`에서 `libvgpu.so` 하나로 링크합니다. 따라서 Vulkan 소스도 **OBJECT 라이브러리 `vulkan_mod`**로 추가하고 루트에 링크해야 합니다.
 
 **Files:**
-- Modify: `libvgpu/Makefile`
-- Modify: `libvgpu/Dockerfile` (존재하면) 또는 이미지 빌드 스크립트
+- Create: `libvgpu/src/vulkan/CMakeLists.txt`
+- Modify: `libvgpu/src/CMakeLists.txt` (`add_subdirectory(vulkan)` 추가)
+- Modify: `libvgpu/CMakeLists.txt` 루트 (target_link_libraries에 `$<TARGET_OBJECTS:vulkan_mod>` 추가, libvulkan-dev 찾기)
+- Modify: `libvgpu/test/CMakeLists.txt` (선택 — glob이 `test/vulkan/*.c`도 잡도록 확장)
+- Modify: `libvgpu/dockerfiles/Dockerfile.<변형>` (vulkan-headers + manifest 복사)
 
-- [ ] **Step 1: 현재 Makefile 소스 리스트 확인**
+- [ ] **Step 1: 현재 CMake 구조 재확인**
 
-Run:
+Run (from `libvgpu/`):
 ```bash
-grep -n "SRCS\|OBJECTS\|\.c\b" libvgpu/Makefile | head -30
+cat src/CMakeLists.txt
+head -60 CMakeLists.txt
+```
+Expected: `add_subdirectory(multiprocess|allocator|cuda|nvml)` 4줄, 루트에 각 OBJECT lib를 `target_sources`/`target_link_libraries`로 합치는 블록.
+
+- [ ] **Step 2: Vulkan 서브디렉토리 CMakeLists 작성**
+
+Create `libvgpu/src/vulkan/CMakeLists.txt`:
+```cmake
+find_path(VULKAN_HEADERS vulkan/vulkan.h
+          HINTS ENV VULKAN_SDK
+          PATH_SUFFIXES include
+          PATHS /usr/include /usr/local/include)
+if(NOT VULKAN_HEADERS)
+    message(FATAL_ERROR "vulkan/vulkan.h not found. Install libvulkan-dev or set VULKAN_SDK.")
+endif()
+
+add_library(vulkan_mod OBJECT
+    layer.c
+    dispatch.c
+    hooks_memory.c
+    hooks_alloc.c
+    hooks_submit.c
+    throttle_adapter.c
+    budget.c
+)
+
+target_include_directories(vulkan_mod PRIVATE
+    ${VULKAN_HEADERS}
+    ${CMAKE_SOURCE_DIR}/src
+)
+
+target_compile_options(vulkan_mod PRIVATE -fPIC)
 ```
 
-- [ ] **Step 2: Vulkan 소스 추가**
+- [ ] **Step 3: `src/CMakeLists.txt`에 서브디렉토리 등록**
 
-Modify `libvgpu/Makefile` — 기존 `SRCS := ...` (또는 등가) 라인에 다음을 추가:
-```makefile
-VULKAN_SRCS := \
-    src/vulkan/layer.c \
-    src/vulkan/dispatch.c \
-    src/vulkan/hooks_memory.c \
-    src/vulkan/hooks_alloc.c \
-    src/vulkan/hooks_submit.c \
-    src/common/throttle.c \
-    src/common/budget.c
-
-SRCS += $(VULKAN_SRCS)
-CFLAGS += -I$(VULKAN_SDK_INCLUDE) -I./src
+Modify `libvgpu/src/CMakeLists.txt` — 기존 4줄 뒤에 한 줄 추가:
+```cmake
+add_subdirectory(vulkan)
 ```
 
-`VULKAN_SDK_INCLUDE`는 기본값을 지정한다:
-```makefile
-VULKAN_SDK_INCLUDE ?= /usr/include
+- [ ] **Step 4: 루트 CMakeLists에서 `vulkan_mod` 링크**
+
+Modify `libvgpu/CMakeLists.txt` — `vgpu` target의 소스 리스트에 `vulkan_mod` OBJECT를 합친다. 기존 패턴이 `$<TARGET_OBJECTS:cuda_mod>` 등을 사용하고 있다면 같은 줄 뒤에 추가:
+```cmake
+target_sources(vgpu PRIVATE
+    $<TARGET_OBJECTS:multiprocess_mod>
+    $<TARGET_OBJECTS:allocator_mod>
+    $<TARGET_OBJECTS:cuda_mod>
+    $<TARGET_OBJECTS:nvml_mod>
+    $<TARGET_OBJECTS:vulkan_mod>          # NEW
+)
 ```
+(실제 라인 위치는 Step 1의 출력으로 확인. 위 코드는 기존 패턴에 한 줄 추가하는 것을 기준으로 한 예시.)
 
-- [ ] **Step 3: 테스트 타겟 추가**
+- [ ] **Step 5: 매니페스트를 install 단계에 포함**
 
-Modify `libvgpu/Makefile` 하단에 test 타겟이 없다면 추가:
-```makefile
-.PHONY: test-vulkan
-test-vulkan:
-	cc -o /tmp/t_mem  -DHAMI_VK_HOOKS_PRESENT $(VULKAN_SRCS) test/vulkan/test_memprops.c -lpthread -I./src -I$(VULKAN_SDK_INCLUDE) && /tmp/t_mem
-	cc -o /tmp/t_alloc -DHAMI_VK_HOOKS_PRESENT $(filter-out src/common/budget.c,$(VULKAN_SRCS)) test/vulkan/test_alloc.c -lpthread -I./src -I$(VULKAN_SDK_INCLUDE) && /tmp/t_alloc
-	cc -o /tmp/t_sub  -DHAMI_VK_HOOKS_PRESENT $(filter-out src/common/throttle.c src/common/budget.c,$(VULKAN_SRCS)) test/vulkan/test_submit.c -lpthread -I./src -I$(VULKAN_SDK_INCLUDE) && /tmp/t_sub
-	cc -o /tmp/t_thr  src/common/throttle.c test/common/test_throttle.c && /tmp/t_thr
-
-test: test-vulkan
+Modify `libvgpu/CMakeLists.txt` 루트에 install 블록이 있으면 그 안에, 없으면 새로:
+```cmake
+install(FILES etc/vulkan/implicit_layer.d/hami.json
+        DESTINATION /etc/vulkan/implicit_layer.d)
 ```
+(CMake install 규칙을 이미지 빌드 단계에서 쓰지 않으면, Dockerfile에서 직접 `COPY`로 처리 — Step 7 참조.)
 
-- [ ] **Step 4: Dockerfile 수정 (매니페스트 복사 + 헤더 설치)**
+- [ ] **Step 6: `test/CMakeLists.txt`에 Vulkan 테스트 포함 확인**
 
-Modify `libvgpu/Dockerfile` (없으면 이 단계는 "빌드 이미지 Dockerfile에 동일 내용 추가"로 대체):
+기존 `test/CMakeLists.txt`가 `file(GLOB ... test/*.c)` 패턴이면 하위 `test/vulkan/`, `test/common/`를 별도로 추가해야 한다. 루트 `test/CMakeLists.txt`에 다음을 추가:
+```cmake
+file(GLOB VULKAN_TESTS "vulkan/*.c")
+foreach(tsrc ${VULKAN_TESTS})
+    get_filename_component(tname ${tsrc} NAME_WE)
+    add_executable(${tname} ${tsrc})
+    target_include_directories(${tname} PRIVATE ${CMAKE_SOURCE_DIR}/src)
+    target_link_libraries(${tname} PRIVATE pthread)
+endforeach()
+```
+단, 이 테스트들은 `src/vulkan/*.c`를 **다시 컴파일**해 자체 바이너리로 링크해야 하므로, 위 코드만으로는 빌드 실패. 단위 테스트는 CI가 아니라 로컬 수동 검증 도구로 놔두고 `make test` 타겟은 기존 CUDA 테스트만 돌리도록 유지하는 것이 실용적. **권장**: 위 `add_executable` 블록은 넣지 않고, `test-vulkan` 용 수동 명령을 `docs/superpowers/plans/notes/vulkan-test-howto.md`에 기록.
+
+- [ ] **Step 7: Dockerfile에 Vulkan 헤더 + 매니페스트 포함**
+
+Modify `libvgpu/dockerfiles/Dockerfile.hami-core` (또는 존재하는 가장 주된 Dockerfile; Step 1에서 `ls dockerfiles/` 확인):
 ```dockerfile
+# Build stage — add vulkan headers before cmake runs
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libvulkan-dev \
     && rm -rf /var/lib/apt/lists/*
 
+# Runtime (final) stage — ship manifest
 COPY etc/vulkan/implicit_layer.d/hami.json \
      /etc/vulkan/implicit_layer.d/hami.json
 ```
+정확한 위치는 기존 Dockerfile의 stage 구조에 맞춘다.
 
-- [ ] **Step 5: 빌드 & 테스트**
+- [ ] **Step 8: 전체 빌드 확인**
 
-Run:
+Run (from `libvgpu/`):
 ```bash
-cd libvgpu && make clean && make && make test-vulkan
+make build 2>&1 | tail -40
 ```
-Expected: `libvgpu.so` 생성, 4개 테스트 모두 PASS.
+Expected: `libvgpu.so` 빌드 성공. `nm libvgpu.so | grep vkNegotiateLoaderLayerInterfaceVersion` 이 `T` 심볼 표시.
 
-- [ ] **Step 6: 커밋**
+- [ ] **Step 9: 수동 단위 테스트 재실행 확인**
+
+Task 1.6 Step 5와 동일한 4개 cc 명령으로 모든 테스트가 PASS하는지 확인.
+
+- [ ] **Step 10: 커밋**
 
 ```bash
-git add Makefile Dockerfile
-git commit -m "build(vulkan): integrate Vulkan layer sources and manifest into image"
+git add CMakeLists.txt src/CMakeLists.txt src/vulkan/CMakeLists.txt dockerfiles/
+git commit -m "build(vulkan): integrate vulkan_mod OBJECT lib and ship implicit layer manifest"
 ```
 
 ---
