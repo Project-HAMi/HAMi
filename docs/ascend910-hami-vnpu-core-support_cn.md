@@ -21,28 +21,6 @@
 * 部署 [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin)
 * 芯片模式：在昇腾芯片上开启 `device-share` 模式以支持虚拟化。
 
-## 宿主机环境准备
-
-在启动任何容器之前，必须在宿主机上初始化 **全局共享内存 (SHM) 区域**，以便进行 Pod 间的协同。
-
-1. **创建共享目录**
-
-   ```
-   sudo mkdir -p /usr/local/hami-shared-region
-   sudo chmod 777 /usr/local/hami-shared-region
-   ```
-
-2. **部署 hami-vnpu-core 组件** 
-
-   将以下文件放置在固定的宿主机路径（`/usr/local/hami-vnpu-core/`）中，以便挂载到容器内： 
-
-   ```
-   /usr/local/hami-vnpu-core/
-   ├── limiter              # Manager daemon binary (compiled from hami-vnpu-core)
-   ├── libvnpu.so           # Interception library for LD_PRELOAD
-   └── ld.so.preload        # Global preload config 
-   ```
-
   ### 在 files 目录下创建 device-config.yaml
 
   配置文件如下所示，可以按需调整：

@@ -19,28 +19,6 @@ Implements  a soft slicing mechanism based on `libvnpu.so` interception and `lim
 * [ascend-device-plugin](https://github.com/Project-HAMi/ascend-device-plugin)
 * **Chip Mode**: enable `device-share` mode on Ascend chips for virtualization
 
-### Host Environment Preparation
-
-Before launching any containers, the **Global Shared Memory (SHM) Region** must be initialized on the host to allow inter-Pod coordination.
-
-#### 1. Create the Shared Directory
-
-```bash
-sudo mkdir -p /usr/local/hami-shared-region
-sudo chmod 777 /usr/local/hami-shared-region
-```
-
-#### 2. Deploy hami-vnpu-core Components
-
-Place the following files in a fixed host path (`/usr/local/hami-vnpu-core/`) for mounting into containers:
-
-```
-/usr/local/hami-vnpu-core/
-├── limiter              # Manager daemon binary (compiled from hami-vnpu-core)
-├── libvnpu.so           # Interception library for LD_PRELOAD
-└── ld.so.preload        # Global preload config 
-```
-
   ### Create device-config.yaml
 
 The content is as follows:
