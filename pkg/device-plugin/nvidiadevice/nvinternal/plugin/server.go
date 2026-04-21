@@ -58,10 +58,10 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -77,8 +77,8 @@ const (
 )
 
 var (
-	hostHookPath string
-	ConfigFile   *string
+	hostHookPath  string
+	ConfigFile    *string
 	getPendingPod = util.GetPendingPod
 )
 
@@ -490,6 +490,9 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 
 		if idx < len(nonEmptyAnnotations) {
 			devices, err = plugin.selectPreferredDeviceIDsFromAnnotatedDevices(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, nonEmptyAnnotations[idx], int(req.AllocationSize))
+			if err != nil {
+				devices, err = plugin.rm.GetPreferredAllocation(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, int(req.AllocationSize))
+			}
 		} else {
 			devices, err = plugin.rm.GetPreferredAllocation(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, int(req.AllocationSize))
 		}
@@ -570,6 +573,19 @@ func physicalDeviceID(id string) string {
 	return id
 }
 
+func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq device.ContainerDevices, deviceIDs []string) (device.ContainerDevices, error) {
+	if len(devreq) != len(deviceIDs) {
+		return nil, errors.New("device number not matched")
+	}
+
+	aligned := append(device.ContainerDevices(nil), devreq...)
+	for i := range aligned {
+		aligned[i].UUID = physicalDeviceID(deviceIDs[i])
+	}
+
+	return aligned, nil
+}
+
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	klog.InfoS("Allocate", "request", reqs)
@@ -589,21 +605,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		if strings.Contains(req.DevicesIds[0], "MIG") {
 			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
 				if len(req.DevicesIds) > 1 {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					podAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
 				}
 			}
 
 			for _, id := range req.DevicesIds {
 				if !plugin.rm.Devices().Contains(id) {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					podAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
 			response, err := plugin.getAllocateResponse(req.DevicesIds)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
@@ -611,30 +627,35 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIds) {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
-			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
+			alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
+			if err != nil {
+				podAllocationFailed(nodename, current, NodeLockNvidia)
+				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+			}
+			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(alignedDevreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
+			err = eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
 			if plugin.operatingMode != "mig" {
-				for i, dev := range devreq {
+				for i, dev := range alignedDevreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 				}
-				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
+				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(alignedDevreq[0].Usedcores)
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
@@ -700,7 +721,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	podAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 
