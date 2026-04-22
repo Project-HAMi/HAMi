@@ -345,6 +345,62 @@ func Test_PatchAnnotations(t *testing.T) {
 	}
 }
 
+func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:   "Ascend910B3",
+			ResourceName: "huawei.com/Ascend910B3",
+		},
+	}
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		pd   device.PodDevices
+		want map[string]string
+	}{
+		{
+			name: "vNPU-mode patch: check json contains cores and memory instead of template",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"huawei.com/vnpu-mode": "hami-core",
+					},
+				},
+			},
+			pd: device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					[]device.ContainerDevice{
+						{
+							Idx:       0,
+							UUID:      "ascend-uuid-1",
+							Type:      "Ascend",
+							Usedcores: 5,
+							Usedmem:   8192,
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"huawei.com/Ascend910B3": "[{\"UUID\":\"ascend-uuid-1\",\"core\":5,\"memory\":8192}]",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			annoInput := make(map[string]string)
+			result := dev.PatchAnnotations(test.pod, &annoInput, test.pd)
+
+			val, ok := result["huawei.com/Ascend910B3"]
+			assert.Assert(t, ok)
+			assert.Assert(t, strings.Contains(val, "\"core\":5"))
+			assert.Assert(t, strings.Contains(val, "\"memory\":8192"))
+			assert.Assert(t, !strings.Contains(val, "\"temp\""))
+		})
+	}
+}
+
 func Test_checkType(t *testing.T) {
 	dev := Devices{
 		config: VNPUConfig{
@@ -739,6 +795,88 @@ func Test_MutateAdmission910C(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
+	const VNPUModeAnnotation = "huawei.com/vnpu-mode"
+	const VNPUModeHamiCore = "hami-core"
+
+	tests := []struct {
+		name string
+		args struct {
+			ctr corev1.Container
+			pod corev1.Pod
+		}
+		wantPostStart bool
+		wantMem       int64
+		wantCore      int64
+	}{
+		{
+			name: "vNPU-mode hami-core: inject postStart and keep raw memory",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+					},
+				},
+				pod: corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							VNPUModeAnnotation: VNPUModeHamiCore,
+						},
+					},
+				},
+			},
+			wantPostStart: true,
+			wantMem:       15360,
+			wantCore:      20,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					MemoryAllocatable:  32768,
+				},
+			}
+
+			ok, err := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
+			assert.NilError(t, err)
+			assert.Equal(t, ok, true)
+
+			if test.wantPostStart {
+				assert.Assert(t, test.args.ctr.Lifecycle != nil, "Lifecycle should not be nil")
+				assert.Assert(t, test.args.ctr.Lifecycle.PostStart != nil, "PostStart should not be nil")
+				assert.Assert(t, test.args.ctr.Lifecycle.PostStart.Exec != nil)
+				commandStr := strings.Join(test.args.ctr.Lifecycle.PostStart.Exec.Command, " ")
+				assert.Assert(t, strings.Contains(commandStr, "/hami-vnpu-core/limiter"))
+			}
+
+			memLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+			assert.Equal(t, memLimit.Value(), test.wantMem)
+
+			coreLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+			assert.Equal(t, coreLimit.Value(), test.wantCore)
+		})
+	}
+}
+
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
@@ -831,6 +969,52 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			result := dev.GenerateResourceRequests(&test.args)
 
 			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "parse custom vNPU core and memory resources",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910B3",
+				Memreq:           int32(15360),
+				Coresreq:         int32(10),
+				MemPercentagereq: int32(0),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+				},
+			}
+			result := dev.GenerateResourceRequests(&test.args)
+
+			assert.Equal(t, result.Memreq, test.want.Memreq)
+			assert.Equal(t, result.Coresreq, test.want.Coresreq)
+			assert.Equal(t, result.Type, test.want.Type)
 		})
 	}
 }

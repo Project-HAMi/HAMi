@@ -337,6 +337,7 @@ data:
       commonWord: Ascend910B3
       resourceName: huawei.com/Ascend910B3
       resourceMemoryName: huawei.com/Ascend910B3-memory
+      resourceCoreName: huawei.com/Ascend910B3-core
       memoryAllocatable: 65536
       memoryCapacity: 65536
       memoryFactor: 1
@@ -425,6 +426,7 @@ data:
       commonWord: Ascend910C
       resourceName: huawei.com/Ascend910C
       resourceMemoryName: huawei.com/Ascend910C-memory
+      resourceCoreName: huawei.com/Ascend910C-core
       memoryAllocatable: 65536
       memoryCapacity: 65536
       aiCore: 20
