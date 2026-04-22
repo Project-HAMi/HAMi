@@ -585,6 +585,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						ReadOnly: true},
 					)
 				}
+				// Mount Vulkan implicit layer manifest so the HAMi Vulkan layer
+				// activates for pods that set HAMI_VULKAN_ENABLE=1 (done by the
+				// webhook when the pod carries hami.io/vulkan="true").
+				// The manifest file is placed on the host by vgpu-init.sh as part
+				// of the standard lib distribution; skip the mount if it is
+				// absent so we do not block pod startup on nodes that have not
+				// yet been populated.
+				vulkanManifestHost := hostHookPath + "/vgpu/vulkan/implicit_layer.d/hami.json"
+				if _, err := os.Stat(vulkanManifestHost); err == nil {
+					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: "/etc/vulkan/implicit_layer.d/hami.json",
+						HostPath:      vulkanManifestHost,
+						ReadOnly:      true,
+					})
+				}
 				_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 				if err == nil {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{

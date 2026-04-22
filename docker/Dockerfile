@@ -38,6 +38,7 @@ COPY --from=gobuild /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
 COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
+COPY --from=nvbuild /libvgpu/etc/vulkan/implicit_layer.d/hami.json /k8s-vgpu/lib/nvidia/vulkan/implicit_layer.d/hami.json
 COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 
 ENV PATH="/k8s-vgpu/bin:${PATH}"
