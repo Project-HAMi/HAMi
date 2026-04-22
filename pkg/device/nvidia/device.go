@@ -56,6 +56,13 @@ const (
 	MpsMode      = "mps"
 )
 
+const (
+	VulkanEnableAnno       = "hami.io/vulkan"
+	VulkanLayerName        = "VK_LAYER_HAMI_vgpu"
+	NvidiaDriverCapsEnvVar = "NVIDIA_DRIVER_CAPABILITIES"
+	HamiVulkanEnvVar       = "HAMI_VULKAN_ENABLE"
+)
+
 var (
 	NodeName          string
 	RuntimeSocketFlag string

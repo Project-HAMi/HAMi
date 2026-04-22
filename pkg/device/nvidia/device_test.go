@@ -2578,3 +2578,40 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 	assert.Assert(t, uuids["dev-0"])
 	assert.Assert(t, uuids["dev-2"])
 }
+
+func TestMutateAdmission_VulkanAnno_AddsGraphicsCap(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{VulkanEnableAnno: "true"},
+		},
+	}
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+
+	var caps, enable string
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			caps = e.Value
+		}
+		if e.Name == HamiVulkanEnvVar {
+			enable = e.Value
+		}
+	}
+	assert.Assert(t, strings.Contains(caps, "graphics"), "expected graphics in caps, got %q", caps)
+	assert.Equal(t, enable, "1")
+}
