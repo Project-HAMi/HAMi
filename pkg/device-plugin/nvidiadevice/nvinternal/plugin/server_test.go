@@ -33,6 +33,7 @@
 package plugin
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -40,10 +41,15 @@ import (
 	"testing"
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/stretchr/testify/require"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -391,6 +397,146 @@ func Test_processMigConfigs(t *testing.T) {
 	}
 }
 
+func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+	available := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67e-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67f-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb680-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb681-0",
+	}
+	required := []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1"}
+	desired := device.ContainerDevices{
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67d"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67e"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67f"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb680"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb681"},
+	}
+
+	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, required, desired, len(desired))
+	require.NoError(t, err)
+	require.Len(t, got, len(desired))
+	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1")
+	require.ElementsMatch(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67e-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67f-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb680-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb681-0",
+	}, got)
+}
+
+func TestSelectPreferredDeviceIDsFromAnnotatedDevicesErrorsWhenAnnotatedUUIDMissing(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	available := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+	}
+	desired := device.ContainerDevices{
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"}, // Missing from available
+	}
+
+	_, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, len(desired))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "GPU-03f69c50-207a-2038-9b45-23cac89cb67c")
+}
+
+func TestGetDevicePluginOptionsEnablesPreferredAllocation(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+
+	options, err := plugin.GetDevicePluginOptions(context.Background(), &kubeletdevicepluginv1beta1.Empty{})
+	require.NoError(t, err)
+	require.True(t, options.GetPreferredAllocationAvailable)
+}
+
+func TestGetPreferredAllocationAlignsWithAnnotatedDevices(t *testing.T) {
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() {
+		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
+	}()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67d", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67e", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67f", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb680", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb681", Type: nvidia.NvidiaGPUDevice},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main"}},
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{}
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return pod, nil
+	}
+	defer func() {
+		getPendingPod = previousGetPendingPod
+	}()
+
+	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67e-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67f-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb680-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb681-0",
+				},
+				MustIncludeDeviceIDs: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1"},
+				AllocationSize:       8,
+			},
+		},
+	}
+
+	response, err := plugin.GetPreferredAllocation(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+	require.ElementsMatch(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67e-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67f-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb680-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb681-0",
+	}, response.ContainerResponses[0].DeviceIDs)
+}
+
 func Test_pathGeneration(t *testing.T) {
 	hostHookPath := "/usr/local/vgpu"
 	uid := "testuid"
@@ -489,4 +635,484 @@ func Test_configOverride(t *testing.T) {
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
 	}
+}
+
+func TestGetPreferredAllocationSkipsEmptyAnnotations(t *testing.T) {
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() {
+		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
+	}()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod",
+			Annotations: map[string]string{
+				// Annotation includes init container (empty) + regular container (with GPU)
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{}, // init container - empty
+					{ // regular container - 2 GPUs
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", Type: nvidia.NvidiaGPUDevice},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "main"}},
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{}
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return pod, nil
+	}
+	defer func() {
+		getPendingPod = previousGetPendingPod
+	}()
+
+	// Kubelet only sends one request (for the main container), not two
+	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1"},
+				AllocationSize:     2,
+			},
+		},
+	}
+
+	response, err := plugin.GetPreferredAllocation(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+	// Should match GPU-a and GPU-b, not fail due to empty init container annotation
+	require.ElementsMatch(t, []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0"}, response.ContainerResponses[0].DeviceIDs)
+}
+
+func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
+	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (5 dashes)
+	// Virtual devices have 6 dashes: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-N
+	tests := []struct {
+		input    string
+		expected string
+	}{
+		// Virtual device format (6 dashes)
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-10", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		// MIG format with template index
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[1-2]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		// Replica format
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a::replica-1", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		// Plain UUID (5 dashes, should not be modified)
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		// UUID ending with -123 (5 dashes total, should NOT be treated as virtual device)
+		{"GPU-03f69c50-207a-2038-9b45-23cac89cb123", "GPU-03f69c50-207a-2038-9b45-23cac89cb123"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.input, func(t *testing.T) {
+			result := physicalDeviceID(tt.input)
+			require.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestSelectPreferredDeviceIDsWithMIGUUIDs(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	// Use real NVIDIA GPU UUID format
+	available := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+	}
+	desired := device.ContainerDevices{
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]"}, // MIG format
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c[1-2]"}, // MIG format with different index
+	}
+
+	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, 3)
+	require.NoError(t, err)
+	require.Len(t, got, 3)
+	// Should select one slice from each physical GPU
+	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0")
+	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0")
+	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0")
+}
+
+func TestGetPreferredAllocationFallbackOnAnnotatedDeviceMappingFailure(t *testing.T) {
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() {
+		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
+	}()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67z", Type: nvidia.NvidiaGPUDevice},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main"}},
+		},
+	}
+
+	rmCallCount := 0
+	mockRM := &rm.ResourceManagerMock{
+		GetPreferredAllocationFunc: func(available []string, required []string, size int) ([]string, error) {
+			rmCallCount++
+			return []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0"}, nil
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+	}
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return pod, nil
+	}
+	defer func() {
+		getPendingPod = previousGetPendingPod
+	}()
+
+	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+				},
+				AllocationSize: 2,
+			},
+		},
+	}
+
+	response, err := plugin.GetPreferredAllocation(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+	require.ElementsMatch(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+	}, response.ContainerResponses[0].DeviceIDs)
+	require.Equal(t, 1, rmCallCount)
+}
+
+func TestGetPreferredAllocationFallbackOnInsufficientAnnotatedDevices(t *testing.T) {
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() {
+		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
+	}()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main"}},
+		},
+	}
+
+	rmCallCount := 0
+	mockRM := &rm.ResourceManagerMock{
+		GetPreferredAllocationFunc: func(available []string, required []string, size int) ([]string, error) {
+			rmCallCount++
+			return []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0"}, nil
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+	}
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return pod, nil
+	}
+	defer func() {
+		getPendingPod = previousGetPendingPod
+	}()
+
+	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+				},
+				AllocationSize: 2,
+			},
+		},
+	}
+
+	response, err := plugin.GetPreferredAllocation(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+	require.ElementsMatch(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+	}, response.ContainerResponses[0].DeviceIDs)
+	require.Equal(t, 1, rmCallCount)
+}
+
+func TestGetPreferredAllocationPropagatesRMErrors(t *testing.T) {
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() {
+		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
+	}()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "test-pod",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67z", Type: nvidia.NvidiaGPUDevice},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "main"}},
+		},
+	}
+
+	mockRM := &rm.ResourceManagerMock{
+		GetPreferredAllocationFunc: func(available []string, required []string, size int) ([]string, error) {
+			return nil, fmt.Errorf("rm allocation failed")
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+	}
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return pod, nil
+	}
+	defer func() {
+		getPendingPod = previousGetPendingPod
+	}()
+
+	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"},
+				AllocationSize:     1,
+			},
+		},
+	}
+
+	_, err := plugin.GetPreferredAllocation(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "rm allocation failed")
+}
+
+func TestAlignContainerDevicesWithAllocatedIDsPreservesMetadata(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	devreq := device.ContainerDevices{
+		{UUID: "GPU-annotated-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 50},
+		{UUID: "GPU-annotated-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 50},
+	}
+
+	aligned, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1",
+	})
+	require.NoError(t, err)
+	require.Equal(t, int32(3000), aligned[0].Usedmem)
+	require.Equal(t, int32(50), aligned[0].Usedcores)
+	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", aligned[0].UUID)
+	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", aligned[1].UUID)
+}
+
+func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	devreq := device.ContainerDevices{
+		{UUID: "GPU-annotated-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 50},
+	}
+
+	_, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "device number not matched")
+}
+
+func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	memScale := 1.0
+	logLevel := nvidia.Error
+
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &memScale,
+				LogLevel:            &logLevel,
+			},
+		},
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
+	eraseNextDeviceTypeFromAnnotation = func(string, corev1.Pod) error { return nil }
+	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"},
+		}},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
+	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
+}
+
+func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	memScale := 1.0
+	logLevel := nvidia.Error
+
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &memScale,
+				LogLevel:            &logLevel,
+			},
+		},
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;GPU-annotated-b,NVIDIA,4000,60:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	// Simulate erase behavior: modifies annotation to move to next container's devices
+	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
+	eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
+		// Simulate erasing first container's request so second call gets second container
+		// After erase, first container becomes empty (;), second container keeps its devices
+		pod.Annotations["hami.io/vgpu-devices-to-allocate"] = ";GPU-annotated-b,NVIDIA,4000,60:;"
+		return nil
+	}
+	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"}},
+			{DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-1"}},
+		},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
+	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", response.ContainerResponses[1].Envs[deviceListEnvVar])
+	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 }
