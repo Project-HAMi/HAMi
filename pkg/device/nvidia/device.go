@@ -374,6 +374,7 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
 			p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
 		}
+		applyVulkanAnnotation(ctr, p)
 	}
 
 	if !hasResource && dev.config.OverwriteEnv {
@@ -383,6 +384,75 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 	return hasResource, nil
+}
+
+// mergeGraphicsCap returns the union of existing NVIDIA_DRIVER_CAPABILITIES
+// tokens with "graphics". If existing contains "all", it is returned unchanged.
+// An empty existing value becomes "compute,utility,graphics".
+func mergeGraphicsCap(existing string) string {
+	if existing == "" {
+		return "compute,utility,graphics"
+	}
+	tokens := strings.Split(existing, ",")
+	seen := make(map[string]struct{}, len(tokens))
+	for _, t := range tokens {
+		t = strings.TrimSpace(t)
+		if t == "" {
+			continue
+		}
+		if t == "all" {
+			return existing
+		}
+		seen[t] = struct{}{}
+	}
+	if _, ok := seen["graphics"]; ok {
+		return existing
+	}
+	tokens = append(tokens, "graphics")
+	cleaned := make([]string, 0, len(tokens))
+	for _, t := range tokens {
+		t = strings.TrimSpace(t)
+		if t != "" {
+			cleaned = append(cleaned, t)
+		}
+	}
+	return strings.Join(cleaned, ",")
+}
+
+// applyVulkanAnnotation mutates the container env when the pod opts into
+// Vulkan partitioning. No-op otherwise.
+func applyVulkanAnnotation(ctr *corev1.Container, pod *corev1.Pod) {
+	if pod == nil || pod.Annotations[VulkanEnableAnno] != "true" {
+		return
+	}
+
+	capsIdx := -1
+	for i, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			capsIdx = i
+			break
+		}
+	}
+	merged := mergeGraphicsCap("")
+	if capsIdx >= 0 {
+		merged = mergeGraphicsCap(ctr.Env[capsIdx].Value)
+	}
+	if capsIdx >= 0 {
+		ctr.Env[capsIdx].Value = merged
+	} else {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: NvidiaDriverCapsEnvVar, Value: merged})
+	}
+
+	hasEnable := false
+	for _, e := range ctr.Env {
+		if e.Name == HamiVulkanEnvVar {
+			hasEnable = true
+			break
+		}
+	}
+	if !hasEnable {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: HamiVulkanEnvVar, Value: "1"})
+	}
 }
 
 func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
