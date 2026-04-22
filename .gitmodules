@@ -1,4 +1,4 @@
 [submodule "libvgpu"]
 	path = libvgpu
-	url = https://github.com/Project-HAMi/HAMi-core.git
-	branch = main
+	url = https://github.com/xiilab/HAMi-core.git
+	branch = vulkan-layer
