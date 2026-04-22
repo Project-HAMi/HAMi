@@ -2615,3 +2615,123 @@ func TestMutateAdmission_VulkanAnno_AddsGraphicsCap(t *testing.T) {
 	assert.Assert(t, strings.Contains(caps, "graphics"), "expected graphics in caps, got %q", caps)
 	assert.Equal(t, enable, "1")
 }
+
+func TestMutateAdmission_VulkanAnno_MergesExistingCaps(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: NvidiaDriverCapsEnvVar, Value: "compute,utility"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+
+	var caps string
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			caps = e.Value
+		}
+	}
+	assert.Assert(t, strings.Contains(caps, "compute"))
+	assert.Assert(t, strings.Contains(caps, "utility"))
+	assert.Assert(t, strings.Contains(caps, "graphics"))
+}
+
+func TestMutateAdmission_VulkanAnno_AllCaps_NoChange(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: NvidiaDriverCapsEnvVar, Value: "all"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			assert.Equal(t, e.Value, "all")
+		}
+	}
+}
+
+func TestMutateAdmission_NoVulkanAnno_NoChange(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	for _, e := range ctr.Env {
+		assert.Assert(t, e.Name != NvidiaDriverCapsEnvVar, "unexpected caps env")
+		assert.Assert(t, e.Name != HamiVulkanEnvVar, "unexpected enable env")
+	}
+}
+
+func TestMutateAdmission_VulkanAnno_NoGPUResource(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	for _, e := range ctr.Env {
+		assert.Assert(t, e.Name != HamiVulkanEnvVar, "no Vulkan env on non-GPU pod")
+	}
+}
+
+func TestMutateAdmission_VulkanAnno_IdempotentHamiEnable(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: HamiVulkanEnvVar, Value: "1"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	count := 0
+	for _, e := range ctr.Env {
+		if e.Name == HamiVulkanEnvVar {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1)
+}
