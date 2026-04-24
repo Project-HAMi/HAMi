@@ -16,7 +16,11 @@ limitations under the License.
 
 package v1
 
-import "unsafe"
+import (
+	"unsafe"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+)
 
 const maxDevices = 16
 
@@ -197,3 +201,16 @@ func (s Spec) GetUtilizationSwitch() int32 {
 func (s Spec) SetUtilizationSwitch(v int32) {
 	s.sr.utilizationSwitch = v
 }
+// --- Factory registrations ---
+
+func init() {
+	nvidia.RegisterFactory(&v1BaseFactory{})  // major=1, minor=1
+}
+
+type v1BaseFactory struct{}
+
+func (v1BaseFactory) Match(h *nvidia.HeaderT, size int64) bool {
+	return h.MajorVersion == 1 && h.MinorVersion <= 1
+}
+func (v1BaseFactory) Cast(data []byte) nvidia.UsageInfo { return CastSpec(data) }
+func (v1BaseFactory) Name() string                      { return "v1" }
