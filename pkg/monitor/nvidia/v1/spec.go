@@ -63,7 +63,7 @@ type sharedRegionT struct {
 	majorVersion    int32
 	minorVersion    int32
 	smInitFlag      int32
-	ownerPid        uint32
+	ownerPid        uint64
 	sem             semT
 	num             uint64
 	uuids           [16]uuid
@@ -220,7 +220,7 @@ type sharedRegionTWithSemPostinit struct {
 	majorVersion      int32
 	minorVersion      int32
 	smInitFlag        int32
-	ownerPid          uint32
+	ownerPid          uint64
 	sem               semT
 	num               uint64
 	uuids             [16]uuid
