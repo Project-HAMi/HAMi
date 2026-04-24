@@ -27,8 +27,6 @@ import (
 	"time"
 	"unsafe"
 
-	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
-	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -44,10 +42,10 @@ import (
 
 const SharedRegionMagicFlag = 19920718
 
-type headerT struct {
-	initializedFlag int32
-	majorVersion    int32
-	minorVersion    int32
+type HeaderT struct {
+	InitializedFlag int32
+	MajorVersion    int32
+	MinorVersion    int32
 }
 
 type UsageInfo interface {
@@ -252,7 +250,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		klog.Errorf("Failed to stat cache file: %s, error: %v", cacheFile, err)
 		return nil, err
 	}
-	if info.Size() < int64(unsafe.Sizeof(headerT{})) {
+	if info.Size() < int64(unsafe.Sizeof(HeaderT{})) {
 		return nil, fmt.Errorf("cache file size %d too small", info.Size())
 	}
 	f, err := os.OpenFile(cacheFile, os.O_RDWR, 0666)
@@ -269,21 +267,18 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		klog.Errorf("Failed to mmap cache file: %s, error: %v", cacheFile, err)
 		return nil, err
 	}
-	head := (*headerT)(unsafe.Pointer(&usage.data[0]))
-	if head.initializedFlag != SharedRegionMagicFlag {
+	head := (*HeaderT)(unsafe.Pointer(&usage.data[0]))
+	if head.InitializedFlag != SharedRegionMagicFlag {
 		_ = syscall.Munmap(usage.data)
 		return nil, fmt.Errorf("cache file magic flag not matched")
 	}
-	if info.Size() == 1197897 {
-		klog.Infoln("casting......v0")
-		usage.Info = v0.CastSpec(usage.data)
-	} else if head.majorVersion == 1 {
-		klog.Infoln("casting......v1")
-		usage.Info = v1.CastSpec(usage.data)
-	} else {
+	factory := findFactory(head, info.Size())
+	if factory == nil {
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.majorVersion, head.minorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.MajorVersion, head.MinorVersion)
 	}
+	klog.Infof("casting......%s", factory.Name())
+	usage.Info = factory.Cast(usage.data)
 	return usage, nil
 }
 
