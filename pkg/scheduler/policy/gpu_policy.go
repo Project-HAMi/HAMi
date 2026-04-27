@@ -19,6 +19,8 @@ package policy
 import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+
+	"k8s.io/klog/v2"
 )
 
 type DeviceListsScore struct {
