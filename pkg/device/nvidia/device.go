@@ -388,13 +388,15 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 
 // mergeGraphicsCap returns the union of existing NVIDIA_DRIVER_CAPABILITIES
 // tokens with "graphics". If existing contains "all", it is returned unchanged.
-// An empty existing value becomes "compute,utility,graphics".
+// An empty (or whitespace/comma-only) existing value becomes
+// "compute,utility,graphics".
 func mergeGraphicsCap(existing string) string {
-	if existing == "" {
+	if strings.TrimSpace(existing) == "" {
 		return "compute,utility,graphics"
 	}
 	tokens := strings.Split(existing, ",")
-	seen := make(map[string]struct{}, len(tokens))
+	cleaned := make([]string, 0, len(tokens)+1)
+	seen := make(map[string]struct{}, len(tokens)+1)
 	for _, t := range tokens {
 		t = strings.TrimSpace(t)
 		if t == "" {
@@ -403,19 +405,19 @@ func mergeGraphicsCap(existing string) string {
 		if t == "all" {
 			return existing
 		}
+		if _, ok := seen[t]; ok {
+			continue
+		}
 		seen[t] = struct{}{}
+		cleaned = append(cleaned, t)
+	}
+	if len(cleaned) == 0 {
+		return "compute,utility,graphics"
 	}
 	if _, ok := seen["graphics"]; ok {
 		return existing
 	}
-	tokens = append(tokens, "graphics")
-	cleaned := make([]string, 0, len(tokens))
-	for _, t := range tokens {
-		t = strings.TrimSpace(t)
-		if t != "" {
-			cleaned = append(cleaned, t)
-		}
-	}
+	cleaned = append(cleaned, "graphics")
 	return strings.Join(cleaned, ",")
 }
 
@@ -427,29 +429,22 @@ func applyVulkanAnnotation(ctr *corev1.Container, pod *corev1.Pod) {
 	}
 
 	capsIdx := -1
+	hasEnable := false
 	for i, e := range ctr.Env {
-		if e.Name == NvidiaDriverCapsEnvVar {
+		switch e.Name {
+		case NvidiaDriverCapsEnvVar:
 			capsIdx = i
-			break
+		case HamiVulkanEnvVar:
+			hasEnable = true
 		}
-	}
-	merged := mergeGraphicsCap("")
-	if capsIdx >= 0 {
-		merged = mergeGraphicsCap(ctr.Env[capsIdx].Value)
-	}
-	if capsIdx >= 0 {
-		ctr.Env[capsIdx].Value = merged
-	} else {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: NvidiaDriverCapsEnvVar, Value: merged})
 	}
 
-	hasEnable := false
-	for _, e := range ctr.Env {
-		if e.Name == HamiVulkanEnvVar {
-			hasEnable = true
-			break
-		}
+	if capsIdx >= 0 {
+		ctr.Env[capsIdx].Value = mergeGraphicsCap(ctr.Env[capsIdx].Value)
+	} else {
+		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: NvidiaDriverCapsEnvVar, Value: mergeGraphicsCap("")})
 	}
+
 	if !hasEnable {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: HamiVulkanEnvVar, Value: "1"})
 	}
