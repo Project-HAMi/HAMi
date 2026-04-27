@@ -2735,3 +2735,38 @@ func TestMutateAdmission_VulkanAnno_IdempotentHamiEnable(t *testing.T) {
 	}
 	assert.Equal(t, count, 1)
 }
+
+func TestMergeGraphicsCap_Empty(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap(""), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_WhitespaceOnly(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap("   "), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_CommasOnly(t *testing.T) {
+	// All tokens are empty after trimming -> default fallback.
+	assert.Equal(t, mergeGraphicsCap(", , ,"), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_All(t *testing.T) {
+	// "all" implies every capability; do not modify.
+	assert.Equal(t, mergeGraphicsCap("all"), "all")
+	assert.Equal(t, mergeGraphicsCap("compute,all,utility"), "compute,all,utility")
+}
+
+func TestMergeGraphicsCap_AlreadyHasGraphics(t *testing.T) {
+	// graphics already present -> return existing untouched.
+	assert.Equal(t, mergeGraphicsCap("compute,graphics,utility"), "compute,graphics,utility")
+}
+
+func TestMergeGraphicsCap_DuplicatesAndPadding(t *testing.T) {
+	// Duplicate tokens are deduped; surrounding whitespace is trimmed; graphics appended.
+	out := mergeGraphicsCap("compute, compute , utility")
+	assert.Equal(t, out, "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_AppendGraphics(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap("compute"), "compute,graphics")
+	assert.Equal(t, mergeGraphicsCap("compute,utility"), "compute,utility,graphics")
+}
