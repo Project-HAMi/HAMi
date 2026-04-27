@@ -89,12 +89,13 @@ Volcano scheduler 가 이미 운영 중인 클러스터에 HAMi 의 Vulkan vGPU 
   ```
 - **결과**: HAMi 의 `applyVulkanAnnotation` 코드가 Volcano 환경에서도 동작. annotation 있는 pod 의 container env 자동 주입.
 
-### C5. Host 측 manifest 파일 사전 배치
+### C5. Host 측 manifest 파일 사전 배치 (`volcano-vgpu-vulkan-manifest.yml`)
 
-- **변경 위치**: 별도 DaemonSet (또는 helm chart 의 init job)
-- **변경 내용**: 노드 부팅 시 `/etc/vulkan/implicit_layer.d/hami.json` 파일 배치
-- **manifest 내용**: HAMi 의 `0150ea7` commit 에서 사용한 것 그대로 (layer 이름, library path, enable_environment 가드)
-- **대안**: 사용자 image 에 manifest 베이크 (B 옵션) — 비채택. 사용자 부담 증가.
+- **변경 위치**: `xiilab/volcano-vgpu-device-plugin` 에 신규 raw yaml 추가 (기존 `volcano-vgpu-device-plugin.yml` 와 같은 디렉터리/패턴)
+- **구성**: ConfigMap (`hami.json` 본문) + DaemonSet (initContainer 가 ConfigMap 의 `hami.json` 을 host 의 `/etc/vulkan/implicit_layer.d/hami.json` 으로 복사)
+- **manifest 내용**: HAMi 의 `0150ea7` commit 에서 사용한 것 그대로 (layer 이름 `VK_LAYER_HAMI_vgpu`, library path `/usr/local/vgpu/libvgpu.so`, enable_environment `HAMI_VULKAN_ENABLE=1`)
+- **DaemonSet 위치**: 모든 GPU 노드 (label `nvidia.com/gpu.present=true` 또는 동등 selector). manifest 파일이 ready 된 노드만 device-plugin 의 mount 가 성공할 수 있으므로 device-plugin DaemonSet 보다 먼저 배포하는 게 안전.
+- **대안**: 사용자 image 에 manifest 베이크 — 비채택 (사용자 부담 증가)
 
 ### C6. E2E 테스트
 
@@ -162,17 +163,35 @@ Volcano scheduler 가 이미 운영 중인 클러스터에 HAMi 의 Vulkan vGPU 
    - 4-3. CUDA pod + annotation: 영향 없음
    - 4-4. dynamic-mig 모드 회귀 (Ampere+ GPU 가용 시)
 
+## Deployment artifact (raw yaml 패턴)
+
+`xiilab/volcano-vgpu-device-plugin` 의 기존 패턴 (helm chart 없음, 평탄한 raw yaml) 을 그대로 따른다.
+
+```
+xiilab/volcano-vgpu-device-plugin/
+├── volcano-vgpu-device-plugin.yml             # 기존 standard mode (image tag 갱신)
+├── volcano-vgpu-device-plugin-cdi.yml         # 기존 CDI mode (image tag 갱신)
+└── volcano-vgpu-vulkan-manifest.yml           # ★ 신규 — ConfigMap + DaemonSet
+```
+
+HAMi webhook 은 별도 yaml 작성하지 않고 **HAMi 본가 helm chart 재사용** (C4 의 values.yaml).
+
 ## Deployment 순서
 
-1. `xiilab/volcano-vgpu-device-plugin` 측 PR
-   - submodule 갱신 (C1)
-   - manifest mount 코드 추가 (C2)
-   - Dockerfile 의존성 (C3)
-   - image 빌드 + harbor push (`vulkan-vgpu` tag)
-2. Host 노드에 manifest 사전 배치 (C5 — DaemonSet 작성)
-3. HAMi helm install (webhook only, C4)
-4. volcano-vgpu-device-plugin daemonset rolling update (새 image)
-5. E2E 검증 (C6)
+1. **PR-1: xiilab/volcano-vgpu-device-plugin**
+   - submodule 갱신 (C1: `6660c84` → vulkan-layer HEAD)
+   - device-plugin 코드에 manifest mount 추가 (C2)
+   - Dockerfile 빌드 의존성 (C3: `libvulkan-dev`)
+   - 기존 두 yaml 의 image tag 를 새 빌드 (`vulkan-v1`) 으로 갱신
+   - 신규 `volcano-vgpu-vulkan-manifest.yml` 추가 (C5)
+   - image 빌드 + harbor push
+
+2. **클러스터 deploy**
+   - 2-1. `kubectl apply -f volcano-vgpu-vulkan-manifest.yml` (host 에 hami.json 배치)
+   - 2-2. `kubectl apply -f volcano-vgpu-device-plugin.yml` (또는 CDI 버전, 새 image rolling)
+   - 2-3. `helm install hami-webhook hami/hami` (C4 values 로 webhook only)
+
+3. **E2E 검증** (C6)
 
 ## 관련 자료
 
