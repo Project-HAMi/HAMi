@@ -290,6 +290,7 @@ data:
       commonWord: Ascend910A
       resourceName: huawei.com/Ascend910A
       resourceMemoryName: huawei.com/Ascend910A-memory
+      resourceCoreName: huawei.com/Ascend910A-core
       memoryAllocatable: 32768
       memoryCapacity: 32768
       memoryFactor: 1
@@ -313,6 +314,7 @@ data:
       commonWord: Ascend910B2
       resourceName: huawei.com/Ascend910B2
       resourceMemoryName: huawei.com/Ascend910B2-memory
+      resourceCoreName: huawei.com/Ascend910B2-core
       memoryAllocatable: 65536
       memoryCapacity: 65536
       memoryFactor: 1
@@ -358,6 +360,7 @@ data:
       commonWord: Ascend910B4-1
       resourceName: huawei.com/Ascend910B4-1
       resourceMemoryName: huawei.com/Ascend910B4-1-memory
+      resourceCoreName: huawei.com/Ascend910B4-1-core
       memoryAllocatable: 65536
       memoryCapacity: 65536
       memoryFactor: 1
@@ -382,6 +385,7 @@ data:
       commonWord: Ascend910B4
       resourceName: huawei.com/Ascend910B4
       resourceMemoryName: huawei.com/Ascend910B4-memory
+      resourceMemoryName: huawei.com/Ascend910B4-core
       memoryAllocatable: 32768
       memoryCapacity: 32768
       memoryFactor: 1
@@ -402,6 +406,7 @@ data:
       commonWord: Ascend310P
       resourceName: huawei.com/Ascend310P
       resourceMemoryName: huawei.com/Ascend310P-memory
+      resourceCoreName: huawei.com/Ascend310P-core
       memoryAllocatable: 21527
       memoryCapacity: 24576
       memoryFactor: 1
