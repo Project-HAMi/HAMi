@@ -36,7 +36,7 @@ func init() {
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 func TestMarkAnnotationsToDelete(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
 	}, metav1.CreateOptions{})
@@ -76,7 +76,7 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 }
 
 func TestGetPendingPod(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	// Create test node and pod
 
 	podList := []*corev1.Pod{
@@ -233,7 +233,7 @@ func TestGetPendingPod(t *testing.T) {
 }
 
 func TestGetAllocatePodByNode(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	emptyPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -324,7 +324,7 @@ func TestGetAllocatePodByNode(t *testing.T) {
 	}
 }
 func TestPatchPodAnnotations(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	// Create test pod
 	pod := &corev1.Pod{
@@ -513,6 +513,131 @@ func Test_AllContainersCreated(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := AllContainersCreated(test.args)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestPatchPodLabels(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	// Create test pod
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			Labels:    map[string]string{},
+		},
+	}
+
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+
+	tests := []struct {
+		name      string
+		namespace string
+		podName   string
+		labels    map[string]string
+		wantErr   bool
+	}{
+		{
+			name:      "patch with valid labels",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "update existing label",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueFollower,
+			},
+			wantErr: false,
+		},
+		{
+			name:      "add multiple labels",
+			namespace: "default",
+			podName:   "test-pod",
+			labels: map[string]string{
+				"test-key1": "test-value1",
+				"test-key2": "test-value2",
+			},
+			wantErr: false,
+		},
+		{
+			name:      "patch non-existent pod",
+			namespace: "default",
+			podName:   "non-existent",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: true,
+		},
+		{
+			name:      "patch non-existent namespace",
+			namespace: "non-existent",
+			podName:   "test-pod",
+			labels: map[string]string{
+				HAMiRoleLabel: HAMiRoleLabelValueLeader,
+			},
+			wantErr: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := PatchPodLabels(tt.namespace, tt.podName, tt.labels)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("PatchPodLabels() error = %v, wantErr %v", err, tt.wantErr)
+			}
+			// If success, verify the labels were patched
+			if err == nil {
+				updatedPod, getErr := client.KubeClient.CoreV1().Pods(tt.namespace).Get(context.TODO(), tt.podName, metav1.GetOptions{})
+				if getErr != nil {
+					t.Errorf("Failed to get updated pod: %v", getErr)
+					return
+				}
+				for k, v := range tt.labels {
+					if updatedPod.Labels[k] != v {
+						t.Errorf("Label %s = %s, want %s", k, updatedPod.Labels[k], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func Test_IsPodTerminating(t *testing.T) {
+	now := metav1.Now()
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "pod with deletion timestamp (terminating)",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					DeletionTimestamp: &now,
+				},
+			},
+			want: true,
+		},
+		{
+			name: "pod without deletion timestamp (normal)",
+			args: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{},
+			},
+			want: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodTerminating(test.args)
 			assert.Equal(t, test.want, got)
 		})
 	}

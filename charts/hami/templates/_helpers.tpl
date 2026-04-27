@@ -118,16 +118,28 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{ regexReplaceAll "^(v[0-9]+\\.[0-9]+\\.[0-9]+)(.*)$" .Capabilities.KubeVersion.Version "$1" }}
 {{- end -}}
 
+{{/*
+  Per-component image tag takes precedence over global.imageTag (trimmed non-empty imageRoot.tag wins).
+*/}}
+{{- define "hami.imageTagOrGlobal" -}}
+{{- .imageRoot.tag | default (and .global .global.imageTag) | default "" | toString | trim -}}
+{{- end -}}
+
+{{- define "hami.image" -}}
+{{- $tag := include "hami.imageTagOrGlobal" . -}}
+{{- include "common.images.image" (dict "imageRoot" .imageRoot "global" .global "tag" $tag) -}}
+{{- end -}}
+
 {{- define "hami.scheduler.kubeScheduler.image" -}}
 {{ include "common.images.image" (dict "imageRoot" .Values.scheduler.kubeScheduler.image "global" .Values.global "tag" (include "resolvedKubeSchedulerTag" .)) }}
 {{- end -}}
 
 {{- define "hami.scheduler.extender.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "hami.image" (dict "imageRoot" .Values.scheduler.extender.image "global" .Values.global) }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "hami.image" (dict "imageRoot" .Values.devicePlugin.image "global" .Values.global) }}
 {{- end -}}
 
 {{- define "hami.mockDevicePlugin.image" -}}
@@ -135,7 +147,7 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end -}}
 
 {{- define "hami.devicePlugin.monitor.image" -}}
-{{ include "common.images.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global "tag" .Values.global.imageTag) }}
+{{ include "hami.image" (dict "imageRoot" .Values.devicePlugin.monitor.image "global" .Values.global) }}
 {{- end -}}
 
 {{- define "hami.scheduler.patch.image" -}}
@@ -160,4 +172,88 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 
 {{- define "hami.scheduler.patch.new.imagePullSecrets" -}}
 {{ include "common.images.pullSecrets" (dict "images" (list .Values.scheduler.patch.imageNew) "global" .Values.global) }}
+{{- end -}}
+
+{{/*
+Get Kubernetes minor version as integer
+*/}}
+{{- define "hami-vgpu.k8sMinorVersion" -}}
+{{- regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int -}}
+{{- end -}}
+
+{{/*
+Check if K8s version >= 1.22 (uses KubeSchedulerConfiguration)
+*/}}
+{{- define "hami-vgpu.useNewSchedulerConfig" -}}
+{{- ge (include "hami-vgpu.k8sMinorVersion" . | int) 22 -}}
+{{- end -}}
+
+{{/*
+Managed resources list for scheduler extender
+Returns a YAML list that can be used directly or converted to JSON via fromYaml | toJson
+*/}}
+{{- define "hami-vgpu.scheduler.managedResources" -}}
+{{- $resources := list -}}
+{{/* Core NVIDIA resources */}}
+{{- $resources = append $resources (dict "name" .Values.resourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.resourceMem "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.resourceCores "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.resourceMemPercentage "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.resourcePriority "ignoredByScheduler" true) -}}
+{{/* MLU resources */}}
+{{- $resources = append $resources (dict "name" .Values.mluResourceName "ignoredByScheduler" true) -}}
+{{/* DCU resources */}}
+{{- $resources = append $resources (dict "name" .Values.dcuResourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.dcuResourceMem "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.dcuResourceCores "ignoredByScheduler" true) -}}
+{{/* Metax resources */}}
+{{- $resources = append $resources (dict "name" "metax-tech.com/gpu" "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.metaxResourceName "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.metaxResourceCore "ignoredByScheduler" true) -}}
+{{- $resources = append $resources (dict "name" .Values.metaxResourceMem "ignoredByScheduler" true) -}}
+{{/* Ascend resources */}}
+{{- if .Values.devices.ascend.enabled -}}
+{{- range .Values.devices.ascend.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Mthreads resources */}}
+{{- if .Values.devices.mthreads.enabled -}}
+{{- range .Values.devices.mthreads.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Enflame resources */}}
+{{- if .Values.devices.enflame.enabled -}}
+{{- range .Values.devices.enflame.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Kunlun resources */}}
+{{- if .Values.devices.kunlun.enabled -}}
+{{- range .Values.devices.kunlun.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* AWS Neuron resources */}}
+{{- range .Values.devices.awsneuron.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{/* Iluvatar resources */}}
+{{- if .Values.devices.iluvatar.enabled -}}
+{{- range .Values.devices.iluvatar.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* Vastai resources */}}
+{{- if .Values.devices.vastai.enabled -}}
+{{- range .Values.devices.vastai.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- end -}}
+{{/* AMD resources */}}
+{{- range .Values.devices.amd.customresources -}}
+{{- $resources = append $resources (dict "name" . "ignoredByScheduler" true) -}}
+{{- end -}}
+{{- toYaml $resources -}}
 {{- end -}}

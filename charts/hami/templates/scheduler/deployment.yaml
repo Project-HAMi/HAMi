@@ -30,11 +30,7 @@ spec:
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
         hami.io/webhook: ignore
       annotations:
-        {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
-        checksum/hami-scheduler-newversion-config: {{ include (print $.Template.BasePath "/scheduler/configmapnew.yaml") . | sha256sum }}
-        {{- else }}
         checksum/hami-scheduler-config: {{ include (print $.Template.BasePath "/scheduler/configmap.yaml") . | sha256sum }}
-        {{- end }}
         checksum/hami-scheduler-device-config: {{ include (print $.Template.BasePath "/scheduler/device-configmap.yaml") . | sha256sum }}
       {{- if .Values.scheduler.podAnnotations }}
         {{- toYaml .Values.scheduler.podAnnotations | nindent 8 }}
@@ -59,10 +55,10 @@ spec:
             {{- range .Values.scheduler.kubeScheduler.extraArgs }}
             - {{ . }}
             {{- end }}
-            {{- end }}
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
+            {{- end }}
           resources:
           {{- toYaml .Values.scheduler.kubeScheduler.resources | nindent 12 }}
           volumeMounts:
@@ -85,6 +81,14 @@ spec:
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
           env:
+            - name: POD_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: POD_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
           {{- if .Values.scheduler.nodeLockExpire }}
             - name: HAMI_NODELOCK_EXPIRE
               value: "{{ .Values.scheduler.nodeLockExpire }}"
@@ -126,6 +130,9 @@ spec:
               {{- $key }}={{ $value -}}
               {{- $first = false -}}
               {{- end -}}
+            {{- end }}
+            {{- if .Values.legacyMetrics }}
+            - --legacy-metrics=true
             {{- end }}
             {{- range .Values.scheduler.extender.extraArgs }}
             - {{ . }}
@@ -206,11 +213,7 @@ spec:
         {{- if .Values.scheduler.kubeScheduler.enabled }}
         - name: scheduler-config
           configMap:
-            {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
-            name: {{ template "hami-vgpu.scheduler" . }}-newversion
-            {{- else }}
             name: {{ template "hami-vgpu.scheduler" . }}
-            {{- end }}
         {{- end }}
         - name: device-config
           configMap:

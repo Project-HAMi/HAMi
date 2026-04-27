@@ -40,7 +40,7 @@ func Files(files ...string) (*fsnotify.Watcher, error) {
 	return watcher, nil
 }
 
-// Signals creats a channel for the specified signals.
+// Signals creates a channel for the specified signals.
 func Signals(sigs ...os.Signal) chan os.Signal {
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, sigs...)

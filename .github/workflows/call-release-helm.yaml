@@ -67,7 +67,7 @@ jobs:
           git config user.name "$GITHUB_ACTOR"
           git config user.email "$GITHUB_ACTOR@users.noreply.github.com"
       - name: Install Helm
-        uses: azure/setup-helm@v4
+        uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
 
@@ -88,7 +88,7 @@ jobs:
           mkdir -p tmp
           mv charts/*.tgz tmp
       - name: Upload Artifact
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: chart_package_artifact
           path: tmp/*
@@ -116,7 +116,7 @@ jobs:
           persist-credentials: "true"
 
       - name: Download Artifact
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: chart_package_artifact
           path: charts/

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -151,6 +152,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.DelPod(pod)
 		return
 	}
+	if util.IsPodTerminating(pod) {
+		klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
+		s.podManager.UpdatePod(pod)
+		return
+	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
@@ -173,7 +179,8 @@ func (s *Scheduler) onDelPod(obj any) {
 		if pod, ok = t.Obj.(*corev1.Pod); ok {
 			klog.V(4).InfoS("Pod tombstone deleted, cleaning up cache", "pod", t.Key)
 		} else {
-			klog.Errorf("Received tombstone for non-pod object on pod delete")
+			klog.V(4).InfoS("Received tombstone for non-pod object on pod delete", "type", fmt.Sprintf("%T", t.Obj))
+			return
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
@@ -353,11 +360,16 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	// 2. lost leadership during or after register: synced will set to true after finishing register, and callback will set it to false again after lock is acquired by callback
 	s.lock.Lock()
 	defer s.lock.Unlock()
-	// Only do registration when we are leader
-	if !s.leaderManager.IsLeader() {
+
+	// Only do registration when we are leader.
+	isLeader := s.leaderManager.IsLeader()
+	if isLeader {
+		s.updateSchedulerLabel()
+	} else {
 		klog.V(5).InfoS("Scheduler is not leader yet, skipping ...")
 		return
 	}
+
 	rawNodes, err := s.nodeLister.List(labelSelector)
 	if err != nil {
 		klog.ErrorS(err, "Failed to list nodes with selector", "selector", labelSelector.String())
@@ -382,6 +394,15 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
 			if !health {
+				existingNode, getNodeErr := s.GetNode(val.Name)
+				if getNodeErr != nil {
+					klog.V(5).InfoS("Skipping device cleanup for node not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+				if _, ok := existingNode.Devices[devhandsk]; !ok {
+					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
 				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
@@ -422,6 +443,62 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced = true
+}
+
+func (s *Scheduler) updateSchedulerLabel() {
+	schedulerSelector := labels.Set(map[string]string{util.HAMiComponentLabel: util.HAMiComponentScheduler}).AsSelector()
+	schedulerPods, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).List(schedulerSelector)
+	if err != nil {
+		klog.Fatalf("Failed to list hami scheduler pods from lister: namespace %s selector %s",
+			os.Getenv("POD_NAMESPACE"),
+			schedulerSelector.String(),
+		)
+	}
+
+	for idx := range schedulerPods {
+		pod := schedulerPods[idx]
+		if pod.Name == os.Getenv("POD_NAME") {
+			// The pod is leader, apply the leader role label to it.
+			if pod.Labels == nil || pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueLeader {
+				err := util.PatchPodLabels(
+					pod.Namespace,
+					pod.Name,
+					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueLeader},
+				)
+				if err != nil {
+					klog.Fatalf("Failed to patch the leader label to hami scheduler pod: namespace %s pod %s",
+						pod.Namespace,
+						pod.Name,
+					)
+				} else {
+					klog.V(4).InfoS("Successfully patched leader label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				}
+			}
+		} else {
+			// The pod is not the leader, apply the follower role label to it.
+			if pod.Labels == nil || pod.Labels[util.HAMiRoleLabel] != util.HAMiRoleLabelValueFollower {
+				err := util.PatchPodLabels(
+					pod.Namespace,
+					pod.Name,
+					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueFollower},
+				)
+				if err != nil {
+					klog.ErrorS(err, "Failed to patch leader label from pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				} else {
+					klog.V(4).InfoS("Successfully patched follower label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
+					)
+				}
+			}
+		}
+	}
 }
 
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
@@ -589,15 +666,18 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		ObjectMeta: metav1.ObjectMeta{Name: args.PodName, UID: args.PodUID},
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
-	current, err := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(context.Background(), args.PodName, metav1.GetOptions{})
+
+	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get pod", "pod", args.PodName, "namespace", args.PodNamespace)
+		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
+
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-	node, err := s.kubeClient.CoreV1().Nodes().Get(context.Background(), args.Node, metav1.GetOptions{})
+
+	node, err := s.nodeLister.Get(args.Node)
 	if err != nil {
-		klog.ErrorS(err, "Failed to get node", "node", args.Node)
+		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil

@@ -308,3 +308,71 @@ func TestAddPod(t *testing.T) {
 		})
 	}
 }
+
+func TestUpdatePod(t *testing.T) {
+	podManager := NewPodManager()
+
+	originalPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod1",
+			UID:       k8stypes.UID("uid1"),
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	podManager.pods["uid1"] = &PodInfo{
+		Pod:     originalPod,
+		NodeID:  "node1",
+		Devices: PodDevices{"device1": {{}}},
+	}
+
+	for _, ts := range []struct {
+		name               string
+		updatedPod         *corev1.Pod
+		expectInCache      bool
+		expectNodeID       string
+		expectDevices      PodDevices
+		expectDelTimestamp bool
+	}{
+		{
+			name: "update terminating pod preserves NodeID and Devices",
+			updatedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace:         "default",
+					Name:              "pod1",
+					UID:               k8stypes.UID("uid1"),
+					DeletionTimestamp: func() *metav1.Time { t := metav1.Now(); return &t }(),
+				},
+				Status: corev1.PodStatus{Phase: corev1.PodRunning},
+			},
+			expectInCache:      true,
+			expectNodeID:       "node1",
+			expectDevices:      PodDevices{"device1": {{}}},
+			expectDelTimestamp: true,
+		},
+		{
+			name: "update non-existent pod is a no-op",
+			updatedPod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Namespace: "default",
+					Name:      "ghost-pod",
+					UID:       k8stypes.UID("uid-ghost"),
+				},
+			},
+			expectInCache: false,
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			podManager.UpdatePod(ts.updatedPod)
+
+			pi, ok := podManager.pods[ts.updatedPod.UID]
+			assert.Equal(t, ts.expectInCache, ok)
+
+			if ts.expectInCache {
+				assert.Equal(t, ts.expectNodeID, pi.NodeID, "NodeID must be preserved")
+				assert.Equal(t, ts.expectDevices, pi.Devices, "Devices must be preserved")
+				assert.Equal(t, ts.expectDelTimestamp, pi.DeletionTimestamp != nil, "DeletionTimestamp should be updated")
+			}
+		})
+	}
+}

@@ -50,6 +50,7 @@ var (
 		},
 	}
 	metricsBindAddress string
+	legacyMetrics      bool
 )
 
 func init() {
@@ -57,6 +58,7 @@ func init() {
 	rootCmd.PersistentFlags().SortFlags = false
 	rootCmd.Flags().AddGoFlagSet(util.InitKlogFlags())
 	rootCmd.Flags().StringVar(&metricsBindAddress, "metrics-bind-address", ":9394", "The TCP address that the vGPUmonitor should bind to for serving prometheus metrics(e.g. 127.0.0.1:9394, :9394)")
+	rootCmd.Flags().BoolVar(&legacyMetrics, "legacy-metrics", false, "Emit legacy metric names alongside new ones for backward compatibility")
 	rootCmd.AddCommand(version.VersionCmd)
 }
 
@@ -143,7 +145,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 
 	// Construct cluster managers. In real code, we would assign them to
 	// variables to then do something with them.
-	NewClusterManager("vGPU", reg, containerLister)
+	NewClusterManager("vGPU", reg, containerLister, legacyMetrics)
 	//NewClusterManager("ca", reg)
 
 	// Uncomment to add the standard process and Go metrics to the custom registry.

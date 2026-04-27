@@ -53,6 +53,9 @@ kunlunResourceName: "kunlunxin.com/xpu"
 kunlunResourceVCountName: "kunlunxin.com/vxpu"
 kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 
+#Vastai Parameters
+vastaiResourceName: "vastaitech.com/va"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -169,6 +172,31 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
+    # namespaceSelector controls which namespaces the webhook will be applied to.
+    # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter namespaces.
+    namespaceSelector:
+      matchLabels:
+        # app.kubernetes.io/part-of: kubeflow-profile
+      matchExpressions: []
+      # Example: exclude namespaces with specific labels
+      # - key: environment
+      #   operator: In
+      #   values:
+      #   - development
+      #   - staging
+    # objectSelector controls which pods the webhook will be applied to.
+    # The default matchExpressions exclude pods with label "hami.io/webhook: ignore".
+    # You can add additional matchLabels or matchExpressions to further filter pods.
+    objectSelector:
+      # matchLabels:
+      #   app.kubernetes.io/managed-by: hami
+      matchExpressions: []
+      # Example: only apply to pods with specific labels
+      # - key: hami.io/enable
+      #   operator: In
+      #   values:
+      #   - "true"
     reinvocationPolicy: Never
     failurePolicy: Ignore
   ## TLS Certificate Option 1: Use cert-manager to generate self-signed certificate.
@@ -302,6 +330,10 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
+  # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
+  # Can be overridden per-node via nodeConfiguration.config.
+  preConfiguredDeviceMemory: 0
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
@@ -314,6 +346,7 @@ devicePlugin:
             "operatingmode": "hami-core",
             "devicememoryscaling": 1,
             "devicesplitcount": 10,
+            "preconfigureddevicememory": 0,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
@@ -355,10 +388,6 @@ devicePlugin:
   nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
-  # The updateStrategy for DevicePlugin DaemonSet.
-  # If you want to update the DaemonSet by manual, set type as "OnDelete".
-  # We recommend use OnDelete update strategy because DevicePlugin pod restart will cause business pod restart, this behavior is destructive.
-  # Otherwise, you can use RollingUpdate update strategy to rolling update DevicePlugin pod.
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -435,6 +464,10 @@ devices:
     enabled: true
     customresources:
       - mthreads.com/vgpu
+  vastai:
+    enabled: true
+    customresources:
+      - vastaitech.com/va
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1
@@ -446,6 +479,7 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
@@ -453,12 +487,16 @@ devices:
       - huawei.com/Ascend910B2-memory
       - huawei.com/Ascend910B3
       - huawei.com/Ascend910B3-memory
+      - huawei.com/Ascend910B3-core
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
       - huawei.com/Ascend910B4-1
       - huawei.com/Ascend910B4-1-memory
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+      - huawei.com/Ascend910C
+      - huawei.com/Ascend910C-memory
+      - huawei.com/Ascend910C-core
   iluvatar:
     enabled: false
     customresources:
@@ -474,6 +512,8 @@ devices:
       - iluvatar.ai/MR-V50-vgpu
       - iluvatar.ai/MR-V50.vCore
       - iluvatar.ai/MR-V50.vMem
+
+legacyMetrics: false
 
 prometheus:
   enabled: false

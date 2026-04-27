@@ -42,7 +42,7 @@ func checkBody(w http.ResponseWriter, r *http.Request) {
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infoln("Entering Predicate Route handler")
+		klog.V(5).Infoln("Entering Predicate Route handler")
 		checkBody(w, r)
 
 		var buf bytes.Buffer
@@ -64,16 +64,16 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				// Poll may return false when context is cancelled
 				err := fmt.Errorf("context cancelled")
 				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
-				w.Header().Set("Content-Type", "application/json")
-				w.WriteHeader(http.StatusInternalServerError)
-				w.Write([]byte(err.Error()))
-				return
-			}
-			extenderFilterResult, err = s.Filter(extenderArgs)
-			if err != nil {
-				klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 				extenderFilterResult = &extenderv1.ExtenderFilterResult{
 					Error: err.Error(),
+				}
+			} else {
+				extenderFilterResult, err = s.Filter(extenderArgs)
+				if err != nil {
+					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
+					extenderFilterResult = &extenderv1.ExtenderFilterResult{
+						Error: err.Error(),
+					}
 				}
 			}
 		}
@@ -82,7 +82,11 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			w.Write([]byte(err.Error()))
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: fmt.Sprintf("Failed to marshal extender filter result: %s", err.Error()),
+			}
+			resultBody, _ = json.Marshal(extenderFilterResult)
+			w.Write(resultBody)
 		} else {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
@@ -93,7 +97,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
-		klog.Infoln("Entering Bind handler")
+		klog.V(5).Infoln("Entering Bind handler")
 		var buf bytes.Buffer
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)
@@ -120,8 +124,11 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
-			errMsg := fmt.Sprintf("{'error':'%s'}", err.Error())
-			w.Write([]byte(errMsg))
+			extenderBindingResult = &extenderv1.ExtenderBindingResult{
+				Error: fmt.Sprintf("Failed to marshal binding result: %s", err.Error()),
+			}
+			response, _ := json.Marshal(extenderBindingResult)
+			w.Write(response)
 		} else {
 			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
@@ -137,30 +144,27 @@ func WebHookRoute() httprouter.Handle {
 		klog.ErrorS(err, "Failed to create new webhook")
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infof("Handling webhook request on %s", r.URL.Path)
+		klog.V(5).Infof("Handling webhook request on %s", r.URL.Path)
 		h.ServeHTTP(w, r)
 	}
 }
 
 func HealthzRoute() httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		klog.Infoln("Health check endpoint hit")
+		klog.V(5).Infoln("Health check endpoint hit")
 		w.WriteHeader(http.StatusOK)
 	}
 }
 
 func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		klog.Infoln("Readiness check endpoint hit")
+		klog.V(5).Infoln("Readiness check endpoint hit")
 
-		ok := s.GetLeaderManager().IsLeader()
-		if !ok {
-			klog.Infoln("Not leader yet")
-			w.WriteHeader(http.StatusServiceUnavailable)
-			return
+		if s.GetLeaderManager().IsLeader() {
+			klog.V(5).Infoln("Scheduler extender is leader")
+		} else {
+			klog.V(3).Infoln("Scheduler extender has not become leader yet")
 		}
-
-		klog.Infoln("Scheduler extender is leader")
 		w.WriteHeader(http.StatusOK)
 	}
 }

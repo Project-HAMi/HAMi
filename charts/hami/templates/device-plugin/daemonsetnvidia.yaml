@@ -29,11 +29,7 @@ spec:
         hami.io/webhook: ignore
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
       annotations:
-        {{- if ge (regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int) 22 }}
-        checksum/hami-scheduler-newversion-config: {{ include (print $.Template.BasePath "/scheduler/configmapnew.yaml") . | sha256sum }}
-        {{- else }}
         checksum/hami-scheduler-config: {{ include (print $.Template.BasePath "/scheduler/configmap.yaml") . | sha256sum }}
-        {{- end }}
         checksum/hami-scheduler-device-config: {{ include (print $.Template.BasePath "/scheduler/device-configmap.yaml") . | sha256sum }}
       {{- if .Values.devicePlugin.podAnnotations }}
         {{- toYaml .Values.devicePlugin.podAnnotations | nindent 8 }}
@@ -152,6 +148,10 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            - name: deviceconfig
+              mountPath: /k8s-vgpu/lib/nvidia/ld.so.preload
+              subPath: ld.so.preload
+              readOnly: true
             {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
@@ -164,6 +164,9 @@ spec:
           imagePullPolicy: {{ .Values.devicePlugin.monitor.image.pullPolicy }}
           command:
             - "vGPUmonitor"
+            {{- if .Values.legacyMetrics }}
+            - "--legacy-metrics=true"
+            {{- end }}
             {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}

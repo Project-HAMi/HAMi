@@ -61,7 +61,7 @@ var _ = ginkgo.Describe("objectToLease", func() {
 		})
 	})
 
-	ginkgo.Context("When obejct is other type", func() {
+	ginkgo.Context("When object is other type", func() {
 		ginkgo.BeforeEach(func() {
 			object = "invalid object"
 		})
@@ -184,7 +184,7 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 			assertNotElected(lm, leaderNotify, synced)
 		})
 		ginkgo.It("should ignore lease with another namespace", func() {
-			lease := generateLease(hostname, "anotherNamspace", name)
+			lease := generateLease(hostname, "anotherNamespace", name)
 			lm.OnAdd(lease, true)
 			assertNotElected(lm, leaderNotify, synced)
 		})
@@ -247,7 +247,7 @@ var _ = ginkgo.Describe("LeaderManager", func() {
 
 	ginkgo.Describe("When lease is deleted", func() {
 		ginkgo.Describe("we are leader", func() {
-			ginkgo.It("shoud not be leader anymore unless elected", func() {
+			ginkgo.It("should not be leader anymore unless elected", func() {
 				ginkgo.By("Elected as leader")
 				lm.OnAdd(initLease, true)
 				assertNotifyElected(lm, leaderNotify)

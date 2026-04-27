@@ -77,65 +77,77 @@ func (a *analyzer) collect(dir string) {
 	}
 	a.donePaths[dir] = nil
 
-	// Create the AST by parsing src.
-	fs, err := parser.ParseDir(a.fset, dir, nil, parser.AllErrors|parser.ParseComments)
-
+	entries, err := os.ReadDir(dir)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, "ERROR(syntax)", logPrefix, err)
+		fmt.Fprintln(os.Stderr, "ERROR(readdir)", logPrefix, err)
 		a.failed = true
 		return
 	}
 
-	for _, p := range fs {
-		// returns first error, but a.handleError deals with it
-		files := a.filterFiles(p.Files)
-		for _, file := range files {
-			replacements := make(map[string]string)
-			pathToFile := a.fset.File(file.Pos()).Name()
-			for _, imp := range file.Imports {
-				importPath := strings.ReplaceAll(imp.Path.Value, "\"", "")
-				pathSegments := strings.Split(importPath, "/")
-				importName := pathSegments[len(pathSegments)-1]
-				if imp.Name != nil {
-					importName = imp.Name.Name
-				}
-				if alias, ok := aliases[importPath]; ok {
-					if alias != importName {
-						if !*confirm {
-							fmt.Fprintf(os.Stderr, "%sERROR wrong alias for import \"%s\" should be %s in file %s\n", logPrefix, importPath, alias, pathToFile)
-							a.failed = true
-						}
-						replacements[importName] = alias
-						if imp.Name != nil {
-							imp.Name.Name = alias
-						} else {
-							imp.Name = ast.NewIdent(alias)
-						}
+	// Just collect all the parsed files in a slice, no need for ast.Package
+	var files []*ast.File
+	for _, entry := range entries {
+		if entry.IsDir() || !strings.HasSuffix(entry.Name(), ".go") {
+			continue
+		}
+		filePath := filepath.Join(dir, entry.Name())
+		f, parseErr := parser.ParseFile(a.fset, filePath, nil, parser.AllErrors|parser.ParseComments)
+		if parseErr != nil {
+			fmt.Fprintln(os.Stderr, "ERROR(parse)", logPrefix, parseErr)
+			a.failed = true
+		}
+		if f != nil {
+			files = append(files, f)
+		}
+	}
+
+	// Iterate directly over the files
+	for _, file := range files {
+		replacements := make(map[string]string)
+		pathToFile := a.fset.File(file.Pos()).Name()
+		for _, imp := range file.Imports {
+			importPath := strings.ReplaceAll(imp.Path.Value, "\"", "")
+			pathSegments := strings.Split(importPath, "/")
+			importName := pathSegments[len(pathSegments)-1]
+			if imp.Name != nil {
+				importName = imp.Name.Name
+			}
+			if alias, ok := aliases[importPath]; ok {
+				if alias != importName {
+					if !*confirm {
+						fmt.Fprintf(os.Stderr, "%sERROR wrong alias for import \"%s\" should be %s in file %s\n", logPrefix, importPath, alias, pathToFile)
+						a.failed = true
+					}
+					replacements[importName] = alias
+					if imp.Name != nil {
+						imp.Name.Name = alias
+					} else {
+						imp.Name = ast.NewIdent(alias)
 					}
 				}
 			}
+		}
 
-			if len(replacements) > 0 {
-				if *confirm {
-					fmt.Printf("%sReplacing imports with aliases in file %s\n", logPrefix, pathToFile)
-					for key, value := range replacements {
-						renameImportUsages(file, key, value)
-					}
-					ast.SortImports(a.fset, file)
-					var buffer bytes.Buffer
-					if err = format.Node(&buffer, a.fset, file); err != nil {
-						panic(fmt.Sprintf("Error formatting ast node after rewriting import.\n%s\n", err.Error()))
-					}
+		if len(replacements) > 0 {
+			if *confirm {
+				fmt.Printf("%sReplacing imports with aliases in file %s\n", logPrefix, pathToFile)
+				for key, value := range replacements {
+					renameImportUsages(file, key, value)
+				}
+				ast.SortImports(a.fset, file)
+				var buffer bytes.Buffer
+				if err = format.Node(&buffer, a.fset, file); err != nil {
+					panic(fmt.Sprintf("Error formatting ast node after rewriting import.\n%s\n", err.Error()))
+				}
 
-					fileInfo, err := os.Stat(pathToFile)
-					if err != nil {
-						panic(fmt.Sprintf("Error stat'ing file: %s\n%s\n", pathToFile, err.Error()))
-					}
+				fileInfo, err := os.Stat(pathToFile)
+				if err != nil {
+					panic(fmt.Sprintf("Error stat'ing file: %s\n%s\n", pathToFile, err.Error()))
+				}
 
-					err = os.WriteFile(pathToFile, buffer.Bytes(), fileInfo.Mode())
-					if err != nil {
-						panic(fmt.Sprintf("Error writing file: %s\n%s\n", pathToFile, err.Error()))
-					}
+				err = os.WriteFile(pathToFile, buffer.Bytes(), fileInfo.Mode())
+				if err != nil {
+					panic(fmt.Sprintf("Error writing file: %s\n%s\n", pathToFile, err.Error()))
 				}
 			}
 		}
@@ -168,14 +180,6 @@ func renameImportUsages(f *ast.File, old, new string) {
 		}
 		return true
 	})
-}
-
-func (a *analyzer) filterFiles(fs map[string]*ast.File) []*ast.File {
-	var files []*ast.File
-	for _, f := range fs {
-		files = append(files, f)
-	}
-	return files
 }
 
 type collector struct {

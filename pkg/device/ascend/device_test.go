@@ -345,6 +345,62 @@ func Test_PatchAnnotations(t *testing.T) {
 	}
 }
 
+func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:   "Ascend910B3",
+			ResourceName: "huawei.com/Ascend910B3",
+		},
+	}
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		pd   device.PodDevices
+		want map[string]string
+	}{
+		{
+			name: "vNPU-mode patch: check json contains cores and memory instead of template",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						"huawei.com/vnpu-mode": "hami-core",
+					},
+				},
+			},
+			pd: device.PodDevices{
+				"Ascend910B3": device.PodSingleDevice{
+					[]device.ContainerDevice{
+						{
+							Idx:       0,
+							UUID:      "ascend-uuid-1",
+							Type:      "Ascend",
+							Usedcores: 5,
+							Usedmem:   8192,
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"huawei.com/Ascend910B3": "[{\"UUID\":\"ascend-uuid-1\",\"core\":5,\"memory\":8192}]",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			annoInput := make(map[string]string)
+			result := dev.PatchAnnotations(test.pod, &annoInput, test.pd)
+
+			val, ok := result["huawei.com/Ascend910B3"]
+			assert.Assert(t, ok)
+			assert.Assert(t, strings.Contains(val, "\"core\":5"))
+			assert.Assert(t, strings.Contains(val, "\"memory\":8192"))
+			assert.Assert(t, !strings.Contains(val, "\"temp\""))
+		})
+	}
+}
+
 func Test_checkType(t *testing.T) {
 	dev := Devices{
 		config: VNPUConfig{
@@ -613,6 +669,214 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission910C(t *testing.T) {
+	tests := []struct {
+		name   string
+		devCfg VNPUConfig
+		args   struct {
+			ctr corev1.Container
+			pod corev1.Pod
+		}
+		want      bool
+		wantErr   bool
+		wantCount int64
+	}{
+		{
+			name: "910C: request 1 → auto adjust to 2",
+			devCfg: VNPUConfig{
+				CommonWord:        "Ascend910C",
+				ResourceName:      "huawei.com/Ascend910C",
+				MemoryAllocatable: 65536,
+				MemoryCapacity:    65536,
+			},
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("1"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("1"),
+						},
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			want:      true,
+			wantCount: 2,
+		},
+		{
+			name: "910C: request 3 → reject (odd number)",
+			devCfg: VNPUConfig{
+				CommonWord:        "Ascend910C",
+				ResourceName:      "huawei.com/Ascend910C",
+				MemoryAllocatable: 65536,
+				MemoryCapacity:    65536,
+			},
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("3"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("3"),
+						},
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			want:    false,
+			wantErr: true,
+		},
+		{
+			name: "910C: request 4 → valid even number",
+			devCfg: VNPUConfig{
+				CommonWord:        "Ascend910C",
+				ResourceName:      "huawei.com/Ascend910C",
+				MemoryAllocatable: 65536,
+				MemoryCapacity:    65536,
+			},
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("4"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910C": resource.MustParse("4"),
+						},
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			want:      true,
+			wantCount: 4,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{config: test.devCfg}
+			result, err := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
+
+			if result != test.want {
+				t.Errorf("expected return bool: %v, got: %v", test.want, result)
+			}
+
+			if test.wantErr {
+				assert.Assert(t, err != nil, "expected error but got nil")
+			} else {
+				assert.NilError(t, err)
+			}
+
+			if test.wantCount > 0 {
+				limitQty := test.args.ctr.Resources.Limits[corev1.ResourceName(test.devCfg.ResourceName)]
+				gotCount, ok := limitQty.AsInt64()
+				assert.Assert(t, ok, "limit quantity should be convertible to int64")
+				assert.Equal(t, gotCount, test.wantCount, "device count should be adjusted")
+
+				if reqQty, exists := test.args.ctr.Resources.Requests[corev1.ResourceName(test.devCfg.ResourceName)]; exists {
+					reqVal, ok := reqQty.AsInt64()
+					assert.Assert(t, ok, "request quantity should be convertible to int64")
+					assert.Equal(t, reqVal, test.wantCount, "requests should also be adjusted")
+				}
+			}
+		})
+	}
+}
+
+func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
+	const VNPUModeAnnotation = "huawei.com/vnpu-mode"
+	const VNPUModeHamiCore = "hami-core"
+
+	tests := []struct {
+		name string
+		args struct {
+			ctr corev1.Container
+			pod corev1.Pod
+		}
+		wantPostStart bool
+		wantMem       int64
+		wantCore      int64
+	}{
+		{
+			name: "vNPU-mode hami-core: inject postStart and keep raw memory",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("20"),
+						},
+					},
+				},
+				pod: corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							VNPUModeAnnotation: VNPUModeHamiCore,
+						},
+					},
+				},
+			},
+			wantPostStart: true,
+			wantMem:       15360,
+			wantCore:      20,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					MemoryAllocatable:  32768,
+				},
+			}
+
+			ok, err := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
+			assert.NilError(t, err)
+			assert.Equal(t, ok, true)
+
+			if test.wantPostStart {
+				assert.Assert(t, test.args.ctr.Lifecycle != nil, "Lifecycle should not be nil")
+				assert.Assert(t, test.args.ctr.Lifecycle.PostStart != nil, "PostStart should not be nil")
+				assert.Assert(t, test.args.ctr.Lifecycle.PostStart.Exec != nil)
+				commandStr := strings.Join(test.args.ctr.Lifecycle.PostStart.Exec.Command, " ")
+				assert.Assert(t, strings.Contains(commandStr, "/hami-vnpu-core/limiter"))
+			}
+
+			memLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+			assert.Equal(t, memLimit.Value(), test.wantMem)
+
+			coreLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+			assert.Equal(t, coreLimit.Value(), test.wantCore)
+		})
+	}
+}
+
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string
@@ -705,6 +969,52 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			result := dev.GenerateResourceRequests(&test.args)
 
 			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
+	tests := []struct {
+		name string
+		args corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "parse custom vNPU core and memory resources",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910B3",
+				Memreq:           int32(15360),
+				Coresreq:         int32(10),
+				MemPercentagereq: int32(0),
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+				},
+			}
+			result := dev.GenerateResourceRequests(&test.args)
+
+			assert.Equal(t, result.Memreq, test.want.Memreq)
+			assert.Equal(t, result.Coresreq, test.want.Coresreq)
+			assert.Equal(t, result.Type, test.want.Type)
 		})
 	}
 }
@@ -1517,6 +1827,158 @@ func TestDevices_Fit(t *testing.T) {
 					},
 				}
 				fit, result, reason := dev.Fit(test.devices, test.request, pod, nodeInfo, allocated)
+				if fit != test.wantFit {
+					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
+				}
+				if test.wantFit {
+					if len(result[dev.config.CommonWord]) != test.wantLen {
+						t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[dev.config.CommonWord]))
+					}
+					for idx, id := range test.wantDevIDs {
+						if id != result[dev.config.CommonWord][idx].UUID {
+							t.Errorf("expected device id: %s, got device id %s", id, result[dev.config.CommonWord][idx].UUID)
+						}
+					}
+				}
+
+				if reason != test.wantReason {
+					t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
+				}
+			})
+		}
+	}
+}
+
+func TestDevices_Fit_910C(t *testing.T) {
+	configStr := `- chipName: Ascend910
+  commonWord: Ascend910C
+  resourceName: huawei.com/Ascend910C
+  resourceMemoryName: huawei.com/Ascend910C-memory
+  memoryAllocatable: 65536
+  memoryCapacity: 65536
+  aiCore: 20
+  aiCPU: 7
+`
+
+	var config []VNPUConfig
+	if err := yaml.Unmarshal([]byte(configStr), &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	enableAscend = true
+	devs := InitDevices(config)
+
+	tests := []struct {
+		name       string
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
+		annos      map[string]string
+		wantFit    bool
+		wantLen    int
+		wantDevIDs []string
+		wantReason string
+	}{
+		{
+			name: "fit success: Ascend910C topology-aware allocation (full modules only)",
+			devices: []*device.DeviceUsage{
+				{
+					ID:         "dev-0",
+					Index:      0,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(0)},
+				},
+				{
+					ID:         "dev-1",
+					Index:      1,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(0)},
+				},
+				{
+					ID:         "dev-2",
+					Index:      2,
+					Used:       0,
+					Count:      100,
+					Usedmem:    0,
+					Totalmem:   128,
+					Totalcore:  100,
+					Usedcores:  0,
+					Numa:       0,
+					Health:     true,
+					CustomInfo: map[string]any{"NetworkID": float64(0)},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           128,
+				MemPercentagereq: 0,
+				Coresreq:         100,
+			},
+			annos:      map[string]string{},
+			wantFit:    true,
+			wantLen:    2,
+			wantDevIDs: []string{"dev-1", "dev-0"},
+			wantReason: "",
+		},
+	}
+
+	for _, dev := range devs {
+		for _, test := range tests {
+			if !strings.Contains(test.name, "type mismatch") {
+				test.request.Type = dev.config.CommonWord
+			}
+
+			for _, d := range test.devices {
+				d.Type = dev.config.CommonWord
+			}
+
+			t.Run(fmt.Sprintf("%s:%s", dev.config.CommonWord, test.name), func(t *testing.T) {
+				allocated := &device.PodDevices{}
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: test.annos,
+					},
+				}
+				nodeInfo := &device.NodeInfo{
+					ID: "node1",
+					Devices: map[string][]device.DeviceInfo{
+						dev.config.CommonWord: {
+							{
+								ID:         "dev-0",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
+							},
+							{
+								ID:         "dev-1",
+								Index:      0,
+								Numa:       0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
+							},
+							{
+								ID:         "dev-2",
+								Index:      0,
+								Health:     true,
+								CustomInfo: map[string]any{"NetworkID": float64(0)},
+							},
+						},
+					},
+				}
+				fit, result, reason := dev.Fit(test.devices, test.request, pod, nodeInfo, allocated)
+				klog.Infof("Result>>>> %d Ascend device plugins: %+v", len(result), result)
 				if fit != test.wantFit {
 					t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 				}

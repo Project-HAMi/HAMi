@@ -95,7 +95,9 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 		if phase, ok := p.Annotations[DeviceBindPhase]; !ok {
 			continue
 		} else {
-			if strings.Compare(phase, DeviceBindAllocating) != 0 {
+			// Allow both "allocating" and "success" phases for multi-container pods
+			// where some containers have already been allocated but others are still pending
+			if phase != DeviceBindAllocating && phase != DeviceBindSuccess {
 				continue
 			}
 		}
@@ -183,6 +185,33 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	return err
 }
 
+func PatchPodLabels(namespace, name string, labels map[string]string) error {
+	type patchMetadata struct {
+		Labels map[string]string `json:"labels,omitempty"`
+	}
+	type patchPod struct {
+		Metadata patchMetadata `json:"metadata"`
+	}
+
+	p := patchPod{
+		Metadata: patchMetadata{
+			Labels: labels,
+		},
+	}
+
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	klog.V(5).InfoS("Patching pod labels", "namespace", namespace, "name", name, "labels", labels)
+	_, err = client.GetClient().CoreV1().Pods(namespace).
+		Patch(context.Background(), name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.ErrorS(err, "Failed to patch pod labels", "namespace", namespace, "name", name)
+	}
+	return err
+}
+
 func InitKlogFlags() *flag.FlagSet {
 	// Init log flags
 	flagset := flag.NewFlagSet("klog", flag.ExitOnError)
@@ -214,6 +243,10 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
+}
+
+func IsPodTerminating(pod *corev1.Pod) bool {
+	return pod.DeletionTimestamp != nil
 }
 
 func AllContainersCreated(pod *corev1.Pod) bool {

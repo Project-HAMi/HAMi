@@ -93,7 +93,7 @@ var (
 		Use:   "version",
 		Short: "print version",
 		Run: func(cmd *cobra.Command, _ []string) {
-			fmt.Println(Print())
+			cmd.Println(Print())
 		},
 	}
 )
