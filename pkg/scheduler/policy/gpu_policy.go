@@ -19,8 +19,6 @@ package policy
 import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
-
-	"k8s.io/klog/v2"
 )
 
 type DeviceListsScore struct {
@@ -43,17 +41,17 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
-		if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
-			return l.DeviceLists[i].Score < l.DeviceLists[j].Score
-		}
-		return l.DeviceLists[i].Device.Numa > l.DeviceLists[j].Device.Numa
-	}
-	// default policy is spread
-	if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
+	switch l.Policy {
+	case util.GPUSchedulerPolicyBinpack.String():
+		return l.DeviceLists[i].Score < l.DeviceLists[j].Score
+	case util.GPUSchedulerPolicySpread.String():
 		return l.DeviceLists[i].Score > l.DeviceLists[j].Score
+	default:
+		if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
+			return l.DeviceLists[i].Score > l.DeviceLists[j].Score
+		}
+		return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
 	}
-	return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
 }
 
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
