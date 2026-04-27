@@ -43,6 +43,7 @@ const (
 	Ascend910NetworkWeight = 10
 	VNPUModeAnnotation     = "huawei.com/vnpu-mode"
 	VNPUModeHamiCore       = "hami-core"
+	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
 type Devices struct {
@@ -430,16 +431,44 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	originReq := k.Nums
 	prevnuma := -1
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
+	var tmpDevs map[string]device.ContainerDevices
+	tmpDevs = make(map[string]device.ContainerDevices)
+	reason := make(map[string]int)
 
 	vnpuMode := ""
 	if pod != nil && pod.Annotations != nil {
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
 	}
+
+	
+	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+
+	// Werify whether the Node supports hami vnpu core 
+	nodeSupportHamiCore := false
+	if nodeInfo.Node.Annotations != nil {
+		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok && val == "true" {
+			nodeSupportHamiCore = true
+		}
+	}
+
+	var totalMemPerCard int32 = 0
+	if len(devices) > 0 {
+		totalMemPerCard = devices[0].Totalmem
+	}
+
+	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
+        if !nodeSupportHamiCore && isHAMiCore {
+			reason[common.ModeNotFit]++
+			klog.V(4).InfoS("Node filtered: Node does not support hami-core mode", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			return false, nil, common.GenReason(reason, len(devices))
+		} else if nodeSupportHamiCore && !isHAMiCore {
+			reason[common.ModeNotFit]++
+			klog.V(4).InfoS("Node filtered: Reserved for hami-core but pod is legacy vNPU", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			return false, nil, common.GenReason(reason, len(devices))
+		}
+	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
 
-	var tmpDevs map[string]device.ContainerDevices
-	tmpDevs = make(map[string]device.ContainerDevices)
-	reason := make(map[string]int)
 	needTopology := false
 	if strings.HasPrefix(npu.CommonWord(), Ascend910Prefix) && hasNetworkID(devices) {
 		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
@@ -495,7 +524,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		// Set dev.Totalcore to 100 if vnpuMode is hami-core
 		effectiveTotalCore := dev.Totalcore
-		if vnpuMode == VNPUModeHamiCore {
+		if isHAMiCore {
 			effectiveTotalCore = 100
 		}
 
