@@ -355,7 +355,7 @@ func init() {
 type v1SemFactory struct{}
 
 func (v1SemFactory) Match(h *nvidia.HeaderT, size int64) bool {
-	return h.MajorVersion == 1 && h.MinorVersion == 2
+	return h.MajorVersion == 1 && h.MinorVersion >= 2
 }
 func (v1SemFactory) Cast(data []byte) nvidia.UsageInfo { return CastSpecWithSemPostinit(data) }
 func (v1SemFactory) Name() string                      { return "v1-sem" }
