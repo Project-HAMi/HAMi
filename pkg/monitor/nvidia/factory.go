@@ -32,7 +32,7 @@ type CacheFactory interface {
 }
 
 var (
-	factories []CacheFactory
+	factories   []CacheFactory
 	factoriesMu sync.RWMutex
 )
 
