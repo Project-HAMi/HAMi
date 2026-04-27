@@ -385,7 +385,7 @@ data:
       commonWord: Ascend910B4
       resourceName: huawei.com/Ascend910B4
       resourceMemoryName: huawei.com/Ascend910B4-memory
-      resourceMemoryName: huawei.com/Ascend910B4-core
+      resourceCoreName: huawei.com/Ascend910B4-core
       memoryAllocatable: 32768
       memoryCapacity: 32768
       memoryFactor: 1
