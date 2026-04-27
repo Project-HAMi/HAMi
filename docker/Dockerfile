@@ -15,7 +15,7 @@ FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get -y update; apt-get -y install cmake git
+RUN apt-get update && apt-get install -y --no-install-recommends cmake git && apt-get clean && rm -rf /var/lib/apt/lists/*
 RUN bash ./build.sh
 
 FROM nvidia/cuda:12.6.3-base-ubuntu22.04
