@@ -39,6 +39,7 @@ jobs:
         uses: golangci/golangci-lint-action@v9
         with:
           version: v2.8.0
+          install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
 
@@ -165,7 +166,7 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.25.5-bookworm
+            GOLANG_IMAGE=golang:1.26.2-bookworm
             NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}

@@ -117,6 +117,12 @@ func (dev *Devices) CommonWord() string {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
+		if dev.config.OverwriteEnv {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "ASCEND_VISIBLE_DEVICES",
+				Value: "",
+			})
+		}
 		return false, nil
 	}
 
@@ -182,6 +188,11 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
+
+	// Set runtime class name if it is not set by user and the runtime class name is configured
+	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+	}
 	return true, nil
 }
 

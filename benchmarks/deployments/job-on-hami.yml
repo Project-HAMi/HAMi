@@ -4,12 +4,12 @@ metadata:
   name: ai-benchmark-on-hami
 spec:
   template:
-    metadata:
-      name: ai-benchmark-on-hami
     spec:
       containers:
-        - name: ai-benchmark-on-hami
-          image: 4pdosc/ai-benchmark:2.4.1-gpu
+        - name: vllm-server
+          image: <your-registry>/vllm-bench-server:latest
+          ports:
+            - containerPort: 8000
           resources:
             requests:
               nvidia.com/gpu: 1
@@ -17,4 +17,32 @@ spec:
             limits:
               nvidia.com/gpu: 1
               nvidia.com/gpumem-percentage: 50
+          volumeMounts:
+            - name: results
+              mountPath: /results
+
+        - name: benchmark-client
+          image: <your-registry>/vllm-bench-client:latest
+          env:
+            - name: VLLM_URL
+              value: "http://127.0.0.1:8000/v1/chat/completions"
+          args:
+            - "--vllm-url"
+            - "http://127.0.0.1:8000/v1/chat/completions"
+            - "--model"
+            - "Qwen3-8B"
+            - "--warmup"
+            - "30"
+            - "--runs"
+            - "200"
+            - "--output"
+            - "/results/bench_hami.jsonl"
+          volumeMounts:
+            - name: results
+              mountPath: /results
+
+      volumes:
+        - name: results
+          emptyDir: {}
+
       restartPolicy: Never
