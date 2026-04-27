@@ -4,15 +4,40 @@ metadata:
   name: ai-benchmark-on-official
 spec:
   template:
-    metadata:
-      name: ai-benchmark-on-official
     spec:
       containers:
-        - name: ai-benchmark-on-official
-          image: 4pdosc/ai-benchmark:2.4.1-gpu
+        - name: vllm-server
+          image: <your-registry>/vllm-bench-server:latest
+          ports:
+            - containerPort: 8000
           resources:
             requests:
               nvidia.com/gpu: 1
             limits:
               nvidia.com/gpu: 1
+          volumeMounts:
+            - name: results
+              mountPath: /results
+
+        - name: benchmark-client
+          image: <your-registry>/vllm-bench-client:latest
+          args:
+            - "--vllm-url"
+            - "http://127.0.0.1:8000/v1/chat/completions"
+            - "--model"
+            - "Qwen3-8B"
+            - "--warmup"
+            - "30"
+            - "--runs"
+            - "200"
+            - "--output"
+            - "/results/bench_native.jsonl"
+          volumeMounts:
+            - name: results
+              mountPath: /results
+
+      volumes:
+        - name: results
+          emptyDir: {}
+
       restartPolicy: Never
