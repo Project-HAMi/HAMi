@@ -1507,3 +1507,489 @@ func TestFitQuota(t *testing.T) {
 		})
 	}
 }
+
+func Test_generateCombinations(t *testing.T) {
+	tests := []struct {
+		name    string
+		request device.ContainerDeviceRequest
+		tmpDevs map[string]device.ContainerDevices
+		wantLen int
+	}{
+		{
+			name: "choose 2 from 4 devices",
+			request: device.ContainerDeviceRequest{
+				Nums: 2,
+				Type: NvidiaGPUDevice,
+			},
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-0"}, {UUID: "gpu-1"}, {UUID: "gpu-2"}, {UUID: "gpu-3"},
+				},
+			},
+			wantLen: 6, // C(4,2)
+		},
+		{
+			name: "choose 1 from 3 devices",
+			request: device.ContainerDeviceRequest{
+				Nums: 1,
+				Type: NvidiaGPUDevice,
+			},
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-0"}, {UUID: "gpu-1"}, {UUID: "gpu-2"},
+				},
+			},
+			wantLen: 3, // C(3,1)
+		},
+		{
+			name: "choose all devices",
+			request: device.ContainerDeviceRequest{
+				Nums: 3,
+				Type: NvidiaGPUDevice,
+			},
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-0"}, {UUID: "gpu-1"}, {UUID: "gpu-2"},
+				},
+			},
+			wantLen: 1, // C(3,3)
+		},
+		{
+			name: "choose 2 from 2 devices",
+			request: device.ContainerDeviceRequest{
+				Nums: 2,
+				Type: NvidiaGPUDevice,
+			},
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-0"}, {UUID: "gpu-1"},
+				},
+			},
+			wantLen: 1, // C(2,2)
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := generateCombinations(tt.request, tt.tmpDevs)
+			if len(got) != tt.wantLen {
+				t.Fatalf("generateCombinations: want %d combinations, got %d", tt.wantLen, len(got))
+			}
+			for _, combo := range got {
+				if len(combo) != int(tt.request.Nums) {
+					t.Fatalf("each combination should have %d devices, got %d", tt.request.Nums, len(combo))
+				}
+			}
+		})
+	}
+}
+
+func Test_computeBestCombination(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu-0", DevicePairScore: device.DevicePairScore{
+					ID: "gpu-0",
+					Scores: map[string]int{"gpu-1": 10, "gpu-2": 5},
+				}},
+				{ID: "gpu-1", DevicePairScore: device.DevicePairScore{
+					ID: "gpu-1",
+					Scores: map[string]int{"gpu-0": 10, "gpu-2": 3},
+				}},
+				{ID: "gpu-2", DevicePairScore: device.DevicePairScore{
+					ID: "gpu-2",
+					Scores: map[string]int{"gpu-0": 5, "gpu-1": 3},
+				}},
+			},
+		},
+	}
+
+	combinations := []device.ContainerDevices{
+		{{UUID: "gpu-0"}, {UUID: "gpu-1"}}, // score 10
+		{{UUID: "gpu-0"}, {UUID: "gpu-2"}}, // score 5
+		{{UUID: "gpu-1"}, {UUID: "gpu-2"}}, // score 3
+	}
+
+	got := computeBestCombination(nodeInfo, combinations)
+	if len(got) != 2 {
+		t.Fatalf("expected 2 devices in best combination, got %d", len(got))
+	}
+	uuids := map[string]bool{got[0].UUID: true, got[1].UUID: true}
+	if !uuids["gpu-0"] || !uuids["gpu-1"] {
+		t.Fatalf("expected gpu-0 and gpu-1 as best combination, got %v", got)
+	}
+}
+
+func Test_computeBestCombination_empty(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu-0", DevicePairScore: device.DevicePairScore{
+					ID: "gpu-0", Scores: map[string]int{},
+				}},
+			},
+		},
+	}
+	got := computeBestCombination(nodeInfo, []device.ContainerDevices{})
+	if len(got) != 0 {
+		t.Fatalf("expected empty result for empty combinations, got %v", got)
+	}
+}
+
+func Test_computeWorstSingleCard(t *testing.T) {
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu-0", DevicePairScore: device.DevicePairScore{
+					ID:     "gpu-0",
+					Scores: map[string]int{"gpu-1": 10, "gpu-2": 10},
+				}},
+				{ID: "gpu-1", DevicePairScore: device.DevicePairScore{
+					ID:     "gpu-1",
+					Scores: map[string]int{"gpu-0": 10, "gpu-2": 2},
+				}},
+				{ID: "gpu-2", DevicePairScore: device.DevicePairScore{
+					ID:     "gpu-2",
+					Scores: map[string]int{"gpu-0": 10, "gpu-1": 2},
+				}},
+			},
+		},
+	}
+
+	tmpDevs := map[string]device.ContainerDevices{
+		NvidiaGPUDevice: {
+			{UUID: "gpu-0"},
+			{UUID: "gpu-1"},
+			{UUID: "gpu-2"},
+		},
+	}
+
+	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice, Nums: 1}
+	got := computeWorstSingleCard(nodeInfo, req, tmpDevs)
+
+	if len(got) != 1 {
+		t.Fatalf("expected 1 device, got %d", len(got))
+	}
+	// gpu-1 and gpu-2 both have total score 12 (10+2), gpu-0 has 20 — worst is gpu-1 or gpu-2
+	if got[0].UUID == "gpu-0" {
+		t.Fatalf("gpu-0 has highest score, should not be worst; got %s", got[0].UUID)
+	}
+}
+
+func Test_GenerateResourceRequests(t *testing.T) {
+	defaultConfig := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultCores:                 0,
+	}
+
+	tests := []struct {
+		name string
+		ctr  corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "gpu with mem and cores in limits",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      resource.MustParse("2"),
+						"nvidia.com/gpumem":   resource.MustParse("4096"),
+						"nvidia.com/gpucores": resource.MustParse("50"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2,
+				Type:             NvidiaGPUDevice,
+				Memreq:           4096,
+				MemPercentagereq: 101,
+				Coresreq:         50,
+			},
+		},
+		{
+			name: "gpu with mem-percentage",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":              resource.MustParse("1"),
+						"nvidia.com/gpumem-percentage": resource.MustParse("80"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 80,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu from requests only",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":    resource.MustParse("1"),
+						"nvidia.com/gpumem": resource.MustParse("2048"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           2048,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "no gpu resource returns empty",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cpu": resource.MustParse("2"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "no mem fields falls back to mempercent=100",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+	}
+
+	dev := &NvidiaGPUDevices{config: defaultConfig}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := dev.GenerateResourceRequests(&tt.ctr)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_MemoryFactor(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:  "nvidia.com/gpu",
+			ResourceMemoryName: "nvidia.com/gpumem",
+			MemoryFactor:       2,
+		},
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":    resource.MustParse("1"),
+				"nvidia.com/gpumem": resource.MustParse("1024"),
+			},
+		},
+	}
+	got := dev.GenerateResourceRequests(&ctr)
+	if got.Memreq != 2048 {
+		t.Fatalf("expected memory 2048 after factor=2, got %d", got.Memreq)
+	}
+}
+
+func Test_FilterDeviceToRegister_extended(t *testing.T) {
+	tests := []struct {
+		name   string
+		filter *FilterDevice
+		uuid   string
+		index  string
+		want   bool
+	}{
+		{
+			name:   "nil filter returns false",
+			filter: nil,
+			uuid:   "gpu-abc",
+			index:  "0",
+			want:   false,
+		},
+		{
+			name:   "empty filter returns false",
+			filter: &FilterDevice{UUID: []string{}, Index: []uint{}},
+			uuid:   "gpu-abc",
+			index:  "0",
+			want:   false,
+		},
+		{
+			name:   "uuid match",
+			filter: &FilterDevice{UUID: []string{"gpu-abc", "gpu-def"}},
+			uuid:   "gpu-abc",
+			index:  "",
+			want:   true,
+		},
+		{
+			name:   "uuid no match",
+			filter: &FilterDevice{UUID: []string{"gpu-xyz"}},
+			uuid:   "gpu-abc",
+			index:  "",
+			want:   false,
+		},
+		{
+			name:   "index match",
+			filter: &FilterDevice{Index: []uint{0, 1}},
+			uuid:   "",
+			index:  "1",
+			want:   true,
+		},
+		{
+			name:   "index no match",
+			filter: &FilterDevice{Index: []uint{2, 3}},
+			uuid:   "",
+			index:  "0",
+			want:   false,
+		},
+		{
+			name:   "invalid index string returns false",
+			filter: &FilterDevice{Index: []uint{0}},
+			uuid:   "",
+			index:  "notanumber",
+			want:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			DevicePluginFilterDevice = tt.filter
+			got := FilterDeviceToRegister(tt.uuid, tt.index)
+			if got != tt.want {
+				t.Fatalf("FilterDeviceToRegister(%q, %q) = %v, want %v", tt.uuid, tt.index, got, tt.want)
+			}
+		})
+	}
+	DevicePluginFilterDevice = nil
+}
+
+func Test_assertNuma(t *testing.T) {
+	tests := []struct {
+		name  string
+		annos map[string]string
+		want  bool
+	}{
+		{
+			name:  "numa bind true",
+			annos: map[string]string{NumaBind: "true"},
+			want:  true,
+		},
+		{
+			name:  "numa bind false",
+			annos: map[string]string{NumaBind: "false"},
+			want:  false,
+		},
+		{
+			name:  "numa bind missing",
+			annos: map[string]string{},
+			want:  false,
+		},
+		{
+			name:  "numa bind invalid value",
+			annos: map[string]string{NumaBind: "yes"},
+			want:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := assertNuma(tt.annos)
+			if got != tt.want {
+				t.Fatalf("assertNuma(%v) = %v, want %v", tt.annos, got, tt.want)
+			}
+		})
+	}
+}
+
+func Test_CheckHealth(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName: "nvidia.com/gpu",
+		},
+		ReportedGPUNum: map[string]int64{},
+	}
+
+	tests := []struct {
+		name        string
+		node        *corev1.Node
+		reported    int64
+		wantHealthy bool
+		wantUpdate  bool
+	}{
+		{
+			name: "node has GPUs, first report",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-1"},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("4"),
+					},
+				},
+			},
+			reported:    0,
+			wantHealthy: true,
+			wantUpdate:  true,
+		},
+		{
+			name: "node has GPUs, count unchanged",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-2"},
+				Status: corev1.NodeStatus{
+					Allocatable: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("4"),
+					},
+				},
+			},
+			reported:    4,
+			wantHealthy: true,
+			wantUpdate:  false,
+		},
+		{
+			name: "node has no GPUs, none reported",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-3"},
+				Status:     corev1.NodeStatus{},
+			},
+			reported:    0,
+			wantHealthy: true,
+			wantUpdate:  false,
+		},
+		{
+			name: "node has no GPUs, was previously reported",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node-4"},
+				Status:     corev1.NodeStatus{},
+			},
+			reported:    2,
+			wantHealthy: false,
+			wantUpdate:  false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev.ReportedGPUNum[tt.node.Name] = tt.reported
+			healthy, update := dev.CheckHealth(NvidiaGPUDevice, tt.node)
+			if healthy != tt.wantHealthy {
+				t.Fatalf("CheckHealth healthy = %v, want %v", healthy, tt.wantHealthy)
+			}
+			if update != tt.wantUpdate {
+				t.Fatalf("CheckHealth update = %v, want %v", update, tt.wantUpdate)
+			}
+		})
+	}
+}
