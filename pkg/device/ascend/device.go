@@ -37,12 +37,12 @@ import (
 )
 
 const (
-	NodeLockAscend         = "hami.io/mutex.lock"
-	Ascend910Prefix        = "Ascend910"
-	Ascend910CType         = "Ascend910C"
-	Ascend910NetworkWeight = 10
-	VNPUModeAnnotation     = "huawei.com/vnpu-mode"
-	VNPUModeHamiCore       = "hami-core"
+	NodeLockAscend             = "hami.io/mutex.lock"
+	Ascend910Prefix            = "Ascend910"
+	Ascend910CType             = "Ascend910C"
+	Ascend910NetworkWeight     = 10
+	VNPUModeAnnotation         = "huawei.com/vnpu-mode"
+	VNPUModeHamiCore           = "hami-core"
 	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
@@ -439,10 +439,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if pod != nil && pod.Annotations != nil {
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
 	}
-	
+
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// Verify whether the Node supports hami vnpu core 
+	// Verify whether the Node supports hami vnpu core
 	nodeSupportHamiCore := false
 	if nodeInfo.Node.Annotations != nil {
 		nodeSupportHamiCore = nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation] == "true"
@@ -454,7 +454,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
-        if nodeSupportHamiCore != isHAMiCore {
+		if nodeSupportHamiCore != isHAMiCore {
 			reason[common.ModeNotFit]++
 			logMsg := "Node filtered: Reserved for hami-core but pod is legacy vNPU"
 			if isHAMiCore {
