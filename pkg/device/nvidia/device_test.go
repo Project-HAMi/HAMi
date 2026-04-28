@@ -1561,8 +1561,11 @@ func TestAssertNuma(t *testing.T) {
 func TestCheckHealth(t *testing.T) {
 	config := NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}
 
+	oldHandshakeAnnos := util.HandshakeAnnos
+	defer func() { util.HandshakeAnnos = oldHandshakeAnnos }()
+
 	util.HandshakeAnnos = make(map[string]string)
-	util.HandshakeAnnos[NvidiaGPUDevice] = "hami.io/node-handshake" // Adjust annotation key if different
+	util.HandshakeAnnos[NvidiaGPUDevice] = "hami.io/node-handshake"
 
 	pastTime := time.Now().Add(-2 * time.Hour).Format(time.DateTime)
 
