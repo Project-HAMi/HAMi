@@ -61,6 +61,18 @@ const (
 	VulkanLayerName        = "VK_LAYER_HAMI_vgpu"
 	NvidiaDriverCapsEnvVar = "NVIDIA_DRIVER_CAPABILITIES"
 	HamiVulkanEnvVar       = "HAMI_VULKAN_ENABLE"
+
+	// VulkanManifestVolumeName is the pod-level volume that exposes the
+	// host's hami.json implicit-layer manifest into the container at the
+	// standard Vulkan loader search path.
+	VulkanManifestVolumeName = "hami-vulkan-manifest"
+	// VulkanManifestHostPath is where the hami-vulkan-manifest-installer
+	// DaemonSet drops the manifest on each GPU node. The webhook mounts
+	// this single file (not the whole directory) into the container so
+	// the existing /etc/vulkan/implicit_layer.d/nvidia_layers.json from
+	// the image keeps working alongside it.
+	VulkanManifestHostPath      = "/etc/vulkan/implicit_layer.d/hami.json"
+	VulkanManifestContainerPath = "/etc/vulkan/implicit_layer.d/hami.json"
 )
 
 var (
@@ -421,8 +433,12 @@ func mergeGraphicsCap(existing string) string {
 	return strings.Join(cleaned, ",")
 }
 
-// applyVulkanAnnotation mutates the container env when the pod opts into
-// Vulkan partitioning. No-op otherwise.
+// applyVulkanAnnotation mutates the container env and pod spec when the
+// pod opts into Vulkan partitioning. It (1) ensures NVIDIA_DRIVER_
+// CAPABILITIES contains "graphics", (2) sets HAMI_VULKAN_ENABLE=1 so the
+// loader's enable_environment gate matches, and (3) injects a hostPath
+// volume that exposes the per-node hami.json implicit-layer manifest at
+// the container's /etc/vulkan/implicit_layer.d/ path. No-op otherwise.
 func applyVulkanAnnotation(ctr *corev1.Container, pod *corev1.Pod) {
 	if pod == nil || pod.Annotations[VulkanEnableAnno] != "true" {
 		return
@@ -448,6 +464,47 @@ func applyVulkanAnnotation(ctr *corev1.Container, pod *corev1.Pod) {
 	if !hasEnable {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: HamiVulkanEnvVar, Value: "1"})
 	}
+
+	ensureVulkanManifestVolume(pod)
+	ensureVulkanManifestVolumeMount(ctr)
+}
+
+// ensureVulkanManifestVolume appends the host hami.json manifest to the
+// pod's volume list once. Idempotent across calls (one per container) so
+// the same volume is not duplicated when the pod has multiple containers
+// that all opt into Vulkan partitioning.
+func ensureVulkanManifestVolume(pod *corev1.Pod) {
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == VulkanManifestVolumeName {
+			return
+		}
+	}
+	fileType := corev1.HostPathFile
+	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
+		Name: VulkanManifestVolumeName,
+		VolumeSource: corev1.VolumeSource{
+			HostPath: &corev1.HostPathVolumeSource{
+				Path: VulkanManifestHostPath,
+				Type: &fileType,
+			},
+		},
+	})
+}
+
+// ensureVulkanManifestVolumeMount appends a read-only volumeMount to the
+// container so the Vulkan loader inside the pod discovers the layer at
+// the canonical implicit_layer.d path. Idempotent.
+func ensureVulkanManifestVolumeMount(ctr *corev1.Container) {
+	for _, m := range ctr.VolumeMounts {
+		if m.Name == VulkanManifestVolumeName {
+			return
+		}
+	}
+	ctr.VolumeMounts = append(ctr.VolumeMounts, corev1.VolumeMount{
+		Name:      VulkanManifestVolumeName,
+		MountPath: VulkanManifestContainerPath,
+		ReadOnly:  true,
+	})
 }
 
 func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
