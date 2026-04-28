@@ -73,6 +73,15 @@ const (
 	// the image keeps working alongside it.
 	VulkanManifestHostPath      = "/etc/vulkan/implicit_layer.d/hami.json"
 	VulkanManifestContainerPath = "/etc/vulkan/implicit_layer.d/hami.json"
+	// VulkanLibSoVolumeName exposes libvgpu_vk.so (Step C split) into
+	// the container at the path the manifest's library_path references.
+	// volcano-vgpu-device-plugin already mounts /usr/local/vgpu/libvgpu.so
+	// for every GPU pod, but it does NOT mount libvgpu_vk.so — that file
+	// is only ever needed by Vulkan-opt-in pods, so the webhook handles
+	// it on a per-pod basis.
+	VulkanLibSoVolumeName    = "hami-vulkan-lib-so"
+	VulkanLibSoHostPath      = "/usr/local/vgpu/libvgpu_vk.so"
+	VulkanLibSoContainerPath = "/usr/local/vgpu/libvgpu_vk.so"
 )
 
 var (
@@ -465,44 +474,45 @@ func applyVulkanAnnotation(ctr *corev1.Container, pod *corev1.Pod) {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{Name: HamiVulkanEnvVar, Value: "1"})
 	}
 
-	ensureVulkanManifestVolume(pod)
-	ensureVulkanManifestVolumeMount(ctr)
+	ensureHostPathFileVolume(pod, VulkanManifestVolumeName, VulkanManifestHostPath)
+	ensureHostPathFileVolumeMount(ctr, VulkanManifestVolumeName, VulkanManifestContainerPath)
+	ensureHostPathFileVolume(pod, VulkanLibSoVolumeName, VulkanLibSoHostPath)
+	ensureHostPathFileVolumeMount(ctr, VulkanLibSoVolumeName, VulkanLibSoContainerPath)
 }
 
-// ensureVulkanManifestVolume appends the host hami.json manifest to the
-// pod's volume list once. Idempotent across calls (one per container) so
-// the same volume is not duplicated when the pod has multiple containers
-// that all opt into Vulkan partitioning.
-func ensureVulkanManifestVolume(pod *corev1.Pod) {
+// ensureHostPathFileVolume appends a HostPathFile volume to the pod once
+// (idempotent across calls — used when the same opt-in trigger fires per
+// container of a multi-container pod). The volume source is the named
+// host file (not directory) so the bind mount is precise.
+func ensureHostPathFileVolume(pod *corev1.Pod, name, hostPath string) {
 	for _, v := range pod.Spec.Volumes {
-		if v.Name == VulkanManifestVolumeName {
+		if v.Name == name {
 			return
 		}
 	}
 	fileType := corev1.HostPathFile
 	pod.Spec.Volumes = append(pod.Spec.Volumes, corev1.Volume{
-		Name: VulkanManifestVolumeName,
+		Name: name,
 		VolumeSource: corev1.VolumeSource{
 			HostPath: &corev1.HostPathVolumeSource{
-				Path: VulkanManifestHostPath,
+				Path: hostPath,
 				Type: &fileType,
 			},
 		},
 	})
 }
 
-// ensureVulkanManifestVolumeMount appends a read-only volumeMount to the
-// container so the Vulkan loader inside the pod discovers the layer at
-// the canonical implicit_layer.d path. Idempotent.
-func ensureVulkanManifestVolumeMount(ctr *corev1.Container) {
+// ensureHostPathFileVolumeMount appends a read-only volumeMount referring
+// to the named volume into the container. Idempotent per container.
+func ensureHostPathFileVolumeMount(ctr *corev1.Container, name, mountPath string) {
 	for _, m := range ctr.VolumeMounts {
-		if m.Name == VulkanManifestVolumeName {
+		if m.Name == name {
 			return
 		}
 	}
 	ctr.VolumeMounts = append(ctr.VolumeMounts, corev1.VolumeMount{
-		Name:      VulkanManifestVolumeName,
-		MountPath: VulkanManifestContainerPath,
+		Name:      name,
+		MountPath: mountPath,
 		ReadOnly:  true,
 	})
 }
