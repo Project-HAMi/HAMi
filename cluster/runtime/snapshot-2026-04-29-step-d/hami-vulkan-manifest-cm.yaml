@@ -18,6 +18,9 @@ data:
             "device_extensions": [],
             "enable_environment": {
                 "HAMI_VULKAN_ENABLE": "1"
+            },
+            "disable_environment": {
+                "DISABLE_HAMI_VULKAN_LAYER": "1"
             }
         }
     }
