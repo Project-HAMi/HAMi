@@ -1804,7 +1804,7 @@ func TestDevices_Fit(t *testing.T) {
 				Numa: 0, Health: true,
 			}},
 			request: device.ContainerDeviceRequest{
-				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0, 
+				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0,
 			},
 			annos:          map[string]string{},
 			wantFit:        false,
