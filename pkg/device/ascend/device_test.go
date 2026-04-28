@@ -1385,14 +1385,15 @@ func TestDevices_Fit(t *testing.T) {
 	devs := InitDevices(config)
 
 	tests := []struct {
-		name       string
-		devices    []*device.DeviceUsage
-		request    device.ContainerDeviceRequest
-		annos      map[string]string
-		wantFit    bool
-		wantLen    int
-		wantDevIDs []string
-		wantReason string
+		name           string
+		devices        []*device.DeviceUsage
+		request        device.ContainerDeviceRequest
+		annos          map[string]string
+		nodeAnnotation map[string]string
+		wantFit        bool
+		wantLen        int
+		wantDevIDs     []string
+		wantReason     string
 	}{
 		{
 			name: "fit success",
@@ -1776,6 +1777,42 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{"dev-2", "dev-1"},
 			wantReason: "",
 		},
+		{
+			name: "fit fail: hami-core pod on legacy node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 15360, MemPercentagereq: 0, Coresreq: 20,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{},
+		},
+		{
+			name: "fit fail: legacy pod on hami-core reserved node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0, 
+			},
+			annos:          map[string]string{},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
 	}
 
 	for _, dev := range devs {
@@ -1802,6 +1839,11 @@ func TestDevices_Fit(t *testing.T) {
 				}
 				nodeInfo := &device.NodeInfo{
 					ID: "node1",
+					Node: &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Annotations: test.nodeAnnotation,
+						},
+					},
 					Devices: map[string][]device.DeviceInfo{
 						dev.config.CommonWord: {
 							{
