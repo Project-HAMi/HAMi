@@ -32,7 +32,7 @@ require (
 	k8s.io/apimachinery v0.36.0
 	k8s.io/client-go v0.36.0
 	k8s.io/klog/v2 v2.140.0
-	k8s.io/kube-scheduler v0.35.4
+	k8s.io/kube-scheduler v0.36.0
 	k8s.io/kubelet v0.35.4
 	sigs.k8s.io/controller-runtime v0.23.3
 	tags.cncf.io/container-device-interface v1.1.0
@@ -71,7 +71,7 @@ require (
 	github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 // indirect
 	github.com/pmezard/go-difflib v1.0.1-0.20181226105442-5d4384ee4fb2 // indirect
 	github.com/prometheus/client_model v0.6.2 // indirect
-	github.com/prometheus/common v0.66.1 // indirect
+	github.com/prometheus/common v0.67.5 // indirect
 	github.com/prometheus/procfs v0.20.1 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
@@ -86,7 +86,7 @@ require (
 	golang.org/x/text v0.36.0 // indirect
 	golang.org/x/time v0.14.0 // indirect
 	gomodules.xyz/jsonpatch/v2 v2.4.0 // indirect
-	google.golang.org/genproto/googleapis/rpc v0.0.0-20260120221211-b8f7ae30c516 // indirect
+	google.golang.org/genproto/googleapis/rpc v0.0.0-20260128011058-8636f8732409 // indirect
 	google.golang.org/protobuf v1.36.12-0.20260120151049-f2248ac996af // indirect
 	gopkg.in/evanphx/json-patch.v4 v4.13.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
