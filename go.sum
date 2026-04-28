@@ -196,6 +196,7 @@ go.opentelemetry.io/otel/sdk v1.39.0 h1:nMLYcjVsvdui1B/4FRkwjzoRVsMK8uL/cj0OyhKz
 go.opentelemetry.io/otel/sdk v1.39.0/go.mod h1:vDojkC4/jsTJsE+kh+LXYQlbL8CgrEcwmt1ENZszdJE=
 go.opentelemetry.io/otel/sdk/metric v1.39.0 h1:cXMVVFVgsIf2YL6QkRF4Urbr/aMInf+2WKg+sEJTtB8=
 go.opentelemetry.io/otel/sdk/metric v1.39.0/go.mod h1:xq9HEVH7qeX69/JnwEfp6fVq5wosJsY1mt4lLfYdVew=
+go.opentelemetry.io/otel/sdk/metric v1.40.0 h1:mtmdVqgQkeRxHgRv4qhyJduP3fYJRMX4AtAlbuWdCYw=
 go.opentelemetry.io/otel/trace v1.41.0 h1:Vbk2co6bhj8L59ZJ6/xFTskY+tGAbOnCtQGVVa9TIN0=
 go.opentelemetry.io/otel/trace v1.41.0/go.mod h1:U1NU4ULCoxeDKc09yCWdWe+3QoyweJcISEVa1RBzOis=
 go.uber.org/goleak v1.3.0 h1:2K3zAYmnTNqV73imy9J1T3WC+gmCePx2hEGkimedGto=
@@ -283,6 +284,8 @@ k8s.io/kube-scheduler v0.36.0 h1:S17SC9TtoUGu/Mi1cylBlUbX7xKWK3Vs8mhWS7daxFE=
 k8s.io/kube-scheduler v0.36.0/go.mod h1:f5aFSPQTIzW+wIyuRb3Bay8YQmzp9JBa0HKIrhf/VyQ=
 k8s.io/kubelet v0.35.4 h1:g/qX1F6PdJQYzAzje3BDRGGEAmeYiiRi9QlLuyliRyw=
 k8s.io/kubelet v0.35.4/go.mod h1:T3X1s+/TM23j8j3hjIem0PCBoSc7VNaKDyOkzAHUiDU=
+k8s.io/kubelet v0.36.0 h1:zWeevZeGl80DInNU6WUo13yWmgbEajkRaBFqeKqkweA=
+k8s.io/kubelet v0.36.0/go.mod h1:PLROV2RwWJkSbAkdZ8HeJWsbsjEEEMlhRIEzAwGeU9c=
 k8s.io/utils v0.0.0-20251002143259-bc988d571ff4 h1:SjGebBtkBqHFOli+05xYbK8YF1Dzkbzn+gDM4X9T4Ck=
 k8s.io/utils v0.0.0-20251002143259-bc988d571ff4/go.mod h1:OLgZIPagt7ERELqWJFomSt595RzquPNLL48iOWgYOg0=
 k8s.io/utils v0.0.0-20260210185600-b8788abfbbc2 h1:AZYQSJemyQB5eRxqcPky+/7EdBj0xi3g0ZcxxJ7vbWU=

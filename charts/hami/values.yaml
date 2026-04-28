@@ -483,17 +483,22 @@ devices:
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910A-core
       - huawei.com/Ascend910B2
       - huawei.com/Ascend910B2-memory
+      - huawei.com/Ascend910B2-core
       - huawei.com/Ascend910B3
       - huawei.com/Ascend910B3-memory
       - huawei.com/Ascend910B3-core
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
+      - huawei.com/Ascend910B4-core
       - huawei.com/Ascend910B4-1
       - huawei.com/Ascend910B4-1-memory
+      - huawei.com/Ascend910B4-1-core
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+      - huawei.com/Ascend310P-core
       - huawei.com/Ascend910C
       - huawei.com/Ascend910C-memory
       - huawei.com/Ascend910C-core
