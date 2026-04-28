@@ -439,16 +439,13 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if pod != nil && pod.Annotations != nil {
 		vnpuMode = pod.Annotations[VNPUModeAnnotation]
 	}
-
 	
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// Werify whether the Node supports hami vnpu core 
+	// Verify whether the Node supports hami vnpu core 
 	nodeSupportHamiCore := false
 	if nodeInfo.Node.Annotations != nil {
-		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok && val == "true" {
-			nodeSupportHamiCore = true
-		}
+		nodeSupportHamiCore = nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation] == "true"
 	}
 
 	var totalMemPerCard int32 = 0
@@ -457,13 +454,13 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
-        if !nodeSupportHamiCore && isHAMiCore {
+        if nodeSupportHamiCore != isHAMiCore {
 			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: Node does not support hami-core mode", "node", nodeInfo.Node.Name, "pod", pod.Name)
-			return false, nil, common.GenReason(reason, len(devices))
-		} else if nodeSupportHamiCore && !isHAMiCore {
-			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: Reserved for hami-core but pod is legacy vNPU", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			logMsg := "Node filtered: Reserved for hami-core but pod is legacy vNPU"
+			if isHAMiCore {
+				logMsg = "Node filtered: Node does not support hami-core mode"
+			}
+			klog.V(4).InfoS(logMsg, "node", nodeInfo.Node.Name, "pod", pod.Name)
 			return false, nil, common.GenReason(reason, len(devices))
 		}
 	}
