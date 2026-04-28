@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: hami-vulkan-manifest-installer
+  namespace: kube-system
+  labels:
+    app: hami-vulkan-manifest-installer
+spec:
+  selector:
+    matchLabels:
+      app: hami-vulkan-manifest-installer
+  template:
+    metadata:
+      labels:
+        app: hami-vulkan-manifest-installer
+    spec:
+      nodeSelector:
+        nvidia.com/gpu.present: "true"
+      hostPID: false
+      restartPolicy: Always
+      tolerations:
+        - operator: Exists
+      containers:
+        - name: installer
+          image: busybox:1.36
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            runAsUser: 0
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -eu
+              mkdir -p /host/etc/vulkan/implicit_layer.d
+              cp -f /manifest/hami.json /host/etc/vulkan/implicit_layer.d/hami.json
+              echo "[hami-vulkan-manifest] installed at /etc/vulkan/implicit_layer.d/hami.json"
+              # DaemonSet 이라 종료하지 않고 sleep — restart 루프 회피
+              sleep infinity
+          volumeMounts:
+            - name: manifest
+              mountPath: /manifest
+              readOnly: true
+            - name: host-etc-vulkan
+              mountPath: /host/etc/vulkan
+      volumes:
+        - name: manifest
+          configMap:
+            name: hami-vulkan-manifest
+        - name: host-etc-vulkan
+          hostPath:
+            path: /etc/vulkan
+            type: DirectoryOrCreate
+  updateStrategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1

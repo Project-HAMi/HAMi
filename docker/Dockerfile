@@ -16,6 +16,7 @@ COPY ./libvgpu /libvgpu
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake libvulkan-dev
+ENV CI_COMMIT_SHA=docker-build
 RUN bash ./build.sh
 
 FROM nvidia/cuda:12.6.3-base-ubuntu22.04
