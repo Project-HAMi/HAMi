@@ -626,6 +626,74 @@ func Test_Filter(t *testing.T) {
 	}
 }
 
+func TestSchedulerOnDelPodReleasesOwnedNodeLock(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deleted-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "locked-node",
+			},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "locked-node", Annotations: map[string]string{nodelockutil.NodeLockKey: nodelockutil.GenerateNodeLockKeyByPod(pod)}}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	s.onDelPod(pod)
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "locked-node", metav1.GetOptions{})
+	require.NoError(t, err)
+	_, ok := node.Annotations[nodelockutil.NodeLockKey]
+	require.False(t, ok)
+}
+
+func TestSchedulerOnDelPodKeepsOtherPodNodeLock(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	s := NewScheduler()
+	deletedPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "deleted-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "locked-node",
+			},
+		},
+	}
+	ownerPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"}}
+	lockValue := nodelockutil.GenerateNodeLockKeyByPod(ownerPod)
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "locked-node", Annotations: map[string]string{nodelockutil.NodeLockKey: lockValue}}}, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	s.onDelPod(deletedPod)
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "locked-node", metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Equal(t, lockValue, node.Annotations[nodelockutil.NodeLockKey])
+}
+
+func TestSchedulerRegisterReleasesStaleNodeLock(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	ownerPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "missing-owner", Namespace: "default"}}
+	lockValue := time.Now().Add(-10*time.Minute).Format(time.RFC3339) + nodelockutil.NodeLockSep + nodelockutil.GeneratePodNamespaceName(ownerPod, nodelockutil.NodeLockSep)
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "stale-node", Annotations: map[string]string{nodelockutil.NodeLockKey: lockValue}}}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+
+	s.register(labels.Everything(), map[string]bool{})
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "stale-node", metav1.GetOptions{})
+	require.NoError(t, err)
+	_, ok := updated.Annotations[nodelockutil.NodeLockKey]
+	require.False(t, ok)
+}
+
 func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)

@@ -65,6 +65,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
@@ -593,7 +594,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	nodename := os.Getenv(util.NodeNameEnvName)
 	current, err := getPendingPod(ctx, nodename)
 	if err != nil {
-		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
+		if _, releaseErr := nodelock.ReleaseStaleNodeLock(nodename, NodeLockNvidia); releaseErr != nil {
+			klog.ErrorS(releaseErr, "Failed to release stale node lock after pending pod lookup failed", "node", nodename)
+		}
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
@@ -641,6 +644,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(alignedDevreq))
 			if err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 

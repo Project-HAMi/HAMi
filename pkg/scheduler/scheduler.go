@@ -187,9 +187,12 @@ func (s *Scheduler) onDelPod(obj any) {
 		return
 	}
 
-	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
+	nodeID, ok := pod.Annotations[util.AssignedNodeAnnotations]
 	if !ok {
 		return
+	}
+	if err := nodelockutil.ReleaseNodeLock(nodeID, nodelockutil.NodeLockKey, pod, false); err != nil {
+		klog.ErrorS(err, "Failed to release node lock for deleted pod", "node", nodeID, "pod", klog.KObj(pod))
 	}
 	pi, ok := s.podManager.GetPod(pod)
 	if ok {
@@ -379,6 +382,9 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	var nodeNames []string
 	for _, val := range rawNodes {
 		nodeNames = append(nodeNames, val.Name)
+		if _, err := nodelockutil.ReleaseStaleNodeLock(val.Name, nodelockutil.NodeLockKey); err != nil {
+			klog.ErrorS(err, "Failed to release stale node lock", "node", val.Name)
+		}
 		klog.V(5).InfoS("Processing node", "nodeName", val.Name)
 
 		for devhandsk, devInstance := range device.GetDevices() {

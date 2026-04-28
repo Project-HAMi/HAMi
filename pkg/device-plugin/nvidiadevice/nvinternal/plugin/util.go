@@ -481,7 +481,6 @@ func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockNa
 	newAnnos := map[string]string{util.DeviceBindPhase: deviceBindPhase}
 	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
 		klog.Errorf("Failed to patch pod annotations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
-		return
 	}
 	if err := nodelock.ReleaseNodeLock(nodeName, lockName, pod, false); err != nil {
 		klog.Errorf("Failed to release node lock for node %s and lock %s: %v", nodeName, lockName, err)

@@ -71,7 +71,11 @@ func GetNode(nodename string) (*corev1.Node, error) {
 func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	pod, err := GetAllocatePodByNode(ctx, node)
 	if err != nil {
-		return nil, err
+		if !apierrors.IsNotFound(err) {
+			return nil, err
+		}
+		klog.InfoS("Node lock owner pod not found, falling back to pending pod scan", "node", node)
+		pod = nil
 	}
 	if pod != nil {
 		return pod, nil

@@ -28,6 +28,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func TestGenerateMigTemplate(t *testing.T) {
@@ -422,9 +423,10 @@ func Test_PodAllocationSuccess(t *testing.T) {
 
 	nodeName := "test-node"
 	lockName := "test-lock"
-
-	// Update pod annotations and release the lock as part of the setup for the test
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
+	_, err = client.KubeClient.CoreV1().Nodes().Create(context.Background(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod)}}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test node: %v", err)
+	}
 
 	// Call the function under test
 	PodAllocationSuccess(nodeName, pod, lockName)
@@ -439,7 +441,39 @@ func Test_PodAllocationSuccess(t *testing.T) {
 	if !ok || annos != util.DeviceBindSuccess {
 		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindSuccess, annos)
 	}
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get test node: %v", err)
+	}
+	if _, ok := node.Annotations[nodelock.NodeLockKey]; ok {
+		t.Error("Expected node lock to be released")
+	}
 }
+func TestUpdatePodAnnotationsAndReleaseLockReleasesWhenPodPatchFails(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-pod",
+			Namespace: "default",
+		},
+	}
+	nodeName := "test-node"
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod)}}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test node: %v", err)
+	}
+
+	updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", util.DeviceBindFailed)
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get test node: %v", err)
+	}
+	if _, ok := node.Annotations[nodelock.NodeLockKey]; ok {
+		t.Error("Expected node lock to be released even when pod patch fails")
+	}
+}
+
 func Test_PodAllocationFailed(t *testing.T) {
 
 	client.KubeClient = fake.NewClientset()
@@ -459,6 +493,10 @@ func Test_PodAllocationFailed(t *testing.T) {
 
 	nodeName := "test-node"
 	lockName := "test-lock"
+	_, err = client.KubeClient.CoreV1().Nodes().Create(context.Background(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod)}}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create test node: %v", err)
+	}
 
 	// simulate a failed pod allocation
 	podAllocationFailed(nodeName, pod, lockName)
@@ -474,5 +512,12 @@ func Test_PodAllocationFailed(t *testing.T) {
 		t.Error("Expected DeviceBindPhase annotation to be present")
 	} else if annos != util.DeviceBindFailed {
 		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
+	}
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get test node: %v", err)
+	}
+	if _, ok := node.Annotations[nodelock.NodeLockKey]; ok {
+		t.Error("Expected node lock to be released")
 	}
 }

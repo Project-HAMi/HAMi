@@ -196,8 +196,6 @@ func TestGetPendingPod(t *testing.T) {
 	}
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node1, metav1.CreateOptions{})
 
-	pendingPod := podList[0]
-
 	tests := []struct {
 		name    string
 		node    string
@@ -208,7 +206,7 @@ func TestGetPendingPod(t *testing.T) {
 			name:    "find pending pod",
 			node:    "test-node-0",
 			wantErr: false,
-			want:    pendingPod,
+			want:    podList[0],
 		},
 		{
 			name:    "find allocated pod",
@@ -229,6 +227,45 @@ func TestGetPendingPod(t *testing.T) {
 				assert.Equal(t, got.Name, tt.want.Name)
 			}
 		})
+	}
+}
+
+func TestGetPendingPodFallsBackWhenLockOwnerMissing(t *testing.T) {
+	client.KubeClient = fake.NewSimpleClientset()
+	missingOwner := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "missing-owner",
+			Namespace: "default",
+		},
+	}
+	fallbackPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pending-pod-fallback",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     "2024-01-01T00:00:00Z",
+				DeviceBindPhase:         DeviceBindAllocating,
+				AssignedNodeAnnotations: "test-node-fallback",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-fallback"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	_, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), fallbackPod, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fallback pod: %v", err)
+	}
+	_, err = client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node-fallback", Annotations: map[string]string{nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(missingOwner)}}}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fallback node: %v", err)
+	}
+
+	got, err := GetPendingPod(context.TODO(), "test-node-fallback")
+	if err != nil {
+		t.Fatalf("GetPendingPod returned error: %v", err)
+	}
+	if got.Name != fallbackPod.Name {
+		t.Fatalf("expected fallback pod %q, got %q", fallbackPod.Name, got.Name)
 	}
 }
 

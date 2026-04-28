@@ -443,6 +443,93 @@ func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
 	}
 }
 
+func TestReleaseStaleNodeLock(t *testing.T) {
+	originalTimeout := NodeLockTimeout
+	NodeLockTimeout = time.Minute * 5
+	defer func() { NodeLockTimeout = originalTimeout }()
+
+	makeLock := func(lockTime time.Time, pod *corev1.Pod) string {
+		return lockTime.Format(time.RFC3339) + NodeLockSep + GeneratePodNamespaceName(pod, NodeLockSep)
+	}
+
+	t.Run("releases expired lock", func(t *testing.T) {
+		client.KubeClient = fake.NewSimpleClientset()
+		nodeName := "expired-node"
+		owner := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "owner", Namespace: "default"}}
+		_, err := client.KubeClient.CoreV1().Pods(owner.Namespace).Create(context.TODO(), owner, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create pod: %v", err)
+		}
+		_, err = client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: makeLock(time.Now().Add(-10*time.Minute), owner)}}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+
+		released, err := ReleaseStaleNodeLock(nodeName, NodeLockKey)
+		if err != nil {
+			t.Fatalf("ReleaseStaleNodeLock returned error: %v", err)
+		}
+		if !released {
+			t.Fatal("expected stale lock to be released")
+		}
+		node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get node: %v", err)
+		}
+		if _, ok := node.Annotations[NodeLockKey]; ok {
+			t.Fatal("expected node lock annotation to be removed")
+		}
+	})
+
+	t.Run("releases dangling owner lock", func(t *testing.T) {
+		client.KubeClient = fake.NewSimpleClientset()
+		nodeName := "dangling-node"
+		owner := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "missing", Namespace: "default"}}
+		_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: makeLock(time.Now(), owner)}}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+
+		released, err := ReleaseStaleNodeLock(nodeName, NodeLockKey)
+		if err != nil {
+			t.Fatalf("ReleaseStaleNodeLock returned error: %v", err)
+		}
+		if !released {
+			t.Fatal("expected dangling lock to be released")
+		}
+	})
+
+	t.Run("keeps fresh owner lock", func(t *testing.T) {
+		client.KubeClient = fake.NewSimpleClientset()
+		nodeName := "fresh-node"
+		owner := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "owner", Namespace: "default"}}
+		_, err := client.KubeClient.CoreV1().Pods(owner.Namespace).Create(context.TODO(), owner, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create pod: %v", err)
+		}
+		lockValue := makeLock(time.Now(), owner)
+		_, err = client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{NodeLockKey: lockValue}}}, metav1.CreateOptions{})
+		if err != nil {
+			t.Fatalf("failed to create node: %v", err)
+		}
+
+		released, err := ReleaseStaleNodeLock(nodeName, NodeLockKey)
+		if err != nil {
+			t.Fatalf("ReleaseStaleNodeLock returned error: %v", err)
+		}
+		if released {
+			t.Fatal("expected fresh lock to remain")
+		}
+		node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to get node: %v", err)
+		}
+		if got := node.Annotations[NodeLockKey]; got != lockValue {
+			t.Fatalf("expected lock %q to remain, got %q", lockValue, got)
+		}
+	})
+}
+
 func TestGeneratePodNamespaceName(t *testing.T) {
 	tests := []struct {
 		name     string
