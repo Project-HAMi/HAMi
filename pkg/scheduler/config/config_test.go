@@ -31,6 +31,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
+	"github.com/Project-HAMi/HAMi/pkg/device/biren"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
@@ -428,6 +429,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 		amd.AMDDevice:                amd.AMDDevice,
 		vastai.VastaiDevice:          vastai.VastaiCommonWord,
+		biren.BirenDevice:            biren.BirenCommonWord,
 	}
 
 	return expectedDevices, device.DevicesMap

@@ -30,6 +30,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
+	"github.com/Project-HAMi/HAMi/pkg/device/biren"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
@@ -84,6 +85,7 @@ type Config struct {
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
+	BirenConfig     biren.BirenConfig         `yaml:"biren"`
 	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
 }
 
@@ -218,6 +220,13 @@ func InitDevicesWithConfig(config *Config) error {
 			}
 			return vastai.InitVastaiDevice(vastaiConfig), nil
 		}, config.VastaiConfig},
+		{biren.BirenDevice, biren.BirenCommonWord, func(cfg any) (device.Devices, error) {
+			birenConfig, ok := cfg.(biren.BirenConfig)
+			if !ok {
+				return nil, fmt.Errorf("invalid configuration for %s", biren.BirenCommonWord)
+			}
+			return biren.InitBirenDevice(birenConfig), nil
+		}, config.BirenConfig},
 	}
 
 	// Initialize all devices using the wrapped functions
