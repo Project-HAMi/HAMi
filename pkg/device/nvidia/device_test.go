@@ -1575,9 +1575,28 @@ func Test_generateCombinations(t *testing.T) {
 			if len(got) != tt.wantLen {
 				t.Fatalf("generateCombinations: want %d combinations, got %d", tt.wantLen, len(got))
 			}
+			seen := map[string]bool{}
 			for _, combo := range got {
 				if len(combo) != int(tt.request.Nums) {
 					t.Fatalf("each combination should have %d devices, got %d", tt.request.Nums, len(combo))
+				}
+				key := ""
+				for _, d := range combo {
+					key += d.UUID + ","
+				}
+				if seen[key] {
+					t.Fatalf("duplicate combination: %s", key)
+				}
+				seen[key] = true
+				available := tt.tmpDevs[tt.request.Type]
+				uuidSet := map[string]bool{}
+				for _, d := range available {
+					uuidSet[d.UUID] = true
+				}
+				for _, d := range combo {
+					if !uuidSet[d.UUID] {
+						t.Fatalf("combination contains unexpected UUID: %s", d.UUID)
+					}
 				}
 			}
 		})
@@ -1670,9 +1689,9 @@ func Test_computeWorstSingleCard(t *testing.T) {
 	if len(got) != 1 {
 		t.Fatalf("expected 1 device, got %d", len(got))
 	}
-	// gpu-1 and gpu-2 both have total score 12 (10+2), gpu-0 has 20 — worst is gpu-1 or gpu-2
-	if got[0].UUID == "gpu-0" {
-		t.Fatalf("gpu-0 has highest score, should not be worst; got %s", got[0].UUID)
+	// gpu-0 total=20, gpu-1 total=12, gpu-2 total=12 — worst is gpu-1 or gpu-2
+	if got[0].UUID != "gpu-1" && got[0].UUID != "gpu-2" {
+		t.Fatalf("expected gpu-1 or gpu-2 as worst card, got %s", got[0].UUID)
 	}
 }
 
@@ -1779,7 +1798,7 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			got := dev.GenerateResourceRequests(&tt.ctr)
-			assert.Equal(t, tt.want, got)
+			assert.Equal(t, got, tt.want)
 		})
 	}
 }
@@ -1867,6 +1886,7 @@ func Test_FilterDeviceToRegister_extended(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Cleanup(func() { DevicePluginFilterDevice = nil })
 			DevicePluginFilterDevice = tt.filter
 			got := FilterDeviceToRegister(tt.uuid, tt.index)
 			if got != tt.want {
@@ -1874,7 +1894,6 @@ func Test_FilterDeviceToRegister_extended(t *testing.T) {
 			}
 		})
 	}
-	DevicePluginFilterDevice = nil
 }
 
 func Test_assertNuma(t *testing.T) {
