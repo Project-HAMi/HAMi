@@ -622,6 +622,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
+			response.Mounts = appendVulkanManifestMount(response.Mounts, hostHookPath)
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
@@ -703,6 +704,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						ReadOnly: true},
 					)
 				}
+				response.Mounts = appendVulkanManifestMount(response.Mounts, hostHookPath)
 				_, err = os.Stat(fmt.Sprintf("%s/vgpu/license", hostHookPath))
 				if err == nil {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{

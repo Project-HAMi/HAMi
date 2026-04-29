@@ -1,0 +1,17 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: hami-vulkan-example
+  annotations:
+    hami.io/vulkan: "true"
+spec:
+  restartPolicy: Never
+  containers:
+    - name: vulkaninfo
+      image: khronosgroup/vulkan-samples:latest
+      command: ["vulkaninfo"]
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+          nvidia.com/gpumem: "1024"   # 1 GiB VRAM budget (shared with CUDA)
+          nvidia.com/gpucores: "30"   # 30% SM throttle (shared with CUDA)

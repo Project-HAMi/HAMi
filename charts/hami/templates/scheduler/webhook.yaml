@@ -29,10 +29,17 @@ webhooks:
         {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels | nindent 8 }}
       {{- end }}
       matchExpressions:
+      {{- if eq (.Values.scheduler.admissionWebhook.namespaceSelector.mode | default "opt-out") "opt-in" }}
+      - key: hami.io/vgpu
+        operator: In
+        values:
+        - enabled
+      {{- else }}
       - key: hami.io/webhook
         operator: NotIn
         values:
         - ignore
+      {{- end }}
       {{- if .Values.scheduler.admissionWebhook.whitelistNamespaces }}
       - key: kubernetes.io/metadata.name
         operator: NotIn

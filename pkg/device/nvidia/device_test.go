@@ -2578,3 +2578,303 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 	assert.Assert(t, uuids["dev-0"])
 	assert.Assert(t, uuids["dev-2"])
 }
+
+func TestMutateAdmission_VulkanAnno_AddsGraphicsCap(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{VulkanEnableAnno: "true"},
+		},
+	}
+	_, err := dev.MutateAdmission(ctr, pod)
+	assert.NilError(t, err)
+
+	var caps, enable string
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			caps = e.Value
+		}
+		if e.Name == HamiVulkanEnvVar {
+			enable = e.Value
+		}
+	}
+	assert.Assert(t, strings.Contains(caps, "graphics"), "expected graphics in caps, got %q", caps)
+	assert.Equal(t, enable, "1")
+}
+
+func TestMutateAdmission_VulkanAnno_MergesExistingCaps(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: NvidiaDriverCapsEnvVar, Value: "compute,utility"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+
+	var caps string
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			caps = e.Value
+		}
+	}
+	assert.Assert(t, strings.Contains(caps, "compute"))
+	assert.Assert(t, strings.Contains(caps, "utility"))
+	assert.Assert(t, strings.Contains(caps, "graphics"))
+}
+
+func TestMutateAdmission_VulkanAnno_AllCaps_NoChange(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: NvidiaDriverCapsEnvVar, Value: "all"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+
+	for _, e := range ctr.Env {
+		if e.Name == NvidiaDriverCapsEnvVar {
+			assert.Equal(t, e.Value, "all")
+		}
+	}
+}
+
+func TestMutateAdmission_NoVulkanAnno_NoChange(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	for _, e := range ctr.Env {
+		assert.Assert(t, e.Name != NvidiaDriverCapsEnvVar, "unexpected caps env")
+		assert.Assert(t, e.Name != HamiVulkanEnvVar, "unexpected enable env")
+	}
+}
+
+func TestMutateAdmission_VulkanAnno_NoGPUResource(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		},
+	}
+	ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	for _, e := range ctr.Env {
+		assert.Assert(t, e.Name != HamiVulkanEnvVar, "no Vulkan env on non-GPU pod")
+	}
+}
+
+func TestMutateAdmission_VulkanAnno_IdempotentHamiEnable(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Env: []corev1.EnvVar{{Name: HamiVulkanEnvVar, Value: "1"}},
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	count := 0
+	for _, e := range ctr.Env {
+		if e.Name == HamiVulkanEnvVar {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1)
+}
+
+func TestMutateAdmission_VulkanAnno_InjectsManifestVolumeMount(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr, pod)
+
+	var volume *corev1.Volume
+	for i := range pod.Spec.Volumes {
+		if pod.Spec.Volumes[i].Name == VulkanManifestVolumeName {
+			volume = &pod.Spec.Volumes[i]
+		}
+	}
+	assert.Assert(t, volume != nil, "expected volume %q on pod", VulkanManifestVolumeName)
+	assert.Assert(t, volume.HostPath != nil, "expected HostPath source")
+	assert.Equal(t, volume.HostPath.Path, VulkanManifestHostPath)
+	assert.Assert(t, volume.HostPath.Type != nil)
+	assert.Equal(t, *volume.HostPath.Type, corev1.HostPathFile)
+
+	var mount *corev1.VolumeMount
+	for i := range ctr.VolumeMounts {
+		if ctr.VolumeMounts[i].Name == VulkanManifestVolumeName {
+			mount = &ctr.VolumeMounts[i]
+		}
+	}
+	assert.Assert(t, mount != nil, "expected volumeMount %q on container", VulkanManifestVolumeName)
+	assert.Equal(t, mount.MountPath, VulkanManifestContainerPath)
+	assert.Equal(t, mount.ReadOnly, true)
+}
+
+func TestMutateAdmission_VulkanAnno_VolumeIdempotent(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr1 := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	ctr2 := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{VulkanEnableAnno: "true"}},
+	}
+	_, _ = dev.MutateAdmission(ctr1, pod)
+	_, _ = dev.MutateAdmission(ctr2, pod)
+
+	count := 0
+	for _, v := range pod.Spec.Volumes {
+		if v.Name == VulkanManifestVolumeName {
+			count++
+		}
+	}
+	assert.Equal(t, count, 1, "volume should be added once even when multiple containers opt in")
+
+	mountCount1 := 0
+	for _, m := range ctr1.VolumeMounts {
+		if m.Name == VulkanManifestVolumeName {
+			mountCount1++
+		}
+	}
+	mountCount2 := 0
+	for _, m := range ctr2.VolumeMounts {
+		if m.Name == VulkanManifestVolumeName {
+			mountCount2++
+		}
+	}
+	assert.Equal(t, mountCount1, 1)
+	assert.Equal(t, mountCount2, 1)
+}
+
+func TestMutateAdmission_NoVulkanAnno_NoVolume(t *testing.T) {
+	dev := &NvidiaGPUDevices{
+		config: NvidiaConfig{ResourceCountName: "nvidia.com/gpu"},
+	}
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+			},
+		},
+	}
+	pod := &corev1.Pod{}
+	_, _ = dev.MutateAdmission(ctr, pod)
+	for _, v := range pod.Spec.Volumes {
+		assert.Assert(t, v.Name != VulkanManifestVolumeName, "no manifest volume without annotation")
+	}
+	for _, m := range ctr.VolumeMounts {
+		assert.Assert(t, m.Name != VulkanManifestVolumeName, "no manifest mount without annotation")
+	}
+}
+
+func TestMergeGraphicsCap_Empty(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap(""), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_WhitespaceOnly(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap("   "), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_CommasOnly(t *testing.T) {
+	// All tokens are empty after trimming -> default fallback.
+	assert.Equal(t, mergeGraphicsCap(", , ,"), "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_All(t *testing.T) {
+	// "all" implies every capability; do not modify.
+	assert.Equal(t, mergeGraphicsCap("all"), "all")
+	assert.Equal(t, mergeGraphicsCap("compute,all,utility"), "compute,all,utility")
+}
+
+func TestMergeGraphicsCap_AlreadyHasGraphics(t *testing.T) {
+	// graphics already present -> return existing untouched.
+	assert.Equal(t, mergeGraphicsCap("compute,graphics,utility"), "compute,graphics,utility")
+}
+
+func TestMergeGraphicsCap_DuplicatesAndPadding(t *testing.T) {
+	// Duplicate tokens are deduped; surrounding whitespace is trimmed; graphics appended.
+	out := mergeGraphicsCap("compute, compute , utility")
+	assert.Equal(t, out, "compute,utility,graphics")
+}
+
+func TestMergeGraphicsCap_AppendGraphics(t *testing.T) {
+	assert.Equal(t, mergeGraphicsCap("compute"), "compute,graphics")
+	assert.Equal(t, mergeGraphicsCap("compute,utility"), "compute,utility,graphics")
+}

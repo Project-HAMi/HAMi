@@ -172,19 +172,19 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
-    # namespaceSelector controls which namespaces the webhook will be applied to.
-    # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
-    # You can add additional matchLabels or matchExpressions to further filter namespaces.
+    # namespaceSelector controls which namespaces the webhook will apply to.
+    # mode:
+    #   "opt-out" (legacy default): apply to all namespaces except those labeled
+    #              hami.io/webhook=ignore. Suitable when most workloads need vGPU
+    #              isolation and a small number opt out.
+    #   "opt-in"  (recommended for clusters with NVIDIA Omniverse / Isaac Sim
+    #              workloads that conflict with HAMi-core hooks): apply ONLY to
+    #              namespaces labeled hami.io/vgpu=enabled. Other namespaces see
+    #              no mutation, no LD_PRELOAD inject, no implicit Vulkan layer.
     namespaceSelector:
-      matchLabels:
-        # app.kubernetes.io/part-of: kubeflow-profile
+      mode: opt-in
+      matchLabels: {}
       matchExpressions: []
-      # Example: exclude namespaces with specific labels
-      # - key: environment
-      #   operator: In
-      #   values:
-      #   - development
-      #   - staging
     # objectSelector controls which pods the webhook will be applied to.
     # The default matchExpressions exclude pods with label "hami.io/webhook: ignore".
     # You can add additional matchLabels or matchExpressions to further filter pods.
