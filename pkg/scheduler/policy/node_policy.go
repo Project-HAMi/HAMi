@@ -87,6 +87,10 @@ func (ns *NodeScore) ComputeDefaultScore(devices DeviceUsageList) {
 		totalCore += deviceLists.Device.Totalcore
 		totalMem += deviceLists.Device.Totalmem
 	}
+	if total == 0 || totalCore == 0 || totalMem == 0 {
+		ns.Score = 0
+		return
+	}
 	useScore := float32(used) / float32(total)
 	coreScore := float32(usedCore) / float32(totalCore)
 	memScore := float32(usedMem) / float32(totalMem)
