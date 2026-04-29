@@ -211,9 +211,7 @@ func (c ContainerDevice) DeepCopy() ContainerDevice {
 	}
 	if c.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(c.CustomInfo))
-		for k, v := range c.CustomInfo {
-			dup.CustomInfo[k] = v
-		}
+		maps.Copy(dup.CustomInfo, c.CustomInfo)
 	}
 	return dup
 }

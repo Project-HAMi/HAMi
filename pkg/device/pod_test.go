@@ -377,7 +377,6 @@ func TestUpdatePod(t *testing.T) {
 	}
 }
 
-
 func TestPodInfoDeepCopy(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -430,14 +429,14 @@ func TestPodInfoDeepCopy(t *testing.T) {
 			assert.Equal(t, tt.original.CtrIDs, copy.CtrIDs)
 			assert.Equal(t, tt.original.Devices, copy.Devices)
 			if tt.original.Pod != nil {
-				assert.Equal(t, tt.original.Pod.Name, copy.Pod.Name)
+				assert.Equal(t, tt.original.Name, copy.Name)
 			}
 
 			// 2. Mutating the copy must not affect the original.
 			if copy.Pod != nil {
-				originalPodName := tt.original.Pod.Name
-				copy.Pod.Name = "mutated-pod"
-				assert.Equal(t, tt.original.Pod.Name, originalPodName)
+				originalPodName := tt.original.Name
+				copy.Name = "mutated-pod"
+				assert.Equal(t, tt.original.Name, originalPodName)
 			}
 			originalNodeID := tt.original.NodeID
 			copy.NodeID = "mutated-node"

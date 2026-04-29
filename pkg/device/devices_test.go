@@ -1191,7 +1191,6 @@ func TestCheckUUID(t *testing.T) {
 	}
 }
 
-
 func TestDeviceUsageDeepCopy(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -1228,9 +1227,9 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 						{Name: "1g.5gb", Core: 1, Memory: 5, InUse: false},
 					},
 				},
-				Numa:     0,
-				Type:     "NVIDIA",
-				Health:   true,
+				Numa:   0,
+				Type:   "NVIDIA",
+				Health: true,
 				PodInfos: []*PodInfo{
 					{
 						Pod: &corev1.Pod{

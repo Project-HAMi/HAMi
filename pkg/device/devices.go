@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -215,9 +216,7 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 
 	if d.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(d.CustomInfo))
-		for k, v := range d.CustomInfo {
-			dup.CustomInfo[k] = v
-		}
+		maps.Copy(dup.CustomInfo, d.CustomInfo)
 	}
 
 	return dup
