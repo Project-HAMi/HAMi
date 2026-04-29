@@ -229,7 +229,16 @@ func (plugin *NvidiaDevicePlugin) cleanup() {
 
 // Devices returns the full set of devices associated with the plugin.
 func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
-	return plugin.rm.Devices()
+	devs := plugin.rm.Devices()
+	ret := make(rm.Devices)
+	for id, dev := range devs {
+		if nvidia.FilterDeviceToRegister(dev.ID, dev.Index) {
+			klog.V(5).InfoS("Filtering device", "device", dev.ID)
+			continue
+		}
+		ret[id] = dev
+	}
+	return ret
 }
 
 // Start starts the gRPC server, registers the device plugin with the Kubelet,
@@ -947,7 +956,7 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
-	return plugin.rm.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
+	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
 }
 
 func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {
