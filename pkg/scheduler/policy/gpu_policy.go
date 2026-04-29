@@ -56,6 +56,30 @@ func (l DeviceUsageList) Less(i, j int) bool {
 	return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
 }
 
+func (l DeviceUsageList) DeepCopy() DeviceUsageList {
+	var deviceLists []*DeviceListsScore
+	if l.DeviceLists != nil {
+		deviceLists = make([]*DeviceListsScore, len(l.DeviceLists))
+		for i, ds := range l.DeviceLists {
+			deviceLists[i] = ds.DeepCopy()
+		}
+	}
+	return DeviceUsageList{
+		DeviceLists: deviceLists,
+		Policy:      l.Policy,
+	}
+}
+
+func (ds *DeviceListsScore) DeepCopy() *DeviceListsScore {
+	if ds == nil {
+		return nil
+	}
+	return &DeviceListsScore{
+		Device: ds.Device.DeepCopy(),
+		Score:  ds.Score,
+	}
+}
+
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
 	request, core, mem := int32(0), int32(0), int32(0)
 	// Here we are required to use the same type device

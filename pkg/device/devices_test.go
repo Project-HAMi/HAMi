@@ -1190,3 +1190,161 @@ func TestCheckUUID(t *testing.T) {
 		})
 	}
 }
+
+
+func TestDeviceUsageDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original *DeviceUsage
+	}{
+		{
+			name:     "nil input",
+			original: nil,
+		},
+		{
+			name:     "empty struct",
+			original: &DeviceUsage{},
+		},
+		{
+			name: "fully populated",
+			original: &DeviceUsage{
+				ID:        "GPU-0",
+				Index:     1,
+				Used:      2,
+				Count:     10,
+				Usedmem:   1024,
+				Totalmem:  8192,
+				Totalcore: 100,
+				Usedcores: 10,
+				Mode:      "hami-core",
+				MigTemplate: []Geometry{
+					{
+						{Name: "1g.5gb", Core: 1, Memory: 5, Count: 1},
+					},
+				},
+				MigUsage: MigInUse{
+					Index: 0,
+					UsageList: MIGS{
+						{Name: "1g.5gb", Core: 1, Memory: 5, InUse: false},
+					},
+				},
+				Numa:     0,
+				Type:     "NVIDIA",
+				Health:   true,
+				PodInfos: []*PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      "pod1",
+								Namespace: "default",
+							},
+						},
+						NodeID: "node1",
+						Devices: PodDevices{
+							"NVIDIA": {
+								{
+									{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10},
+								},
+							},
+						},
+						CtrIDs: []string{"ctr1"},
+					},
+				},
+				CustomInfo: map[string]any{
+					"key1": "value1",
+					"key2": 42,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			if tt.original == nil {
+				if copy != nil {
+					t.Fatalf("expected nil, got %v", copy)
+				}
+				return
+			}
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			originalID := tt.original.ID
+			copy.ID = "mutated-id"
+			assert.Equal(t, tt.original.ID, originalID)
+
+			if len(copy.MigTemplate) > 0 && len(copy.MigTemplate[0]) > 0 {
+				originalTemplateName := tt.original.MigTemplate[0][0].Name
+				copy.MigTemplate[0][0].Name = "mutated-template"
+				assert.Equal(t, tt.original.MigTemplate[0][0].Name, originalTemplateName)
+			}
+
+			if len(copy.MigUsage.UsageList) > 0 {
+				originalUsageName := tt.original.MigUsage.UsageList[0].Name
+				copy.MigUsage.UsageList[0].Name = "mutated-usage"
+				assert.Equal(t, tt.original.MigUsage.UsageList[0].Name, originalUsageName)
+			}
+
+			if len(copy.PodInfos) > 0 {
+				originalNodeID := tt.original.PodInfos[0].NodeID
+				originalCtrIDsLen := len(tt.original.PodInfos[0].CtrIDs)
+				copy.PodInfos[0].NodeID = "mutated-node"
+				copy.PodInfos[0].CtrIDs = append(copy.PodInfos[0].CtrIDs, "ctr2")
+				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
+				assert.Equal(t, len(tt.original.PodInfos[0].CtrIDs), originalCtrIDsLen)
+			}
+
+			if copy.CustomInfo != nil {
+				copy.CustomInfo["newkey"] = "newvalue"
+				_, exists := tt.original.CustomInfo["newkey"]
+				assert.Assert(t, !exists, "original CustomInfo should not have newkey")
+			}
+		})
+	}
+}
+
+func TestMigInUseDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original MigInUse
+	}{
+		{
+			name:     "empty",
+			original: MigInUse{},
+		},
+		{
+			name: "with data",
+			original: MigInUse{
+				Index: 1,
+				UsageList: MIGS{
+					{Name: "1g.5gb", Core: 1, Memory: 5, InUse: true},
+					{Name: "2g.10gb", Core: 2, Memory: 10, InUse: false},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			originalIndex := tt.original.Index
+			copy.Index = 99
+			assert.Equal(t, tt.original.Index, originalIndex)
+
+			if len(copy.UsageList) > 0 {
+				originalName := tt.original.UsageList[0].Name
+				copy.UsageList[0].Name = "mutated"
+				assert.Equal(t, tt.original.UsageList[0].Name, originalName)
+			}
+		})
+	}
+}

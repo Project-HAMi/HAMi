@@ -177,6 +177,64 @@ func init() {
 	SupportDevices = make(map[string]string)
 }
 
+func (d *DeviceUsage) DeepCopy() *DeviceUsage {
+	if d == nil {
+		return nil
+	}
+	dup := &DeviceUsage{
+		ID:        d.ID,
+		Index:     d.Index,
+		Used:      d.Used,
+		Count:     d.Count,
+		Usedmem:   d.Usedmem,
+		Totalmem:  d.Totalmem,
+		Totalcore: d.Totalcore,
+		Usedcores: d.Usedcores,
+		Mode:      d.Mode,
+		Numa:      d.Numa,
+		Type:      d.Type,
+		Health:    d.Health,
+	}
+
+	if d.MigTemplate != nil {
+		dup.MigTemplate = make([]Geometry, len(d.MigTemplate))
+		for i, g := range d.MigTemplate {
+			dup.MigTemplate[i] = make(Geometry, len(g))
+			copy(dup.MigTemplate[i], g)
+		}
+	}
+
+	dup.MigUsage = d.MigUsage.DeepCopy()
+
+	if d.PodInfos != nil {
+		dup.PodInfos = make([]*PodInfo, len(d.PodInfos))
+		for i, pi := range d.PodInfos {
+			dup.PodInfos[i] = pi.DeepCopy()
+		}
+	}
+
+	if d.CustomInfo != nil {
+		dup.CustomInfo = make(map[string]any, len(d.CustomInfo))
+		for k, v := range d.CustomInfo {
+			dup.CustomInfo[k] = v
+		}
+	}
+
+	return dup
+}
+
+func (m MigInUse) DeepCopy() MigInUse {
+	var usageList MIGS
+	if m.UsageList != nil {
+		usageList = make(MIGS, len(m.UsageList))
+		copy(usageList, m.UsageList)
+	}
+	return MigInUse{
+		Index:     m.Index,
+		UsageList: usageList,
+	}
+}
+
 func GetDevices() map[string]Devices {
 	return DevicesMap
 }
