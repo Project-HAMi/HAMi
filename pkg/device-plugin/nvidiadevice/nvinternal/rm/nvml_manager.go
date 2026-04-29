@@ -39,7 +39,6 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"k8s.io/klog/v2"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -74,13 +73,6 @@ func NewNVMLResourceManagers(infolib info.Interface, nvmllib nvml.Interface, dev
 	for resourceName, devices := range deviceMap {
 		if len(devices) == 0 {
 			continue
-		}
-		for key, value := range devices {
-			if nvidia.FilterDeviceToRegister(value.ID, value.Index) {
-				klog.V(5).InfoS("Filtering device", "device", value.ID)
-				delete(devices, key)
-				continue
-			}
 		}
 		r := &nvmlResourceManager{
 			resourceManager: resourceManager{
