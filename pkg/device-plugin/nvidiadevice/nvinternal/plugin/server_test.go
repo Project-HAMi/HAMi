@@ -1032,7 +1032,7 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 
 	response, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
-	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
+	require.Equal(t, "GPU-annotated-a", response.ContainerResponses[0].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 }
@@ -1111,8 +1111,8 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 
 	response, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
-	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
-	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", response.ContainerResponses[1].Envs[deviceListEnvVar])
+	require.Equal(t, "GPU-annotated-a", response.ContainerResponses[0].Envs[deviceListEnvVar])
+	require.Equal(t, "GPU-annotated-b", response.ContainerResponses[1].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 }
