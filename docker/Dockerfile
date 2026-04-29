@@ -18,7 +18,7 @@ ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get -y update; apt-get -y install cmake
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+FROM nvidia/cuda:13.2.1-base-ubuntu22.04
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-12-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
