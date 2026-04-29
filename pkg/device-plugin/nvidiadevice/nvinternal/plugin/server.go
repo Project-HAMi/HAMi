@@ -643,6 +643,14 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
+			if plugin.operatingMode != "mig" {
+				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
+				if err != nil {
+					podAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+				}
+				devreq = alignedDevreq
+			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
