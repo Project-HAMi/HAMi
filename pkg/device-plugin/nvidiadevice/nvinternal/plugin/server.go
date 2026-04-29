@@ -232,7 +232,7 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 	devs := plugin.rm.Devices()
 	ret := make(rm.Devices)
 	for id, dev := range devs {
-		if nvidia.FilterDeviceToRegister(dev.ID, string(dev.Index)) {
+		if nvidia.FilterDeviceToRegister(dev.ID, dev.Index) {
 			klog.V(5).InfoS("Filtering device", "device", dev.ID)
 			continue
 		}
