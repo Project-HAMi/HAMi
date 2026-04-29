@@ -17,9 +17,10 @@ limitations under the License.
 package v1
 
 import (
+	"sync"
 	"unsafe"
 
-	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/api"
 )
 
 const maxDevices = 16
@@ -347,23 +348,27 @@ func CastSpecWithSemPostinit(data []byte) SpecWithSemPostinit {
 
 // --- Factory registrations ---
 
-func init() {
-	nvidia.RegisterFactory(&v1SemFactory{})  // major=1, minor=2
-	nvidia.RegisterFactory(&v1BaseFactory{}) // major=1, minor=1
+var registerOnce sync.Once
+
+func Register() {
+	registerOnce.Do(func() {
+		api.RegisterFactory(&v1SemFactory{})  // major=1, minor=2
+		api.RegisterFactory(&v1BaseFactory{}) // major=1, minor=1
+	})
 }
 
 type v1SemFactory struct{}
 
-func (v1SemFactory) Match(h *nvidia.HeaderT, size int64) bool {
+func (v1SemFactory) Match(h *api.Header, size int64) bool {
 	return h.MajorVersion == 1 && h.MinorVersion >= 2
 }
-func (v1SemFactory) Cast(data []byte) nvidia.UsageInfo { return CastSpecWithSemPostinit(data) }
-func (v1SemFactory) Name() string                      { return "v1-sem" }
+func (v1SemFactory) Cast(data []byte) api.UsageInfo { return CastSpecWithSemPostinit(data) }
+func (v1SemFactory) Name() string                   { return "v1-sem" }
 
 type v1BaseFactory struct{}
 
-func (v1BaseFactory) Match(h *nvidia.HeaderT, size int64) bool {
+func (v1BaseFactory) Match(h *api.Header, size int64) bool {
 	return h.MajorVersion == 1 && h.MinorVersion <= 1
 }
-func (v1BaseFactory) Cast(data []byte) nvidia.UsageInfo { return CastSpec(data) }
-func (v1BaseFactory) Name() string                      { return "v1" }
+func (v1BaseFactory) Cast(data []byte) api.UsageInfo { return CastSpec(data) }
+func (v1BaseFactory) Name() string                   { return "v1" }

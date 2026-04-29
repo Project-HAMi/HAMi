@@ -18,39 +18,26 @@ package nvidia
 
 import (
 	"sync"
+
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/api"
+	nvidiav0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
+	nvidiav1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 )
 
-// CacheFactory abstracts version detection and binary casting for shared region cache files.
-// Each versioned sub-package (v0, v1, ...) registers its own factory implementations via init().
-type CacheFactory interface {
-	// Match returns true if this factory can handle the given cache file.
-	Match(header *HeaderT, fileSize int64) bool
-	// Cast interprets the raw mmap data as the version-specific shared region struct.
-	Cast(data []byte) UsageInfo
-	// Name returns a human-readable version identifier for logging.
-	Name() string
+var registerBuiltinsOnce sync.Once
+
+func ensureBuiltinsRegistered() {
+	registerBuiltinsOnce.Do(func() {
+		nvidiav0.Register()
+		nvidiav1.Register()
+	})
 }
 
-var (
-	factories   []CacheFactory
-	factoriesMu sync.RWMutex
-)
-
-// RegisterFactory should be called from a sub-package's init() to register a version factory.
-func RegisterFactory(f CacheFactory) {
-	factoriesMu.Lock()
-	defer factoriesMu.Unlock()
-	factories = append(factories, f)
+func RegisterFactory(f api.CacheFactory) {
+	api.RegisterFactory(f)
 }
 
-// findFactory iterates over registered factories and returns the first one that matches.
-func findFactory(header *HeaderT, fileSize int64) CacheFactory {
-	factoriesMu.RLock()
-	defer factoriesMu.RUnlock()
-	for _, f := range factories {
-		if f.Match(header, fileSize) {
-			return f
-		}
-	}
-	return nil
+func findFactory(header *HeaderT, fileSize int64) api.CacheFactory {
+	ensureBuiltinsRegistered()
+	return api.FindFactory(header, fileSize)
 }

@@ -27,6 +27,7 @@ import (
 	"time"
 	"unsafe"
 
+	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/api"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
@@ -42,34 +43,8 @@ import (
 
 const SharedRegionMagicFlag = 19920718
 
-type HeaderT struct {
-	InitializedFlag int32
-	MajorVersion    int32
-	MinorVersion    int32
-}
-
-type UsageInfo interface {
-	DeviceMax() int
-	DeviceNum() int
-	DeviceMemoryContextSize(idx int) uint64
-	DeviceMemoryModuleSize(idx int) uint64
-	DeviceMemoryBufferSize(idx int) uint64
-	DeviceMemoryOffset(idx int) uint64
-	DeviceMemoryTotal(idx int) uint64
-	DeviceSmUtil(idx int) uint64
-	SetDeviceSmLimit(l uint64)
-	IsValidUUID(idx int) bool
-	DeviceUUID(idx int) string
-	DeviceMemoryLimit(idx int) uint64
-	SetDeviceMemoryLimit(l uint64)
-	LastKernelTime() int64
-	//UsedMemory(idx int) (uint64, error)
-	GetPriority() int
-	GetRecentKernel() int32
-	SetRecentKernel(v int32)
-	GetUtilizationSwitch() int32
-	SetUtilizationSwitch(v int32)
-}
+type HeaderT = api.Header
+type UsageInfo = api.UsageInfo
 
 type ContainerUsage struct {
 	PodUID        string
@@ -93,7 +68,7 @@ type ContainerLister struct {
 	stopCh          chan struct{}
 }
 
-var resyncInterval time.Duration = 5 * time.Minute
+var resyncInterval = 5 * time.Minute
 
 func init() {
 	if os.Getenv("HAMI_RESYNC_INTERVAL") != "" {
@@ -107,6 +82,7 @@ func init() {
 }
 
 func NewContainerLister() (*ContainerLister, error) {
+	ensureBuiltinsRegistered()
 	hookPath, ok := os.LookupEnv("HOOK_PATH")
 	if !ok {
 		return nil, fmt.Errorf("HOOK_PATH not set")
@@ -274,8 +250,10 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	}
 	factory := findFactory(head, info.Size())
 	if factory == nil {
+		majorVersion := head.MajorVersion
+		minorVersion := head.MinorVersion
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.MajorVersion, head.MinorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	klog.Infof("casting......%s", factory.Name())
 	usage.Info = factory.Cast(usage.data)
