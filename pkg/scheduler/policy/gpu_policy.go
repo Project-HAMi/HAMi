@@ -57,6 +57,10 @@ func (l DeviceUsageList) Less(i, j int) bool {
 }
 
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
+	if ds.Device.Count == 0 || ds.Device.Totalcore == 0 || ds.Device.Totalmem == 0 {
+		ds.Score = 0
+		return
+	}
 	request, core, mem := int32(0), int32(0), int32(0)
 	// Here we are required to use the same type device
 	for _, container := range requests {

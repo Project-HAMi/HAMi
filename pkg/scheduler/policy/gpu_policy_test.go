@@ -204,6 +204,30 @@ func TestComputeScore(t *testing.T) {
 		expectedScore float32
 	}{
 		{
+			name: "Zero capacity device returns score 0 without panic",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Count:     0,
+				Totalcore: 0,
+				Totalmem:  0,
+			},
+			requests:      make(device.ContainerDeviceRequests),
+			expectedScore: 0,
+		},
+		{
+			name: "Partial zero capacity (Count=0) returns score 0 without panic",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Count:     0,
+				Totalcore: 8,
+				Totalmem:  4096,
+			},
+			requests:      make(device.ContainerDeviceRequests),
+			expectedScore: 0,
+		},
+		{
 			name: "ContainerDeviceRequests has no data",
 			device: &device.DeviceUsage{
 				ID:        "test-device",
