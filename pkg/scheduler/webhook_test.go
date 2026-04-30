@@ -359,6 +359,89 @@ func TestFitResourceQuota(t *testing.T) {
 			fit: true,
 		},
 		{
+			name: "InitContainers run sequentially: max init fits quota, but simple sum would exceed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-init-fit",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					// Two init containers each asking for 800. Max = 800.
+					InitContainers: []corev1.Container{
+						{
+							Name: "init1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("800"),
+								},
+							},
+						},
+						{
+							Name: "init2",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("800"),
+								},
+							},
+						},
+					},
+					// App container asking for 500. Total effective requirement = max(800, 500) = 800.
+					// 800 is less than the available 1000 limit, so it should fit.
+					// If the quota manager wrongly sums everything (800+800+500=2100), this test will catch it by failing.
+					Containers: []corev1.Container{
+						{
+							Name: "app1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("500"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: true,
+		},
+		{
+			name: "InitContainer request exceeds quota directly",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-init-fail",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					InitContainers: []corev1.Container{
+						{
+							Name: "init-massive",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("1500"), // 1500 > 1000 available limit
+								},
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name: "app1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("100"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: false,
+		},
+		{
 			name: "request ascend",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{

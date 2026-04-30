@@ -69,6 +69,27 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
+
+	// 1. Process InitContainers
+	for idx, ctr := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		if ctr.SecurityContext != nil {
+			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
+				klog.Warningf(template+" - Denying admission as init container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
+				continue
+			}
+		}
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
+
+	// 2. Process Regular Containers (Keep your existing loop here)
 	for idx, ctr := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		if ctr.SecurityContext != nil {
@@ -110,7 +131,6 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 
 func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
-		// Only supports NVIDIA
 		if deviceName != nvidia.NvidiaGPUDevice {
 			continue
 		}
@@ -119,8 +139,7 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
 		memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)
 		coreResourceName := corev1.ResourceName(resourceNames.ResourceCoreName)
-		var memoryReq int64 = 0
-		var coresReq int64 = 0
+
 		getRequest := func(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
 			v, ok := ctr.Resources.Limits[resName]
 			if !ok {
@@ -133,24 +152,48 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			}
 			return 0, false
 		}
+
+		var initMemoryReq, initCoresReq int64
+		var appMemoryReq, appCoresReq int64
+
+		// 1. Calculate the MAX request among InitContainers
+		for _, ctr := range pod.Spec.InitContainers {
+			req, ok := getRequest(&ctr, resourceName)
+			if ok && req == 1 {
+				if memReq, ok := getRequest(&ctr, memResourceName); ok {
+					// --- FIX 2: Use modern max() ---
+					initMemoryReq = max(initMemoryReq, memReq)
+				}
+				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
+					initCoresReq = max(initCoresReq, coreReq)
+				}
+			}
+		}
+
+		// 2. Calculate the SUM of requests among Regular Containers
 		for _, ctr := range pod.Spec.Containers {
 			req, ok := getRequest(&ctr, resourceName)
 			if ok && req == 1 {
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					memoryReq += memReq
+					appMemoryReq += memReq
 				}
 				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					coresReq += coreReq
+					appCoresReq += coreReq
 				}
 			}
 		}
+
+		memoryReq := max(appMemoryReq, initMemoryReq)
+		coresReq := max(appCoresReq, initCoresReq)
+
 		if memoryFactor > 1 {
 			oriMemReq := memoryReq
 			memoryReq = memoryReq * int64(memoryFactor)
 			klog.V(5).Infof("Adjusting memory request for quota check: oriMemReq %d, memoryReq %d, factor %d", oriMemReq, memoryReq, memoryFactor)
 		}
+
 		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
-			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
+			klog.Infof("Namespace %s, Pod %s, UID %s - Denying admission", pod.Namespace, pod.Name, pod.UID)
 			return false
 		}
 	}

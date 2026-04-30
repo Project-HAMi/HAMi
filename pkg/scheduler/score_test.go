@@ -2445,6 +2445,258 @@ func Test_calcScore(t *testing.T) {
 			},
 		},
 		{
+			name: "one node two devices, pod has one init container (uses 1 device) and one regular container (uses 1 device) - tests InitContainer capacity reset",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  device.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.NodeSchedulerPolicyBinpack.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &device.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+								},
+								{
+									Device: &device.DeviceUsage{
+										ID:        "uuid2",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   0,
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+								},
+							},
+						},
+					},
+				},
+				nums: device.PodDeviceRequests{
+					// Index 0: InitContainer Request
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 30,
+						},
+					},
+					// Index 1: Regular Container Request
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   1000,
+							Coresreq: 30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-init-container",
+					},
+					Spec: corev1.PodSpec{
+						InitContainers: []corev1.Container{
+							{
+								Name:  "init-gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "app-gpu-burn",
+								Image: "chrstnhntschl/gpu_burn",
+								Args:  []string{"6000"},
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
+									// Index 0: InitContainer skipped (covered by app allocation)
+									// since init request == app request, no clone needed.
+									{},
+									// Index 1: Regular Container allocated normally.
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid2",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
+								},
+							},
+							Score: 0,
+						},
+					},
+				},
+				err: nil,
+			},
+		},
+		{
+			name: "init container requests MORE than app container - needsInitClone=true path",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  device.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.NodeSchedulerPolicyBinpack.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &device.DeviceUsage{
+										ID: "uuid1", Index: 0, Used: 0, Count: 10,
+										Usedmem: 0, Totalmem: 8000, Totalcore: 100,
+										Usedcores: 0, Numa: 0,
+										Type: nvidia.NvidiaGPUDevice, Health: true,
+									},
+								},
+								{
+									Device: &device.DeviceUsage{
+										ID: "uuid2", Index: 0, Used: 0, Count: 10,
+										Usedmem: 0, Totalmem: 8000, Totalcore: 100,
+										Usedcores: 0, Numa: 0,
+										Type: nvidia.NvidiaGPUDevice, Health: true,
+									},
+								},
+							},
+						},
+					},
+				},
+				nums: device.PodDeviceRequests{
+					// Index 0: InitContainer requests 2 GPUs (MORE than app)
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums: 2, Type: nvidia.NvidiaGPUDevice,
+							Memreq: 1000, Coresreq: 30,
+						},
+					},
+					// Index 1: App container requests only 1 GPU (LESS than init)
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums: 1, Type: nvidia.NvidiaGPUDevice,
+							Memreq: 1000, Coresreq: 30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-init-bigger"},
+					Spec: corev1.PodSpec{
+						InitContainers: []corev1.Container{
+							{
+								Name:  "init-heavy",
+								Image: "chrstnhntschl/gpu_burn",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(2, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "app-light",
+								Image: "chrstnhntschl/gpu_burn",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(1000, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy: util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{
+						{
+							NodeID: "node1",
+							Devices: device.PodDevices{
+								"NVIDIA": device.PodSingleDevice{
+									// Init container allocated 2 GPUs from fresh snapshot
+									{
+										{Idx: 0, UUID: "uuid2", Type: nvidia.NvidiaGPUDevice, Usedcores: 30, Usedmem: 1000},
+										{Idx: 0, UUID: "uuid1", Type: nvidia.NvidiaGPUDevice, Usedcores: 30, Usedmem: 1000},
+									},
+									// App container allocated 1 GPU from its own fresh pool
+									{
+										{Idx: 0, UUID: "uuid2", Type: nvidia.NvidiaGPUDevice, Usedcores: 30, Usedmem: 1000},
+									},
+								},
+							},
+							Score: 0,
+						},
+					},
+				},
+				err: nil,
+			},
+		},
+		{
 			name: "two node per node having one device one pod two container use one device",
 			args: struct {
 				nodes *map[string]*NodeUsage

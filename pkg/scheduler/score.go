@@ -16,6 +16,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -31,6 +32,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
+
+// containerResourceSummary holds both the GPU count and total memory
+// for a group of containers, so we can compare them on both dimensions.
+type containerResourceSummary struct {
+	nums   int
+	memreq int32
+}
 
 func viewStatus(usage NodeUsage) {
 	klog.V(5).Info("devices status")
@@ -50,16 +58,15 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 }
 
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
-	//devmap := make(map[string]device.ContainerDevices)
 	devs := device.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
 	free, freeCore, freeMem := int32(0), int32(0), int32(0)
 	sums := 0
-	// computer all device score for one node
+	// compute all device scores for one node
 	for index := range node.Devices.DeviceLists {
 		node.Devices.DeviceLists[index].ComputeScore(requests)
 	}
-	//This loop is for requests for different devices
+	// This loop is for requests for different devices
 	for _, k := range requests {
 		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
@@ -75,7 +82,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 		if fit {
 			for idx, val := range tmpDevs[k.Type] {
 				for nidx, v := range node.Devices.DeviceLists {
-					//bc node.Devices has been sorted, so we should find out the correct device
+					// bc node.Devices has been sorted, so we should find out the correct device
 					if v.Device.ID != val.UUID {
 						continue
 					}
@@ -102,6 +109,40 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
+// podInitContainerMaxRequest returns the maximum single-container device
+// request across all init containers, considering both GPU count AND memory.
+// Per Kubernetes semantics, init containers run sequentially, so the node
+// only needs to reserve capacity for the largest one at any moment.
+func podInitContainerMaxRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) containerResourceSummary {
+	maxReq := containerResourceSummary{}
+	for i := range numInitContainers {
+		var nums int
+		var mem int32
+		for _, k := range resourceReqs[i] {
+			nums += int(k.Nums)
+			mem += k.Memreq
+		}
+		if nums > maxReq.nums || (nums == maxReq.nums && mem > maxReq.memreq) {
+			maxReq.nums = nums
+			maxReq.memreq = mem
+		}
+	}
+	return maxReq
+}
+
+// podAppContainerTotalRequest returns the sum of device requests across all
+// regular (non-init) containers, considering both GPU count AND memory.
+func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) containerResourceSummary {
+	total := containerResourceSummary{}
+	for i := numInitContainers; i < len(resourceReqs); i++ {
+		for _, k := range resourceReqs[i] {
+			total.nums += int(k.Nums)
+			total.memreq += k.Memreq
+		}
+	}
+	return total
+}
+
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
@@ -119,6 +160,23 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	failedNodesMutex := sync.Mutex{}
 	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
+
+	// Pre-compute container counts and request totals once, outside the
+	// per-node goroutines, since they are identical for every node.
+	numInitContainers := len(task.Spec.InitContainers)
+	maxInitReq := podInitContainerMaxRequest(resourceReqs, numInitContainers)
+	appReqTotal := podAppContainerTotalRequest(resourceReqs, numInitContainers)
+
+	// Maintainer optimization (@Shouren):
+	// Init containers run sequentially and exit before app containers start.
+	// The node only ever needs to hold max(maxInitReq, appReqTotal) free at
+	// any moment. We compare both GPU count AND memory to correctly detect
+	// when init containers need more resources than app containers.
+	// If needsInitClone=false, we skip fitInDevices for init containers
+	// entirely — the app allocation implicitly covers them.
+	needsInitClone := numInitContainers > 0 &&
+		(maxInitReq.nums > appReqTotal.nums || maxInitReq.memreq > appReqTotal.memreq)
+
 	for nodeID, node := range *nodes {
 		wg.Add(1)
 		go func(nodeID string, node *NodeUsage) {
@@ -136,25 +194,103 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			// Assume the node is a fit by default. This handles pods with no device
-			// requests, which should be schedulable on any node.
 			ctrfit := true
 			deviceType := ""
-			//This loop is for different container request
+
+			// appContainersNode is the NodeUsage that regular containers
+			// will deduct from.
+			var appContainersNode *NodeUsage
+
+			// initialNodeBytes holds the JSON snapshot of the node's full
+			// capacity. It is only populated when needsInitClone is true,
+			// so that each init container can be evaluated against a fresh
+			// copy of the node without draining the pool for app containers.
+			var initialNodeBytes []byte
+
+			if needsInitClone {
+				// Init containers request MORE than app containers (by count
+				// or memory), so we must evaluate them against full node
+				// capacity. Marshal once; each init container gets its own
+				// Unmarshal.
+				initialNodeBytes, err = json.Marshal(node)
+				if err != nil {
+					klog.ErrorS(err, "Failed to marshal node state for cloning", "nodeID", nodeID)
+					errCh <- err
+					return
+				}
+
+				// App containers share a separate copy that starts at full
+				// capacity and is drained as each app container is scheduled.
+				appContainersNode = &NodeUsage{}
+				if err := json.Unmarshal(initialNodeBytes, appContainersNode); err != nil {
+					klog.ErrorS(err, "Failed to unmarshal node state for app containers", "nodeID", nodeID)
+					errCh <- err
+					return
+				}
+			} else {
+				// No init containers, or init requests are already covered
+				// by app container requests — use the node directly with no
+				// clone overhead.
+				appContainersNode = node
+			}
+
+			// This loop iterates over every container's device requests.
+			// resourceReqs is ordered: [initContainer_0, ..., initContainer_N-1,
+			//                           appContainer_0, ..., appContainer_M-1]
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
 					sums += int(k.Nums)
 				}
 
-				// container need no device and we have got certain deviceType
+				// Maintainer optimization (@Shouren):
+				// When init container requests are already covered by app
+				// container requests (!needsInitClone), skip fitInDevices
+				// for init containers entirely. Their device usage is
+				// implicitly satisfied by the app container allocation since
+				// init and app containers never run simultaneously — the node
+				// only needs max(init, app) capacity at any moment.
+				if ctrid < numInitContainers && !needsInitClone {
+					if deviceType != "" {
+						score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
+					}
+					continue
+				}
+
+				// Container needs no device but a deviceType has already been
+				// identified — record an empty allocation and continue.
 				if sums == 0 && deviceType != "" {
 					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
 					continue
 				}
+
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
-				// found certain deviceType, fill missing empty allocation for containers before this
+
+				// Decide which NodeUsage view to pass to fitInDevices.
+				var workingNode *NodeUsage
+				if needsInitClone && ctrid < numInitContainers {
+					// This is an init container that needs more resources than
+					// the app containers. Give it a fresh snapshot of the
+					// node's full capacity so it doesn't interfere with the
+					// app container pool.
+					workingNode = &NodeUsage{}
+					if err := json.Unmarshal(initialNodeBytes, workingNode); err != nil {
+						klog.ErrorS(err, "Failed to unmarshal node state for init container",
+							"nodeID", nodeID, "ctrid", ctrid)
+						errCh <- err
+						return
+					}
+				} else {
+					// Regular app container (or an init container whose
+					// request is already covered by the app allocation).
+					// Both deduct from the shared accumulated state.
+					workingNode = appContainersNode
+				}
+
+				fit, reason := fitInDevices(workingNode, n, task, nodeInfo, &score.Devices)
+
+				// Fill any missing empty-allocation slots for containers
+				// that were processed before the first device-using container.
 				for idx := range score.Devices {
 					deviceType = idx
 					for len(score.Devices[idx]) <= ctrid {
@@ -164,6 +300,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
 					}
 				}
+
 				ctrfit = fit
 				if !fit {
 					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
@@ -189,7 +326,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	wg.Wait()
 	close(errCh)
 
-	// only pod scheduler failure will record failure event
+	// Only record a filter failure event when no node could fit the pod.
 	if len(res.NodeList) == 0 {
 		for reasonType, failureNodes := range failureReason {
 			sort.Strings(failureNodes)
