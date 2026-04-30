@@ -259,12 +259,14 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	reported := dev.ReportedGPUNum[n.Name]
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
+	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, n)
+
 	if current == 0 {
 		if reported == 0 {
-			return true, false
+			return handshakeHealthy, handshakeChanged
 		}
 		dev.ReportedGPUNum[n.Name] = current
-		return false, false
+		return false, handshakeChanged
 	}
 
 	if reported != current {
@@ -272,7 +274,7 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 		return true, true
 	}
 
-	return true, false
+	return handshakeHealthy, handshakeChanged
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {

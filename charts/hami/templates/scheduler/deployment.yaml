@@ -95,7 +95,7 @@ spec:
           {{- end }}
           {{- if .Values.global.managedNodeSelectorEnable }}
           {{- range $key, $value := .Values.global.managedNodeSelector }}
-            - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" }}
+            - name: NODE_SELECTOR_{{ $key | upper | replace "-" "_" | replace "/" "_" | replace "." "_" }}
               value: "{{ $value }}"
           {{- end }}
           {{- end }}

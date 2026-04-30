@@ -22,6 +22,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -1560,60 +1561,98 @@ func TestAssertNuma(t *testing.T) {
 func TestCheckHealth(t *testing.T) {
 	config := NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}
 
+	oldHandshakeAnnos := util.HandshakeAnnos
+	defer func() { util.HandshakeAnnos = oldHandshakeAnnos }()
+
+	util.HandshakeAnnos = make(map[string]string)
+	util.HandshakeAnnos[NvidiaGPUDevice] = "hami.io/node-handshake"
+
+	pastTime := time.Now().Add(-2 * time.Hour).Format(time.DateTime)
+
 	tests := []struct {
-		name          string
-		current       int64
-		reported      int64
-		wantHealthy   bool
-		wantNeedReset bool
+		name                string
+		current             int64
+		reported            int64
+		handshakeAnnotation string
+		wantHealthy         bool
+		wantNeedReset       bool
 	}{
 		{
-			name:          "current=0 reported=0: no devices registered yet",
-			current:       0,
-			reported:      0,
-			wantHealthy:   true,
-			wantNeedReset: false,
+			name:                "current=0 reported=0: no devices registered yet",
+			current:             0,
+			reported:            0,
+			handshakeAnnotation: "Deleted_",
+			wantHealthy:         true,
+			wantNeedReset:       false,
 		},
 		{
-			name:          "current=0 reported>0: devices disappeared",
-			current:       0,
-			reported:      2,
-			wantHealthy:   false,
-			wantNeedReset: false,
+			name:                "current=0 reported>0: devices disappeared",
+			current:             0,
+			reported:            2,
+			handshakeAnnotation: "Deleted_",
+			wantHealthy:         false,
+			wantNeedReset:       false,
 		},
 		{
-			name:          "current>0 reported differs: count changed",
-			current:       4,
-			reported:      2,
-			wantHealthy:   true,
-			wantNeedReset: true,
+			name:                "current>0 reported differs: count changed",
+			current:             4,
+			reported:            2,
+			handshakeAnnotation: "Deleted_",
+			wantHealthy:         true,
+			wantNeedReset:       true,
 		},
 		{
-			name:          "current>0 reported same: stable",
-			current:       4,
-			reported:      4,
-			wantHealthy:   true,
-			wantNeedReset: false,
+			name:                "current>0 reported same: stable",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Deleted_",
+			wantHealthy:         true,
+			wantNeedReset:       false,
+		},
+		{
+			name:                "Kernel 6.17 Bug: current=0 reported=0 but handshake pending",
+			current:             0,
+			reported:            0,
+			handshakeAnnotation: "Requesting_" + time.Now().Format(time.DateTime),
+			wantHealthy:         true,
+			wantNeedReset:       false,
+		},
+		{
+			name:                "Kernel 6.17 Bug: current=0 reported=0 but handshake expired",
+			current:             0,
+			reported:            0,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			wantHealthy:         false,
+			wantNeedReset:       false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			dev := InitNvidiaDevice(config)
+
 			allocatable := corev1.ResourceList{}
 			if tt.current > 0 {
 				allocatable[corev1.ResourceName(config.ResourceCountName)] = *resource.NewQuantity(tt.current, resource.DecimalSI)
 			}
+
 			node := &corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
-				Status:     corev1.NodeStatus{Allocatable: allocatable},
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+					Annotations: map[string]string{
+						util.HandshakeAnnos[NvidiaGPUDevice]: tt.handshakeAnnotation,
+					},
+				},
+				Status: corev1.NodeStatus{Allocatable: allocatable},
 			}
+
 			if tt.reported > 0 {
 				dev.ReportedGPUNum["test-node"] = tt.reported
 			}
+
 			healthy, needReset := dev.CheckHealth("NVIDIA", node)
-			assert.Equal(t, healthy, tt.wantHealthy)
-			assert.Equal(t, needReset, tt.wantNeedReset)
+			assert.Equal(t, tt.wantHealthy, healthy, "Healthy status mismatch")
+			assert.Equal(t, tt.wantNeedReset, needReset, "Reset status mismatch")
 		})
 	}
 }
