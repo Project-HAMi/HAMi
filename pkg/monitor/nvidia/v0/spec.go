@@ -17,7 +17,6 @@ limitations under the License.
 package v0
 
 import (
-	"sync"
 	"unsafe"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/api"
@@ -196,12 +195,8 @@ func (s Spec) SetUtilizationSwitch(v int32) {
 	s.sr.utilizationSwitch = v
 }
 
-var registerOnce sync.Once
-
 func Register() {
-	registerOnce.Do(func() {
-		api.RegisterFactory(&v0Factory{})
-	})
+	api.RegisterFactory(&v0Factory{})
 }
 
 type v0Factory struct{}

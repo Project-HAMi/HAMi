@@ -17,7 +17,6 @@ limitations under the License.
 package v1
 
 import (
-	"sync"
 	"unsafe"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/api"
@@ -348,13 +347,9 @@ func CastSpecWithSemPostinit(data []byte) SpecWithSemPostinit {
 
 // --- Factory registrations ---
 
-var registerOnce sync.Once
-
 func Register() {
-	registerOnce.Do(func() {
-		api.RegisterFactory(&v1SemFactory{})  // major=1, minor=2
-		api.RegisterFactory(&v1BaseFactory{}) // major=1, minor=1
-	})
+	api.RegisterFactory(&v1SemFactory{})  // major=1, minor=2
+	api.RegisterFactory(&v1BaseFactory{}) // major=1, minor=1
 }
 
 type v1SemFactory struct{}
