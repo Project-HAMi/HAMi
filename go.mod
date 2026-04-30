@@ -9,7 +9,7 @@ require (
 	github.com/NVIDIA/k8s-device-plugin v0.19.1
 	github.com/NVIDIA/nvidia-container-toolkit v1.19.1-0.20260410190841-2c0c91d0ebaa
 	github.com/ccoveille/go-safecast v1.8.2
-	github.com/fsnotify/fsnotify v1.9.0
+	github.com/fsnotify/fsnotify v1.10.0
 	github.com/google/uuid v1.6.0
 	github.com/imdario/mergo v0.3.16
 	github.com/julienschmidt/httprouter v1.3.0
