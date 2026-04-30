@@ -33,10 +33,6 @@ func ensureBuiltinsRegistered() {
 	})
 }
 
-func RegisterFactory(f api.CacheFactory) {
-	api.RegisterFactory(f)
-}
-
 func findFactory(header *HeaderT, fileSize int64) api.CacheFactory {
 	ensureBuiltinsRegistered()
 	return api.FindFactory(header, fileSize)
