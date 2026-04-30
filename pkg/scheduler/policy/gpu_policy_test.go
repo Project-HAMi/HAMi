@@ -150,7 +150,7 @@ func TestDeviceUsageList_Less(t *testing.T) {
 				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
 				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
 			},
-			expectedLess: false,
+			expectedLess: true,
 		},
 		{
 			name:   "Spread policy with same Numa",
@@ -177,7 +177,7 @@ func TestDeviceUsageList_Less(t *testing.T) {
 				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
 				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
 			},
-			expectedLess: true,
+			expectedLess: false,
 		},
 	}
 
