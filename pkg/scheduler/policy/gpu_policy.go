@@ -57,7 +57,7 @@ func (l DeviceUsageList) Less(i, j int) bool {
 }
 
 func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
-	if ds.Device.Count == 0 || ds.Device.Totalcore == 0 || ds.Device.Totalmem == 0 {
+	if ds.Device == nil || ds.Device.Count == 0 || ds.Device.Totalcore == 0 || ds.Device.Totalmem == 0 {
 		ds.Score = 0
 		return
 	}
