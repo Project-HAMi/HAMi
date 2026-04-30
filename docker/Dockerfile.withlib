@@ -10,7 +10,7 @@ RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
-FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+FROM nvidia/cuda:13.2.1-base-ubuntu22.04
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-12-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
