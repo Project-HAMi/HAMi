@@ -432,7 +432,7 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
+		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
 		return true, false
