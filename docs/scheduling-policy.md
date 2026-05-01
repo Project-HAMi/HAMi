@@ -6,6 +6,7 @@ scenarios. A pod can select a scheduling policy using pod annotations.
 ## Available Policies
 
 | Policy      | Scope | Effect |
+| ---------   | ----- | ------ |
 | `binpack`   | Node  | Tries to allocate tasks to the **same GPU node** as much as possible |
 | `spread`    | Node  | Tries to allocate tasks to **different GPU nodes** as much as possible |
 | `numa-first`| GPU   | For multi-GPU allocations, prefers GPUs on the **same NUMA node** |
@@ -70,6 +71,9 @@ spec:
 
 - The annotation `hami.io/node-scheduler-policy` controls **which node**
   the pod is placed on.
-- For GPU-level policy (which GPU card within a node), configure
-  `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy` globally.
+- Only node-level policies (`binpack`, `spread`) can be overridden per-pod
+  via annotations. GPU-level policy within a node is configured globally
+  via `scheduler.defaultSchedulerPolicy.gpuSchedulerPolicy`.
+- `numa-first` (NUMA affinity) is not yet implemented and is tracked
+  as an open item in [roadmap.md](./develop/roadmap.md).
 - See [config.md](./config.md) for the full list of scheduler configuration options.

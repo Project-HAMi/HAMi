@@ -1,14 +1,15 @@
 # roadmap
 | Production | manufactor   | Type       | MemoryIsolation  | CoreIsolation | MultiCard support |
+| -----------| -------------| -----------| --------- -------| --------------| ------------------|
 | GPU        | NVIDIA       | All        | ✅               | ✅           | ✅ |
 | MLU        | Cambricon    | 370, 590   | ✅               | ✅           | ❌ |
 | GCU        |  Enflame     | S60        | ✅               | ✅           | ❌ |
 | DCU        | Hygon        | Z100, Z100L| ✅               | ✅           | ❌ |
 | Ascend     | Huawei       | 910B       | ✅               | ✅           | ❌ |
 | GPU        | iluvatar     | All        | ✅               | ✅           | ❌ |
-| DPU        | Teco         | Checking   | In progress      | In progress  | ❌ |
-| GPU        |Moore Threads | MTT S4000  | In progress      | In progress  | ❌ |
-| GPU        | Birentech    | Model 110  | In progress      | In progress | ❌ |
+| DPU        | Teco         | Checking   | In progress      | In progress   | ❌ |
+| GPU        |Moore Threads | MTT S4000  | In progress      | In progress   | ❌ |
+| GPU        | Birentech    | Model 110  | In progress      | In progress   | ❌ |
 
 
 - [ ] Support video codec processing

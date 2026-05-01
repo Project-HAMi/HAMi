@@ -32,7 +32,7 @@ spec:
     requests.memory: 1Gi
     limits.cpu: "2"
     limits.memory: 2Gi
-    requests.nvidia.com/gpu-memory: 30000
+    limits.nvidia.com/gpumem: 30000
 ```
 
 **Step 2:** Apply it to your namespace:
@@ -52,7 +52,7 @@ kubectl describe resourcequota compute-resources --namespace=myspace
 
 ## Notes
 
-- The quota unit for `requests.nvidia.com/gpu-memory` is MiB.
+- The quota unit for `limits.nvidia.com/gpumem` is MiB.
 - This quota applies to the sum of all pod requests in the namespace,
   not per individual pod.
 - Pods that would exceed the quota will be rejected at admission time.
