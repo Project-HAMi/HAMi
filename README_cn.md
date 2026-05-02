@@ -185,6 +185,8 @@ HAMi 社区致力于营造开放和友好的环境，提供多种方式与其他
 
 HAMi 采用 Apache 2.0 许可证。详情请参见 [LICENSE](LICENSE) 文件。
 
+Copyright Contributors to HAMi, established as HAMi a Series of LF Projects, LLC.
+
 ## Star 趋势
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)
