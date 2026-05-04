@@ -157,6 +157,13 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
+	// When Coscheduling denies a PodGroup, pods return to Pending with stale
+	// HAMi annotations. Evict them from cache to prevent phantom GPU occupancy.
+	if pod.Status.Phase == corev1.PodPending && pod.Annotations[util.DeviceBindPhase] != util.DeviceBindSuccess {
+		klog.V(5).InfoS("Pod is pending with stale annotations, evicting from cache", "pod", pod.Name)
+		s.podManager.DelPod(pod)
+		return
+	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
@@ -717,6 +724,7 @@ ReleaseNodeLocks:
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
 	}
+	s.podManager.DelPod(current)
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }

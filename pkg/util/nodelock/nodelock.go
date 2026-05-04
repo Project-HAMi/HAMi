@@ -18,6 +18,7 @@ package nodelock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -40,11 +41,19 @@ const (
 	NodeLockSep = ","
 )
 
+// errNodeLocked is a sentinel error indicating the node is locked by a valid
+// (non-expired, non-dangling) pod. LockNode uses this to distinguish retryable
+// lock contention from non-retryable errors.
+var errNodeLocked = errors.New("node is locked by a valid pod")
+
 var (
 	// nodeLocks manages per-node locks for fine-grained concurrency control.
 	nodeLocks = newNodeLockManager()
 	// NodeLockTimeout is the global timeout for node locks.
 	NodeLockTimeout time.Duration = time.Minute * 5
+	// NodeLockRetryTimeout is the timeout for retrying lock acquisition when
+	// a node is locked by a valid (non-expired, non-dangling) pod.
+	NodeLockRetryTimeout time.Duration = time.Second * 30
 
 	DefaultStrategy = wait.Backoff{
 		Steps:    5,
@@ -113,6 +122,16 @@ func setupNodeLockTimeout() {
 		} else {
 			NodeLockTimeout = d
 			klog.InfoS("Node lock expiration time set from environment variable", "duration", d)
+		}
+	}
+	retryTimeout := os.Getenv("HAMI_NODELOCK_RETRY_TIMEOUT")
+	if retryTimeout != "" {
+		d, err := time.ParseDuration(retryTimeout)
+		if err != nil {
+			klog.ErrorS(err, "Failed to parse HAMI_NODELOCK_RETRY_TIMEOUT, using default", "duration", NodeLockRetryTimeout)
+		} else {
+			NodeLockRetryTimeout = d
+			klog.InfoS("Node lock retry timeout set from environment variable", "duration", d)
 		}
 	}
 }
@@ -205,8 +224,39 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	return nil
 }
 
+// LockNode attempts to acquire a node lock, retrying with backoff when the
+// node is locked by a valid (non-expired, non-dangling) pod. This allows
+// concurrent bind operations (e.g., from coscheduling PodGroups) to succeed
+// sequentially on the same node rather than failing immediately.
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
-	ctx := context.Background()
+	ctx, cancel := context.WithTimeout(context.Background(), NodeLockRetryTimeout)
+	defer cancel()
+
+	var lastErr error
+	err := wait.PollUntilContextCancel(ctx, time.Second, true, func(ctx context.Context) (bool, error) {
+		lastErr = tryLockNode(ctx, nodeName, lockname, pods)
+		if lastErr == nil {
+			return true, nil
+		}
+		if errors.Is(lastErr, errNodeLocked) {
+			klog.V(5).InfoS("Node locked by valid pod, retrying", "node", nodeName)
+			return false, nil
+		}
+		return false, lastErr
+	})
+	if err != nil {
+		if lastErr != nil {
+			return lastErr
+		}
+		return fmt.Errorf("failed to lock node %s: timed out after %v", nodeName, NodeLockRetryTimeout)
+	}
+	return nil
+}
+
+// tryLockNode makes a single attempt to acquire the node lock.
+// It returns nil on success, errNodeLocked when the lock is held by a valid
+// pod (retryable), or a regular error for non-retryable failures.
+func tryLockNode(ctx context.Context, nodeName string, lockname string, pods *corev1.Pod) error {
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -219,13 +269,18 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return err
 	}
 
+	// Lock held by the same pod → idempotent success.
+	if ns == pods.Namespace && previousPodName == pods.Name {
+		return nil
+	}
+
 	var skipOwnerCheck = false
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
 		skipOwnerCheck = true
 	} else
 	// Check dangling nodeLock
-	if ns != "" && previousPodName != "" && (ns != pods.Namespace || previousPodName != pods.Name) {
+	if ns != "" && previousPodName != "" {
 		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)
@@ -245,7 +300,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
 
-	return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
+	return errNodeLocked
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {
