@@ -157,9 +157,10 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
-	// When Coscheduling denies a PodGroup, pods return to Pending with stale
-	// HAMi annotations. Evict them from cache to prevent phantom GPU occupancy.
-	if pod.Status.Phase == corev1.PodPending && pod.Annotations[util.DeviceBindPhase] != util.DeviceBindSuccess {
+	// Evict stale cache entries for pods denied by Coscheduling at Permit stage
+	// (Bind never ran, so DeviceBindPhase is unset). Skip "allocating" pods —
+	// they are mid-Bind and will be cleaned up by the Bind failure path.
+	if pod.Status.Phase == corev1.PodPending && pod.Annotations[util.DeviceBindPhase] == "" {
 		klog.V(5).InfoS("Pod is pending with stale annotations, evicting from cache", "pod", pod.Name)
 		s.podManager.DelPod(pod)
 		return
