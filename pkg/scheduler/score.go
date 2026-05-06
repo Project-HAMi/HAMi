@@ -16,7 +16,6 @@ limitations under the License.
 package scheduler
 
 import (
-	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -161,19 +160,10 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
 
-	// Pre-compute container counts and request totals once, outside the
-	// per-node goroutines, since they are identical for every node.
 	numInitContainers := len(task.Spec.InitContainers)
 	maxInitReq := podInitContainerMaxRequest(resourceReqs, numInitContainers)
 	appReqTotal := podAppContainerTotalRequest(resourceReqs, numInitContainers)
 
-	// Maintainer optimization (@Shouren):
-	// Init containers run sequentially and exit before app containers start.
-	// The node only ever needs to hold max(maxInitReq, appReqTotal) free at
-	// any moment. We compare both GPU count AND memory to correctly detect
-	// when init containers need more resources than app containers.
-	// If needsInitClone=false, we skip fitInDevices for init containers
-	// entirely — the app allocation implicitly covers them.
 	needsInitClone := numInitContainers > 0 &&
 		(maxInitReq.nums > appReqTotal.nums || maxInitReq.memreq > appReqTotal.memreq)
 
@@ -197,40 +187,14 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			ctrfit := true
 			deviceType := ""
 
-			// appContainersNode is the NodeUsage that regular containers
-			// will deduct from.
 			var appContainersNode *NodeUsage
-
-			// initialNodeBytes holds the JSON snapshot of the node's full
-			// capacity. It is only populated when needsInitClone is true,
-			// so that each init container can be evaluated against a fresh
-			// copy of the node without draining the pool for app containers.
-			var initialNodeBytes []byte
-
 			if needsInitClone {
 				// Init containers request MORE than app containers (by count
-				// or memory), so we must evaluate them against full node
-				// capacity. Marshal once; each init container gets its own
-				// Unmarshal.
-				initialNodeBytes, err = json.Marshal(node)
-				if err != nil {
-					klog.ErrorS(err, "Failed to marshal node state for cloning", "nodeID", nodeID)
-					errCh <- err
-					return
-				}
-
-				// App containers share a separate copy that starts at full
-				// capacity and is drained as each app container is scheduled.
-				appContainersNode = &NodeUsage{}
-				if err := json.Unmarshal(initialNodeBytes, appContainersNode); err != nil {
-					klog.ErrorS(err, "Failed to unmarshal node state for app containers", "nodeID", nodeID)
-					errCh <- err
-					return
-				}
+				// or memory). DeepCopy replaces JSON marshal/unmarshal
+				appContainersNode = node.DeepCopy()
 			} else {
 				// No init containers, or init requests are already covered
 				// by app container requests — use the node directly with no
-				// clone overhead.
 				appContainersNode = node
 			}
 
@@ -243,10 +207,6 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					sums += int(k.Nums)
 				}
 
-				// Maintainer optimization (@Shouren):
-				// When init container requests are already covered by app
-				// container requests (!needsInitClone), skip fitInDevices
-				// for init containers entirely. Their device usage is
 				// implicitly satisfied by the app container allocation since
 				// init and app containers never run simultaneously — the node
 				// only needs max(init, app) capacity at any moment.
@@ -269,21 +229,8 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				// Decide which NodeUsage view to pass to fitInDevices.
 				var workingNode *NodeUsage
 				if needsInitClone && ctrid < numInitContainers {
-					// This is an init container that needs more resources than
-					// the app containers. Give it a fresh snapshot of the
-					// node's full capacity so it doesn't interfere with the
-					// app container pool.
-					workingNode = &NodeUsage{}
-					if err := json.Unmarshal(initialNodeBytes, workingNode); err != nil {
-						klog.ErrorS(err, "Failed to unmarshal node state for init container",
-							"nodeID", nodeID, "ctrid", ctrid)
-						errCh <- err
-						return
-					}
+					workingNode = node.DeepCopy()
 				} else {
-					// Regular app container (or an init container whose
-					// request is already covered by the app allocation).
-					// Both deduct from the shared accumulated state.
 					workingNode = appContainersNode
 				}
 
