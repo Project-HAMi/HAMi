@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+
+	"gotest.tools/v3/assert"
 )
 
 func TestDeviceUsageListLen(t *testing.T) {
@@ -196,6 +198,110 @@ func TestDeviceUsageList_Less(t *testing.T) {
 	}
 }
 
+func TestDeviceUsageListDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original DeviceUsageList
+	}{
+		{
+			name:     "empty",
+			original: DeviceUsageList{},
+		},
+		{
+			name: "fully populated",
+			original: DeviceUsageList{
+				Policy: "binpack",
+				DeviceLists: []*DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:     "GPU-0",
+							Type:   "NVIDIA",
+							Health: true,
+						},
+						Score: 1.0,
+					},
+					{
+						Device: &device.DeviceUsage{
+							ID:     "GPU-1",
+							Type:   "NVIDIA",
+							Health: false,
+						},
+						Score: 2.0,
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			originalPolicy := tt.original.Policy
+			copy.Policy = "spread"
+			assert.Equal(t, tt.original.Policy, originalPolicy)
+			if len(copy.DeviceLists) > 0 {
+				originalScore := tt.original.DeviceLists[0].Score
+				originalDeviceID := tt.original.DeviceLists[0].Device.ID
+				copy.DeviceLists[0].Score = 99.9
+				copy.DeviceLists[0].Device.ID = "mutated-gpu"
+				assert.Equal(t, tt.original.DeviceLists[0].Score, originalScore)
+				assert.Equal(t, tt.original.DeviceLists[0].Device.ID, originalDeviceID)
+			}
+		})
+	}
+}
+
+func TestDeviceListsScoreDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original *DeviceListsScore
+	}{
+		{
+			name:     "nil",
+			original: nil,
+		},
+		{
+			name: "fully populated",
+			original: &DeviceListsScore{
+				Device: &device.DeviceUsage{
+					ID:     "GPU-0",
+					Type:   "NVIDIA",
+					Health: true,
+				},
+				Score: 3.5,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			if tt.original == nil {
+				if copy != nil {
+					t.Fatalf("expected nil, got %v", copy)
+				}
+				return
+			}
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			copy.Score = 99.9
+			copy.Device.ID = "mutated-gpu"
+
+			assert.Equal(t, tt.original.Score, float32(3.5))
+			assert.Equal(t, tt.original.Device.ID, "GPU-0")
+		})
+	}
+}
+
 func TestComputeScore(t *testing.T) {
 	tests := []struct {
 		name          string
@@ -203,6 +309,30 @@ func TestComputeScore(t *testing.T) {
 		requests      device.ContainerDeviceRequests
 		expectedScore float32
 	}{
+		{
+			name: "Zero capacity device returns score 0 without panic",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Count:     0,
+				Totalcore: 0,
+				Totalmem:  0,
+			},
+			requests:      make(device.ContainerDeviceRequests),
+			expectedScore: 0,
+		},
+		{
+			name: "Partial zero capacity (Count=0) returns score 0 without panic",
+			device: &device.DeviceUsage{
+				ID:        "test-device",
+				Type:      "type1",
+				Count:     0,
+				Totalcore: 8,
+				Totalmem:  4096,
+			},
+			requests:      make(device.ContainerDeviceRequests),
+			expectedScore: 0,
+		},
 		{
 			name: "ContainerDeviceRequests has no data",
 			device: &device.DeviceUsage{

@@ -13,12 +13,14 @@ RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu
+COPY .git/modules/libvgpu /libvgpu-git
+RUN rm -rf /libvgpu/.git && echo "gitdir: /libvgpu-git" > /libvgpu/.git
 WORKDIR /libvgpu
 ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get -y update; apt-get -y install cmake
+RUN apt-get -y update; apt-get -y --no-install-recommends install cmake git && rm -rf /var/lib/apt/lists/*
 RUN bash ./build.sh
 
-FROM nvidia/cuda:12.6.3-base-ubuntu22.04
+FROM nvidia/cuda:13.2.1-base-ubuntu22.04
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-12-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \

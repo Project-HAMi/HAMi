@@ -187,6 +187,8 @@ If you have any questions, please feel free to reach out to us through the follo
 
 HAMi is under the Apache 2.0 license. See the [LICENSE](LICENSE) file for details.
 
+Copyright Contributors to HAMi, established as HAMi a Series of LF Projects, LLC.
+
 ## Star History
 
 [![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)

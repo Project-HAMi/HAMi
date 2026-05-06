@@ -1,16 +1,18 @@
 # roadmap
-
-Heterogeneous AI Computing device to support
-
-| Production  | manufactor | Type        |MemoryIsolation | CoreIsolation | MultiCard support |
-|-------------|------------|-------------|-----------|---------------|-------------------|
-| GPU         | NVIDIA     | All         | ✅              | ✅            | ✅                |
-| MLU         | Cambricon  | 370, 590    | ✅              | ✅            | ❌                |
-| GCU         | Enflame    | S60         | ✅              | ✅            | ❌                |
-| DCU         | Hygon      | Z100, Z100L | ✅              | ✅            | ❌                |
-| Ascend      | Huawei     | 910B        | ✅              | ✅            | ❌                |
-| GPU         | iluvatar   | All         | ✅              | ✅            | ❌                |
-| DPU         | Teco       | Checking    | In progress     | In progress   | ❌                |
+| Production | Manufactor    | Type             | MemoryIsolation | CoreIsolation | MultiCard support |
+|------------|---------------|------------------|-----------------|---------------|-------------------|
+| GPU        | NVIDIA        | All              | ✅              | ✅            | ✅                |
+| MLU        | Cambricon     | 370, 590         | ✅              | ✅            | ❌                |
+| GCU        | Enflame       | S60              | ✅              | ✅            | ❌                |
+| DCU        | Hygon         | Z100, Z100L      | ✅              | ✅            | ❌                |
+| NPU        | Ascend        | 310P, 910B, 910B3| ✅              | ✅            | ❌                |
+| GPU        | iluvatar      | All              | ✅              | ✅            | ❌                |
+| DPU        | Teco          | Checking         | In progress     | In progress   | ❌                |
+| GPU        | Moore Threads | MTT S4000        | ✅              | ✅            | ❌                |
+| GPU        | Birentech     | Model 110        | In progress     | In progress   | ❌                |
+| GPU        | MetaX         | MXC500           | ✅              | ✅            | ❌                |
+| XPU        | Kunlunxin     | P800             | ✅              | ✅            | ❌                |
+| GPU        | Vastai        | VA16             | ✅              | ✅            | ❌              |      
 
 
 - [ ] Support video codec processing

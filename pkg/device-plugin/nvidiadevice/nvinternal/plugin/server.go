@@ -634,12 +634,15 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
-			alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
-			if err != nil {
-				podAllocationFailed(nodename, current, NodeLockNvidia)
-				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+			if plugin.operatingMode != "mig" {
+				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
+				if err != nil {
+					podAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+				}
+				devreq = alignedDevreq
 			}
-			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(alignedDevreq))
+			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
@@ -651,11 +654,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 
 			if plugin.operatingMode != "mig" {
-				for i, dev := range alignedDevreq {
+				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
 				}
-				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(alignedDevreq[0].Usedcores)
+				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
@@ -947,7 +950,7 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
-	return plugin.rm.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
+	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
 }
 
 func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {

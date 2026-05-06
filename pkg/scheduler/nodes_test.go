@@ -22,9 +22,11 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func Test_addNode_ListNodes(t *testing.T) {
@@ -208,6 +210,90 @@ func Test_GetNode(t *testing.T) {
 			result, err := m.GetNode(test.args)
 			if err != nil {
 				assert.DeepEqual(t, test.want, result)
+			}
+		})
+	}
+}
+
+func TestNodeUsageDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original *NodeUsage
+	}{
+		{
+			name:     "nil input",
+			original: nil,
+		},
+		{
+			name: "empty fields",
+			original: &NodeUsage{
+				Node:    nil,
+				Devices: policy.DeviceUsageList{},
+			},
+		},
+		{
+			name: "fully populated",
+			original: &NodeUsage{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-node",
+					},
+				},
+				Devices: policy.DeviceUsageList{
+					Policy: "binpack",
+					DeviceLists: []*policy.DeviceListsScore{
+						{
+							Device: &device.DeviceUsage{
+								ID:        "GPU-0",
+								Index:     0,
+								Used:      1,
+								Count:     10,
+								Usedmem:   1024,
+								Totalmem:  8192,
+								Totalcore: 100,
+								Usedcores: 10,
+								Numa:      0,
+								Type:      "NVIDIA",
+								Health:    true,
+							},
+							Score: 1.5,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			if tt.original == nil {
+				if copy != nil {
+					t.Fatalf("expected nil, got %v", copy)
+				}
+				return
+			}
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			if copy.Node != nil {
+				originalNodeName := tt.original.Node.Name
+				copy.Node.Name = "mutated-node"
+				assert.Equal(t, tt.original.Node.Name, originalNodeName)
+			}
+			originalPolicy := tt.original.Devices.Policy
+			copy.Devices.Policy = "spread"
+			assert.Equal(t, tt.original.Devices.Policy, originalPolicy)
+			if len(copy.Devices.DeviceLists) > 0 {
+				originalScore := tt.original.Devices.DeviceLists[0].Score
+				originalDeviceID := tt.original.Devices.DeviceLists[0].Device.ID
+				copy.Devices.DeviceLists[0].Score = 99.9
+				copy.Devices.DeviceLists[0].Device.ID = "mutated-gpu"
+				assert.Equal(t, tt.original.Devices.DeviceLists[0].Score, originalScore)
+				assert.Equal(t, tt.original.Devices.DeviceLists[0].Device.ID, originalDeviceID)
 			}
 		})
 	}

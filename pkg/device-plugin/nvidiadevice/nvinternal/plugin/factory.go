@@ -83,14 +83,14 @@ func New(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, de
 		o.cdiHandler = cdi.NewNullHandler()
 	}
 
-	resourceManagers, err := o.getResourceManagers()
-	if err != nil {
-		return nil, fmt.Errorf("failed to construct resource managers: %w", err)
-	}
-
 	sConfig, mode, err := LoadNvidiaDevicePluginConfig()
 	if err != nil {
 		return nil, fmt.Errorf("failed to load nvidia plugin config: %v", err)
+	}
+
+	resourceManagers, err := o.getResourceManagers()
+	if err != nil {
+		return nil, fmt.Errorf("failed to construct resource managers: %w", err)
 	}
 
 	var plugins []Interface

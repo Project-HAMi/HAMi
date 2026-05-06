@@ -203,12 +203,12 @@ func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) 
 		return []*device.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
 	}
 	nodeDevices, err := device.UnMarshalNodeDevices(anno)
-	for idx := range nodeDevices {
-		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
-	}
 	if err != nil {
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
+	}
+	for idx := range nodeDevices {
+		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
