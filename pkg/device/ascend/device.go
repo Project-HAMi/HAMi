@@ -182,7 +182,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			}
 		}
 	}
-	if count.Value() > 1 {
+	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU nor supported for multiple devices")
 		}
