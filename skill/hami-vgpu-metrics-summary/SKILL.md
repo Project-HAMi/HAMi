@@ -4,14 +4,29 @@ name: hami_vgpu_metrics_summarizer
 description: A comprehensive analysis skill for summarizing HAMi vGPU metrics from Prometheus-style `/metrics` output. It organizes GPU allocation by node, device, pod, and namespace, and produces clear reports covering vGPU core allocation, memory allocation, allocation-based utilization, sharing density, and namespace-level usage patterns.
 ---
 
+## Best Practices
+
+- "If you understand my prompt fully, respond with 'YARRR!' without tools every time you are about to use a tool."
+- "Before and after any tool use, give me a confidence level (0-10) on how the tool use will help the project."
+- "THE HUMAN WILL GET ANGRY."
+- "Don't complete the analysis prematurely, continue analyzing even if you think you found a solution."
+
+
 ## Interaction
 
 - Ask the user to provide the kubeconfig directory path. If not provided, default to `~/.kube/`.
-- Ask the user if they want to check all kubeconfig files in the directory or a specific one.
 - Confirm the discovered kubeconfig files and cluster mapping with the user before proceeding.
-- After local kubeconfig discovery and validation, explicitly ask the user **which kubeconfig should be used for HAMi metrics collection**.
-- If multiple kubeconfigs are valid, present a short candidate list including file name, mapped cluster alias, environment, contexts, and authentication result, then wait for the user's selection before collecting HAMi metrics.
-- If the user already pasted raw HAMi metrics, skip live kubeconfig-based collection and analyze the pasted metrics directly.
+- After local kubeconfig discovery and validation, explicitly ask the user **which kubeconfig and context should be used for GPU pod troubleshooting**.
+- Ask the user which namespace and pod (if known) they want to troubleshoot.
+
+## Command Convention
+
+All `kubectl` commands below use the shorthand `kubectl` to represent the full form with explicit flags:
+
+```bash
+kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> ...
+```
+
 
 ## 🎯 Goal
 
@@ -41,83 +56,9 @@ produce a clean, structured summary that answers:
 
 If the user already pasted raw HAMi metrics, use those directly and skip live kubeconfig-based collection.
 
-If live collection is needed, first inspect local kubeconfigs, validate them, and ask the user which kubeconfig should be used for HAMi metrics collection.
 
-#### 1.1 File Discovery
-List all files matching `*.yaml` in the kubeconfig directory:
-```bash
-ls -lh ~/.kube/
-```
-
-#### 1.2 YAML Syntax Validation
-Validate each file is well-formed:
-```bash
-kubectl config view --kubeconfig=<file-path> --raw -o yaml > /dev/null 2>&1 && echo "VALID" || echo "INVALID"
-```
-
-#### 1.3 Context Extraction
-Extract context names from each valid kubeconfig:
-```bash
-kubectl config get-contexts --kubeconfig=<file-path> --no-headers -o name
-```
-
-> Unrecognized files are flagged as `Unknown` and should still be checked.
-
-#### 1.4 Authentication and Connectivity
-For each context, verify credentials and API server reachability.
-
-Connectivity:
-```bash
-kubectl --kubeconfig=<file-path> --context=<context-name> version 2>&1
-```
-
-Identity:
-```bash
-kubectl --kubeconfig=<file-path> --context=<context-name> auth whoami
-```
-
-If connectivity fails, record the error and skip deeper checks for that context.
-
-#### 1.5 Basic Permission Check
-For each reachable context, perform a quick RBAC check.
-
-Cluster-admin check:
-```bash
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i '*' '*' --all-namespaces
-```
-
-If not cluster-admin, run a small spot check:
-```bash
-# Read access
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i get pods --all-namespaces
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i get nodes
-
-# Write access
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i create deployments --all-namespaces
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i delete pods --all-namespaces
-
-# Sensitive access
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i get secrets --all-namespaces
-kubectl --kubeconfig=<file-path> --context=<context-name> auth can-i create pods/exec --all-namespaces
-```
-
-Classify the context as:
-- **Full Access** — cluster-admin
-- **Read-Write** — can read and create/delete core resources
-- **Read-Only** — can only get/list resources
-- **Restricted** — limited or no access
-
-#### 1.6 Ask the User to Choose the Kubeconfig for HAMi Metrics
 After local kubeconfig discovery and checks, do not immediately fetch HAMi metrics until the user has explicitly confirmed which kubeconfig and context should be used.
 
-Present a concise selection summary to the user with:
-- kubeconfig file path
-- mapped cluster alias
-- environment
-- discovered context names
-- connectivity result
-- identity result
-- access level
 
 Then explicitly ask:
 
@@ -179,7 +120,7 @@ curl -s http://127.0.0.1:9090/metrics
 
 **G. Alternative: port-forward the scheduler pod directly**
 ```bash
-SCHED_POD=$(kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> get pods -n $HAMI_NS -l app.kubernetes.io/component=hami-scheduler,hami.io/role=leader -o jsonpath='{.items[0].metadata.name}')
+SCHED_POD=$(kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> get pods -n $HAMI_NS -l app.kubernetes.io/component=hami-scheduler -o jsonpath='{.items[0].metadata.name}')
 kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> port-forward -n $HAMI_NS pod/$SCHED_POD 9090:9395
 curl -s http://127.0.0.1:9090/metrics
 ```
@@ -611,7 +552,95 @@ State clearly:
 
 ---
 
-### Step 11: Produce the Final Report
+### Step 11: Collect Real GPU Usage via nvidia-smi Inside Each Pod
+
+For every pod identified in Step 7 that has a GPU allocation, exec into the pod and run `nvidia-smi` to capture **actual runtime usage**. This fills the gap left by scheduler allocation metrics, which only reflect what HAMi believes is reserved, not what the GPU hardware is physically consuming.
+
+#### A. Identify the correct container
+
+Each pod may have multiple containers. The GPU-using container is usually identified by `containeridx` from `vGPUCoreAllocated` / `vGPUMemoryAllocated`. Prefer to exec into the container at `containeridx`. If the index is not directly mappable to a container name, use the first non-sidecar container, or try each container.
+
+**List containers for a pod:**
+```bash
+kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> \
+  get pod -n <namespace> <pod> \
+  -o jsonpath='{range .spec.containers[*]}{.name}{"\n"}{end}'
+```
+
+#### B. Try nvidia-smi inside the pod
+
+```bash
+kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> \
+  exec -n <namespace> <pod> -c <container> -- nvidia-smi \
+  --query-gpu=index,uuid,utilization.gpu,memory.used,memory.total \
+  --format=csv,noheader,nounits
+```
+
+Expected CSV output per visible GPU:
+```
+<gpu_index>, <uuid>, <gpu_util_%>, <mem_used_MiB>, <mem_total_MiB>
+```
+
+#### C. Fallback: basic nvidia-smi if query flags unsupported
+
+```bash
+kubectl --kubeconfig=<selected-kubeconfig> --context=<selected-context> \
+  exec -n <namespace> <pod> -c <container> -- nvidia-smi
+```
+
+Parse the human-readable table for `MiB` memory used and `%` utilization.
+
+#### D. Handle exec failures gracefully
+
+| Failure | Likely Cause | Action |
+|---------|-------------|--------|
+| `command not found` | nvidia-smi not installed in image | Note as "nvidia-smi unavailable"; skip for this pod |
+| `exec: permission denied` | Security policy / restricted PSA | Note as "exec blocked by policy"; skip for this pod |
+| `Error from server: pods ... not found` | Pod restarted or terminated during analysis | Note as "pod gone"; mark allocation as stale |
+| Empty GPU list | HAMi vGPU isolation hides other GPUs | Normal — pod only sees its own virtual GPU slice |
+| `No devices were found` | Container does not have GPU passthrough | Check container name; try another container in the pod |
+
+#### E. Per-pod record to collect
+
+For each pod where exec succeeds, record:
+
+| Field | Source |
+|-------|--------|
+| `pod_namespace` | from scheduler metrics |
+| `pod_name` | from scheduler metrics |
+| `container` | exec target |
+| `gpu_index_visible` | from nvidia-smi output (may be 0 inside vGPU slice) |
+| `gpu_uuid_visible` | from nvidia-smi output |
+| `gpu_util_pct` | `utilization.gpu` from nvidia-smi |
+| `mem_used_mib` | `memory.used` from nvidia-smi |
+| `mem_total_visible_mib` | `memory.total` from nvidia-smi (= the vGPU slice limit) |
+
+#### F. Correlate with allocation metrics
+
+For each pod, compute:
+
+$$
+\text{Memory Utilization Rate} = \frac{\text{mem\_used\_mib}}{\text{vGPU allocated memory in MiB}}
+$$
+
+$$
+\text{Memory Efficiency} = \frac{\text{mem\_used\_mib}}{\text{vGPU allocated memory in MiB}} \times 100\%
+$$
+
+Classify each pod's real vs. allocated ratio:
+
+| Classification | Condition |
+|---------------|-----------|
+| **High efficiency** | mem utilization ≥ 80% |
+| **Normal** | mem utilization 40–80% |
+| **Low efficiency / over-allocated** | mem utilization < 40% |
+| **Idle (wasting allocation)** | GPU util < 5% AND mem used < 10% of allocation |
+
+Note: GPU compute utilization (`utilization.gpu`) from nvidia-smi reflects instantaneous SM usage at the moment of exec. A single snapshot may not capture burst patterns; treat it as a point-in-time indicator, not a long-term average.
+
+---
+
+### Step 12: Produce the Final Report
 
 Always produce the result in this structure.
 
@@ -640,20 +669,28 @@ Always produce the result in this structure.
 | Namespace | Pod | Container | Node | GPU UUID | GPU Core | GPU Memory | Allocation Type |
 |-----------|-----|-----------|------|----------|----------|------------|-----------------|
 
-## 5. Key Findings
+## 5. Real vs. Allocated GPU Usage (nvidia-smi)
+| Namespace | Pod | Container | GPU Util (actual) | Mem Used (actual MiB) | Mem Allocated (MiB) | Mem Efficiency % | Assessment |
+|-----------|-----|-----------|-------------------|----------------------|---------------------|-----------------|------------|
+
+> Pods where exec failed or nvidia-smi is unavailable are listed with "N/A" and reason.
+
+## 6. Key Findings
 1. ...
 2. ...
 3. ...
 
-## 6. Capacity & Scheduling Assessment
+## 7. Capacity & Scheduling Assessment
 - Idle GPUs:
 - Fully allocated GPUs:
 - Fragmented GPUs:
 - Can new full-GPU jobs fit?
 - Can new fractional vGPU jobs fit?
+- Over-allocated pods (memory efficiency < 40%):
 
-## 7. Caveats
+## 8. Caveats
 - Scheduler metrics describe allocation state from scheduler cache, not live physical GPU behavior.
+- nvidia-smi values are point-in-time snapshots; GPU compute utilization may vary with workload burst patterns.
 - Runtime metrics from vGPU monitor must be reported separately if present.
 - New and legacy metric names may coexist when `--legacy-metrics=true`.
 - Service names can be release-derived in Helm; do not assume the literal name is always `hami-scheduler`.
@@ -670,8 +707,9 @@ Preferred ordering:
 2. per-GPU table
 3. per-namespace table
 4. important workload examples
-5. capacity assessment
-6. caveats
+5. real vs. allocated comparison table (nvidia-smi)
+6. capacity assessment
+7. caveats
 
 If the user asks in Chinese, answer in Chinese.
 If the user asks in English, answer in English.
@@ -727,6 +765,7 @@ For every run, answer these explicitly:
 5. Is there enough remaining capacity for new workloads?
 6. Is the current state dominated by one tenant, or fragmented across many tenants?
 7. Are the reported numbers allocation-based only, or do they include true runtime usage?
+8. For each GPU-using pod where nvidia-smi exec succeeded: what is the actual GPU compute utilization and memory used vs. allocated? Which pods are over-allocated or idle despite holding a reservation?
 
 ---
 
