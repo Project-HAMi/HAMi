@@ -1,26 +1,27 @@
 # HAMi v2.9.0 Documentation Status
 
 Last updated: 2026-05-07
-Scope: All English `.md` files under `/docs` (upstream master)
+Scope: All English .md files under /docs (upstream master)
 
 ## Summary
 
-Three structural problems remain unresolved as of v2.9.0:
+Three structural problems remain unresolved as of v2.9.0.
 
-1. `develop/design.md` has no version stamp and predates HA support in v2.8. It is the primary reference for new contributors building a mental model of HAMi internals. If it is inaccurate, they start wrong.
-2. The `/docs` root has 40+ files with no grouping by audience. Users, operators, and developers land in the same flat list.
-3. Four high-priority docs are missing: a standalone Quick Start, an Architecture page, a FAQ, and a Concepts overview (vGPU vs MIG, scheduling model).
+First, develop/design.md has no version stamp and predates HA support in v2.8. It is the primary reference for new contributors building a mental model of HAMi internals. If it is inaccurate, they start wrong.
 
-**Resolved since initial audit (2026-04-15):**
-- `benchmark.md` updated with A100/vLLM data — no longer outdated
-- `develop/tasklist.md` removed
-- New files added: `ascend910-hami-vnpu-core-support.md`, `resource-quota.md`, `scheduling-policy.md`
+Second, the /docs root has 40+ files with no grouping by audience. Users, operators, and developers land in the same flat list.
 
-**Open questions for maintainers:**
-1. Is `develop/design.md` still accurate against the v2.8/v2.9 codebase?
+Third, four high-priority docs are missing: a standalone Quick Start, an Architecture page, a FAQ, and a Concepts overview (vGPU vs MIG, scheduling model).
+
+Resolved since initial audit (2026-04-15):
+- benchmark.md updated with A100/vLLM data, no longer outdated
+- develop/tasklist.md removed
+- New files added: ascend910-hami-vnpu-core-support.md, resource-quota.md, scheduling-policy.md
+
+Open questions for maintainers:
+1. Is develop/design.md still accurate against the v2.8/v2.9 codebase?
 2. Is the directory structure in Section 3 acceptable as a v2.9.0 target?
 
----
 
 ## 1. File Inventory
 
@@ -60,21 +61,19 @@ Three structural problems remain unresolved as of v2.9.0:
 | proposals/nvidia-gpu-topology-scheduler.md | Operator/User | Fresh | Keep |
 | mind-map/ | Community | Fresh | Keep |
 
----
 
 ## 2. Missing Docs
 
 | Gap | Priority | Notes |
 |-----|----------|-------|
-| Quick Start, standalone | High | PR #1718 was redirected to website repo; `/docs` still has no equivalent |
-| Architecture doc | High | design.md covers internals, but no user-facing architecture page exists |
+| Quick Start, standalone | High | PR 1718 was redirected to website repo. /docs still has no equivalent |
+| Architecture doc | High | design.md covers internals but no user-facing architecture page exists |
 | Concepts: vGPU vs MIG | High | No doc explains the core scheduling model to a new user |
-| FAQ | High | Common questions scattered across Issues and Slack |
+| FAQ | High | Common questions are scattered across Issues and Slack |
 | Troubleshooting guide | Medium | |
 | DRA integration doc | Medium | DRA support merged but undocumented |
 | vLLM integration guide | Medium | Referenced in benchmark.md, no standalone guide |
 
----
 
 ## 3. Proposed Structure
 
@@ -113,20 +112,19 @@ docs/
         profiling.md
 ```
 
-Chinese translations would mirror the same structure under `i18n/zh/`. The `proposals/` directory stays as-is; historical design records do not need to move.
+Chinese translations would mirror the same structure under i18n/zh/. The proposals/ directory stays as-is.
 
----
 
 ## 4. Action Plan
 
-### Immediate (no content decisions needed)
+### Immediate
 
 | Action | Label |
 |--------|-------|
-| Validate `develop/design.md` against v2.8/v2.9 internals | docs/accuracy, needs-maintainer |
-| Write `docs/guides/quick-start.md` (deploy and verify in under 10 minutes) | docs/quickstart, good-first-issue |
-| Write `docs/guides/troubleshooting/faq.md` (seed from Issues and Slack) | docs/faq, good-first-issue |
-| Write `docs/concepts/architecture.md` (user-facing, based on design.md) | docs/diagram, needs-maintainer |
+| Validate develop/design.md against v2.8/v2.9 internals | docs/accuracy, needs-maintainer |
+| Write docs/guides/quick-start.md | docs/quickstart, good-first-issue |
+| Write docs/guides/troubleshooting/faq.md | docs/faq, good-first-issue |
+| Write docs/concepts/architecture.md | docs/diagram, needs-maintainer |
 
 ### After missing docs are merged
 
@@ -136,18 +134,17 @@ Chinese translations would mirror the same structure under `i18n/zh/`. The `prop
 | Update all internal cross-links | docs/migration |
 | Update README to use new paths | docs/migration |
 
----
 
 ## 5. Diagrams
 
-All diagram assets currently exist as `.png` or `.jpg` with no editable source (except mind-maps which have `.xmind` sources). This makes updates expensive.
+All diagram assets currently exist as .png or .jpg with no editable source, except mind-maps which have .xmind sources. This makes updates expensive.
 
 | Asset | Problem |
 |-------|---------|
-| `imgs/hami-arch.png` (source: `.pptx`) | No SVG; source not in repo |
-| `imgs/example.png` | No editable source |
-| `imgs/hard_limit.jpg` | Low quality format, no source |
-| `imgs/release-process.png` | No editable source |
-| `imgs/metax_*.png` | No editable source |
+| imgs/hami-arch.png (source: .pptx) | No SVG. Source not in repo |
+| imgs/example.png | No editable source |
+| imgs/hard_limit.jpg | Low quality format, no source |
+| imgs/release-process.png | No editable source |
+| imgs/metax_*.png | No editable source |
 
-Target: redraw as SVG using draw.io (renders in GitHub without extra tooling). Existing `.xmind` mind-map sources can serve as the template for how to track source files.
+Target: redraw as SVG using draw.io, which renders in GitHub without extra tooling. Existing .xmind mind-map sources can serve as the template for how to track source files.
