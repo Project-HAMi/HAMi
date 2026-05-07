@@ -1,39 +1,34 @@
-# HAMi v2.9.0 Documentation Audit Report
+# HAMi v2.9.0 Documentation Status
 
-Date: 2026-04-15
-Scope: All English .md files under /docs (30 files, _cn.md translations tracked separately)
+Last updated: 2026-05-07
+Scope: All English `.md` files under `/docs` (upstream master)
 
 ## Summary
 
-This audit covers all 30 English docs in /docs. The goal is to get a clear picture of what we have, what is broken, and what is missing before anything gets changed.
+Three structural problems remain unresolved as of v2.9.0:
 
-Three things need a maintainer decision before any work starts.
+1. `develop/design.md` has no version stamp and predates HA support in v2.8. It is the primary reference for new contributors building a mental model of HAMi internals. If it is inaccurate, they start wrong.
+2. The `/docs` root has 40+ files with no grouping by audience. Users, operators, and developers land in the same flat list.
+3. Four high-priority docs are missing: a standalone Quick Start, an Architecture page, a FAQ, and a Concepts overview (vGPU vs MIG, scheduling model).
 
-First, benchmark.md references a Tesla V100 and Kubernetes v1.12, both from 2018. This is the only performance document we have. Users evaluating HAMi read it and assume the numbers are current. They are not. Someone needs to decide whether to rewrite it with A100/H100 data or archive it.
+**Resolved since initial audit (2026-04-15):**
+- `benchmark.md` updated with A100/vLLM data — no longer outdated
+- `develop/tasklist.md` removed
+- New files added: `ascend910-hami-vnpu-core-support.md`, `resource-quota.md`, `scheduling-policy.md`
 
-Second, develop/design.md has no version stamp and was likely written before HA support landed in v2.8. New contributors use this to understand how HAMi works internally. If it is inaccurate, they start with a wrong mental model. A maintainer familiar with the v2.8 internals should do a quick pass and confirm whether it is still correct.
+**Open questions for maintainers:**
+1. Is `develop/design.md` still accurate against the v2.8/v2.9 codebase?
+2. Is the directory structure in Section 3 acceptable as a v2.9.0 target?
 
-Third, the doc structure is flat. There are 42 files at the top level with no separation between user guides, operator references, developer internals, and historical proposals. A new contributor or user has no way to figure out where to start. This is the main reason onboarding takes so long.
-
-Four high-priority docs do not exist yet: a standalone Quick Start, an Architecture page, a FAQ, and a Concepts overview.
-
-Decisions needed from maintainers:
-1. Archive or rewrite benchmark.md?
-2. Who reviews develop/design.md against the v2.8 codebase?
-3. Is the proposed directory structure in Section 3 acceptable as the v2.9.0 target?
-
-Things contributors can start on now without waiting for a maintainer:
-1. Add a deprecation notice to benchmark.md
-2. Remove develop/tasklist.md, which duplicates roadmap.md
-3. Draft docs/guides/quick-start.md and docs/guides/troubleshooting/faq.md
-
+---
 
 ## 1. File Inventory
 
 | File | Audience | Freshness | Recommendation |
 |------|----------|-----------|----------------|
 | ascend910b-support.md | Operator/User | Fresh | Keep |
-| benchmark.md | User | Outdated | Update or archive |
+| ascend910-hami-vnpu-core-support.md | Operator/User | Fresh | Keep |
+| benchmark.md | User | Fresh (updated) | Keep |
 | cambricon-mlu-support.md | Operator/User | Fresh | Keep |
 | config.md | Operator | Fresh | Keep |
 | dashboard.md | Operator | Fresh | Keep |
@@ -51,54 +46,39 @@ Things contributors can start on now without waiting for a maintainer:
 | mthreads-support.md | Operator/User | Fresh | Keep |
 | offline-install.md | Operator | Fresh | Keep |
 | release-process.md | Maintainer | Fresh | Keep |
+| resource-quota.md | Operator | Fresh | Keep |
 | scheduler-event-log.md | Developer | Fresh | Keep |
+| scheduling-policy.md | Operator/Dev | Fresh | Keep |
 | vastai-support.md | Operator/User | Fresh | Keep |
-| develop/design.md | Developer | Possibly outdated | Validate against v2.8 |
+| develop/design.md | Developer | Unverified | Validate against v2.8/v2.9 |
 | develop/dynamic-mig.md | Developer | Fresh | Keep |
 | develop/protocol.md | Developer | Fresh | Keep |
 | develop/roadmap.md | Developer | Fresh | Keep |
 | develop/scheduler-policy.md | Operator/Dev | Fresh | Keep |
-| develop/tasklist.md | Developer | Possibly outdated | Remove, duplicates roadmap |
 | proposals/e2e_test.md | Developer | Fresh | Keep |
 | proposals/gpu-topo-policy.md | Developer | Fresh | Keep |
 | proposals/nvidia-gpu-topology-scheduler.md | Operator/User | Fresh | Keep |
-| mind-map/readme | Community | Fresh | Keep |
+| mind-map/ | Community | Fresh | Keep |
 
+---
 
-## 2. Issues
+## 2. Missing Docs
 
-### README and Docs Overlap
+| Gap | Priority | Notes |
+|-----|----------|-------|
+| Quick Start, standalone | High | PR #1718 was redirected to website repo; `/docs` still has no equivalent |
+| Architecture doc | High | design.md covers internals, but no user-facing architecture page exists |
+| Concepts: vGPU vs MIG | High | No doc explains the core scheduling model to a new user |
+| FAQ | High | Common questions scattered across Issues and Slack |
+| Troubleshooting guide | Medium | |
+| DRA integration doc | Medium | DRA support merged but undocumented |
+| vLLM integration guide | Medium | Referenced in benchmark.md, no standalone guide |
 
-The README is currently trying to be both an entry point and a full manual. That creates a maintenance problem: any change to installation steps or architecture has to be updated in two places. The cleaner model is README as entry point (short intro, three commands, links to docs) and /docs as the place where depth lives.
-
-| README section | Where the detail already lives | What to do |
-|----------------|-------------------------------|------------|
-| Quick Start / Install | Partially in config.md | Shorten to 3 commands, link to quick-start.md |
-| Supported devices list | All device support docs | Replace with a summary table and links |
-| Architecture | develop/design.md | Keep one diagram, link to architecture.md |
-| Monitor section | dashboard.md | One sentence and a link |
-| Notes | Nowhere | Move content to FAQ |
-
-
-### Missing Docs
-
-| Gap | Priority | Workstream |
-|-----|----------|------------|
-| Quick Start, standalone | High | WS7 |
-| Architecture doc, standalone | High | WS4 |
-| Concepts: vGPU vs MIG model | High | WS1 and WS8 |
-| FAQ | High | WS6 |
-| NVIDIA GPU setup guide | Medium | WS1 |
-| Troubleshooting guide | Medium | WS1 |
-| DRA doc | Medium | WS1 |
-| vLLM integration guide | Medium | WS8 |
-
+---
 
 ## 3. Proposed Structure
 
-Right now there are 42 files at the top level with no grouping. Chinese translations sit inline next to English files. The proposals directory has no framing, so users landing there from a search engine cannot tell if they are reading a current guide or an old design proposal.
-
-The structure below groups files by who reads them and why. This is a proposal for maintainer review, not a commitment. The priority for v2.9.0 is getting the four missing high-priority docs written and placed correctly. Moving existing files can happen incrementally.
+The current flat layout mixes user guides, developer internals, operator references, and historical proposals with no separation. The structure below groups files by audience. Moving existing files can happen incrementally after the missing docs are written.
 
 ```
 docs/
@@ -112,17 +92,7 @@ docs/
             online.md
             offline.md
         devices/
-            nvidia-gpu.md
-            ascend-npu.md
-            dynamic-mig.md
-            cambricon-mlu.md
-            hygon-dcu.md
-            iluvatar-gpu.md
-            moore-threads.md
-            metax-gpu.md
-            enflame-gcu.md
-            kunlun-xpu.md
-            vastai.md
+            (existing per-vendor files)
         integrations/
             volcano-vgpu.md
             volcano-ascend.md
@@ -134,6 +104,8 @@ docs/
             scheduler-events.md
     reference/
         config.md
+        resource-quota.md
+        scheduling-policy.md
     contributing/
         development.md
         release-process.md
@@ -141,59 +113,41 @@ docs/
         profiling.md
 ```
 
-The proposals directory would move out of the user-facing tree. Actionable items go to GitHub Issues. Historical design records go to an internal wiki. Chinese translations would move to an i18n/zh mirror of the same structure.
+Chinese translations would mirror the same structure under `i18n/zh/`. The `proposals/` directory stays as-is; historical design records do not need to move.
 
+---
 
 ## 4. Action Plan
 
-### Step 1: Immediate cleanup, no content changes needed
+### Immediate (no content decisions needed)
 
-| Action | Owner | Label |
-|--------|-------|-------|
-| Add a deprecation notice to benchmark.md | Contributor | docs/cleanup, good-first-issue |
-| Open an issue to rewrite benchmark.md with A100/H100 data | Maintainer | docs/cleanup, help-wanted |
-| Move any unique content from develop/tasklist.md to GitHub Issues, then delete the file | Contributor | docs/cleanup |
+| Action | Label |
+|--------|-------|
+| Validate `develop/design.md` against v2.8/v2.9 internals | docs/accuracy, needs-maintainer |
+| Write `docs/guides/quick-start.md` (deploy and verify in under 10 minutes) | docs/quickstart, good-first-issue |
+| Write `docs/guides/troubleshooting/faq.md` (seed from Issues and Slack) | docs/faq, good-first-issue |
+| Write `docs/concepts/architecture.md` (user-facing, based on design.md) | docs/diagram, needs-maintainer |
 
+### After missing docs are merged
 
-### Step 2: README rewrite (maintainer sign-off needed before merge)
+| Action | Label |
+|--------|-------|
+| Reorganize files into the proposed structure | docs/migration |
+| Update all internal cross-links | docs/migration |
+| Update README to use new paths | docs/migration |
 
-| Action | Owner | Label |
-|--------|-------|-------|
-| Rewrite the intro as a problem and solution narrative | Contributor | docs/readme |
-| Shorten Quick Start to three commands and a link | Contributor | docs/readme |
-| Replace the supported devices section with a summary table and links | Contributor | docs/readme |
-| Update the architecture section with a current diagram and link | Maintainer | docs/readme |
-| Move the Notes section content to the future FAQ | Contributor | docs/readme |
-
-
-### Step 3: Write the four missing high-priority docs
-
-| Action | Owner | Label |
-|--------|-------|-------|
-| Write docs/guides/quick-start.md, deploy and verify in under 10 minutes | Contributor | docs/quickstart, good-first-issue |
-| Write docs/guides/troubleshooting/faq.md, seed from GitHub Issues and Slack | Contributor | docs/faq, good-first-issue |
-| Write docs/concepts/architecture.md, based on design.md and validated against v2.8 | Maintainer | docs/diagram |
-
-
-### Step 4: Reorganize existing files (do this after Step 3 is merged)
-
-| Action | Owner | Label |
-|--------|-------|-------|
-| Move files into the new structure | Contributor | docs/migration |
-| Update all internal cross-links | Contributor | docs/migration |
-| Update README links to match new paths | Contributor | docs/migration |
-
+---
 
 ## 5. Diagrams
 
-| Asset | Location | Problem |
-|-------|----------|---------|
-| Main architecture | imgs/hami-arch.png (source: hami-arch.pptx) | No SVG version |
-| Device sharing example | imgs/example.png | No editable source |
-| Hard limit demo | imgs/hard_limit.jpg | Low quality format, no source file |
-| Release process | imgs/release-process.png | No editable source |
-| Mind maps | docs/mind-map/*.png and *.xmind | Editable source exists |
-| Benchmark charts | imgs/benchmark*.png | Tied to outdated benchmark.md |
-| MetaX topology | imgs/metax_*.png | No editable source |
+All diagram assets currently exist as `.png` or `.jpg` with no editable source (except mind-maps which have `.xmind` sources). This makes updates expensive.
 
-All of these should eventually be redrawn as SVG with editable source files. draw.io is the preferred format since it works in GitHub without extra tooling.
+| Asset | Problem |
+|-------|---------|
+| `imgs/hami-arch.png` (source: `.pptx`) | No SVG; source not in repo |
+| `imgs/example.png` | No editable source |
+| `imgs/hard_limit.jpg` | Low quality format, no source |
+| `imgs/release-process.png` | No editable source |
+| `imgs/metax_*.png` | No editable source |
+
+Target: redraw as SVG using draw.io (renders in GitHub without extra tooling). Existing `.xmind` mind-map sources can serve as the template for how to track source files.
