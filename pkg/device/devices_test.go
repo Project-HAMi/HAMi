@@ -622,6 +622,68 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
+			// Inside the 60s cooldown window — keep the conservative path,
+			// scheduler should not yet re-add the node to its cache.
+			name: "Deleted state within cooldown",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2128-12-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Stale Deleted_ — the recovery path is taken but util.GetNode
+			// fails outside a real cluster, so the function falls back to
+			// (true, false). Behaviour matches the existing "Unknown state"
+			// case which exercises the same util.GetNode failure path.
+			name: "Deleted state stale",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2024-01-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Unparsable timestamp must keep the conservative (true, false)
+			// path — never recover from a malformed value.
+			name: "Deleted state with unparsable timestamp",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_not-a-timestamp",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
 			name: "Unknown state",
 			args: struct {
 				devType string

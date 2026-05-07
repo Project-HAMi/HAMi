@@ -492,7 +492,39 @@ func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
 		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
 		return time.Now().Before(formertime.Add(time.Second * 60)), false
 	} else if strings.Contains(handshake, "Deleted") {
-		return true, false
+		// Mirror the timestamp logic used by the Requesting branch: a
+		// Deleted_<ts> older than 60s on a node whose devices are otherwise
+		// reporting healthy means the previous cleanup is stale and the
+		// scheduler should bring the node back into its cache. Stamp
+		// Requesting_<now> and return (true, true) so the caller re-adds
+		// node devices on the next reconcile.
+		//
+		// Bare "Deleted" without a timestamp (used in some unit tests) and
+		// any unparsable timestamp must keep the conservative (true, false)
+		// path so we never recover from a malformed value.
+		parts := strings.SplitN(handshake, "_", 2)
+		if len(parts) < 2 {
+			return true, false
+		}
+		formerTime, err := time.Parse(time.DateTime, parts[1])
+		if err != nil {
+			return true, false
+		}
+		if time.Now().Before(formerTime.Add(time.Second * 60)) {
+			return true, false
+		}
+		tmppat := make(map[string]string)
+		tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
+		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
+		n, err := util.GetNode(node.Name)
+		if err != nil {
+			klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
+			return true, false
+		}
+		if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
+			klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
+		}
+		return true, true
 	} else {
 		_, ok := util.HandshakeAnnos[devType]
 		if ok {
