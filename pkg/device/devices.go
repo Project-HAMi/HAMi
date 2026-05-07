@@ -502,6 +502,10 @@ func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
 		// Bare "Deleted" without a timestamp (used in some unit tests) and
 		// any unparsable timestamp must keep the conservative (true, false)
 		// path so we never recover from a malformed value.
+		annoKey, ok := util.HandshakeAnnos[devType]
+		if !ok {
+			return true, false
+		}
 		parts := strings.SplitN(handshake, "_", 2)
 		if len(parts) < 2 {
 			return true, false
@@ -510,12 +514,17 @@ func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
 		if err != nil {
 			return true, false
 		}
-		if time.Now().Before(formerTime.Add(time.Second * 60)) {
+		now := time.Now()
+		if now.Before(formerTime.Add(time.Second * 60)) {
 			return true, false
 		}
-		tmppat := make(map[string]string)
-		tmppat[util.HandshakeAnnos[devType]] = "Requesting_" + time.Now().Format(time.DateTime)
-		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", util.HandshakeAnnos[devType], "annotationValue", tmppat[util.HandshakeAnnos[devType]])
+		newHandshake := "Requesting_" + now.Format(time.DateTime)
+		tmppat := map[string]string{annoKey: newHandshake}
+		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", annoKey, "annotationValue", newHandshake)
+		// Mirror the empty-annotation branch: GetNode also acts as a guard
+		// for an empty node.Name and an uninitialised client (PatchNodeAnnotations
+		// panics in unit tests without it). Worth a follow-up to dedupe with
+		// the else branch into a helper.
 		n, err := util.GetNode(node.Name)
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
