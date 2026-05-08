@@ -510,7 +510,7 @@ func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
 		if len(parts) < 2 {
 			return true, false
 		}
-		formerTime, err := time.Parse(time.DateTime, parts[1])
+		formerTime, err := time.ParseInLocation(time.DateTime, parts[1], time.Local)
 		if err != nil {
 			return true, false
 		}
