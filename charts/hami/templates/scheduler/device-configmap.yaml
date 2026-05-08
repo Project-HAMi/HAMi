@@ -96,9 +96,9 @@ data:
               memory: 40960
               count: 2
           - 
-            - name: 7g.79gb
-              core: 100
-              memory: 80896
+            - name: 7g.80gb
+              core: 98
+              memory: 81920
               count: 1
       - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
         allowedGeometries:
