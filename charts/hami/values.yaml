@@ -436,8 +436,8 @@ hami-dra:
       # If you are using gpu driver on host, you need to set this to false
       containerDriver: true
       image:
-        repository: projecthami/k8s-dra-driver
-        tag: "v0.0.1-dev"
+        repository: ghcr.io/project-hami/k8s-dra-driver
+        tag: "main"
 
 devices:
   amd:
