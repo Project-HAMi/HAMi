@@ -1,0 +1,6 @@
+dependencies:
+- name: hami-dra
+  repository: https://project-hami.github.io/HAMi-DRA/
+  version: 0.2.0
+digest: sha256:560025a3c26590eec8cb0d73e74ef9255e2d52e5c1b4f829694fd309cd45b5c3
+generated: "2026-05-08T16:02:02.292237+08:00"
