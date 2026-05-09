@@ -187,7 +187,7 @@ HAMi コミュニティは、ユーザー、コントリビューター、ハー
 
 | イベント | 講演 |
 | --- | --- |
-| CHINA CLOUD COMPUTING INFRASTRUCTURE DEVELOPER CONFERENCE, Beijing 2024 | [Unlocking heterogeneous AI infrastructure on k8s clusters](https://live.csdn.net/room/csdnnews/3zwDP09S) |
+| 中国クラウドコンピューティング・インフラ開発者会議、北京 2024 | [k8s クラスターにおける異種 AI インフラストラクチャの解放](https://live.csdn.net/room/csdnnews/3zwDP09S) |
 | KubeDay Japan 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster: Leveraging the Power of HAMi](https://www.youtube.com/watch?v=owoaSb4nZwg) |
 | KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Is Your GPU Really Working Efficiently in the Data Center? N Ways to Improve GPU Usage](https://www.youtube.com/watch?v=ApkyK3zLF5Q) |
 | KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster](https://www.youtube.com/watch?v=kcGXnp_QShs) |
