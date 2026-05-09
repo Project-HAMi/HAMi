@@ -1,6 +1,6 @@
 [English version](README.md) | [中文版](README_cn.md) | 日本語版
 
-<img src="imgs/hami-horizontal-colordark.png" width="600px">
+<img src="imgs/hami-horizontal-colordark.png" width="600px" alt="HAMi logo">
 
 [![LICENSE](https://img.shields.io/github/license/Project-HAMi/HAMi.svg)](/LICENSE)
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
@@ -10,184 +10,191 @@
 [![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
 [![docker pulls](https://img.shields.io/docker/pulls/projecthami/hami.svg)](https://hub.docker.com/r/projecthami/hami)
-[![Contact Me](https://img.shields.io/badge/Contact%20Me-blue)](https://github.com/Project-HAMi/HAMi#meeting--contact)
-[![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=googlechat)](https://cloud-native.slack.com/archives/C07T10BU4R2)
-[![discord](https://img.shields.io/badge/discord-5865F2?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
-[![website](https://img.shields.io/badge/website-green?style=for-the-badge&logo=readthedocs)](http://project-hami.io)
+[![slack](https://img.shields.io/badge/slack-green?style=for-the-badge&logo=slack)](https://cloud-native.slack.com/archives/C07T10BU4R2)
+[![discord](https://img.shields.io/badge/discord-grey?style=for-the-badge&logo=discord)](https://discord.gg/Amhy7XmbNq)
+[![website](https://img.shields.io/badge/website-blue?style=for-the-badge&logo=readthedocs)](https://project-hami.io)
 
-## Project-HAMi: 異種AIコンピューティング仮想化ミドルウェア
+# HAMi
 
-## はじめに
+**AI インフラストラクチャ向け Kubernetes GPU 仮想化およびヘテロジニアスアクセラレータスケジューリング。**
 
-HAMi(旧称「k8s-vGPU-scheduler」)は、Kubernetes用のヘテロジニアスデバイス管理ミドルウェアです。GPU、NPUなどの異なるタイプのヘテロジニアスデバイスを管理し、Pod間でヘテロジニアスデバイスを共有し、デバイスのトポロジーとスケジューリングポリシーに基づいてより良いスケジューリング決定を行うことができます。
+![HAMi Architecture](imgs/hami-architecture.png)
 
-HAMiは、異なるヘテロジニアスデバイス間のギャップを埋め、ユーザーがアプリケーションを変更することなく統一されたインターフェースで管理できるようにすることを目指しています。2024年12月現在、HAMiはインターネット、パブリッククラウド、プライベートクラウドだけでなく、金融、証券、エネルギー、通信、教育、製造などのさまざまな垂直産業でも広く採用されています。50以上の企業や機関がエンドユーザーであるだけでなく、アクティブな貢献者でもあります。
+HAMi は **Heterogeneous AI Computing Virtualization Middleware**（異種 AI コンピューティング仮想化ミドルウェア）の略称です。旧称 `k8s-vGPU-scheduler`。HAMi はプラットフォームチームが Kubernetes ワークロード間で高価な GPU やその他の AI アクセラレータを共有し、デバイスメモリとコンピュートを分離し、アプリケーションコードを変更することなくデバイスアウェアなスケジューリングポリシーで Pod をスケジュールできるようにします。
 
-![cncf_logo](imgs/cncf-logo.png)
+HAMi は [CNCF Sandbox](https://www.cncf.io/sandbox-projects/) および [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) プロジェクトであり、[CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami) にも掲載されています。
 
-HAMiは[Cloud Native Computing Foundation](https://cncf.io/)(CNCF)のサンドボックス及び[landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami)プロジェクトであり、
-[CNAI Landscapeプロジェクト](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami)でもあります。
+![CNCF logo](imgs/cncf-logo.png)
 
+## なぜ HAMi？
+
+AI インフラストラクチャチームは、同じような Kubernetes アクセラレータの問題に直面しています：GPU 全体が小さなジョブに割り当てられ、チームが希少なデバイスを争い、異なるアクセラレータベンダーが異なる運用モデルを提供し、スケジューラがワークロードを効率的に配置するための十分なデバイスコンテキストを持っていません。
+
+HAMi は Kubernetes ネイティブなレイヤーを提供します：
+
+- **デバイス共有**：メモリ、コア、またはデバイス数によって物理アクセラレータの一部を割り当てます。
+- **リソース分離**：デバイスバックエンドがサポートする場合、ワークロードごとのアクセラレータメモリとコンピュートの制限を強制します。
+- **デバイスアウェアスケジューリング**：トポロジアウェア、binpack、spread、およびデバイス固有のスケジューリングポリシーで Pod を配置します。
+- **ヘテロジニアス AI クラスター**：NVIDIA GPU、NPU、DCU、MLU など、1 つのスケジューリングおよび割り当てワークフローで複数のアクセラレータタイプを管理します。
+- **アプリケーションの変更不要**：標準の Kubernetes リソースリクエストとリミットを引き続き使用します。
+- **本番運用**：メトリクス、ダッシュボード、WebUI、Helm インストール、コミュニティサポートのデプロイガイダンスを提供します。
+
+## ユースケース
+
+- 共有 Kubernetes AI クラスターでの GPU 利用率の向上。
+- 同一のアクセラレータプール上でマルチテナントのノートブック、トレーニング、推論ワークロードを実行。
+- 公平なデバイス割り当てとクォータ制御を備えたプライベートクラウド AI プラットフォームの構築。
+- NVIDIA、Ascend、Cambricon、Hygon、Iluvatar、MetaX、Moore Threads など、複数ベンダーのヘテロジニアスアクセラレータクラスターの運用。
+- バッチ AI ワークロード向けに kube-scheduler や Volcano などの Kubernetes スケジューラと HAMi を組み合わせて使用。
+
+## 仕組み
+
+HAMi は Mutating Webhook、スケジューラエクステンダー、デバイスプラグイン、およびデバイス固有のコンテナ内仮想化コンポーネントで構成されています。
+
+```text
+Pod サブミッション
+  -> HAMi Mutating Webhook
+  -> HAMi スケジューラ filter / score / bind
+  -> デバイス割り当てを Pod アノテーションに書き込み
+  -> デバイスプラグイン Allocate()
+  -> コンテナランタイム環境
+  -> HAMi モニターおよびメトリクス
+```
 
 ## デバイス仮想化
 
-HAMiは、デバイス共有とデバイスリソース分離をサポートすることにより、GPUを含むいくつかのヘテロジニアスデバイスにデバイス仮想化を提供します。デバイス仮想化をサポートするデバイスのリストについては、[サポートされているデバイス](#サポートされているデバイス)を参照してください。
-
-### デバイス共有
-
-- デバイスコアの使用量を指定することにより、部分的なデバイス割り当てが可能です。
-- デバイスメモリを指定することにより、部分的なデバイス割り当てが可能です。
-- ストリーミングマルチプロセッサに厳格な制限を課します。
-- 既存のプログラムへの変更は不要です。
-- [dynamic-mig](docs/dynamic-mig-support.md)機能をサポートします。[例](examples/nvidia/dynamic_mig_example.yaml)
-
-<img src="./imgs/example.png" width = "500" />
-
-### デバイスリソース分離
-
-デバイス分離の簡単なデモンストレーション:
-次のリソースを持つタスクは、コンテナ内で3000MのデバイスメモリーとGPUを認識します:
+HAMi はワークロードが必要なアクセラレータリソースのみをリクエストできるようにします。例えば、次の Pod は 3 GiB の GPU メモリを持つ物理 NVIDIA GPU を 1 つリクエストします：
 
 ```yaml
-      resources:
-        limits:
-          nvidia.com/gpu: 1 # Podが必要とする物理GPUの数を宣言
-          nvidia.com/gpumem: 3000 # 各物理GPUがPodに割り当てる3GのGPUメモリを識別
+resources:
+  limits:
+    nvidia.com/gpu: 1
+    nvidia.com/gpumem: 3000
 ```
 
-![img](./imgs/hard_limit.jpg)
+ワークロードはコンテナ内で割り当てられたデバイスリソースを確認し、HAMi がスケジューリング、割り当て、分離を調整します。
 
-> 注意:
-1. **HAMiをインストールした後、ノードに登録される`nvidia.com/gpu`の値はデフォルトでvGPUの数になります。**
-2. **Pod内でリソースをリクエストする場合、`nvidia.com/gpu`は現在のPodが必要とする物理GPUの数を指します。**
+![HAMi Example](imgs/example.png)
 
-### サポートされているデバイス
+> 注意：
+>
+> 1. HAMi のインストール後、ノードに登録される `nvidia.com/gpu` の値はデフォルトで vGPU の数になります。
+> 2. Pod でリソースをリクエストする場合、`nvidia.com/gpu` は現在の Pod が必要とする物理 GPU の数を指します。
 
-[NVIDIA GPU](https://github.com/Project-HAMi/HAMi#preparing-your-gpu-nodes)   
-[Cambricon MLU](docs/cambricon-mlu-support.md)   
-[HYGON DCU](docs/hygon-dcu-support.md)   
-[Iluvatar CoreX GPU](docs/iluvatar-gpu-support.md)   
-[Moore Threads GPU](docs/mthreads-support.md)   
-[HUAWEI Ascend NPU](https://github.com/Project-HAMi/ascend-device-plugin/blob/main/README.md)   
-[MetaX GPU](docs/metax-support.md)   
+## サポートされているデバイス
 
-## アーキテクチャ
+HAMi は GPU、NPU、DCU、MLU、GCU、XPU など、複数のヘテロジニアスアクセラレータバックエンドをサポートしています。デバイスの機能はベンダー、モデル、ドライバー、ハードウェア世代によって異なります。
 
-<img src="./imgs/hami-arch.png" width = "600" />
-
-HAMiは、統一されたmutatingwebhook、統一されたスケジューラーエクステンダー、異なるデバイスプラグイン、および各ヘテロジニアスAIデバイスのための異なるコンテナ内仮想化技術を含む、いくつかのコンポーネントで構成されています。
+最新のサポートマトリクスについては、[HAMi サポートデバイス](https://project-hami.io/docs/userguide/device-supported)ページを参照してください。
 
 ## クイックスタート
 
-### オーケストレーターを選択
-
-[![kube-scheduler](https://img.shields.io/badge/kube-scheduler-blue)](#前提条件)
-[![volcano-scheduler](https://img.shields.io/badge/volcano-scheduler-orange)](docs/how-to-use-volcano-vgpu.md)
-
 ### 前提条件
 
-NVIDIAデバイスプラグインを実行するための前提条件のリストは以下の通りです:
+NVIDIA デバイスプラグインを使用する場合：
 
-- NVIDIA drivers >= 440
-- nvidia-docker version > 2.0
-- containerd/docker/cri-oコンテナランタイムのデフォルトランタイムとしてnvidiaが設定されていること
-- Kubernetes version >= 1.23
-- glibc >= 2.17 & glibc < 2.30
-- kernel version >= 3.10
-- helm > 3.0
+- NVIDIA ドライバー >= 440
+- `nvidia-docker` バージョン > 2.0
+- NVIDIA が containerd、Docker、または CRI-O のデフォルトランタイムとして設定されていること
+- Kubernetes >= 1.23
+- glibc >= 2.17 および < 2.30
+- Linux カーネル >= 3.10
+- Helm > 3.0
 
-### インストール
+### Helm でインストール
 
-まず、「gpu=on」ラベルを追加して、HAMiでスケジューリングするためにGPUノードにラベルを付けます。このラベルがないと、ノードはスケジューラーで管理できません。
+HAMi が管理できるように GPU ノードにラベルを付けます：
 
+```bash
+kubectl label nodes <node-name> gpu=on
 ```
-kubectl label nodes {nodeid} gpu=on
-```
 
-helmにリポジトリを追加します
+HAMi Helm リポジトリを追加します：
 
-```
+```bash
 helm repo add hami-charts https://project-hami.github.io/HAMi/
+helm repo update
 ```
 
-次のコマンドでデプロイします:
+HAMi をインストールします：
 
-```
+```bash
 helm install hami hami-charts/hami -n kube-system
 ```
 
-[設定](docs/config.md)を調整してインストールをカスタマイズします。
+スケジューラとデバイスプラグインが実行されていることを確認します：
 
-次のコマンドでインストールを確認します:
-
-```
+```bash
 kubectl get pods -n kube-system
 ```
 
-`hami-device-plugin`(旧称`vgpu-device-plugin`)と`hami-scheduler`(旧称`vgpu-scheduler`)の両方のPodが*Running*状態であれば、インストールは成功です。[こちら](examples/nvidia/default_use.yaml)の例を試すことができます。
+`hami-device-plugin` と `hami-scheduler` が両方とも `Running` になったら、サンプルワークロードをデプロイします：
 
-### WebUI
-
-[HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI)はHAMi v2.4以降で利用可能です。
-
-インストールガイドについては、[こちら](https://github.com/Project-HAMi/HAMi-WebUI/blob/main/docs/installation/helm/index.md)をクリックしてください。
-
-### モニタリング
-
-モニタリングはインストール後に自動的に有効になります。次のURLにアクセスしてクラスター情報の概要を取得します:
-
-```
-http://{scheduler ip}:{monitorPort}/metrics
+```bash
+kubectl apply -f examples/nvidia/default_use.yaml
 ```
 
-デフォルトのmonitorPortは31993です。他の値はインストール時に`--set devicePlugin.service.httpPort`を使用して設定できます。
+完全なインストールガイドと設定オプションについては、[HAMi ドキュメント](https://project-hami.io/docs/get-started/deploy-with-helm/)を参照してください。
 
-Grafanaダッシュボードの[例](docs/dashboard.md)
+## スケジューリングポリシー
 
-> **注意** タスクを送信する前にノードのステータスは収集されません
+HAMi は AI ワークロード向けに複数のスケジューリングモードをサポートしています：
 
-## 注意事項
+- **binpack**：少数のノードまたはデバイスにワークロードをパックしてリソース利用率を向上させます。
+- **spread**：ノードまたはデバイス間でワークロードを分散させ、競合を減らします。
+- **トポロジアウェアスケジューリング**：サポートされている場合、GPU トポロジに基づいてデバイスの組み合わせを選択します。
+- **ダイナミック MIG**：対応するカードとモードに対して NVIDIA MIG インスタンスを動的に作成および割り当てます。
 
-- NVIDIAイメージでデバイスプラグインを使用する際にvGPUをリクエストしない場合、マシン上のすべてのGPUがコンテナ内に公開される可能性があります
-- 現在、A100 MIGは「none」および「mixed」モードでのみサポートされています。
-- 「nodeName」フィールドを持つタスクは現時点ではスケジュールできません。代わりに「nodeSelector」を使用してください。
+HAMi はデフォルトの Kubernetes スケジューラパスと互換性があり、バッチ指向の AI ワークロードに Volcano を組み合わせて使用することもできます。現在のスケジューラ統合ガイドについては、[HAMi Web サイト](https://project-hami.io/docs/)を参照してください。
+
+## オブザーバビリティと WebUI
+
+HAMi はクラスタのアクセラレータ使用状況を監視するためのメトリクスを公開します。インストール後、スケジューラのモニターエンドポイントからメトリクスにアクセスできます：
+
+```text
+http://<scheduler-ip>:<monitor-port>/metrics
+```
+
+デフォルトのモニターポートは `31993` です。Helm の値で `--set scheduler.service.monitorPort=<port>` のように変更できます。
+
+HAMi は他にも以下を提供します：
+
+- [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) — ビジュアルクラスタおよびデバイス管理。
+- Grafana ダッシュボードの例 — アクセラレータモニタリング用。
+- ベンチマーク素材 — ワークロードの動作とスケジューリング効果の評価用。
+
+![HAMi WebUI](imgs/hami-webui-overview.png)
 
 ## ロードマップ、ガバナンス、コントリビューション
 
-このプロジェクトは[メンテナー](./MAINTAINERS.md)と[コントリビューター](./AUTHORS.md)のグループによって管理されています。彼らがどのように選ばれ、管理されているかは、[ガバナンスドキュメント](https://github.com/Project-HAMi/community/blob/main/governance.md)に概説されています。
+HAMi は[メンテナー](./MAINTAINERS.md)と[コントリビューター](./AUTHORS.md)によって管理されています。ガバナンスについては、[HAMi コミュニティリポジトリ](https://github.com/Project-HAMi/community/blob/main/governance.md)を参照してください。
 
-コントリビューターになり、HAMiコードの開発に関わることに興味がある場合は、パッチの送信とコントリビューションワークフローの詳細について[CONTRIBUTING](CONTRIBUTING.md)を参照してください。
+コード、ドキュメント、テスト、デバイスバックエンドの改善に貢献するには、[CONTRIBUTING.md](./CONTRIBUTING.md) をお読みください。
 
-興味のあることについては[ロードマップ](docs/develop/roadmap.md)を参照してください。
+## コミュニティ
 
-## ミーティングと連絡先
+HAMi コミュニティは、ユーザー、コントリビューター、ハードウェアベンダー、Kubernetes ベースの AI インフラストラクチャを構築するプラットフォームチームに開かれています。
 
-HAMiコミュニティは、オープンで歓迎的な環境を育むことに取り組んでおり、他のユーザーや開発者と関わるための複数の方法があります。
-
-ご質問がある場合は、以下のチャネルからお気軽にお問い合わせください:
-
-- 定期コミュニティミーティング: 毎週金曜日 16:00 UTC+8 (中国語)。[タイムゾーンに変換](https://www.thetimezoneconverter.com/?t=14%3A30&tz=GMT%2B8&)。
-  - [ミーティングノートとアジェンダ](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
-  - [ミーティングリンク](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- Email: すべてのメンテナーのメールアドレスは[MAINTAINERS.md](MAINTAINERS.md)を参照してください。問題を報告したり質問したりする場合は、メールでお気軽にご連絡ください。
-- [メーリングリスト](https://groups.google.com/forum/#!forum/hami-project)
+- Web サイト：[project-hami.io](https://project-hami.io)
+- Discord：[HAMi Discord に参加](https://discord.gg/Amhy7XmbNq)（推奨）
+- Slack：[CNCF Slack #hami-dev](https://cloud-native.slack.com/archives/C07T10BU4R2)
+- メーリングリスト：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
+- [ミーティングノートとアジェンダ](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
+- 中国語コミュニティミーティング：毎週金曜日 16:00 UTC+8 — [ミーティングリンク](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
+- 英語コミュニティミーティング：隔週水曜日 16:00 UTC+8 — [ミーティングリンク](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
 
 ## 講演と参考資料
 
-|                  | リンク                                                                                                                    |
-|------------------|-------------------------------------------------------------------------------------------------------------------------|
-| CHINA CLOUD COMPUTING INFRASTRUCTURE DEVELOPER CONFERENCE (Beijing 2024) | [Unlocking heterogeneous AI infrastructure on k8s clusters](https://live.csdn.net/room/csdnnews/3zwDP09S) 03:06:15から開始 |
-| KubeDay(Japan 2024) | [Unlocking Heterogeneous AI Infrastructure K8s Cluster:Leveraging the Power of HAMi](https://www.youtube.com/watch?v=owoaSb4nZwg) |
-| KubeCon & AI_dev Open Source GenAI & ML Summit(China 2024) | [Is Your GPU Really Working Efficiently in the Data Center?N Ways to Improve GPU Usage](https://www.youtube.com/watch?v=ApkyK3zLF5Q) |
-| KubeCon & AI_dev Open Source GenAI & ML Summit(China 2024) | [Unlocking Heterogeneous AI Infrastructure K8s Cluster](https://www.youtube.com/watch?v=kcGXnp_QShs)                                     |
-| KubeCon(EU 2024)| [Cloud Native Batch Computing with Volcano: Updates and Future](https://youtu.be/fVYKk6xSOsw) |
+| イベント | 講演 |
+| --- | --- |
+| CHINA CLOUD COMPUTING INFRASTRUCTURE DEVELOPER CONFERENCE, Beijing 2024 | [Unlocking heterogeneous AI infrastructure on k8s clusters](https://live.csdn.net/room/csdnnews/3zwDP09S) |
+| KubeDay Japan 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster: Leveraging the Power of HAMi](https://www.youtube.com/watch?v=owoaSb4nZwg) |
+| KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Is Your GPU Really Working Efficiently in the Data Center? N Ways to Improve GPU Usage](https://www.youtube.com/watch?v=ApkyK3zLF5Q) |
+| KubeCon + AI_dev Open Source GenAI & ML Summit China 2024 | [Unlocking Heterogeneous AI Infrastructure K8s Cluster](https://www.youtube.com/watch?v=kcGXnp_QShs) |
+| KubeCon Europe 2024 | [Cloud Native Batch Computing with Volcano: Updates and Future](https://youtu.be/fVYKk6xSOsw) |
 
 ## ライセンス
 
-HAMiはApache 2.0ライセンスの下にあります。詳細については[LICENSE](LICENSE)ファイルを参照してください。
+HAMi は Apache License 2.0 の下でライセンスされています。詳細は [LICENSE](LICENSE) を参照してください。
 
 Copyright Contributors to HAMi, established as HAMi a Series of LF Projects, LLC.
-
-## スター履歴
-
-[![Star History Chart](https://api.star-history.com/svg?repos=Project-HAMi/HAMi&type=Date)](https://star-history.com/#Project-HAMi/HAMi&Date)
