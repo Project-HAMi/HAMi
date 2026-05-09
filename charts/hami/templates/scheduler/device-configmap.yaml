@@ -79,26 +79,26 @@ data:
           - 
             - name: 1g.10gb
               core: 14
-              memory: 10240
+              memory: 9728
               count: 7
           - 
             - name: 1g.10gb
               core: 14
-              memory: 10240
+              memory: 9728
               count: 1
             - name: 2g.20gb
               core: 28
-              memory: 20480
+              memory: 19968
               count: 3
           - 
             - name: 3g.40gb
               core: 42
-              memory: 40960
+              memory: 40192
               count: 2
           - 
             - name: 7g.80gb
               core: 98
-              memory: 81920
+              memory: 80896
               count: 1
       - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
         allowedGeometries:
