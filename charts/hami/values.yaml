@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.8.0"
+  imageTag: "v2.9.0"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -481,6 +481,7 @@ devices:
       ascend: "on"
     tolerations: []
     runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory

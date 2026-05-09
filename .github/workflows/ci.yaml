@@ -167,7 +167,7 @@ jobs:
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
             GOLANG_IMAGE=golang:1.26.2-bookworm
-            NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+            NVIDIA_IMAGE=nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false

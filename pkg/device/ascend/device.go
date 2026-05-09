@@ -52,6 +52,7 @@ type Devices struct {
 	useUUIDAnno      string
 	noUseUUIDAnno    string
 	handshakeAnno    string
+	hamiVnpuCore     bool
 }
 
 type RuntimeInfo struct {
@@ -78,12 +79,12 @@ func (dev *Devices) trimMemory(m int64) (int64, string) {
 	return 0, ""
 }
 
-func InitDevices(config []VNPUConfig) []*Devices {
+func InitDevices(vnpus VNPUs) []*Devices {
 	var devs []*Devices
 	if !enableAscend {
 		return devs
 	}
-	for _, vnpu := range config {
+	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
 			config:           vnpu,
@@ -91,6 +92,7 @@ func InitDevices(config []VNPUConfig) []*Devices {
 			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
 			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+			hamiVnpuCore:     vnpus.HamiVnpuCore,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -442,11 +444,14 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// Verify whether the Node supports hami vnpu core
-	nodeSupportHamiCore := false
+	// Verify whether the Node supports hami vnpu core.
+	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
+	nodeSupportHamiCore := npu.hamiVnpuCore
 
 	if nodeInfo != nil && nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		nodeSupportHamiCore = nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation] == "true"
+		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok {
+			nodeSupportHamiCore = val == "true"
+		}
 	}
 
 	var totalMemPerCard int32 = 0
