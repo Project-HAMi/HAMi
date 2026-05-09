@@ -1,4 +1,4 @@
-ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+ARG NVIDIA_IMAGE=nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04
 
 FROM $NVIDIA_IMAGE AS nvbuild
 COPY ./libvgpu /libvgpu

@@ -1,5 +1,5 @@
 ARG GOLANG_IMAGE=golang:1.25.5-bookworm
-ARG NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+ARG NVIDIA_IMAGE=nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04
 
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
