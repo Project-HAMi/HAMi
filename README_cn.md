@@ -49,7 +49,7 @@ HAMi 提供了一个 Kubernetes 原生层：
 
 ## 工作原理
 
-HAMi 由变更 webhook、调度器扩展器、设备插件和设备特定的容器内虚拟化组件组成。
+HAMi 由 Mutating Webhook、调度器扩展器、设备插件和设备特定的容器内虚拟化组件组成。
 
 ```text
 Pod 提交
