@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"strings"
 	"sync"
@@ -60,6 +61,17 @@ var (
 		Duration: 100 * time.Millisecond,
 		Factor:   2.0,
 		Jitter:   0.5,
+	}
+
+	// LockNodeBackoff is the backoff strategy for LockNode contention retries.
+	// It uses exponential backoff with jitter to stagger concurrent goroutines
+	// (e.g., coscheduling PodGroup members all competing for the same node lock).
+	LockNodeBackoff = wait.Backoff{
+		Duration: 200 * time.Millisecond,
+		Factor:   2.0,
+		Jitter:   0.3,
+		Cap:      5 * time.Second,
+		Steps:    math.MaxInt32, // context timeout (NodeLockRetryTimeout) controls termination
 	}
 )
 
@@ -233,7 +245,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	defer cancel()
 
 	var lastErr error
-	err := wait.PollUntilContextCancel(ctx, time.Second, true, func(ctx context.Context) (bool, error) {
+	err := wait.ExponentialBackoffWithContext(ctx, LockNodeBackoff, func(ctx context.Context) (bool, error) {
 		lastErr = tryLockNode(ctx, nodeName, lockname, pods)
 		if lastErr == nil {
 			return true, nil
