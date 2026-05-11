@@ -45,6 +45,13 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 	assert.DeepEqual(t, cd1, cd2)
 }
 
+func TestDecodeContainerDevices_InvalidFields(t *testing.T) {
+	_, err := DecodeContainerDevices("uuid,type,notanumber,3:")
+	assert.Assert(t, err != nil)
+	_, err = DecodeContainerDevices("uuid,type,100,notanumber:")
+	assert.Assert(t, err != nil)
+}
+
 func TestEmptyPodDeviceCoding(t *testing.T) {
 	pd1 := PodDevices{}
 	s := EncodePodDevices(inRequestDevices, pd1)
