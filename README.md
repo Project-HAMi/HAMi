@@ -20,7 +20,7 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 HAMi (Heterogeneous AI Computing Virtualization Middleware) lets you share GPUs across Kubernetes workloads with memory and compute isolation, without changing application code. Formerly k8s-vGPU-scheduler.
 
-[Docs](https://docs.project-hami.io) | [Quick Start](#quick-start) | [Discord](https://discord.gg/hami) | [Issues](https://github.com/project-hami/hami/issues) | [Roadmap](ROADMAP.md) | [Contributing](CONTRIBUTING.md)
+[Docs](https://docs.project-hami.io) | [Quick Start](#quick-start) | [Discord](https://discord.gg/hami) | [Issues](https://github.com/project-hami/hami/issues) | [[Contributing](CONTRIBUTING.md)
 
 ![HAMi Architecture](imgs/hami-architecture.png)
 
