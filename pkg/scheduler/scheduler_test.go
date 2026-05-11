@@ -1449,8 +1449,8 @@ func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 			Name:      "bad-anno-pod",
 			Namespace: "default",
 			Annotations: map[string]string{
-				util.AssignedNodeAnnotations:  "node1",
-				"hami.io/test-allocated":      "uuid,type,100:;",
+				util.AssignedNodeAnnotations: "node1",
+				"hami.io/test-allocated":     "uuid,type,100:;",
 			},
 		},
 		Status: corev1.PodStatus{Phase: corev1.PodRunning},
