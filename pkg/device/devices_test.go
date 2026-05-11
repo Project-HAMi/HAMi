@@ -293,6 +293,13 @@ func Test_DecodePodDevices(t *testing.T) {
 	}
 }
 
+func TestDecodePodDevices_BadAnnotation(t *testing.T) {
+	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
+	annos := map[string]string{"hami.io/vgpu-devices-to-allocate": "uuid,type,100:;"}
+	_, err := DecodePodDevices(checklist, annos)
+	assert.Assert(t, err != nil)
+}
+
 func TestMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		dlist []*DeviceInfo
