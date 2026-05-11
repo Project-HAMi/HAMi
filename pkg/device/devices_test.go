@@ -461,8 +461,8 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				di  []*DeviceInfo
 				err error
 			}{
-				di:  []*DeviceInfo{},
-				err: errors.New("node annotations not decode successfully"),
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
 			},
 		},
 		{
