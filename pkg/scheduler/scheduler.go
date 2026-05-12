@@ -159,7 +159,7 @@ func (s *Scheduler) onAddPod(obj any) {
 	}
 	podDev, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
-		klog.Errorf("failed to decode pod devices for %s: %v", pod.Name, err)
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
 	if s.podManager.AddPod(pod, nodeID, podDev) {
