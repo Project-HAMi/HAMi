@@ -1457,5 +1457,5 @@ func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 	}
 	s.onAddPod(pod)
 	_, ok := s.podManager.GetPod(pod)
-	assert.Equal(t, true, ok)
+	assert.Equal(t, false, ok)
 }
