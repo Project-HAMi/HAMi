@@ -413,7 +413,7 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 		if strings.Contains(val, ",") {
 			tmpstr := strings.Split(val, ",")
 			if len(tmpstr) < 4 {
-				return ContainerDevices{}, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
+				return nil, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
 			}
 			tmpdev.UUID = tmpstr[0]
 			tmpdev.Type = tmpstr[1]

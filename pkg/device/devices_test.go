@@ -46,7 +46,9 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 }
 
 func TestDecodeContainerDevices_InvalidFields(t *testing.T) {
-	_, err := DecodeContainerDevices("uuid,type,notanumber,3:")
+	_, err := DecodeContainerDevices("uuid,type,100:")
+	assert.Assert(t, err != nil)
+	_, err = DecodeContainerDevices("uuid,type,notanumber,3:")
 	assert.Assert(t, err != nil)
 	_, err = DecodeContainerDevices("uuid,type,100,notanumber:")
 	assert.Assert(t, err != nil)
