@@ -512,6 +512,17 @@ func Test_DecodeNodeDevices(t *testing.T) {
 			},
 		},
 		{
+			name: "malformed segment without comma",
+			args: "garbage:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`malformed node annotation segment: "garbage"`),
+			},
+		},
+		{
 			name: "invalid count field",
 			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,notanint,7680,100,NVIDIA-Tesla P4,0,true:",
 			want: struct {
