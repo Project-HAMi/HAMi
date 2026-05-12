@@ -274,6 +274,9 @@ func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 					if err != nil {
 						return nil, fmt.Errorf("invalid index field: %w", err)
 					}
+					if index < 0 {
+						return nil, fmt.Errorf("index field must not be negative: %d", index)
+					}
 					mode = items[8]
 				}
 				i := DeviceInfo{

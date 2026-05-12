@@ -511,6 +511,94 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				err: nil,
 			},
 		},
+		{
+			name: "invalid count field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,notanint,7680,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid count field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid memory field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,notanint,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid memory field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid core field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,notanint,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid core field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid numa field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,notanint,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid numa field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid health field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,notabool:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid health field: strconv.ParseBool: parsing "notabool": invalid syntax`),
+			},
+		},
+		{
+			name: "unexpected field count",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 5 in node annotation"),
+			},
+		},
+		{
+			name: "invalid index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,notanint,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid index field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "negative index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,-1,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("index field must not be negative: -1"),
+			},
+		},
 	}
 
 	for _, test := range tests {
