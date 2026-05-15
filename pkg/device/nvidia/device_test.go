@@ -635,6 +635,32 @@ func Test_GetNodeDevices(t *testing.T) {
 			err: nil,
 		},
 		{
+			name: "legacy encoded gpu devices",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "node-legacy",
+					Annotations: map[string]string{
+						RegisterAnnos: "GPU-0,5,8192,100,NVIDIA-Tesla P4,0,true,0,hami-core:",
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					ID:           "GPU-0",
+					Count:        5,
+					Devmem:       8192,
+					Devcore:      100,
+					Type:         "NVIDIA-Tesla P4",
+					Numa:         0,
+					Health:       true,
+					Index:        0,
+					Mode:         "hami-core",
+					DeviceVendor: NvidiaGPUDevice,
+				},
+			},
+			err: nil,
+		},
+		{
 			name: "no gpu devices",
 			args: corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
