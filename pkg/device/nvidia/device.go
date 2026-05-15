@@ -415,19 +415,11 @@ func (dev *NvidiaGPUDevices) defaultExclusiveCoreIfNeeded(ctr *corev1.Container)
 		return false
 	}
 
-	exclusive := false
-	// gpumem-percentage explicitly set
+	exclusive := true // Default to exclusive
 	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
 		exclusive = pct == 100
 	} else if _, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryName)); ok {
-		// gpumem is explicitly set to a specific value (NOT exclusive)
-		exclusive = false
-	} else if dev.config.ResourceMemoryName == "" {
-		// ResourceMemoryName is disabled in config (treat as exclusive)
-		exclusive = true
-	} else {
-		// Neither gpumem-percentage nor gpumem is set  (default to exclusive (100%))
-		exclusive = true
+		exclusive = false // ✅ Same explicit check, but cleaner
 	}
 
 	if !exclusive {
