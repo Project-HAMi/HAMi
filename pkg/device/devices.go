@@ -449,7 +449,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
 			cd, err := DecodeContainerDevices(s)
 			if err != nil {
-				return PodDevices{}, nil
+				return PodDevices{}, err
 			}
 			// IMPORTANT: Do NOT skip empty ContainerDevices!
 			// We must preserve the index mapping between annotation entries and pod containers.
