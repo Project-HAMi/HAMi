@@ -403,6 +403,124 @@ func Test_calcScore(t *testing.T) {
 			},
 		},
 		{
+			name: "init container requests more memory than any single device has (should filter node)",
+			args: struct {
+				nodes *map[string]*NodeUsage
+				nums  device.PodDeviceRequests
+				annos map[string]string
+				task  *corev1.Pod
+			}{
+				nodes: &map[string]*NodeUsage{
+					"node1": {
+						Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+						Devices: policy.DeviceUsageList{
+							Policy: util.NodeSchedulerPolicyBinpack.String(),
+							DeviceLists: []*policy.DeviceListsScore{
+								{
+									Device: &device.DeviceUsage{
+										ID:        "uuid1",
+										Index:     0,
+										Used:      0,
+										Count:     10,
+										Usedmem:   7500, // Only 500 available (8000-7500)
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+								},
+								{
+									Device: &device.DeviceUsage{
+										ID:        "uuid2",
+										Index:     1,
+										Used:      0,
+										Count:     10,
+										Usedmem:   7500, // Only 500 available (8000-7500)
+										Totalmem:  8000,
+										Totalcore: 100,
+										Usedcores: 0,
+										Numa:      0,
+										Type:      nvidia.NvidiaGPUDevice,
+										Health:    true,
+									},
+								},
+							},
+						},
+					},
+				},
+				nums: device.PodDeviceRequests{
+					// Index 0: InitContainer requests 4000 (more than any single device has)
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   4000, // Each device only has 500 available
+							Coresreq: 30,
+						},
+					},
+					// Index 1: App container requests only 100
+					{
+						nvidia.NvidiaGPUDevice: device.ContainerDeviceRequest{
+							Nums:     1,
+							Type:     nvidia.NvidiaGPUDevice,
+							Memreq:   100,
+							Coresreq: 30,
+						},
+					},
+				},
+				annos: make(map[string]string),
+				task: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "test-init-large-mem",
+					},
+					Spec: corev1.PodSpec{
+						InitContainers: []corev1.Container{
+							{
+								Name:  "init-large",
+								Image: "busybox",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(4000, resource.BinarySI),
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{
+								Name:  "app-small",
+								Image: "busybox",
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+										"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+										"hami.io/gpumem":   *resource.NewQuantity(100, resource.BinarySI),
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+			wants: struct {
+				want        *policy.NodeScoreList
+				failedNodes map[string]string
+				err         error
+			}{
+				want: &policy.NodeScoreList{
+					Policy:   util.NodeSchedulerPolicyBinpack.String(),
+					NodeList: []*policy.NodeScore{}, // Node should be filtered out
+				},
+				failedNodes: map[string]string{
+					"node1": "no single device has sufficient memory (4000MiB) for init container",
+				},
+				err: nil,
+			},
+		},
+		{
 			name: "one node two device one pod one container use one device,but having use 50%",
 			args: struct {
 				nodes *map[string]*NodeUsage
