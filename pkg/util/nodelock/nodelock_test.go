@@ -32,6 +32,14 @@ import (
 
 func Test_LockNode(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
+
+	// Use a short retry timeout so tests that expect lock contention complete quickly.
+	originalRetryTimeout := NodeLockRetryTimeout
+	NodeLockRetryTimeout = 500 * time.Millisecond
+	defer func() {
+		NodeLockRetryTimeout = originalRetryTimeout
+	}()
+
 	type args struct {
 		nodeName func() string
 		lockname string
@@ -58,7 +66,7 @@ func Test_LockNode(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "node has been locked",
+			name: "node has been locked by another pod",
 			args: args{
 				nodeName: func() string {
 					name := "worker-1"
@@ -67,10 +75,14 @@ func Test_LockNode(t *testing.T) {
 							Name: name,
 							Annotations: map[string]string{
 								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
-									ObjectMeta: metav1.ObjectMeta{Name: "hami", Namespace: "hami-ns"},
+									ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
 								}),
 							},
 						},
+					}, metav1.CreateOptions{})
+					// The lock-holding pod must exist to avoid dangling detection.
+					client.KubeClient.CoreV1().Pods("other-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
 					}, metav1.CreateOptions{})
 					return name
 				},
@@ -139,16 +151,23 @@ func Test_LockNode(t *testing.T) {
 func TestLockNodeWithTimeout(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 
-	// Set a custom timeout for testing
+	// Set a custom timeout for testing.
 	originalTimeout := NodeLockTimeout
 	NodeLockTimeout = time.Minute * 2
 	defer func() {
 		NodeLockTimeout = originalTimeout
 	}()
 
+	// Use a short retry timeout so the test completes quickly.
+	originalRetryTimeout := NodeLockRetryTimeout
+	NodeLockRetryTimeout = 500 * time.Millisecond
+	defer func() {
+		NodeLockRetryTimeout = originalRetryTimeout
+	}()
+
 	nodeName := "test-node-timeout"
 
-	// Create a node with a fresh lock (should not be expired)
+	// Create a node with a fresh lock (should not be expired).
 	freshLockTime := time.Now().Format(time.RFC3339)
 	testNamespace := "test-ns"
 	testPodName := "test-pod"
@@ -163,7 +182,7 @@ func TestLockNodeWithTimeout(t *testing.T) {
 		},
 	}, metav1.CreateOptions{})
 
-	// Pod must exist to avoid dangling node lock
+	// Pod must exist to avoid dangling node lock.
 	client.KubeClient.CoreV1().Pods(testNamespace).Create(context.TODO(), &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      testPodName,
@@ -178,17 +197,21 @@ func TestLockNodeWithTimeout(t *testing.T) {
 		},
 	}
 
-	// Try to lock the node again - this should trigger line 130
+	start := time.Now()
 	err := LockNode(nodeName, "", pod)
+	elapsed := time.Since(start)
 
-	// Verify the error contains the NodeLockTimeout value
 	if err == nil {
 		t.Fatal("Expected error but got nil")
 	}
 
-	expectedError := "has been locked within 2m0s"
-	if !strings.Contains(err.Error(), expectedError) {
-		t.Errorf("Expected error to contain '%s', but got: %v", expectedError, err)
+	// Should have retried for roughly NodeLockRetryTimeout before giving up.
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("LockNode returned too quickly (%v), expected retry for ~%v", elapsed, NodeLockRetryTimeout)
+	}
+
+	if !strings.Contains(err.Error(), "locked by a valid pod") {
+		t.Errorf("Expected errNodeLocked sentinel, got: %v", err)
 	}
 }
 
@@ -498,6 +521,92 @@ func TestGeneratePodNamespaceName(t *testing.T) {
 				t.Errorf("GeneratePodNamespaceName() = %v, want %v", result, tt.expected)
 			}
 		})
+	}
+}
+
+// TestLockNodeRetrySuccess verifies that LockNode retries and succeeds when a
+// lock is released by the holder before the retry timeout expires.
+func TestLockNodeRetrySuccess(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+
+	originalRetryTimeout := NodeLockRetryTimeout
+	NodeLockRetryTimeout = 5 * time.Second
+	defer func() {
+		NodeLockRetryTimeout = originalRetryTimeout
+	}()
+
+	nodeName := "retry-success-node"
+	holderPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "holder-pod", Namespace: "holder-ns"},
+	}
+	waiterPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "waiter-pod", Namespace: "waiter-ns"},
+	}
+
+	// Create node and holder pod.
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+	client.KubeClient.CoreV1().Pods("holder-ns").Create(context.TODO(), holderPod, metav1.CreateOptions{})
+
+	// Holder acquires the lock.
+	if err := LockNode(nodeName, "", holderPod); err != nil {
+		t.Fatalf("Holder failed to acquire lock: %v", err)
+	}
+
+	// Release the lock after a short delay so the waiter can acquire it.
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		if err := ReleaseNodeLock(nodeName, "", holderPod, false); err != nil {
+			t.Errorf("Holder failed to release lock: %v", err)
+		}
+	}()
+
+	// Waiter should retry and eventually succeed.
+	start := time.Now()
+	if err := LockNode(nodeName, "", waiterPod); err != nil {
+		t.Fatalf("Waiter failed to acquire lock after retry: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed < 400*time.Millisecond {
+		t.Errorf("Waiter acquired lock too quickly (%v), expected some retry delay", elapsed)
+	}
+	if elapsed > 3*time.Second {
+		t.Errorf("Waiter took too long (%v), expected lock within ~1-2s", elapsed)
+	}
+}
+
+// TestLockNodeIdempotent verifies that LockNode succeeds immediately when the
+// lock is already held by the same pod (idempotent behavior).
+func TestLockNodeIdempotent(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+
+	nodeName := "idempotent-node"
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "my-pod", Namespace: "my-ns"},
+	}
+
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+
+	// First lock.
+	if err := LockNode(nodeName, "", pod); err != nil {
+		t.Fatalf("First LockNode failed: %v", err)
+	}
+
+	// Second lock by the same pod should succeed immediately.
+	start := time.Now()
+	if err := LockNode(nodeName, "", pod); err != nil {
+		t.Fatalf("Second LockNode (idempotent) failed: %v", err)
+	}
+	elapsed := time.Since(start)
+
+	if elapsed > 200*time.Millisecond {
+		t.Errorf("Idempotent lock took too long (%v), should be immediate", elapsed)
 	}
 }
 

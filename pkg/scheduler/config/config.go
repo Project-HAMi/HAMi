@@ -63,6 +63,9 @@ var (
 	// NodeLockTimeout is the timeout for node locks.
 	NodeLockTimeout time.Duration
 
+	// NodeLockRetryTimeout is the timeout for retrying node lock acquisition.
+	NodeLockRetryTimeout time.Duration
+
 	// If set to false, When Pod.Spec.SchedulerName equals to the const DefaultSchedulerName in k8s.io/api/core/v1 package, webhook will not overwrite it, default value is true.
 	ForceOverwriteDefaultScheduler bool
 

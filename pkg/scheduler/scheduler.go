@@ -157,6 +157,14 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
+	// Evict stale cache entries for pods denied by Coscheduling at Permit stage
+	// (Bind never ran, so DeviceBindPhase is unset). Skip "allocating" pods —
+	// they are mid-Bind and will be cleaned up by the Bind failure path.
+	if pod.Status.Phase == corev1.PodPending && pod.Annotations[util.DeviceBindPhase] == "" {
+		klog.V(5).InfoS("Pod is pending with stale annotations, evicting from cache", "pod", pod.Name)
+		s.podManager.DelPod(pod)
+		return
+	}
 	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
@@ -717,6 +725,7 @@ ReleaseNodeLocks:
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
 	}
+	s.podManager.DelPod(current)
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
