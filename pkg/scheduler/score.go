@@ -286,6 +286,32 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 			}
 
+			// when needsInitClone=false, so the device plugin knows which devices to use
+			if numInitContainers > 0 && !needsInitClone {
+				for deviceType := range score.Devices {
+					containerList := score.Devices[deviceType]
+					// We need to fill empty init slots with app container allocations
+
+					if len(containerList) > numInitContainers {
+						firstAppAllocation := containerList[numInitContainers]
+
+						// Updated to modern Go range-over-int syntax
+						for initIdx := range numInitContainers {
+							if initIdx < len(containerList) {
+								containerList[initIdx] = firstAppAllocation
+								klog.V(4).InfoS(
+									"Copied app container device allocation to init container slot",
+									"pod", klog.KObj(task),
+									"init_idx", initIdx,
+									"device_type", deviceType,
+									"allocation", firstAppAllocation,
+								)
+							}
+						}
+					}
+				}
+			}
+
 			if ctrfit {
 				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, &score)

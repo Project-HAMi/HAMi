@@ -2679,9 +2679,15 @@ func Test_calcScore(t *testing.T) {
 							NodeID: "node1",
 							Devices: device.PodDevices{
 								"NVIDIA": device.PodSingleDevice{
-									// Index 0: InitContainer skipped (covered by app allocation)
-									// since init request == app request, no clone needed.
-									{},
+									{
+										{
+											Idx:       0,
+											UUID:      "uuid2",
+											Type:      nvidia.NvidiaGPUDevice,
+											Usedcores: 30,
+											Usedmem:   1000,
+										},
+									},
 									// Index 1: Regular Container allocated normally.
 									{
 										{
