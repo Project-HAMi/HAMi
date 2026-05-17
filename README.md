@@ -74,7 +74,7 @@ resources:
 
 The workload sees the allocated device resources inside the container, while HAMi coordinates scheduling, allocation, and isolation.
 
-![HAMi Example](imgs/example.png)
+![Before and After Using HAMi](imgs/hami-gpu-sharing-example.png)
 
 > Notes:
 >

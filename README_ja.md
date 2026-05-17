@@ -74,7 +74,7 @@ resources:
 
 ワークロードはコンテナ内で割り当てられたデバイスリソースを確認し、HAMi がスケジューリング、割り当て、分離を調整します。
 
-![HAMi Example](imgs/example.png)
+![HAMi 使用前後の比較](imgs/hami-gpu-sharing-example.png)
 
 > 注意：
 >

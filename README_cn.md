@@ -74,7 +74,7 @@ resources:
 
 工作负载在容器内看到已分配的设备资源，HAMi 负责协调调度、分配和隔离。
 
-![HAMi Example](imgs/example.png)
+![使用 HAMi 前后对比](imgs/hami-gpu-sharing-example.png)
 
 > 注意：
 >
