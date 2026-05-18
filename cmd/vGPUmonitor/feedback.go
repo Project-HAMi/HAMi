@@ -117,7 +117,7 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 					return true
 				}
 			}
-			if p < len(utSwitchOn[uuid]) && utSwitchOn[uuid][p] > 1 {
+			if p >= 0 && p < len(utSwitchOn[uuid]) && utSwitchOn[uuid][p] > 1 {
 				return true
 			}
 		}
@@ -142,6 +142,9 @@ func Observe(lister *nvidia.ContainerLister) {
 					}
 					uuid := c.Info.DeviceUUID(i)
 					p := c.Info.GetPriority()
+					if p < 0 {
+						continue
+					}
 					for p >= len(utSwitchOn[uuid]) {
 						utSwitchOn[uuid] = append(utSwitchOn[uuid], 0)
 					}
