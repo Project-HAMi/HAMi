@@ -213,6 +213,24 @@ func TestIsManagedQuota(t *testing.T) {
 	}
 }
 
+func TestRmUsageDoesNotUnderflow(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+	podDev := PodDevices{"NVIDIA": PodSingleDevice{[]ContainerDevice{{UUID: "GPU0", Usedmem: 1000, Usedcores: 100}}}}
+	qm.Quotas[ns] = &DeviceQuota{}
+	qm.AddUsage(pod, podDev)
+	qm.RmUsage(pod, podDev)
+	qm.RmUsage(pod, podDev) // duplicate delete must not underflow
+	if (*qm.Quotas[ns])["nvidia.com/gpumem"].Used < 0 {
+		t.Errorf("Used memory went negative: %d", (*qm.Quotas[ns])["nvidia.com/gpumem"].Used)
+	}
+	if (*qm.Quotas[ns])["nvidia.com/gpucore"].Used < 0 {
+		t.Errorf("Used core went negative: %d", (*qm.Quotas[ns])["nvidia.com/gpucore"].Used)
+	}
+}
+
 func TestAddQuotaAndDelQuota(t *testing.T) {
 	initTest()
 	qm := NewQuotaManager()
