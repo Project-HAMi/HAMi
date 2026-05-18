@@ -155,9 +155,8 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 		return
 	}
 	for idx, val := range usage {
-		_, ok = (*dp)[idx]
-		if ok {
-			(*dp)[idx].Used = max(0, (*dp)[idx].Used-val)
+		if qInfo, ok := (*dp)[idx]; ok && qInfo != nil {
+			qInfo.Used = max(0, qInfo.Used-val)
 		}
 	}
 	if klog.V(4).Enabled() {
