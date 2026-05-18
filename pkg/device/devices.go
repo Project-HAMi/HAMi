@@ -510,7 +510,7 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (b
 		if time.Now().Before(formertime.Add(time.Second * 60)) {
 			return true, false
 		}
-	
+
 		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
 		if qty.Value() > 0 {
 			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
