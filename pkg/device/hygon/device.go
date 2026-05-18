@@ -181,7 +181,7 @@ func (dev *DCUDevices) NodeCleanUp(nn string) error {
 }
 
 func (dev *DCUDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
 func (dev *DCUDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
