@@ -503,9 +503,6 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	return uuids
 }
 
-// CheckHealth checks whether the device-plugin for devType is still alive on node.
-// resourceCountName is the Kubernetes resource name (e.g. "nvidia.com/gpu") used to
-// verify liveness via node.Status.Allocatable when the handshake timestamp expires.
 func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
@@ -513,11 +510,7 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (b
 		if time.Now().Before(formertime.Add(time.Second * 60)) {
 			return true, false
 		}
-		// Handshake timestamp has expired. Before triggering NodeCleanUp, check
-		// whether the device-plugin is still reporting via node Allocatable. Kubelet
-		// maintains Allocatable directly from the device-plugin gRPC stream, so a
-		// non-zero quantity is a reliable liveness signal regardless of vendor.
-		// No annotation patch is issued here to avoid unnecessary API server writes.
+	
 		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
 		if qty.Value() > 0 {
 			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
