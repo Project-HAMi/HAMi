@@ -104,6 +104,20 @@ if ! helm repo update --kubeconfig "${KUBE_CONF}"; then
   exit 1
 fi
 
+# Clean up any previous HAMi release to ensure a fresh deployment.
+# This prevents issues with stuck pending-upgrade states and pod anti-affinity
+# conflicts when the old scheduler pod is still running during an upgrade.
+echo "Checking for existing HAMi release..."
+EXISTING_STATUS=$(helm status "${HAMI_ALIAS}" -n "${TARGET_NS}" --kubeconfig "${KUBE_CONF}" 2>/dev/null \
+  | grep "^STATUS:" | awk '{print $2}' || true)
+if [[ -n "${EXISTING_STATUS}" ]]; then
+  echo "Found existing release with status '${EXISTING_STATUS}', uninstalling..."
+  helm uninstall "${HAMI_ALIAS}" -n "${TARGET_NS}" --kubeconfig "${KUBE_CONF}" || true
+  echo "Waiting for all pods in ${TARGET_NS} to be deleted..."
+  kubectl wait --for=delete pod --all -n "${TARGET_NS}" \
+    --timeout=120s --kubeconfig "${KUBE_CONF}" 2>/dev/null || true
+fi
+
 # Deploy or upgrade Helm Chart.
 echo "Deploying/Upgrading HAMI Helm Chart..."
 echo "Helm Source: ${HELM_SOURCE}"
@@ -132,6 +146,7 @@ else
   if ! helm --debug upgrade --install --create-namespace --cleanup-on-fail \
     "${HAMI_ALIAS}" "${HELM_SOURCE}" -n "${TARGET_NS}" \
     --set devicePlugin.passDeviceSpecsEnabled=false \
+    --set scheduler.leaderElect=false \
     --version "${HELM_VER}" --set global.imageTag="${HELM_VER}" --wait --timeout 10m --kubeconfig "${KUBE_CONF}"; then
     echo "Error: Failed to deploy/upgrade Helm Chart. Please check the Helm logs above for more details."
     exit 1
