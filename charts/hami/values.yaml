@@ -317,6 +317,11 @@ devicePlugin:
     extraArgs:
       - -v=4
     extraEnvs: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["SYS_ADMIN"]
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -386,6 +391,17 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
+  hostPID: true
+  hostNetwork: false
+  initContainerSecurityContext:
+    privileged: true
+    runAsUser: 0
+  securityContext:
+    privileged: true
+    allowPrivilegeEscalation: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
