@@ -269,6 +269,9 @@ devicePlugin:
   gpuOperatorToolkitReady:
     enabled: false
     hostPath: "/run/nvidia/validations"
+    securityContext:
+      privileged: true
+      runAsUser: 0
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
@@ -393,9 +396,6 @@ devicePlugin:
   podAnnotations: {}
   hostPID: true
   hostNetwork: false
-  initContainerSecurityContext:
-    privileged: true
-    runAsUser: 0
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true

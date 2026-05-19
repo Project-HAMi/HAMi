@@ -48,7 +48,7 @@ spec:
         - name: toolkit-validation
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
-          {{- with .Values.devicePlugin.initContainerSecurityContext }}
+          {{- with .Values.devicePlugin.gpuOperatorToolkitReady.securityContext }}
           securityContext:
             {{- toYaml . | nindent 12 }}
           {{- end }}
