@@ -72,3 +72,17 @@ jobs:
       - name: e2e test
         run: |
           make e2e-test
+
+      - name: cleanup e2e env
+        if: always()
+        run: |
+          echo "Cleaning up HAMi deployment..."
+          helm uninstall hami -n hami-system --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          kubectl wait --for=delete pod --all -n hami-system \
+            --timeout=120s --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          kubectl delete ns hami-system --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          kubectl annotate node --all \
+            hami.io/mutex.lock- hami.io/node-handshake- \
+            hami.io/node-nvidia-register- hami.io/nvidia-license- \
+            --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
+          echo "Cleanup done."
