@@ -60,17 +60,8 @@ jobs:
         if: inputs.type == 'pullrequest'
         run: |
           echo "Loading Docker image from image.tar..."
-          LOCAL_IPS=$(hostname -I)
-          # Use local-node mode when VSPHERE_GPU_VM_IP is unset or points to this machine.
-          if [ -z "${VSPHERE_GPU_VM_IP}" ] || echo "${LOCAL_IPS}" | grep -qw "${VSPHERE_GPU_VM_IP}"; then
-            echo "Local-node mode: loading image directly on this machine..."
-            nerdctl load -i ./image/image.tar || docker load -i ./image/image.tar
-            nerdctl image ls | grep hami || docker images | grep hami
-          else
-            scp ./image/image.tar root@$VSPHERE_GPU_VM_IP:/home/
-            ssh root@$VSPHERE_GPU_VM_IP "nerdctl load -i /home/image.tar"
-            ssh root@$VSPHERE_GPU_VM_IP "nerdctl image ls | grep hami"
-          fi
+          nerdctl load -i ./image/image.tar || docker load -i ./image/image.tar
+          nerdctl image ls | grep hami || docker images | grep hami
 
       - name: deploy hami helm
         run: |
