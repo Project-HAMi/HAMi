@@ -90,7 +90,7 @@ func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 }
 
 func (dev *KunlunVDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
 func (dev *KunlunVDevices) NodeCleanUp(nn string) error {

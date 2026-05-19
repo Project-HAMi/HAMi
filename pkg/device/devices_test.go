@@ -579,8 +579,9 @@ func Test_CheckHealth(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
-			devType string
-			n       corev1.Node
+			devType           string
+			resourceCountName string
+			n                 corev1.Node
 		}
 		want1 bool
 		want2 bool
@@ -588,8 +589,9 @@ func Test_CheckHealth(t *testing.T) {
 		{
 			name: "Requesting state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -606,8 +608,9 @@ func Test_CheckHealth(t *testing.T) {
 		{
 			name: "Deleted state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -622,12 +625,15 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			// Inside the 60s cooldown window — keep the conservative path,
-			// scheduler should not yet re-add the node to its cache.
+			// Inside the 60-second deletedCooldown window — keep the conservative
+			// path; the scheduler should not yet re-add the node to its cache.
+			// The far-future timestamp (year 2128) ensures the cooldown has not
+			// elapsed regardless of when the test runs.
 			name: "Deleted state within cooldown",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -648,8 +654,9 @@ func Test_CheckHealth(t *testing.T) {
 			// case which exercises the same util.GetNode failure path.
 			name: "Deleted state stale",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -668,8 +675,9 @@ func Test_CheckHealth(t *testing.T) {
 			// path — never recover from a malformed value.
 			name: "Deleted state with unparsable timestamp",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -686,8 +694,9 @@ func Test_CheckHealth(t *testing.T) {
 		{
 			name: "Unknown state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -702,12 +711,16 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Requesting state expired",
+			// Expired Requesting_ and no Allocatable resources: the device-plugin
+			// is truly gone, so NodeCleanUp should be triggered → (false, false).
+			name: "Requesting state expired, no allocatable",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
-				devType: "huawei.com/Ascend910",
+				devType:           "huawei.com/Ascend910",
+				resourceCountName: "huawei.com/Ascend910",
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
@@ -719,10 +732,38 @@ func Test_CheckHealth(t *testing.T) {
 			want1: false,
 			want2: false,
 		},
+		{
+			// Expired Requesting_ but Allocatable still has the resource: the
+			// device-plugin gRPC stream is alive. Handshake is refreshed and the
+			// node stays healthy → (true, false).
+			name: "Requesting state expired, allocatable present",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType:           "huawei.com/Ascend910",
+				resourceCountName: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Allocatable: corev1.ResourceList{
+							"huawei.com/Ascend910": resource.MustParse("8"),
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1, result2 := CheckHealth(test.args.devType, &test.args.n)
+			result1, result2 := CheckHealth(test.args.devType, test.args.resourceCountName, &test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 		})
