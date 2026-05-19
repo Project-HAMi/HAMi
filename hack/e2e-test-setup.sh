@@ -74,8 +74,21 @@ function govc_restore_vm_snapshot() {
 }
 
 function setup_gpu_test_env() {
+    local vm_ip="${VSPHERE_GPU_VM_IP:-""}"
+
+    # If GOVC_URL is not set, skip vSphere VM management and run in local-node mode.
+    # This allows e2e tests to run directly on the machine that hosts the GPU and
+    # Kubernetes cluster, without requiring a separate vSphere-managed VM.
+    if [[ -z "${GOVC_URL:-}" ]]; then
+        echo "GOVC_URL is not set — skipping vSphere VM management (local-node mode)."
+        if [[ -n "${vm_ip}" ]]; then
+            echo "Waiting for local node ${vm_ip} to be reachable..."
+            util::wait_ip_reachable "${vm_ip}" 3 10
+        fi
+        return 0
+    fi
+
     export GOVC_INSECURE=1
-    export vm_ip=$VSPHERE_GPU_VM_IP
     export vm_name=$VSPHERE_GPU_VM_NAME
     export vm_snapshot_name=$VSPHERE_GPU_VM_NAME_SNAPSHOT
 
