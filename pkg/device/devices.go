@@ -503,11 +503,20 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	return uuids
 }
 
-func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
+func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
-		return time.Now().Before(formertime.Add(time.Second * 60)), false
+		if time.Now().Before(formertime.Add(time.Second * 60)) {
+			return true, false
+		}
+
+		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
+		if qty.Value() > 0 {
+			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
+			return true, false
+		}
+		return false, false
 	} else if strings.Contains(handshake, "Deleted") {
 		// Mirror the timestamp logic used by the Requesting branch: a
 		// Deleted_<ts> older than 60s on a node whose devices are otherwise
