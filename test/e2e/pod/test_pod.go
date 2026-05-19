@@ -34,7 +34,6 @@ import (
 var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 	const (
 		Namespace      = utils.GPUNameSpace
-		NodeName       = utils.GPUNode
 		NodeLabelKey   = utils.GPUNodeLabelKey
 		NodeLabelValue = utils.GPUNodeLabelValue
 		DeleteTimeout  = 300 * time.Second
@@ -44,11 +43,17 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 	var (
 		clientSet = utils.GetClientSet()
 		newPod    *corev1.Pod
+		nodeName  string
 	)
 
 	ginkgo.BeforeAll(func() {
+		var err error
+		nodeName, err = utils.GetGPUNode(clientSet)
+		gomega.Expect(err).NotTo(gomega.HaveOccurred())
+		fmt.Printf("Using GPU node: %s\n", nodeName)
+
 		ginkgo.By("Adding node labeling")
-		_, err := utils.AddNodeLabel(clientSet, NodeName, NodeLabelKey, NodeLabelValue)
+		_, err = utils.AddNodeLabel(clientSet, nodeName, NodeLabelKey, NodeLabelValue)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 
@@ -59,7 +64,7 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 
 	ginkgo.AfterAll(func() {
 		ginkgo.By("Deleting node labeling")
-		_, err := utils.RemoveNodeLabel(clientSet, NodeName, NodeLabelKey)
+		_, err := utils.RemoveNodeLabel(clientSet, nodeName, NodeLabelKey)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 	})
 

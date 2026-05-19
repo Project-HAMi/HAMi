@@ -18,6 +18,7 @@ package utils
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	v1 "k8s.io/api/core/v1"
@@ -25,6 +26,24 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
+
+// GetGPUNode returns the name of the first node that has nvidia.com/gpu capacity.
+// It falls back to the first node in the cluster if no GPU node is found.
+func GetGPUNode(clientSet *kubernetes.Clientset) (string, error) {
+	nodes, err := clientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
+	if err != nil {
+		return "", err
+	}
+	for _, node := range nodes.Items {
+		if _, ok := node.Status.Capacity["nvidia.com/gpu"]; ok {
+			return node.Name, nil
+		}
+	}
+	if len(nodes.Items) > 0 {
+		return nodes.Items[0].Name, nil
+	}
+	return "", fmt.Errorf("no nodes found in the cluster")
+}
 
 func GetNodes(clientSet *kubernetes.Clientset) (*v1.NodeList, error) {
 	nodes, err := clientSet.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})

@@ -20,14 +20,15 @@ set -o pipefail
 set -x
 
 E2E_TYPE=${1:-"pullrequest"}
-KUBE_CONF=${2:-""}
+KUBE_CONF=${2:-"${HOME}/.kube/config"}
 
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
+cd "${REPO_ROOT}"
 source "${REPO_ROOT}"/hack/util.sh
 
 if [ -z "${KUBE_CONF}" ]; then
-   echo "Error: KUBE_CONF environment variable is not set."
-   return 1
+   echo "Error: KUBE_CONF is not set and no default kubeconfig found."
+   exit 1
 fi
 
 # Run e2e
@@ -35,15 +36,11 @@ if [ "${E2E_TYPE}" == "pullrequest" ] || [ "${E2E_TYPE}" == "release" ]; then
    GINKGO_VERSION=$(go list -m -f '{{.Version}}' github.com/onsi/ginkgo/v2)
    if [ -z "${GINKGO_VERSION}" ]; then
        echo "Error: could not determine ginkgo version from go.mod" >&2
-       return 1
+       exit 1
    fi
    go run "github.com/onsi/ginkgo/v2/ginkgo@${GINKGO_VERSION}" \
       run -v -r --fail-fast ./test/e2e/ -- --kubeconfig="${KUBE_CONF}"
-   if [ $? -ne 0 ]; then
-       echo "Error: ginkgo command failed."
-       return 1
-   fi
 else
    echo "Invalid E2E Type: ${E2E_TYPE}"
-   return 1
+   exit 1
 fi
