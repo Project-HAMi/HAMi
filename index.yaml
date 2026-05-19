@@ -3,14 +3,14 @@ entries:
   hami:
   - apiVersion: v2
     appVersion: 2.9.0
-    created: "2026-05-19T04:49:38.814155224Z"
+    created: "2026-05-19T06:03:39.337004294Z"
     dependencies:
     - condition: dra.enabled
       name: hami-dra
       repository: https://project-hami.github.io/HAMi-DRA/
       version: 0.2.0
     description: Heterogeneous AI Computing Virtualization Middleware
-    digest: 66639882d25976e9453fe14ff62178f4d874a8a6130c9f57b8a02142ecad3e8b
+    digest: e38adbe49c2b38efcc4e903c99cd268cc32b0ab8b3438891fc0abe8c47a0f3e3
     keywords:
     - vgpu
     - gpu
@@ -29,7 +29,7 @@ entries:
     version: 2.9.0
   - apiVersion: v2
     appVersion: 2.8.3
-    created: "2026-05-19T04:49:38.812016552Z"
+    created: "2026-05-19T06:03:39.334899545Z"
     dependencies:
     - condition: dra.enabled
       name: hami-dra
@@ -55,7 +55,7 @@ entries:
     version: 2.8.3
   - apiVersion: v2
     appVersion: 2.8.1
-    created: "2026-05-19T04:49:38.810025498Z"
+    created: "2026-05-19T06:03:39.332984189Z"
     dependencies:
     - condition: dra.enabled
       name: hami-dra
@@ -81,7 +81,7 @@ entries:
     version: 2.8.1
   - apiVersion: v2
     appVersion: 2.8.0
-    created: "2026-05-19T04:49:38.807309647Z"
+    created: "2026-05-19T06:03:39.326463954Z"
     dependencies:
     - condition: dra.enabled
       name: hami-dra
@@ -107,7 +107,7 @@ entries:
     version: 2.8.0
   - apiVersion: v2
     appVersion: 2.7.1
-    created: "2026-05-19T04:49:38.804728708Z"
+    created: "2026-05-19T06:03:39.323989262Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 6342c99d39b5128090b9cc4a64cd7bd124298331f617a3f175763c27aa8a8622
     keywords:
@@ -128,7 +128,7 @@ entries:
     version: 2.7.1
   - apiVersion: v2
     appVersion: 2.7.0
-    created: "2026-05-19T04:49:38.803572953Z"
+    created: "2026-05-19T06:03:39.322825388Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 5c3a6234c6c3ed05ea8fffe722ba83450f3480c2a1c023a26415489a62313b2f
     keywords:
@@ -149,7 +149,7 @@ entries:
     version: 2.7.0
   - apiVersion: v2
     appVersion: 2.6.1
-    created: "2026-05-19T04:49:38.802422168Z"
+    created: "2026-05-19T06:03:39.321538143Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: e6699c47df7af201914432b491031a0002a98af6a4a9ce20bc20593e89c5406b
     keywords:
@@ -168,7 +168,7 @@ entries:
     version: 2.6.1
   - apiVersion: v2
     appVersion: 2.6.0
-    created: "2026-05-19T04:49:38.801445331Z"
+    created: "2026-05-19T06:03:39.320673834Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 21d7db257bdb4b5230d034be984a3d3d3901dbacf8f41150c1e0175654d33c06
     keywords:
@@ -187,7 +187,7 @@ entries:
     version: 2.6.0
   - apiVersion: v2
     appVersion: 2.5.3
-    created: "2026-05-19T04:49:38.799621558Z"
+    created: "2026-05-19T06:03:39.31951011Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: dfa421d12be76156b1893974e17313373811809d78c08fd198de17a06de7f2fd
     keywords:
@@ -206,7 +206,7 @@ entries:
     version: 2.5.3
   - apiVersion: v2
     appVersion: 2.5.2
-    created: "2026-05-19T04:49:38.798766752Z"
+    created: "2026-05-19T06:03:39.318234401Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 05eeec9d417620afaa7b34d69a8af073681f58f078c5a2cd99714afcee18846d
     keywords:
@@ -225,7 +225,7 @@ entries:
     version: 2.5.2
   - apiVersion: v2
     appVersion: 2.5.1
-    created: "2026-05-19T04:49:38.797958194Z"
+    created: "2026-05-19T06:03:39.317457183Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 8b979607de49b6b1b2706b1ec59ef1c5cd56a69d9a2fa06d9549c0cb0bce3ea2
     keywords:
@@ -244,7 +244,7 @@ entries:
     version: 2.5.1
   - apiVersion: v2
     appVersion: 2.5.0
-    created: "2026-05-19T04:49:38.797185844Z"
+    created: "2026-05-19T06:03:39.316678173Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 18405c6324453ce63ed2708436b802d2aa0f96f921c3a00aa8e6c03eb3de4e6a
     keywords:
@@ -263,7 +263,7 @@ entries:
     version: 2.5.0
   - apiVersion: v2
     appVersion: 2.4.1
-    created: "2026-05-19T04:49:38.796341548Z"
+    created: "2026-05-19T06:03:39.315881037Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: a9151a78340c06525b9071bef1f0f24cf52bddc3aa5f20d3045310449b37657a
     keywords:
@@ -282,7 +282,7 @@ entries:
     version: 2.4.1
   - apiVersion: v2
     appVersion: 2.4.0
-    created: "2026-05-19T04:49:38.789594494Z"
+    created: "2026-05-19T06:03:39.315076321Z"
     description: Heterogeneous AI Computing Virtualization Middleware
     digest: 1b25c767b32433b02fb3b4fa6194e8946e9f9233de4046ea0536051f8f6c2af2
     keywords:
@@ -299,4 +299,4 @@ entries:
     urls:
     - https://Project-HAMi.github.io/HAMi/charts/hami-2.4.0.tgz
     version: 2.4.0
-generated: "2026-05-19T04:49:38.781284225Z"
+generated: "2026-05-19T06:03:39.313277897Z"
