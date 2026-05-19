@@ -60,8 +60,8 @@ jobs:
         if: inputs.type == 'pullrequest'
         run: |
           echo "Loading Docker image from image.tar..."
-          nerdctl load -i ./image/image.tar || docker load -i ./image/image.tar
-          nerdctl image ls | grep hami || docker images | grep hami
+          sudo nerdctl load -i ./image/image.tar || sudo docker load -i ./image/image.tar
+          sudo nerdctl image ls | grep hami || sudo docker images | grep hami
 
       - name: deploy hami helm
         run: |
