@@ -60,14 +60,9 @@ jobs:
         if: inputs.type == 'pullrequest'
         run: |
           echo "Loading Docker image from image.tar..."
-          if [ -z "${VSPHERE_GPU_VM_IP}" ]; then
-            echo "Error: VSPHERE_GPU_VM_IP is not defined!"
-            exit 1
-          fi
-          # When the GPU node is the same machine as the runner (local-node mode),
-          # load the image directly instead of going through SSH.
           LOCAL_IPS=$(hostname -I)
-          if echo "${LOCAL_IPS}" | grep -qw "${VSPHERE_GPU_VM_IP}"; then
+          # Use local-node mode when VSPHERE_GPU_VM_IP is unset or points to this machine.
+          if [ -z "${VSPHERE_GPU_VM_IP}" ] || echo "${LOCAL_IPS}" | grep -qw "${VSPHERE_GPU_VM_IP}"; then
             echo "Local-node mode: loading image directly on this machine..."
             nerdctl load -i ./image/image.tar || docker load -i ./image/image.tar
             nerdctl image ls | grep hami || docker images | grep hami
