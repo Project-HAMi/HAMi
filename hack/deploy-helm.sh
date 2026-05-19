@@ -17,18 +17,18 @@ set -o nounset  # Exit if an unset variable is referenced
 set -o pipefail # Exit if any command in a pipeline fails
 set -x          # Enable debug mode
 
+REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
+cd "${REPO_ROOT}"
+
 # Default values
 E2E_TYPE=${1:-"pullrequest"}
 KUBE_CONF=${2:-"${HOME}/.kube/config"}  # Default to ~/.kube/config
-HELM_VER=${3:-"v2.4.1"}
+HELM_VER=${3:-$(tr -d '[:space:]' < VERSION)}
 HELM_NAME=${4:-"hami-charts"}
 HELM_REPO=${5:-"https://project-hami.github.io/HAMi/"}
 TARGET_NS=${6:-"hami-system"}
 HAMI_ALIAS="hami"
 HELM_SOURCE=""
-
-REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-cd "${REPO_ROOT}"
 
 source "${REPO_ROOT}"/hack/util.sh
 
