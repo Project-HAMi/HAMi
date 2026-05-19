@@ -145,11 +145,9 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
-		pi, ok := s.podManager.GetPod(pod)
-		if ok {
+		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
-		s.podManager.DelPod(pod)
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -191,10 +189,8 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
-	pi, ok := s.podManager.GetPod(pod)
-	if ok {
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
-		s.podManager.DelPod(pod)
 	}
 }
 
