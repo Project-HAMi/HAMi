@@ -563,11 +563,12 @@ func Test_configOverride(t *testing.T) {
 
 	config := nvidia.DevicePluginConfigs{
 		Nodeconfig: []struct {
-			nvidia.NodeDefaultConfig `json:",inline"`
-			Name                     string               `json:"name"`
-			OperatingMode            string               `json:"operatingmode"`
-			Migstrategy              string               `json:"migstrategy"`
-			FilterDevice             *nvidia.FilterDevice `json:"filterdevices"`
+			nvidia.NodeDefaultConfig     `json:",inline"`
+			Name                         string               `json:"name"`
+			OperatingMode                string               `json:"operatingmode"`
+			Migstrategy                  string               `json:"migstrategy"`
+			FilterDevice                 *nvidia.FilterDevice `json:"filterdevices"`
+			EnableGetPreferredAllocation bool                 `json:"enablegetpreferredallocation"`
 		}{
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
@@ -576,10 +577,11 @@ func Test_configOverride(t *testing.T) {
 					DeviceCoreScaling:   &coreScale1,
 					LogLevel:            &logLevel1,
 				},
-				Name:          "node-1",
-				OperatingMode: "default",
-				Migstrategy:   "single",
-				FilterDevice:  nil,
+				Name:                         "node-1",
+				OperatingMode:                "default",
+				Migstrategy:                  "single",
+				FilterDevice:                 nil,
+				EnableGetPreferredAllocation: true,
 			},
 			{
 				NodeDefaultConfig: nvidia.NodeDefaultConfig{
@@ -588,10 +590,11 @@ func Test_configOverride(t *testing.T) {
 					DeviceCoreScaling:   &coreScale2,
 					LogLevel:            &logLevel2,
 				},
-				Name:          "testnode",
-				OperatingMode: "custom",
-				Migstrategy:   "mixed",
-				FilterDevice:  nil,
+				Name:                         "testnode",
+				OperatingMode:                "custom",
+				Migstrategy:                  "mixed",
+				FilterDevice:                 nil,
+				EnableGetPreferredAllocation: true,
 			},
 		},
 	}
@@ -803,12 +806,7 @@ func TestGetPreferredAllocationFallbackOnAnnotatedDeviceMappingFailure(t *testin
 
 	response, err := plugin.GetPreferredAllocation(context.Background(), request)
 	require.NoError(t, err)
-	require.Len(t, response.ContainerResponses, 1)
-	require.ElementsMatch(t, []string{
-		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
-		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
-	}, response.ContainerResponses[0].DeviceIDs)
-	require.Equal(t, 1, rmCallCount)
+	require.Len(t, response.ContainerResponses, 0)
 }
 
 func TestGetPreferredAllocationFallbackOnInsufficientAnnotatedDevices(t *testing.T) {
@@ -869,68 +867,7 @@ func TestGetPreferredAllocationFallbackOnInsufficientAnnotatedDevices(t *testing
 
 	response, err := plugin.GetPreferredAllocation(context.Background(), request)
 	require.NoError(t, err)
-	require.Len(t, response.ContainerResponses, 1)
-	require.ElementsMatch(t, []string{
-		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
-		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
-	}, response.ContainerResponses[0].DeviceIDs)
-	require.Equal(t, 1, rmCallCount)
-}
-
-func TestGetPreferredAllocationPropagatesRMErrors(t *testing.T) {
-	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
-	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-	defer func() {
-		device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice
-	}()
-
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Namespace: "default",
-			Name:      "test-pod",
-			Annotations: map[string]string{
-				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
-					{
-						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67z", Type: nvidia.NvidiaGPUDevice},
-					},
-				}),
-			},
-		},
-		Spec: corev1.PodSpec{
-			Containers: []corev1.Container{{Name: "main"}},
-		},
-	}
-
-	mockRM := &rm.ResourceManagerMock{
-		GetPreferredAllocationFunc: func(available []string, required []string, size int) ([]string, error) {
-			return nil, fmt.Errorf("rm allocation failed")
-		},
-	}
-
-	plugin := &NvidiaDevicePlugin{
-		rm: mockRM,
-	}
-	t.Setenv(util.NodeNameEnvName, "node-a")
-	previousGetPendingPod := getPendingPod
-	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
-		return pod, nil
-	}
-	defer func() {
-		getPendingPod = previousGetPendingPod
-	}()
-
-	request := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
-		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
-			{
-				AvailableDeviceIDs: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"},
-				AllocationSize:     1,
-			},
-		},
-	}
-
-	_, err := plugin.GetPreferredAllocation(context.Background(), request)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "rm allocation failed")
+	require.Len(t, response.ContainerResponses, 0)
 }
 
 func TestAlignContainerDevicesWithAllocatedIDsPreservesMetadata(t *testing.T) {

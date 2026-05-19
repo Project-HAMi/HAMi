@@ -23,6 +23,12 @@ jobs:
         uses: azure/setup-helm@v5
         with:
           version: v3.7.1
+
+      - name: Add HAMi DRA Helm repository
+        run: |
+          helm repo add hami-dra https://project-hami.github.io/HAMi-DRA/
+          helm repo update hami-dra
+
       - name: Lint Chart
         run: |
           make lint_chart

@@ -584,7 +584,8 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 	for _, pod := range pods {
 		pdevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 		if err != nil {
-			return fmt.Errorf("failed to decode pod devices: %w", err)
+			klog.Errorf("failed to decode pod devices for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			continue
 		}
 		for ctrIdx, container := range pod.Spec.Containers {
 			for ctrDevIdx, ctrDevices := range pdevices[nv.NvidiaGPUDevice] {

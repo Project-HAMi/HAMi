@@ -38,3 +38,10 @@ type VNPUConfig struct {
 	OverwriteEnv       bool       `yaml:"overwriteEnv"`
 	Templates          []Template `yaml:"templates"`
 }
+
+// VNPUs holds the global Ascend VNPU configuration, including a flag to enable
+// hami-vnpu-core soft-partitioning for all nodes and the per-chip config list.
+type VNPUs struct {
+	HamiVnpuCore bool         `yaml:"hamiVnpuCore"`
+	Configs      []VNPUConfig `yaml:"configs"`
+}

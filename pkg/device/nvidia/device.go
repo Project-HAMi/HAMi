@@ -170,11 +170,12 @@ type FilterDevice struct {
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
 		// These configs is shared and will overwrite those in NvidiaConfig.
-		NodeDefaultConfig `json:",inline"`
-		Name              string        `json:"name"`
-		OperatingMode     string        `json:"operatingmode"`
-		Migstrategy       string        `json:"migstrategy"`
-		FilterDevice      *FilterDevice `json:"filterdevices"`
+		NodeDefaultConfig            `json:",inline"`
+		Name                         string        `json:"name"`
+		OperatingMode                string        `json:"operatingmode"`
+		Migstrategy                  string        `json:"migstrategy"`
+		FilterDevice                 *FilterDevice `json:"filterdevices"`
+		EnableGetPreferredAllocation bool          `json:"enablegetpreferredallocation"`
 	} `json:"nodeconfig"`
 }
 

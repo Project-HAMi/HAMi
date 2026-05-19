@@ -23,6 +23,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
+	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -474,5 +475,297 @@ func Test_PodAllocationFailed(t *testing.T) {
 		t.Error("Expected DeviceBindPhase annotation to be present")
 	} else if annos != util.DeviceBindFailed {
 		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
+	}
+}
+
+func TestCheckCDISpec(t *testing.T) {
+	testCases := []struct {
+		name        string
+		spec        specs.Spec
+		kind        string
+		expectError bool
+		errorMsg    string
+	}{
+		{
+			name: "success - no MIG device with correct kind",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "GPU-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{
+									Path:     "/dev/nvidia0",
+									HostPath: "/dev/nvidia0",
+								},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: false,
+		},
+		{
+			name: "success - MIG device with nvidia-cap and correct kind",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{
+									Path: "/dev/nvidia0",
+								},
+								{
+									Path: "/dev/nvidia-cap",
+								},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: false,
+		},
+		{
+			name: "success - multiple MIG devices all with cap and correct kind",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-11111111-1111-1111-1111-111111111111",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia-cap"},
+							},
+						},
+					},
+					{
+						Name: "MIG-22222222-2222-2222-2222-222222222222",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia1"},
+								{Path: "/dev/nvidia-cap"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: false,
+		},
+		{
+			name: "fail - kind mismatch (nvidia.com/gpu vs expected)",
+			spec: specs.Spec{
+				Kind: "nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "GPU-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "kind mismatch. current: nvidia.com/gpu, expect: k8s.device-plugin.nvidia.com/gpu",
+		},
+		{
+			name: "fail - kind mismatch (custom kind vs expected)",
+			spec: specs.Spec{
+				Kind: "mycompany.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "GPU-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "kind mismatch. current: mycompany.com/gpu, expect: k8s.device-plugin.nvidia.com/gpu",
+		},
+		{
+			name: "fail - MIG device has no deviceNodes",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "MIG device MIG-12345678-1234-1234-1234-123456789012 has no deviceNodes",
+		},
+		{
+			name: "fail - MIG device missing nvidia-cap",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia1"},
+								{Path: "/dev/nvidia2"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "MIG device MIG-12345678-1234-1234-1234-123456789012 does not have a corresponding nvidia-cap device",
+		},
+		{
+			name: "fail - multiple MIG devices one missing cap",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-11111111-1111-1111-1111-111111111111",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia-cap"},
+							},
+						},
+					},
+					{
+						Name: "MIG-22222222-2222-2222-2222-222222222222",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia1"},
+							},
+						},
+					},
+					{
+						Name: "MIG-33333333-3333-3333-3333-333333333333",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia2"},
+								{Path: "/dev/nvidia-cap"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "MIG device MIG-22222222-2222-2222-2222-222222222222 does not have a corresponding nvidia-cap device",
+		},
+		{
+			name: "success - MIG device with multiple cap devices and correct kind",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia-cap"},
+								{Path: "/dev/nvidia-cap-extra"},
+								{Path: "/dev/nvidia-cap-backup"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: false,
+		},
+		{
+			name: "fail - MIG device with nil deviceNodes",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: nil,
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "MIG device MIG-12345678-1234-1234-1234-123456789012 has no deviceNodes",
+		},
+		{
+			name: "success - MIG device with cap device path containing 'nvidia-cap' substring",
+			spec: specs.Spec{
+				Kind: "k8s.device-plugin.nvidia.com/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia-cap01"},
+								{Path: "/dev/nvidia-cap-abc"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: false,
+		},
+		{
+			name: "fail - wrong kind with MIG device",
+			spec: specs.Spec{
+				Kind: "wrong.kind/gpu",
+				Devices: []specs.Device{
+					{
+						Name: "MIG-12345678-1234-1234-1234-123456789012",
+						ContainerEdits: specs.ContainerEdits{
+							DeviceNodes: []*specs.DeviceNode{
+								{Path: "/dev/nvidia0"},
+								{Path: "/dev/nvidia-cap"},
+							},
+						},
+					},
+				},
+			},
+			kind:        "k8s.device-plugin.nvidia.com/gpu",
+			expectError: true,
+			errorMsg:    "kind mismatch. current: wrong.kind/gpu, expect: k8s.device-plugin.nvidia.com/gpu",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := checkCDISpec(tc.spec, tc.kind)
+
+			if tc.expectError {
+				if err == nil {
+					t.Errorf("Expected error but got nil")
+				} else if tc.errorMsg != "" && err.Error() != tc.errorMsg {
+					t.Errorf("Expected error message:\n'%s'\nGot:\n'%s'", tc.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error, got: %v", err)
+				}
+			}
+		})
 	}
 }

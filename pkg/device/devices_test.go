@@ -45,6 +45,15 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 	assert.DeepEqual(t, cd1, cd2)
 }
 
+func TestDecodeContainerDevices_InvalidFields(t *testing.T) {
+	_, err := DecodeContainerDevices("uuid,type,100:")
+	assert.Assert(t, err != nil)
+	_, err = DecodeContainerDevices("uuid,type,notanumber,3:")
+	assert.Assert(t, err != nil)
+	_, err = DecodeContainerDevices("uuid,type,100,notanumber:")
+	assert.Assert(t, err != nil)
+}
+
 func TestEmptyPodDeviceCoding(t *testing.T) {
 	pd1 := PodDevices{}
 	s := EncodePodDevices(inRequestDevices, pd1)
@@ -293,6 +302,13 @@ func Test_DecodePodDevices(t *testing.T) {
 	}
 }
 
+func TestDecodePodDevices_BadAnnotation(t *testing.T) {
+	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
+	annos := map[string]string{"hami.io/vgpu-devices-to-allocate": "uuid,type,100:;"}
+	_, err := DecodePodDevices(checklist, annos)
+	assert.Assert(t, err != nil)
+}
+
 func TestMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		dlist []*DeviceInfo
@@ -461,8 +477,8 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				di  []*DeviceInfo
 				err error
 			}{
-				di:  []*DeviceInfo{},
-				err: errors.New("node annotations not decode successfully"),
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
 			},
 		},
 		{
@@ -509,6 +525,105 @@ func Test_DecodeNodeDevices(t *testing.T) {
 					},
 				},
 				err: nil,
+			},
+		},
+		{
+			name: "malformed segment without comma",
+			args: "garbage:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`malformed node annotation segment: "garbage"`),
+			},
+		},
+		{
+			name: "invalid count field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,notanint,7680,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid count field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid memory field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,notanint,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid memory field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid core field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,notanint,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid core field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid numa field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,notanint,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid numa field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid health field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,notabool:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid health field: strconv.ParseBool: parsing "notabool": invalid syntax`),
+			},
+		},
+		{
+			name: "unexpected field count",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 5 in node annotation"),
+			},
+		},
+		{
+			name: "invalid index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,notanint,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid index field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "negative index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,-1,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("index field must not be negative: -1"),
 			},
 		},
 	}
@@ -614,6 +729,68 @@ func Test_CheckHealth(t *testing.T) {
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
 							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Inside the 60s cooldown window — keep the conservative path,
+			// scheduler should not yet re-add the node to its cache.
+			name: "Deleted state within cooldown",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2128-12-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Stale Deleted_ — the recovery path is taken but util.GetNode
+			// fails outside a real cluster, so the function falls back to
+			// (true, false). Behaviour matches the existing "Unknown state"
+			// case which exercises the same util.GetNode failure path.
+			name: "Deleted state stale",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2024-01-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Unparsable timestamp must keep the conservative (true, false)
+			// path — never recover from a malformed value.
+			name: "Deleted state with unparsable timestamp",
+			args: struct {
+				devType string
+				n       corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_not-a-timestamp",
 						},
 					},
 				},
@@ -1187,6 +1364,163 @@ func TestCheckUUID(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			got := CheckUUID(test.annos, test.id, GPUUseUUID, GPUNoUseUUID, "NVIDIA")
 			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestDeviceUsageDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original *DeviceUsage
+	}{
+		{
+			name:     "nil input",
+			original: nil,
+		},
+		{
+			name:     "empty struct",
+			original: &DeviceUsage{},
+		},
+		{
+			name: "fully populated",
+			original: &DeviceUsage{
+				ID:        "GPU-0",
+				Index:     1,
+				Used:      2,
+				Count:     10,
+				Usedmem:   1024,
+				Totalmem:  8192,
+				Totalcore: 100,
+				Usedcores: 10,
+				Mode:      "hami-core",
+				MigTemplate: []Geometry{
+					{
+						{Name: "1g.5gb", Core: 1, Memory: 5, Count: 1},
+					},
+				},
+				MigUsage: MigInUse{
+					Index: 0,
+					UsageList: MIGS{
+						{Name: "1g.5gb", Core: 1, Memory: 5, InUse: false},
+					},
+				},
+				Numa:   0,
+				Type:   "NVIDIA",
+				Health: true,
+				PodInfos: []*PodInfo{
+					{
+						Pod: &corev1.Pod{
+							ObjectMeta: metav1.ObjectMeta{
+								Name:      "pod1",
+								Namespace: "default",
+							},
+						},
+						NodeID: "node1",
+						Devices: PodDevices{
+							"NVIDIA": {
+								{
+									{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10},
+								},
+							},
+						},
+						CtrIDs: []string{"ctr1"},
+					},
+				},
+				CustomInfo: map[string]any{
+					"key1": "value1",
+					"key2": 42,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			if tt.original == nil {
+				if copy != nil {
+					t.Fatalf("expected nil, got %v", copy)
+				}
+				return
+			}
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			originalID := tt.original.ID
+			copy.ID = "mutated-id"
+			assert.Equal(t, tt.original.ID, originalID)
+
+			if len(copy.MigTemplate) > 0 && len(copy.MigTemplate[0]) > 0 {
+				originalTemplateName := tt.original.MigTemplate[0][0].Name
+				copy.MigTemplate[0][0].Name = "mutated-template"
+				assert.Equal(t, tt.original.MigTemplate[0][0].Name, originalTemplateName)
+			}
+
+			if len(copy.MigUsage.UsageList) > 0 {
+				originalUsageName := tt.original.MigUsage.UsageList[0].Name
+				copy.MigUsage.UsageList[0].Name = "mutated-usage"
+				assert.Equal(t, tt.original.MigUsage.UsageList[0].Name, originalUsageName)
+			}
+
+			if len(copy.PodInfos) > 0 {
+				originalNodeID := tt.original.PodInfos[0].NodeID
+				originalCtrIDsLen := len(tt.original.PodInfos[0].CtrIDs)
+				copy.PodInfos[0].NodeID = "mutated-node"
+				copy.PodInfos[0].CtrIDs = append(copy.PodInfos[0].CtrIDs, "ctr2")
+				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
+				assert.Equal(t, len(tt.original.PodInfos[0].CtrIDs), originalCtrIDsLen)
+			}
+
+			if copy.CustomInfo != nil {
+				copy.CustomInfo["newkey"] = "newvalue"
+				_, exists := tt.original.CustomInfo["newkey"]
+				assert.Assert(t, !exists, "original CustomInfo should not have newkey")
+			}
+		})
+	}
+}
+
+func TestMigInUseDeepCopy(t *testing.T) {
+	tests := []struct {
+		name     string
+		original MigInUse
+	}{
+		{
+			name:     "empty",
+			original: MigInUse{},
+		},
+		{
+			name: "with data",
+			original: MigInUse{
+				Index: 1,
+				UsageList: MIGS{
+					{Name: "1g.5gb", Core: 1, Memory: 5, InUse: true},
+					{Name: "2g.10gb", Core: 2, Memory: 10, InUse: false},
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			copy := tt.original.DeepCopy()
+
+			// 1. Copy must be deeply equal to original.
+			assert.DeepEqual(t, tt.original, copy)
+
+			// 2. Mutating the copy must not affect the original.
+			originalIndex := tt.original.Index
+			copy.Index = 99
+			assert.Equal(t, tt.original.Index, originalIndex)
+
+			if len(copy.UsageList) > 0 {
+				originalName := tt.original.UsageList[0].Name
+				copy.UsageList[0].Name = "mutated"
+				assert.Equal(t, tt.original.UsageList[0].Name, originalName)
+			}
 		})
 	}
 }

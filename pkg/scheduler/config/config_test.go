@@ -96,102 +96,104 @@ iluvatars:
 kunlun:
   resourceCountName: "kunlunxin.com/xpu"
 vnpus:
-- chipName: 910A
-  commonWord: Ascend910A
-  resourceName: huawei.com/Ascend910A
-  resourceMemoryName: huawei.com/Ascend910A-memory
-  memoryAllocatable: 32768
-  memoryCapacity: 32768
-  aiCore: 30
-  templates:
-    - name: vir02
-      memory: 2184
-      aiCore: 2
-    - name: vir04
-      memory: 4369
-      aiCore: 4
-    - name: vir08
-      memory: 8738
-      aiCore: 8
-    - name: vir16
-      memory: 17476
-      aiCore: 16
-- chipName: 910B2
-  commonWord: Ascend910B2
-  resourceName: huawei.com/Ascend910B2
-  resourceMemoryName: huawei.com/Ascend910B2-memory
-  memoryAllocatable: 65536
-  memoryCapacity: 65536
-  aiCore: 24
-  aiCPU: 6
-  templates:
-    - name: vir03_1c_8g
-      memory: 8192
-      aiCore: 3
-      aiCPU: 1
-    - name: vir06_1c_16g
-      memory: 16384
-      aiCore: 6
-      aiCPU: 1
-    - name: vir12_3c_32g
-      memory: 32768
-      aiCore: 12
-      aiCPU: 3
-- chipName: 910B3
-  commonWord: Ascend910B3
-  resourceName: huawei.com/Ascend910B3
-  resourceMemoryName: huawei.com/Ascend910B3-memory
-  memoryAllocatable: 65536
-  memoryCapacity: 65536
-  aiCore: 20
-  aiCPU: 7
-  templates:
-    - name: vir05_1c_16g
-      memory: 16384
-      aiCore: 5
-      aiCPU: 1
-    - name: vir10_3c_32g
-      memory: 32768
-      aiCore: 10
-      aiCPU: 3
-- chipName: 910B4
-  commonWord: Ascend910B4
-  resourceName: huawei.com/Ascend910B4
-  resourceMemoryName: huawei.com/Ascend910B4-memory
-  memoryAllocatable: 32768
-  memoryCapacity: 32768
-  aiCore: 20
-  aiCPU: 7
-  templates:
-    - name: vir05_1c_8g
-      memory: 8192
-      aiCore: 5
-      aiCPU: 1
-    - name: vir10_3c_16g
-      memory: 16384
-      aiCore: 10
-      aiCPU: 3
-- chipName: 310P3
-  commonWord: Ascend310P
-  resourceName: huawei.com/Ascend310P
-  resourceMemoryName: huawei.com/Ascend310P-memory
-  memoryAllocatable: 21527
-  memoryCapacity: 24576
-  aiCore: 8
-  aiCPU: 7
-  templates:
-    - name: vir01
-      memory: 3072
-      aiCore: 1
-      aiCPU: 1
-    - name: vir02
-      memory: 6144
-      aiCore: 2
-      aiCPU: 2
-    - name: vir04
-      memory: 12288
-      aiCore: 4
-      aiCPU: 4`
+  hamiVnpuCore: false
+  configs:
+  - chipName: 910A
+    commonWord: Ascend910A
+    resourceName: huawei.com/Ascend910A
+    resourceMemoryName: huawei.com/Ascend910A-memory
+    memoryAllocatable: 32768
+    memoryCapacity: 32768
+    aiCore: 30
+    templates:
+      - name: vir02
+        memory: 2184
+        aiCore: 2
+      - name: vir04
+        memory: 4369
+        aiCore: 4
+      - name: vir08
+        memory: 8738
+        aiCore: 8
+      - name: vir16
+        memory: 17476
+        aiCore: 16
+  - chipName: 910B2
+    commonWord: Ascend910B2
+    resourceName: huawei.com/Ascend910B2
+    resourceMemoryName: huawei.com/Ascend910B2-memory
+    memoryAllocatable: 65536
+    memoryCapacity: 65536
+    aiCore: 24
+    aiCPU: 6
+    templates:
+      - name: vir03_1c_8g
+        memory: 8192
+        aiCore: 3
+        aiCPU: 1
+      - name: vir06_1c_16g
+        memory: 16384
+        aiCore: 6
+        aiCPU: 1
+      - name: vir12_3c_32g
+        memory: 32768
+        aiCore: 12
+        aiCPU: 3
+  - chipName: 910B3
+    commonWord: Ascend910B3
+    resourceName: huawei.com/Ascend910B3
+    resourceMemoryName: huawei.com/Ascend910B3-memory
+    memoryAllocatable: 65536
+    memoryCapacity: 65536
+    aiCore: 20
+    aiCPU: 7
+    templates:
+      - name: vir05_1c_16g
+        memory: 16384
+        aiCore: 5
+        aiCPU: 1
+      - name: vir10_3c_32g
+        memory: 32768
+        aiCore: 10
+        aiCPU: 3
+  - chipName: 910B4
+    commonWord: Ascend910B4
+    resourceName: huawei.com/Ascend910B4
+    resourceMemoryName: huawei.com/Ascend910B4-memory
+    memoryAllocatable: 32768
+    memoryCapacity: 32768
+    aiCore: 20
+    aiCPU: 7
+    templates:
+      - name: vir05_1c_8g
+        memory: 8192
+        aiCore: 5
+        aiCPU: 1
+      - name: vir10_3c_16g
+        memory: 16384
+        aiCore: 10
+        aiCPU: 3
+  - chipName: 310P3
+    commonWord: Ascend310P
+    resourceName: huawei.com/Ascend310P
+    resourceMemoryName: huawei.com/Ascend310P-memory
+    memoryAllocatable: 21527
+    memoryCapacity: 24576
+    aiCore: 8
+    aiCPU: 7
+    templates:
+      - name: vir01
+        memory: 3072
+        aiCore: 1
+        aiCPU: 1
+      - name: vir02
+        memory: 6144
+        aiCore: 2
+        aiCPU: 2
+      - name: vir04
+        memory: 12288
+        aiCore: 4
+        aiCPU: 4`
 }
 
 func Test_LoadConfig(t *testing.T) {
@@ -291,79 +293,82 @@ func createKunlunConfig() kunlun.KunlunConfig {
 	}
 }
 
-func createVNPUConfigs() []ascend.VNPUConfig {
-	return []ascend.VNPUConfig{
-		{
-			ChipName:           "910A",
-			CommonWord:         "Ascend910A",
-			ResourceName:       "huawei.com/Ascend910A",
-			ResourceMemoryName: "huawei.com/Ascend910A-memory",
-			MemoryAllocatable:  32768,
-			MemoryCapacity:     32768,
-			AICore:             30,
-			Templates: []ascend.Template{
-				{Name: "vir02", Memory: 2184, AICore: 2},
-				{Name: "vir04", Memory: 4369, AICore: 4},
-				{Name: "vir08", Memory: 8738, AICore: 8},
-				{Name: "vir16", Memory: 17476, AICore: 16},
+func createVNPUConfigs() ascend.VNPUs {
+	return ascend.VNPUs{
+		HamiVnpuCore: false,
+		Configs: []ascend.VNPUConfig{
+			{
+				ChipName:           "910A",
+				CommonWord:         "Ascend910A",
+				ResourceName:       "huawei.com/Ascend910A",
+				ResourceMemoryName: "huawei.com/Ascend910A-memory",
+				MemoryAllocatable:  32768,
+				MemoryCapacity:     32768,
+				AICore:             30,
+				Templates: []ascend.Template{
+					{Name: "vir02", Memory: 2184, AICore: 2},
+					{Name: "vir04", Memory: 4369, AICore: 4},
+					{Name: "vir08", Memory: 8738, AICore: 8},
+					{Name: "vir16", Memory: 17476, AICore: 16},
+				},
 			},
-		},
-		{
-			ChipName:           "910B2",
-			CommonWord:         "Ascend910B2",
-			ResourceName:       "huawei.com/Ascend910B2",
-			ResourceMemoryName: "huawei.com/Ascend910B2-memory",
-			MemoryAllocatable:  65536,
-			MemoryCapacity:     65536,
-			AICore:             24,
-			AICPU:              6,
-			Templates: []ascend.Template{
-				{Name: "vir03_1c_8g", Memory: 8192, AICore: 3, AICPU: 1},
-				{Name: "vir06_1c_16g", Memory: 16384, AICore: 6, AICPU: 1},
-				{Name: "vir12_3c_32g", Memory: 32768, AICore: 12, AICPU: 3},
+			{
+				ChipName:           "910B2",
+				CommonWord:         "Ascend910B2",
+				ResourceName:       "huawei.com/Ascend910B2",
+				ResourceMemoryName: "huawei.com/Ascend910B2-memory",
+				MemoryAllocatable:  65536,
+				MemoryCapacity:     65536,
+				AICore:             24,
+				AICPU:              6,
+				Templates: []ascend.Template{
+					{Name: "vir03_1c_8g", Memory: 8192, AICore: 3, AICPU: 1},
+					{Name: "vir06_1c_16g", Memory: 16384, AICore: 6, AICPU: 1},
+					{Name: "vir12_3c_32g", Memory: 32768, AICore: 12, AICPU: 3},
+				},
 			},
-		},
-		{
-			ChipName:           "910B3",
-			CommonWord:         "Ascend910B3",
-			ResourceName:       "huawei.com/Ascend910B3",
-			ResourceMemoryName: "huawei.com/Ascend910B3-memory",
-			MemoryAllocatable:  65536,
-			MemoryCapacity:     65536,
-			AICore:             20,
-			AICPU:              7,
-			Templates: []ascend.Template{
-				{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
-				{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
+			{
+				ChipName:           "910B3",
+				CommonWord:         "Ascend910B3",
+				ResourceName:       "huawei.com/Ascend910B3",
+				ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+				MemoryAllocatable:  65536,
+				MemoryCapacity:     65536,
+				AICore:             20,
+				AICPU:              7,
+				Templates: []ascend.Template{
+					{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
+					{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
+				},
 			},
-		},
-		{
-			ChipName:           "910B4",
-			CommonWord:         "Ascend910B4",
-			ResourceName:       "huawei.com/Ascend910B4",
-			ResourceMemoryName: "huawei.com/Ascend910B4-memory",
-			MemoryAllocatable:  32768,
-			MemoryCapacity:     32768,
-			AICore:             20,
-			AICPU:              7,
-			Templates: []ascend.Template{
-				{Name: "vir05_1c_8g", Memory: 8192, AICore: 5, AICPU: 1},
-				{Name: "vir10_3c_16g", Memory: 16384, AICore: 10, AICPU: 3},
+			{
+				ChipName:           "910B4",
+				CommonWord:         "Ascend910B4",
+				ResourceName:       "huawei.com/Ascend910B4",
+				ResourceMemoryName: "huawei.com/Ascend910B4-memory",
+				MemoryAllocatable:  32768,
+				MemoryCapacity:     32768,
+				AICore:             20,
+				AICPU:              7,
+				Templates: []ascend.Template{
+					{Name: "vir05_1c_8g", Memory: 8192, AICore: 5, AICPU: 1},
+					{Name: "vir10_3c_16g", Memory: 16384, AICore: 10, AICPU: 3},
+				},
 			},
-		},
-		{
-			ChipName:           "310P3",
-			CommonWord:         "Ascend310P",
-			ResourceName:       "huawei.com/Ascend310P",
-			ResourceMemoryName: "huawei.com/Ascend310P-memory",
-			MemoryAllocatable:  21527,
-			MemoryCapacity:     24576,
-			AICore:             8,
-			AICPU:              7,
-			Templates: []ascend.Template{
-				{Name: "vir01", Memory: 3072, AICore: 1, AICPU: 1},
-				{Name: "vir02", Memory: 6144, AICore: 2, AICPU: 2},
-				{Name: "vir04", Memory: 12288, AICore: 4, AICPU: 4},
+			{
+				ChipName:           "310P3",
+				CommonWord:         "Ascend310P",
+				ResourceName:       "huawei.com/Ascend310P",
+				ResourceMemoryName: "huawei.com/Ascend310P-memory",
+				MemoryAllocatable:  21527,
+				MemoryCapacity:     24576,
+				AICore:             8,
+				AICPU:              7,
+				Templates: []ascend.Template{
+					{Name: "vir01", Memory: 3072, AICore: 1, AICPU: 1},
+					{Name: "vir02", Memory: 6144, AICore: 2, AICPU: 2},
+					{Name: "vir04", Memory: 12288, AICore: 4, AICPU: 4},
+				},
 			},
 		},
 	}

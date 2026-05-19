@@ -1439,3 +1439,23 @@ func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	_, ok = s.podManager.GetPod(terminatedPod)
 	assert.Equal(t, false, ok, "Pod should be removed from cache after reaching a terminal phase (Succeeded/Failed)")
 }
+
+func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
+	device.SupportDevices["TEST"] = "hami.io/test-allocated"
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "bad-anno-uid",
+			Name:      "bad-anno-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "node1",
+				"hami.io/test-allocated":     "uuid,type,100:;",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	s.onAddPod(pod)
+	_, ok := s.podManager.GetPod(pod)
+	assert.Equal(t, false, ok)
+}

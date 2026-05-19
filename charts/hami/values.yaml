@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.8.0"
+  imageTag: "v2.9.0"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -351,7 +351,8 @@ devicePlugin:
             "filterdevices": {
               "uuid": [],
               "index": []
-            }
+            },
+            "enablegetpreferredallocation": false
           }
         ]
       }
@@ -436,8 +437,8 @@ hami-dra:
       # If you are using gpu driver on host, you need to set this to false
       containerDriver: true
       image:
-        repository: projecthami/k8s-dra-driver
-        tag: "v0.0.1-dev"
+        repository: ghcr.io/project-hami/k8s-dra-driver
+        tag: "main"
 
 devices:
   amd:
@@ -480,6 +481,7 @@ devices:
       ascend: "on"
     tolerations: []
     runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory

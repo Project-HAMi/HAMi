@@ -32,6 +32,16 @@ type NodeUsage struct {
 	Devices policy.DeviceUsageList
 }
 
+func (n *NodeUsage) DeepCopy() *NodeUsage {
+	if n == nil {
+		return nil
+	}
+	return &NodeUsage{
+		Node:    n.Node.DeepCopy(),
+		Devices: n.Devices.DeepCopy(),
+	}
+}
+
 type nodeManager struct {
 	nodes map[string]*device.NodeInfo
 	mutex sync.RWMutex

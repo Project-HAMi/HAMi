@@ -84,7 +84,7 @@ type Config struct {
 	AWSNeuronConfig awsneuron.AWSNeuronConfig `yaml:"awsneuron"`
 	AMDGPUConfig    amd.AMDConfig             `yaml:"amd"`
 	VastaiConfig    vastai.VastaiConfig       `yaml:"vastai"`
-	VNPUs           []ascend.VNPUConfig       `yaml:"vnpus"`
+	VNPUs           ascend.VNPUs              `yaml:"vnpus"`
 }
 
 var (
@@ -261,7 +261,7 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
 		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
-		len(config.VNPUs) > 0 {
+		len(config.VNPUs.Configs) > 0 {
 		return nil
 	}
 	return fmt.Errorf("all configurations are empty")
@@ -341,6 +341,8 @@ awsneuron:
 amd:
   resourceCountName: "amd.com/gpu"
 vnpus:
+  hamiVnpuCore: false
+  configs:
   - chipName: "910A"
     commonWord: "Ascend910A"
     resourceName: "huawei.com/Ascend910A"
