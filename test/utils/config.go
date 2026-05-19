@@ -26,7 +26,6 @@ const (
 	GPUPodMemoryUnit     = "MiB"
 	GPUPodCore           = "40"
 	GPUNameSpace         = "hami-system"
-	GPUNode              = "gpu-master"
 	GPUCudaTestPass      = "Test PASSED"
 )
 
