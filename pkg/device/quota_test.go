@@ -213,7 +213,6 @@ func TestIsManagedQuota(t *testing.T) {
 	}
 }
 
-
 func TestAddQuotaAndDelQuota(t *testing.T) {
 	initTest()
 	qm := NewQuotaManager()
