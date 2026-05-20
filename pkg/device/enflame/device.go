@@ -19,9 +19,9 @@ package enflame
 import (
 	"encoding/json"
 	"fmt"
-	"slices"
 	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
