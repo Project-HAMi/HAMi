@@ -18,6 +18,7 @@ package enflame
 
 import (
 	"fmt"
+	"slices"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -146,8 +147,8 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, v := range slices.Backward(devices) {
+		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		if !gcuDev.checkType(k) {
