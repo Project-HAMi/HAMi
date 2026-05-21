@@ -17,10 +17,14 @@ limitations under the License.
 package mig
 
 import (
+	"os"
 	"testing"
 )
 
 func TestGetMigCapabilityDevicePaths_noFile(t *testing.T) {
+	if _, err := os.Stat(nvcapsMigMinorsPath); err == nil {
+		t.Skipf("skipping: %s exists on this machine", nvcapsMigMinorsPath)
+	}
 	result, err := GetMigCapabilityDevicePaths()
 	if err != nil {
 		t.Fatalf("GetMigCapabilityDevicePaths() unexpected error: %v", err)
