@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"math"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -402,8 +403,8 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	if profileCorePercent <= 0 {
 		profileCorePercent = 1
 	}
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, v := range slices.Backward(devices) {
+		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, _ := enf.checkType(pod.GetAnnotations(), *dev, k)
