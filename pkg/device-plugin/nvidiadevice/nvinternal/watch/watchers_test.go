@@ -36,7 +36,7 @@ func TestFiles_valid(t *testing.T) {
 }
 
 func TestFiles_nonexistent(t *testing.T) {
-	_, err := Files("/tmp/hami-test-nonexistent-file-12345")
+	_, err := Files(filepath.Join(t.TempDir(), "nonexistent"))
 	if err == nil {
 		t.Fatal("Files() expected error for nonexistent path, got nil")
 	}
