@@ -840,8 +840,10 @@ func Test_CheckHealth(t *testing.T) {
 		},
 		{
 			// Expired Requesting_ but Allocatable still has the resource: the
-			// device-plugin gRPC stream is alive. Handshake is refreshed and the
-			// node stays healthy → (true, false).
+			// device-plugin gRPC stream is alive. Handshake refresh is attempted
+			// but fails in unit tests (no cluster), so the function returns
+			// (true, false). In production, refreshHandshake succeeds and the
+			// caller receives (true, true), repopulating the scheduler cache.
 			name: "Requesting state expired, allocatable present",
 			args: struct {
 				devType           string
