@@ -119,7 +119,9 @@ func start() error {
 		client.WithTimeout(config.Timeout),
 	)
 
-	config.InitDevices()
+	if err := config.InitDevices(); err != nil {
+		return fmt.Errorf("failed to initialize devices: %w", err)
+	}
 
 	var err error
 	config.HostName, err = os.Hostname()

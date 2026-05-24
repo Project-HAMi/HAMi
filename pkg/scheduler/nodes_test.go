@@ -128,7 +128,7 @@ func Test_addNode_ListNodes(t *testing.T) {
 			err: nil,
 		},
 	}
-	config.InitDefaultDevices()
+	assert.NilError(t, config.InitDefaultDevices(), "Expected InitDefaultDevices to succeed")
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			m := nodeManager{

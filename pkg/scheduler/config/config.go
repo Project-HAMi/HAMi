@@ -278,24 +278,25 @@ func validateConfig(config *Config) error {
 	return fmt.Errorf("all configurations are empty")
 }
 
-func InitDevices() {
+func InitDevices() error {
 	if len(device.DevicesMap) > 0 {
 		klog.Info("Devices are already initialized, skipping initialization")
-		return
+		return nil
 	}
 	klog.Infof("Loading device configuration from file: %s", configFile)
 	config, err := LoadConfig(configFile)
 	if err != nil {
-		klog.Fatalf("Failed to load device config file %s: %v", configFile, err)
+		return fmt.Errorf("failed to load device config file %s: %w", configFile, err)
 	}
 	klog.Infof("Loaded config: %v", config)
 	err = InitDevicesWithConfig(config)
 	if err != nil {
-		klog.Fatalf("Failed to initialize devices: %v", err)
+		return fmt.Errorf("failed to initialize devices: %w", err)
 	}
+	return nil
 }
 
-func InitDefaultDevices() {
+func InitDefaultDevices() error {
 	configMapdata := `
 nvidia:
   resourceCountName: "nvidia.com/gpu"
@@ -454,14 +455,13 @@ vnpus:
 	var yamlData Config
 	err := yaml.Unmarshal([]byte(configMapdata), &yamlData)
 	if err != nil {
-		klog.Fatalf("Failed to unmarshal default config: %v", err)
-		return
+		return fmt.Errorf("failed to unmarshal default config: %w", err)
 	}
 
-	// Initialize devices with configuration
 	if err := InitDevicesWithConfig(&yamlData); err != nil {
-		klog.Fatalf("Failed to initialize devices with default config: %v", err)
+		return fmt.Errorf("failed to initialize devices with default config: %w", err)
 	}
+	return nil
 }
 
 func GlobalFlagSet() *flag.FlagSet {

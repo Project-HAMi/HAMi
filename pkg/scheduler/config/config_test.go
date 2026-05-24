@@ -479,7 +479,8 @@ func Test_GetDevices(t *testing.T) {
 }
 
 func Test_InitDefaultDevices(t *testing.T) {
-	InitDefaultDevices()
+	err := InitDefaultDevices()
+	assert.NilError(t, err, "Expected InitDefaultDevices to succeed")
 	assert.Assert(t, len(device.DevicesMap) > 0, "Expected devicesMap to be populated")
 	assert.Assert(t, len(device.DevicesToHandle) > 0, "Expected DevicesToHandle to be populated")
 }
