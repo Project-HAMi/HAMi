@@ -1,5 +1,6 @@
 cyphar.com/go-pathrs v0.2.1 h1:9nx1vOgwVvX1mNBWDu93+vaceedpbsDqo+XuBGL40b8=
 cyphar.com/go-pathrs v0.2.1/go.mod h1:y8f1EMG7r+hCuFf/rXsKqMJrJAUoADZGNh5/vZPKcGc=
+cyphar.com/go-pathrs v0.2.4 h1:iD/mge36swa1UFKdINkr1Frkpp6wZsy3YYEildj9cLY=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/NVIDIA/go-gpuallocator v0.6.0 h1:2PA2swx59gJYREPkZNTGtyCP6Pnz3WEgnYsXlRkyvkk=
@@ -12,6 +13,8 @@ github.com/NVIDIA/k8s-device-plugin v0.19.1 h1:JD3tbmFHCgAwu7+tw7A0PdQ75MYWvL+fr
 github.com/NVIDIA/k8s-device-plugin v0.19.1/go.mod h1:yH0C+Rf/FUVIlVU1qod7BASgM7QDGcxwiuSXvX5DeBs=
 github.com/NVIDIA/nvidia-container-toolkit v1.19.1-0.20260410190841-2c0c91d0ebaa h1:/NWUzIuzA33H1hm9ze8RXdlKAsA1LVccZgdnt93MrQg=
 github.com/NVIDIA/nvidia-container-toolkit v1.19.1-0.20260410190841-2c0c91d0ebaa/go.mod h1:4aDFESAMdSDUGqFD6q3CBRaScL1ZNbMVDifD67cPxUw=
+github.com/NVIDIA/nvidia-container-toolkit v1.19.1 h1:1sV4ddFrBccqL9Lbzcdu50w2j5FhyNJpN5hXTfCsjps=
+github.com/NVIDIA/nvidia-container-toolkit v1.19.1/go.mod h1:yGsZ4s2lMjfE4r8/DMUPVpaFhRGkWvo2H++/Dy84nVc=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
@@ -120,6 +123,8 @@ github.com/opencontainers/cgroups v0.0.6 h1:tfZFWTIIGaUUFImTyuTg+Mr5x8XRiSdZESgE
 github.com/opencontainers/cgroups v0.0.6/go.mod h1:oWVzJsKK0gG9SCRBfTpnn16WcGEqDI8PAcpMGbqWxcs=
 github.com/opencontainers/runc v1.4.0 h1:FG1Hw0GBYPsNki+mBz1QOrSzbwbAcerhrAD2r097QCc=
 github.com/opencontainers/runc v1.4.0/go.mod h1:sch3Bh3c1NlyAkALoAUz5Br9ubMLZzFcxuovZbnkErk=
+github.com/opencontainers/runc v1.4.2 h1:/AEjjXuVH9lTRl9ZyUFQj7oWBM7Xv00qFV6Vx9q5N3o=
+github.com/opencontainers/runc v1.4.2/go.mod h1:ufk5PTTsy5pnGBAvTh50e+eqGk01pYH2YcVxh557Qlk=
 github.com/opencontainers/runtime-spec v1.3.0 h1:YZupQUdctfhpZy3TM39nN9Ika5CBWT5diQ8ibYCRkxg=
 github.com/opencontainers/runtime-spec v1.3.0/go.mod h1:jwyrGlmzljRJv/Fgzds9SsS/C5hL+LL3ko9hs6T5lQ0=
 github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 h1:tAKu3NkKWZYpqBSOJKwTxT1wIGueiF7gcmcNgr5pNTY=
