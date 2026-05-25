@@ -21,6 +21,7 @@ set -x
 
 E2E_TYPE=${1:-"pullrequest"}
 KUBE_CONF=${2:-"${HOME}/.kube/config"}
+export KUBE_CONF
 
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 cd "${REPO_ROOT}"

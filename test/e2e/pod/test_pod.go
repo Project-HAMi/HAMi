@@ -41,12 +41,14 @@ var _ = ginkgo.Describe("Pod E2E Tests", ginkgo.Ordered, func() {
 	)
 
 	var (
-		clientSet = utils.GetClientSet()
+		clientSet *kubernetes.Clientset
 		newPod    *corev1.Pod
 		nodeName  string
 	)
 
 	ginkgo.BeforeAll(func() {
+		clientSet = utils.GetClientSet()
+
 		var err error
 		nodeName, err = utils.GetGPUNode(clientSet)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
