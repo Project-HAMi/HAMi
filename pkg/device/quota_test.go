@@ -319,3 +319,28 @@ func TestAddQuotaExplicitZero(t *testing.T) {
 		t.Error("FitQuota should deny request when explicit zero limit is set")
 	}
 }
+
+func TestGetResourceQuotaPreservesLimitSet(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "copy-ns"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	qm.Quotas[ns] = &DeviceQuota{
+		memName:  &Quota{Used: 100, Limit: 0, LimitSet: true},
+		coreName: &Quota{Used: 50, Limit: 200, LimitSet: false},
+	}
+
+	snapshot := qm.GetResourceQuota()
+	dq, ok := snapshot[ns]
+	if !ok {
+		t.Fatalf("GetResourceQuota: missing namespace %q", ns)
+	}
+	if !(*dq)[memName].LimitSet {
+		t.Error("GetResourceQuota: expected LimitSet=true to be preserved")
+	}
+	if (*dq)[coreName].LimitSet {
+		t.Error("GetResourceQuota: expected LimitSet=false to be preserved")
+	}
+}

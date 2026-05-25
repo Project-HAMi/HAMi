@@ -260,8 +260,9 @@ func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
 		curDQ := &DeviceQuota{}
 		for name, quota := range *dq {
 			(*curDQ)[name] = &Quota{
-				Used:  quota.Used,
-				Limit: quota.Limit,
+				Used:     quota.Used,
+				Limit:    quota.Limit,
+				LimitSet: quota.LimitSet,
 			}
 		}
 		quotasCopy[ns] = curDQ
