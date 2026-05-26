@@ -740,7 +740,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-	s.podManager.DelPod(args.Pod)
+	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
+		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+	}
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)

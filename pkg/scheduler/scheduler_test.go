@@ -1392,6 +1392,37 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 	<-done
 }
 
+func Test_Filter_EvictsStaleEntry(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-s2", Name: "stale", Namespace: "ns-evict"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpumem": *resource.NewQuantity(500, resource.BinarySI),
+			}},
+		}}},
+	}
+	devs := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500, Usedcores: 10}}},
+	}
+	s.podManager.AddPod(pod, "node1", devs)
+	s.quotaManager.AddUsage(pod, devs)
+	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	_, inCache := s.podManager.GetPod(pod)
+	assert.Equal(t, false, inCache)
+	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
+		assert.Equal(t, int64(0), v.Used)
+	}
+}
+
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
