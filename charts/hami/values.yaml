@@ -318,6 +318,11 @@ devicePlugin:
     extraArgs:
       - -v=4
     extraEnvs: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["SYS_ADMIN"]
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -382,6 +387,20 @@ devicePlugin:
     httpPort: 31992
     labels: {}
     annotations: {}
+
+  hostPID: true
+  hostNetwork: false
+
+  securityContext:
+    privileged: true
+    allowPrivilegeEscalation: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["SYS_ADMIN"]
+
+  initContainerSecurityContext:
+    privileged: true
+    runAsUser: 0
 
   pluginPath: /var/lib/kubelet/device-plugins
   libPath: /usr/local/vgpu

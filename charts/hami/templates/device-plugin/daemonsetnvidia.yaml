@@ -40,8 +40,8 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
-      hostPID: true
-      hostNetwork: false
+      hostPID: {{ .Values.devicePlugin.hostPID }}
+      hostNetwork: {{ .Values.devicePlugin.hostNetwork }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
@@ -49,8 +49,7 @@ spec:
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
           securityContext:
-            privileged: true
-            runAsUser: 0
+          {{- toYaml .Values.devicePlugin.initContainerSecurityContext | nindent 12 }}
           command: ["sh", "-c"]
           args:
             - |
@@ -125,11 +124,7 @@ spec:
             {{- . | toYaml | nindent 12 }}
             {{- end }}
           securityContext:
-            privileged: true
-            allowPrivilegeEscalation: true
-            capabilities:
-              drop: ["ALL"]
-              add: ["SYS_ADMIN"]
+          {{- toYaml .Values.devicePlugin.securityContext | nindent 12 }}
           resources:
           {{- toYaml .Values.devicePlugin.resources | nindent 12 }}
           volumeMounts:
@@ -171,10 +166,7 @@ spec:
             - {{ . }}
             {{- end }}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-              add: ["SYS_ADMIN"]
+          {{- toYaml .Values.devicePlugin.monitor.securityContext | nindent 12 }}
           env:
             - name: NODE_NAME
               valueFrom:
