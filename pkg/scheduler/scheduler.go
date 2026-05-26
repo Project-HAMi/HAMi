@@ -786,7 +786,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		s.podManager.DelPod(args.Pod)
+		if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
+			s.quotaManager.RmUsage(args.Pod, pi.Devices)
+		}
 		return nil, err
 	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
