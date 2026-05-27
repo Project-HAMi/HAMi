@@ -782,12 +782,17 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	if s.podManager.AddPod(args.Pod, m.NodeID, m.Devices) {
+	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
+	if added {
 		s.quotaManager.AddUsage(args.Pod, m.Devices)
 	}
+
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		if added {
+			s.quotaManager.RmUsage(args.Pod, m.Devices)
+		}
 		s.podManager.DelPod(args.Pod)
 		return nil, err
 	}
