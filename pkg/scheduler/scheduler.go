@@ -145,11 +145,9 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
-		pi, ok := s.podManager.GetPod(pod)
-		if ok {
+		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
-		s.podManager.DelPod(pod)
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -157,7 +155,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
-	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+	podDev, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
+		return
+	}
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
@@ -179,7 +181,8 @@ func (s *Scheduler) onDelPod(obj any) {
 		if pod, ok = t.Obj.(*corev1.Pod); ok {
 			klog.V(4).InfoS("Pod tombstone deleted, cleaning up cache", "pod", t.Key)
 		} else {
-			klog.Errorf("Received tombstone for non-pod object on pod delete")
+			klog.V(4).InfoS("Received tombstone for non-pod object on pod delete", "type", fmt.Sprintf("%T", t.Obj))
+			return
 		}
 	default:
 		klog.Errorf("Received unknown object type on pod delete")
@@ -190,10 +193,8 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
-	pi, ok := s.podManager.GetPod(pod)
-	if ok {
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
-		s.podManager.DelPod(pod)
 	}
 }
 
@@ -393,6 +394,15 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			klog.V(5).InfoS("Device health check result", "nodeName", val.Name, "deviceVendor", devhandsk, "health", health, "needUpdate", needUpdate)
 
 			if !health {
+				existingNode, getNodeErr := s.GetNode(val.Name)
+				if getNodeErr != nil {
+					klog.V(5).InfoS("Skipping device cleanup for node not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
+				if _, ok := existingNode.Devices[devhandsk]; !ok {
+					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
+					continue
+				}
 				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
@@ -730,7 +740,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-	s.podManager.DelPod(args.Pod)
+	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
+		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+	}
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
@@ -770,12 +782,17 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	if s.podManager.AddPod(args.Pod, m.NodeID, m.Devices) {
+	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
+	if added {
 		s.quotaManager.AddUsage(args.Pod, m.Devices)
 	}
+
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		if added {
+			s.quotaManager.RmUsage(args.Pod, m.Devices)
+		}
 		s.podManager.DelPod(args.Pod)
 		return nil, err
 	}

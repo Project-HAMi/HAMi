@@ -17,9 +17,9 @@ limitations under the License.
 package version
 
 import (
+	"bytes"
 	"fmt"
 	"runtime"
-
 	"testing"
 )
 
@@ -72,5 +72,42 @@ platform:         ` + fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH),
 				t.Errorf("Print() = %v, want %v", got, tt.want)
 			}
 		})
+	}
+}
+
+func TestVersionInfo(t *testing.T) {
+	got := Version()
+
+	if got.Version != version {
+		t.Errorf("Version().Version = %q, want %q", got.Version, version)
+	}
+	if got.Revision != revision {
+		t.Errorf("Version().Revision = %q, want %q", got.Revision, revision)
+	}
+	if got.BuildDate != buildDate {
+		t.Errorf("Version().BuildDate = %q, want %q", got.BuildDate, buildDate)
+	}
+	if got.GoVersion != runtime.Version() {
+		t.Errorf("Version().GoVersion = %q, want %q", got.GoVersion, runtime.Version())
+	}
+	if got.Compiler != runtime.Compiler {
+		t.Errorf("Version().Compiler = %q, want %q", got.Compiler, runtime.Compiler)
+	}
+
+	wantPlatform := fmt.Sprintf("%s/%s", runtime.GOOS, runtime.GOARCH)
+	if got.Platform != wantPlatform {
+		t.Errorf("Version().Platform = %q, want %q", got.Platform, wantPlatform)
+	}
+}
+
+func TestVersionCmd(t *testing.T) {
+	var buf bytes.Buffer
+	VersionCmd.SetOut(&buf)
+
+	VersionCmd.Run(VersionCmd, nil)
+
+	want := Print() + "\n"
+	if buf.String() != want {
+		t.Errorf("VersionCmd output = %q, want %q", buf.String(), want)
 	}
 }

@@ -76,7 +76,7 @@ func TestRecordScheduleBindingResultEvent(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		fakeClient := fake.NewSimpleClientset()
+		fakeClient := fake.NewClientset()
 		eventBroadcaster := record.NewBroadcaster()
 		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: fakeClient.CoreV1().Events(metav1.NamespaceAll)})
 
@@ -163,7 +163,7 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 		},
 	}
 	for _, test := range tests {
-		fakeClient := fake.NewSimpleClientset()
+		fakeClient := fake.NewClientset()
 		eventBroadcaster := record.NewBroadcaster()
 		eventBroadcaster.StartRecordingToSink(&v1core.EventSinkImpl{Interface: fakeClient.CoreV1().Events(metav1.NamespaceAll)})
 

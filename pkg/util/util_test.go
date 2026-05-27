@@ -36,7 +36,7 @@ func init() {
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
 func TestMarkAnnotationsToDelete(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
 	}, metav1.CreateOptions{})
@@ -76,7 +76,7 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 }
 
 func TestGetPendingPod(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	// Create test node and pod
 
 	podList := []*corev1.Pod{
@@ -233,7 +233,7 @@ func TestGetPendingPod(t *testing.T) {
 }
 
 func TestGetAllocatePodByNode(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	emptyPod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -324,7 +324,7 @@ func TestGetAllocatePodByNode(t *testing.T) {
 	}
 }
 func TestPatchPodAnnotations(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	// Create test pod
 	pod := &corev1.Pod{
@@ -519,7 +519,7 @@ func Test_AllContainersCreated(t *testing.T) {
 }
 
 func TestPatchPodLabels(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	// Create test pod
 	pod := &corev1.Pod{

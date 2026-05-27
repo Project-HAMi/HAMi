@@ -18,19 +18,24 @@ package plugin
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	"golang.org/x/net/context"
+	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"gopkg.in/yaml.v3"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/klog/v2"
+	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/info"
@@ -61,13 +66,13 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	if !ok {
 		return corev1.Container{}, res, errors.New("device request not found")
 	}
-	
+
 	// The annotation format follows the order: init containers first, then regular containers
 	// Index mapping:
 	//   0 to len(InitContainers)-1: init containers
 	//   len(InitContainers) to len(InitContainers)+len(Containers)-1: regular containers
 	initContainerCount := len(p.Spec.InitContainers)
-	
+
 	for ctridx, ctrDevice := range pd {
 		if len(ctrDevice) > 0 {
 			if ctridx < initContainerCount {
@@ -87,7 +92,7 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	return corev1.Container{}, res, errors.New("device request not found")
 }
 
-func EraseNextDeviceTypeFromAnnotation(dtype string, p corev1.Pod) error {
+var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 	pdevices, err := device.DecodePodDevices(device.InRequestDevices, p.Annotations)
 	if err != nil {
 		return err
@@ -447,6 +452,36 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 			position, needsreset = nv.GenerateMigTemplate(devtype, devindex, val)
 			if needsreset {
 				nv.ApplyMigTemplate()
+				if nv.deviceListStrategies.Includes(spec.DeviceListStrategyVolumeMounts) ||
+					nv.deviceListStrategies.Includes(spec.DeviceListStrategyCDIAnnotations) ||
+					nv.deviceListStrategies.Includes(spec.DeviceListStrategyCDICRI) {
+					klog.V(3).Infoln("generate CDI spec file")
+					const (
+						maxTryTimes      = 5
+						waitTimeInterval = 5 * time.Second
+						specFilePath     = "/var/run/cdi/k8s.device-plugin.nvidia.com-gpu.json"
+						kind             = "k8s.device-plugin.nvidia.com/gpu"
+					)
+					for i := 0; i < maxTryTimes; i++ {
+						if err := createSpecFile(specFilePath); err != nil {
+							klog.Warningf("failed to create CDI spec file: %v", err)
+						} else {
+							klog.Infof("createSpecFile ok. file path %s", specFilePath)
+						}
+						if err := checkCDISpecFile(specFilePath, kind); err != nil {
+							klog.Warningf("check CDI spec file failed. %v", err)
+							if i == maxTryTimes-1 {
+								klog.Fatalf("exceed the max trytime %d", maxTryTimes)
+							} else {
+								time.Sleep(waitTimeInterval)
+								klog.Warningf("try to create CDI spec file again. try times: %d", i)
+								continue
+							}
+						}
+						klog.Infof("check CDI spec file ok")
+						break
+					}
+				}
 			}
 			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
 		}
@@ -455,7 +490,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	return tmp
 }
 
-func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
+var podAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {
 	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -488,7 +523,73 @@ func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockNa
 	}
 }
 
-func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
+var podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
 	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
+}
+
+func checkCDISpecFile(filePath, kind string) error {
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return fmt.Errorf("fail to read file: %v", err)
+	}
+	var spec specs.Spec
+	if err := json.Unmarshal(data, &spec); err != nil {
+		return fmt.Errorf("fail to parse json: %v", err)
+	}
+	return checkCDISpec(spec, kind)
+}
+
+func checkCDISpec(spec specs.Spec, kind string) error {
+	if spec.Kind != kind {
+		return fmt.Errorf("kind mismatch. current: %s, expect: %s", spec.Kind, kind)
+	}
+	for _, device := range spec.Devices {
+		if strings.HasPrefix(device.Name, "MIG") {
+			if len(device.ContainerEdits.DeviceNodes) == 0 {
+				return fmt.Errorf("MIG device %s has no deviceNodes", device.Name)
+			}
+			containCap := false
+			for _, node := range device.ContainerEdits.DeviceNodes {
+				if strings.Contains(node.Path, "nvidia-cap") {
+					containCap = true
+					break
+				}
+			}
+			if !containCap {
+				return fmt.Errorf("MIG device %s does not have a corresponding nvidia-cap device", device.Name)
+			}
+		}
+	}
+	return nil
+}
+
+func createSpecFile(outputPath string) error {
+	nvidiaCtkPath := "/usrbin/nvidia-ctk"
+	if outputPath == "" {
+		outputPath = "/var/run/cdi/k8s.device-plugin.nvidia.com-gpu.json"
+	}
+	outputDir := filepath.Dir(outputPath)
+	if err := os.MkdirAll(outputDir, 0755); err != nil {
+		return fmt.Errorf("failed to create output directory %s: %v", outputDir, err)
+	}
+
+	args := []string{
+		"cdi",
+		"generate",
+		"--vendor", "k8s.device-plugin.nvidia.com",
+		"--output", outputPath,
+	}
+
+	cmd := exec.Command(nvidiaCtkPath, args...)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("failed to generate CDI spec file: %v\ncommand: nvidia-ctk %v\noutput: %s",
+			err, args, string(output))
+	}
+
+	if _, err := os.Stat(outputPath); err != nil {
+		return fmt.Errorf("spec file was not created at %s: %v", outputPath, err)
+	}
+	return nil
 }

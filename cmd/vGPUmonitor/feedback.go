@@ -95,7 +95,7 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
-			for i := range p {
+			for i := range min(p, len(utSwitchOn[uuid])) {
 				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
@@ -112,12 +112,12 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
-			for i := range p {
+			for i := range min(p, len(utSwitchOn[uuid])) {
 				if utSwitchOn[uuid][i] > 0 {
 					return true
 				}
 			}
-			if utSwitchOn[uuid][p] > 1 {
+			if p >= 0 && p < len(utSwitchOn[uuid]) && utSwitchOn[uuid][p] > 1 {
 				return true
 			}
 		}
@@ -141,10 +141,14 @@ func Observe(lister *nvidia.ContainerLister) {
 						continue
 					}
 					uuid := c.Info.DeviceUUID(i)
-					if len(utSwitchOn[uuid]) == 0 {
-						utSwitchOn[uuid] = []int{0, 0}
+					p := c.Info.GetPriority()
+					if p < 0 {
+						continue
 					}
-					utSwitchOn[uuid][c.Info.GetPriority()]++
+					for p >= len(utSwitchOn[uuid]) {
+						utSwitchOn[uuid] = append(utSwitchOn[uuid], 0)
+					}
+					utSwitchOn[uuid][p]++
 				}
 			}
 			c.Info.SetRecentKernel(recentKernel)

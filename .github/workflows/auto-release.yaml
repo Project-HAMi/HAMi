@@ -43,7 +43,7 @@ jobs:
       # generate release notes for the new release branch
     - name: Generate pre release notes
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v2
+      uses: softprops/action-gh-release@v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -93,7 +93,7 @@ jobs:
           ref: ${{ env.RUN_TAG }}
         # if branch exists, the action will no fail, and it output created=false
       - name: release Y branch
-        uses: peterjgrainger/action-create-branch@v3.0.0
+        uses: peterjgrainger/action-create-branch@v4.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:

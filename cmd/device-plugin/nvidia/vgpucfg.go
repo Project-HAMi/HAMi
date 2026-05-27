@@ -72,25 +72,20 @@ func addFlags() []cli.Flag {
 	return addition
 }
 
-// prt returns a reference to whatever type is passed into it.
-func ptr[T any](x T) *T {
-	return &x
-}
-
 // updateFromCLIFlag conditionally updates the config flag at 'pflag' to the value of the CLI flag with name 'flagName'.
 func updateFromCLIFlag[T any](pflag **T, c *cli.Context, flagName string) {
 	if c.IsSet(flagName) || *pflag == (*T)(nil) {
 		switch flag := any(pflag).(type) {
 		case **string:
-			*flag = ptr(c.String(flagName))
+			*flag = new(c.String(flagName))
 		case **[]string:
-			*flag = ptr(c.StringSlice(flagName))
+			*flag = new(c.StringSlice(flagName))
 		case **bool:
-			*flag = ptr(c.Bool(flagName))
+			*flag = new(c.Bool(flagName))
 		case **float64:
-			*flag = ptr(c.Float64(flagName))
+			*flag = new(c.Float64(flagName))
 		case **uint:
-			*flag = ptr(c.Uint(flagName))
+			*flag = new(c.Uint(flagName))
 		default:
 			panic(fmt.Errorf("unsupported flag type for %v: %T", flagName, flag))
 		}

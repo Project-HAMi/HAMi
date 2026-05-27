@@ -71,6 +71,11 @@ jobs:
         with:
           version: ${{ env.HELM_VERSION }}
 
+      - name: Add HAMi DRA Helm repository
+        run: |
+          helm repo add hami-dra https://project-hami.github.io/HAMi-DRA/
+          helm repo update hami-dra
+
       - name: Lint helm chart
         run: |
           make lint_chart

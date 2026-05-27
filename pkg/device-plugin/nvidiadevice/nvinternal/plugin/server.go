@@ -58,6 +58,7 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -76,8 +77,10 @@ const (
 )
 
 var (
-	hostHookPath string
-	ConfigFile   *string
+	hostHookPath                 string
+	ConfigFile                   *string
+	getPendingPod                = util.GetPendingPod
+	enableGetPreferredAllocation bool
 )
 
 func init() {
@@ -86,6 +89,8 @@ func init() {
 
 // NvidiaDevicePlugin implements the Kubernetes device plugin API
 type NvidiaDevicePlugin struct {
+	kubeletdevicepluginv1beta1.UnimplementedDevicePluginServer
+
 	ctx                  context.Context
 	rm                   rm.ResourceManager
 	config               *nvidia.DeviceConfig
@@ -138,6 +143,7 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 			if len(val.OperatingMode) > 0 {
 				mode = val.OperatingMode
 			}
+			enableGetPreferredAllocation = val.EnableGetPreferredAllocation
 			klog.Infof("FilterDevice: %v", val.FilterDevice)
 		}
 	}
@@ -417,7 +423,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 		Endpoint:     path.Base(plugin.socket),
 		ResourceName: string(plugin.rm.Resource()),
 		Options: &kubeletdevicepluginv1beta1.DevicePluginOptions{
-			GetPreferredAllocationAvailable: false,
+			GetPreferredAllocationAvailable: enableGetPreferredAllocation,
 		},
 	}
 
@@ -431,7 +437,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
-		GetPreferredAllocationAvailable: false,
+		GetPreferredAllocationAvailable: true,
 	}
 	return options, nil
 }
@@ -456,19 +462,121 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 // GetPreferredAllocation returns the preferred allocation from the set of devices specified in the request
 func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r *kubeletdevicepluginv1beta1.PreferredAllocationRequest) (*kubeletdevicepluginv1beta1.PreferredAllocationResponse, error) {
 	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
-	/*for _, req := range r.ContainerRequests {
-		devices, err := plugin.rm.GetPreferredAllocation(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, int(req.AllocationSize))
-		if err != nil {
-			return nil, fmt.Errorf("error getting list of preferred allocation devices: %v", err)
-		}
 
-		resp := &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
-			DeviceIDs: devices,
+	var annotatedRequests device.PodSingleDevice
+	nodename := os.Getenv(util.NodeNameEnvName)
+	if nodename != "" {
+		current, err := getPendingPod(ctx, nodename)
+		if err == nil && current != nil {
+			if podRequests, decodeErr := device.DecodePodDevices(device.InRequestDevices, current.Annotations); decodeErr == nil {
+				annotatedRequests = podRequests[nvidia.NvidiaGPUDevice]
+			}
 		}
+	}
 
-		response.ContainerResponses = append(response.ContainerResponses, resp)
-	}*/
+	// Filter out empty annotations to match kubelet's ContainerRequests order.
+	// Kubelet only sends requests for containers that need GPUs, but annotations
+	// include all containers (init + regular), some of which may be empty.
+	var nonEmptyAnnotations []device.ContainerDevices
+	for _, ann := range annotatedRequests {
+		if len(ann) > 0 {
+			nonEmptyAnnotations = append(nonEmptyAnnotations, ann)
+		}
+	}
+
+	for idx, req := range r.ContainerRequests {
+		if idx < len(nonEmptyAnnotations) {
+			devices, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, nonEmptyAnnotations[idx], int(req.AllocationSize))
+			if err == nil {
+				klog.V(5).Infof("selectPreferredDevice: %v", devices)
+				response.ContainerResponses = append(response.ContainerResponses, &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
+					DeviceIDs: devices,
+				})
+			} else {
+				klog.Warningf("err: %v", err)
+			}
+		}
+	}
 	return response, nil
+}
+
+func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(available, required []string, desired device.ContainerDevices, allocationSize int) ([]string, error) {
+	if len(desired) < allocationSize {
+		return nil, fmt.Errorf("annotated devices %d smaller than requested allocation size %d", len(desired), allocationSize)
+	}
+
+	requiredSet := make(map[string]bool, len(required))
+	requiredByPhysical := make(map[string]int, len(required))
+	availableByPhysical := make(map[string][]string)
+	selected := make([]string, 0, allocationSize)
+
+	for _, id := range required {
+		requiredSet[id] = true
+		requiredByPhysical[physicalDeviceID(id)]++
+		selected = append(selected, id)
+	}
+
+	for _, id := range available {
+		if requiredSet[id] {
+			continue
+		}
+		availableByPhysical[physicalDeviceID(id)] = append(availableByPhysical[physicalDeviceID(id)], id)
+	}
+
+	for _, dev := range desired[:allocationSize] {
+		physicalID := physicalDeviceID(dev.UUID)
+		if requiredByPhysical[physicalID] > 0 {
+			requiredByPhysical[physicalID]--
+			continue
+		}
+		candidates := availableByPhysical[physicalID]
+		if len(candidates) == 0 {
+			return nil, fmt.Errorf("no available slice device found for annotated GPU %s", physicalID)
+		}
+		selected = append(selected, candidates[0])
+		availableByPhysical[physicalID] = candidates[1:]
+	}
+
+	if len(selected) != allocationSize {
+		return nil, fmt.Errorf("preferred allocation selected %d devices, want %d", len(selected), allocationSize)
+	}
+
+	return selected, nil
+}
+
+func physicalDeviceID(id string) string {
+	if strings.Contains(id, "::") {
+		return rm.AnnotatedID(id).GetID()
+	}
+	// Handle MIG format: GPU-UUID[tidx-idx] -> GPU-UUID
+	if bracketIdx := strings.Index(id, "["); bracketIdx != -1 {
+		return id[:bracketIdx]
+	}
+	// Handle virtual device format: GPU-UUID-N -> GPU-UUID
+	// NVIDIA GPU UUID has exactly 5 dashes (GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
+	// Virtual devices append "-N" suffix, resulting in exactly 6 dashes
+	if strings.Count(id, "-") == 6 {
+		lastDash := strings.LastIndex(id, "-")
+		if lastDash != -1 && lastDash < len(id)-1 {
+			if _, err := strconv.Atoi(id[lastDash+1:]); err == nil {
+				return id[:lastDash]
+			}
+		}
+	}
+	return id
+}
+
+func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq device.ContainerDevices, deviceIDs []string) (device.ContainerDevices, error) {
+	if len(devreq) != len(deviceIDs) {
+		return nil, errors.New("device number not matched")
+	}
+
+	aligned := append(device.ContainerDevices(nil), devreq...)
+	for i := range aligned {
+		aligned[i].UUID = physicalDeviceID(deviceIDs[i])
+	}
+
+	return aligned, nil
 }
 
 // Allocate which return list of devices.
@@ -476,7 +584,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
-	current, err := util.GetPendingPod(ctx, nodename)
+	current, err := getPendingPod(ctx, nodename)
 	if err != nil {
 		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
@@ -487,24 +595,24 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		// If the devices being allocated are replicas, then (conditionally)
 		// error out if more than one resource is being allocated.
 
-		if strings.Contains(req.DevicesIDs[0], "MIG") {
-			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIDs).AnyHasAnnotations() {
-				if len(req.DevicesIDs) > 1 {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
-					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIDs))
+		if strings.Contains(req.DevicesIds[0], "MIG") {
+			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
+				if len(req.DevicesIds) > 1 {
+					podAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
 				}
 			}
 
-			for _, id := range req.DevicesIDs {
+			for _, id := range req.DevicesIds {
 				if !plugin.rm.Devices().Contains(id) {
-					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					podAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
-			response, err := plugin.getAllocateResponse(req.DevicesIDs)
+			response, err := plugin.getAllocateResponse(req.DevicesIds)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
@@ -512,21 +620,29 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
-			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIDs) {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIds) {
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
+			}
+			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
+				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
+				if err != nil {
+					podAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+				}
+				devreq = alignedDevreq
 			}
 			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
 			if err != nil {
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 
-			err = EraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
+			err = eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				podAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
@@ -601,7 +717,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	podAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 
@@ -675,7 +791,7 @@ func (plugin *NvidiaDevicePlugin) updateResponseForCDI(response *kubeletdevicepl
 			cdiDevice := kubeletdevicepluginv1beta1.CDIDevice{
 				Name: device,
 			}
-			response.CDIDevices = append(response.CDIDevices, &cdiDevice)
+			response.CdiDevices = append(response.CdiDevices, &cdiDevice)
 		}
 	}
 
@@ -827,7 +943,7 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 }
 
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
-	return plugin.rm.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
+	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount)
 }
 
 func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {

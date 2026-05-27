@@ -79,25 +79,25 @@ data:
           - 
             - name: 1g.10gb
               core: 14
-              memory: 10240
+              memory: 9728
               count: 7
           - 
             - name: 1g.10gb
               core: 14
-              memory: 10240
+              memory: 9728
               count: 1
             - name: 2g.20gb
               core: 28
-              memory: 20480
+              memory: 19968
               count: 3
           - 
             - name: 3g.40gb
               core: 42
-              memory: 40960
+              memory: 40192
               count: 2
           - 
-            - name: 7g.79gb
-              core: 100
+            - name: 7g.80gb
+              core: 98
               memory: 80896
               count: 1
       - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
@@ -247,8 +247,9 @@ data:
       sgpuTopologyAware: {{ .Values.metaxsGPUTopologyAware }}
     enflame:
       resourceNameGCU: "enflame.com/gcu"
-      resourceNameVGCU: {{ .Values.enflameResourceNameVGCU }}
-      resourceNameVGCUPercentage: {{ .Values.enflameResourceNameVGCUPercentage }}
+      resourceNameDRSGCU: {{ .Values.enflameResourceNameDRSGCU }}
+      resourceNameGCUMemory: {{ .Values.enflameResourceNameGCUMemory }}
+      resourceNameGCUCore: {{ .Values.enflameResourceNameGCUCore }}
     mthreads:
       resourceCountName: "mthreads.com/vgpu"
       resourceMemoryName: "mthreads.com/sgpu-memory"
@@ -288,136 +289,159 @@ data:
     biren:
       resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
-    - chipName: 910A
-      commonWord: Ascend910A
-      resourceName: huawei.com/Ascend910A
-      resourceMemoryName: huawei.com/Ascend910A-memory
-      memoryAllocatable: 32768
-      memoryCapacity: 32768
-      memoryFactor: 1
-      aiCore: 30
-      templates:
-        - name: vir02
-          memory: 2184
-          aiCore: 2
-        - name: vir04
-          memory: 4369
-          aiCore: 4
-        - name: vir08
-          memory: 8738
-          aiCore: 8
-        - name: vir16
-          memory: 17476
-          aiCore: 16
-    - chipName: 910B2
-      commonWord: Ascend910B2
-      resourceName: huawei.com/Ascend910B2
-      resourceMemoryName: huawei.com/Ascend910B2-memory
-      memoryAllocatable: 65536
-      memoryCapacity: 65536
-      memoryFactor: 1
-      aiCore: 24
-      aiCPU: 6
-      templates:
-        - name: vir03_1c_8g
-          memory: 8192
-          aiCore: 3
-          aiCPU: 1
-        - name: vir06_1c_16g
-          memory: 16384
-          aiCore: 6
-          aiCPU: 1
-        - name: vir12_3c_32g
-          memory: 32768
-          aiCore: 12
-          aiCPU: 3
-    - chipName: 910B3
-      commonWord: Ascend910B3
-      resourceName: huawei.com/Ascend910B3
-      resourceMemoryName: huawei.com/Ascend910B3-memory
-      memoryAllocatable: 65536
-      memoryCapacity: 65536
-      memoryFactor: 1
-      aiCore: 20
-      aiCPU: 7
-      templates:
-        - name: vir05_1c_16g
-          memory: 16384
-          aiCore: 5
-          aiCPU: 1
-        - name: vir10_3c_32g
-          memory: 32768
-          aiCore: 10
-          aiCPU: 3
-    - chipName: 910B4-1
-      commonWord: Ascend910B4-1
-      resourceName: huawei.com/Ascend910B4-1
-      resourceMemoryName: huawei.com/Ascend910B4-1-memory
-      memoryAllocatable: 65536
-      memoryCapacity: 65536
-      memoryFactor: 1
-      aiCore: 20
-      aiCPU: 7
-      templates:
-        # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
-        # The memory is used for scheduling so the correct values must be set.
-        # Template vir05_1c_8g actually provides 16GB memory,
-        - name: vir05_1c_8g
-          memory: 16384
-          aiCore: 5
-          aiCPU: 1
-        # Template vir10_3c_16g actually provides 32GB memory
-        - name: vir10_3c_16g
-          memory: 32768
-          aiCore: 10
-          aiCPU: 3
-    - chipName: 910B4
-      commonWord: Ascend910B4
-      resourceName: huawei.com/Ascend910B4
-      resourceMemoryName: huawei.com/Ascend910B4-memory
-      memoryAllocatable: 32768
-      memoryCapacity: 32768
-      memoryFactor: 1
-      aiCore: 20
-      aiCPU: 7
-      templates:
-        - name: vir05_1c_8g
-          memory: 8192
-          aiCore: 5
-          aiCPU: 1
-        - name: vir10_3c_16g
-          memory: 16384
-          aiCore: 10
-          aiCPU: 3
-    - chipName: 310P3
-      commonWord: Ascend310P
-      resourceName: huawei.com/Ascend310P
-      resourceMemoryName: huawei.com/Ascend310P-memory
-      memoryAllocatable: 21527
-      memoryCapacity: 24576
-      memoryFactor: 1
-      aiCore: 8
-      aiCPU: 7
-      templates:
-        - name: vir01
-          memory: 3072
-          aiCore: 1
-          aiCPU: 1
-        - name: vir02
-          memory: 6144
-          aiCore: 2
-          aiCPU: 2
-        - name: vir04
-          memory: 12288
-          aiCore: 4
-          aiCPU: 4
-    - chipName: Ascend910
-      commonWord: Ascend910C
-      resourceName: huawei.com/Ascend910C
-      resourceMemoryName: huawei.com/Ascend910C-memory
-      memoryAllocatable: 65536
-      memoryCapacity: 65536
-      aiCore: 20
-      aiCPU: 7
+      hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      configs:
+      - chipName: 910A
+        commonWord: Ascend910A
+        resourceName: huawei.com/Ascend910A
+        resourceMemoryName: huawei.com/Ascend910A-memory
+        resourceCoreName: huawei.com/Ascend910A-core
+        memoryAllocatable: 32768
+        memoryCapacity: 32768
+        memoryFactor: 1
+        aiCore: 30
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir02
+            memory: 2184
+            aiCore: 2
+          - name: vir04
+            memory: 4369
+            aiCore: 4
+          - name: vir08
+            memory: 8738
+            aiCore: 8
+          - name: vir16
+            memory: 17476
+            aiCore: 16
+      - chipName: 910B2
+        commonWord: Ascend910B2
+        resourceName: huawei.com/Ascend910B2
+        resourceMemoryName: huawei.com/Ascend910B2-memory
+        resourceCoreName: huawei.com/Ascend910B2-core
+        memoryAllocatable: 65536
+        memoryCapacity: 65536
+        memoryFactor: 1
+        aiCore: 24
+        aiCPU: 6
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir03_1c_8g
+            memory: 8192
+            aiCore: 3
+            aiCPU: 1
+          - name: vir06_1c_16g
+            memory: 16384
+            aiCore: 6
+            aiCPU: 1
+          - name: vir12_3c_32g
+            memory: 32768
+            aiCore: 12
+            aiCPU: 3
+      - chipName: 910B3
+        commonWord: Ascend910B3
+        resourceName: huawei.com/Ascend910B3
+        resourceMemoryName: huawei.com/Ascend910B3-memory
+        resourceCoreName: huawei.com/Ascend910B3-core
+        memoryAllocatable: 65536
+        memoryCapacity: 65536
+        memoryFactor: 1
+        aiCore: 20
+        aiCPU: 7
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir05_1c_16g
+            memory: 16384
+            aiCore: 5
+            aiCPU: 1
+          - name: vir10_3c_32g
+            memory: 32768
+            aiCore: 10
+            aiCPU: 3
+      - chipName: 910B4-1
+        commonWord: Ascend910B4-1
+        resourceName: huawei.com/Ascend910B4-1
+        resourceMemoryName: huawei.com/Ascend910B4-1-memory
+        resourceCoreName: huawei.com/Ascend910B4-1-core
+        memoryAllocatable: 65536
+        memoryCapacity: 65536
+        memoryFactor: 1
+        aiCore: 20
+        aiCPU: 7
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
+          # The memory is used for scheduling so the correct values must be set.
+          # Template vir05_1c_8g actually provides 16GB memory,
+          - name: vir05_1c_8g
+            memory: 16384
+            aiCore: 5
+            aiCPU: 1
+          # Template vir10_3c_16g actually provides 32GB memory
+          - name: vir10_3c_16g
+            memory: 32768
+            aiCore: 10
+            aiCPU: 3
+      - chipName: 910B4
+        commonWord: Ascend910B4
+        resourceName: huawei.com/Ascend910B4
+        resourceMemoryName: huawei.com/Ascend910B4-memory
+        resourceCoreName: huawei.com/Ascend910B4-core
+        memoryAllocatable: 32768
+        memoryCapacity: 32768
+        memoryFactor: 1
+        aiCore: 20
+        aiCPU: 7
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir05_1c_8g
+            memory: 8192
+            aiCore: 5
+            aiCPU: 1
+          - name: vir10_3c_16g
+            memory: 16384
+            aiCore: 10
+            aiCPU: 3
+      - chipName: 310P3
+        commonWord: Ascend310P
+        resourceName: huawei.com/Ascend310P
+        resourceMemoryName: huawei.com/Ascend310P-memory
+        resourceCoreName: huawei.com/Ascend310P-core
+        memoryAllocatable: 21527
+        memoryCapacity: 24576
+        memoryFactor: 1
+        aiCore: 8
+        aiCPU: 7
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir01
+            memory: 3072
+            aiCore: 1
+            aiCPU: 1
+          - name: vir02
+            memory: 6144
+            aiCore: 2
+            aiCPU: 2
+          - name: vir04
+            memory: 12288
+            aiCore: 4
+            aiCPU: 4
+      - chipName: Ascend910
+        commonWord: Ascend910C
+        resourceName: huawei.com/Ascend910C
+        resourceMemoryName: huawei.com/Ascend910C-memory
+        resourceCoreName: huawei.com/Ascend910C-core
+        memoryAllocatable: 65536
+        memoryCapacity: 65536
+        aiCore: 20
+        aiCPU: 7
+        runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
+        overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
   {{ end }}
 {{- end }}

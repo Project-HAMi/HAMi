@@ -348,6 +348,33 @@ func TestComputeDefaultScore(t *testing.T) {
 		wantScore float32
 	}{
 		{
+			name: "Zero capacity devices returns score 0 without panic",
+			nodeScore: NodeScore{
+				NodeID: "node-zero",
+				Score:  0.0,
+			},
+			devices: DeviceUsageList{
+				DeviceLists: []*DeviceListsScore{
+					{Device: &device.DeviceUsage{
+						Count: 0, Totalcore: 0, Totalmem: 0,
+						Used: 0, Usedcores: 0, Usedmem: 0,
+					}, Score: 0},
+				},
+			},
+			wantScore: 0,
+		},
+		{
+			name: "Empty device list returns score 0 without panic",
+			nodeScore: NodeScore{
+				NodeID: "node-empty",
+				Score:  0.0,
+			},
+			devices: DeviceUsageList{
+				DeviceLists: []*DeviceListsScore{},
+			},
+			wantScore: 0,
+		},
+		{
 			name: "Test with no devices",
 			nodeScore: NodeScore{
 				NodeID: "node1",

@@ -119,6 +119,18 @@ func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	return pi, ok
 }
 
+func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, ok := m.pods[pod.UID]
+	if ok {
+		delete(m.pods, pod.UID)
+		klog.InfoS("Pod taken and deleted", "pod", klog.KRef(pod.Namespace, pod.Name), "nodeID", pi.NodeID)
+	}
+	return pi, ok
+}
+
 func (m *PodManager) ListPodsUID() ([]*corev1.Pod, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -154,6 +166,66 @@ func (m *PodManager) ListPodsInfo() []*PodInfo {
 		"podCount", len(pods),
 	)
 	return pods
+}
+
+func (p *PodInfo) DeepCopy() *PodInfo {
+	if p == nil {
+		return nil
+	}
+	return &PodInfo{
+		Pod:     p.Pod.DeepCopy(),
+		NodeID:  p.NodeID,
+		Devices: p.Devices.DeepCopy(),
+		CtrIDs:  append([]string(nil), p.CtrIDs...),
+	}
+}
+
+func (pd PodDevices) DeepCopy() PodDevices {
+	if pd == nil {
+		return nil
+	}
+	dup := make(PodDevices, len(pd))
+	for k, v := range pd {
+		dup[k] = v.DeepCopy()
+	}
+	return dup
+}
+
+func (psd PodSingleDevice) DeepCopy() PodSingleDevice {
+	if psd == nil {
+		return nil
+	}
+	dup := make(PodSingleDevice, len(psd))
+	for i, cd := range psd {
+		dup[i] = cd.DeepCopy()
+	}
+	return dup
+}
+
+func (cd ContainerDevices) DeepCopy() ContainerDevices {
+	if cd == nil {
+		return nil
+	}
+	dup := make(ContainerDevices, len(cd))
+	for i, c := range cd {
+		dup[i] = c.DeepCopy()
+	}
+	return dup
+}
+
+func (c ContainerDevice) DeepCopy() ContainerDevice {
+	dup := ContainerDevice{
+		Idx:       c.Idx,
+		UUID:      c.UUID,
+		Type:      c.Type,
+		Usedmem:   c.Usedmem,
+		Usedcores: c.Usedcores,
+	}
+	if c.CustomInfo != nil {
+		dup.CustomInfo = make(map[string]any, len(c.CustomInfo))
+		maps.Copy(dup.CustomInfo, c.CustomInfo)
+	}
+	return dup
 }
 
 func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {

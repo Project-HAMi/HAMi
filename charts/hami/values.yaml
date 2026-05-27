@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.8.0"
+  imageTag: "v2.9.0"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -44,9 +44,10 @@ metaxResourceCore: "metax-tech.com/vcore"
 metaxResourceMem: "metax-tech.com/vmemory"
 metaxsGPUTopologyAware: "false"
 
-#Enflame VGCU Parameters
-enflameResourceNameVGCU: "enflame.com/vgcu"
-enflameResourceNameVGCUPercentage: "enflame.com/vgcu-percentage"
+#Enflame DRS Parameters
+enflameResourceNameDRSGCU: "enflame.com/drs-gcu"
+enflameResourceNameGCUMemory: "enflame.com/gcu-memory"
+enflameResourceNameGCUCore: "enflame.com/gcu-core"
 
 #Kunlun XPU Parameters
 kunlunResourceName: "kunlunxin.com/xpu"
@@ -354,7 +355,8 @@ devicePlugin:
             "filterdevices": {
               "uuid": [],
               "index": []
-            }
+            },
+            "enablegetpreferredallocation": false
           }
         ]
       }
@@ -391,10 +393,6 @@ devicePlugin:
   nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
-  # The updateStrategy for DevicePlugin DaemonSet.
-  # If you want to update the DaemonSet by manual, set type as "OnDelete".
-  # We recommend use OnDelete update strategy because DevicePlugin pod restart will cause business pod restart, this behavior is destructive.
-  # Otherwise, you can use RollingUpdate update strategy to rolling update DevicePlugin pod.
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:
@@ -443,8 +441,8 @@ hami-dra:
       # If you are using gpu driver on host, you need to set this to false
       containerDriver: true
       image:
-        repository: projecthami/k8s-dra-driver
-        tag: "v0.0.1-dev"
+        repository: ghcr.io/project-hami/k8s-dra-driver
+        tag: "main"
 
 devices:
   amd:
@@ -464,8 +462,9 @@ devices:
   enflame:
     enabled: true
     customresources:
-      - enflame.com/vgcu
-      - enflame.com/vgcu-percentage
+      - enflame.com/drs-gcu
+      - enflame.com/gcu-memory
+      - enflame.com/gcu-core
       - enflame.com/gcu
   mthreads:
     enabled: true
@@ -490,19 +489,30 @@ devices:
     nodeSelector:
       ascend: "on"
     tolerations: []
+    runtimeClassName: ""  # Name of the runtime class to set the Pod .spec.runtimeClassName utilizing Ascend NPU
+    hamiVnpuCore: false  # When true, all nodes will enable soft-partitioning based on hami-vnpu-core (node-level annotation takes higher priority)
     customresources:
       - huawei.com/Ascend910A
       - huawei.com/Ascend910A-memory
+      - huawei.com/Ascend910A-core
       - huawei.com/Ascend910B2
       - huawei.com/Ascend910B2-memory
+      - huawei.com/Ascend910B2-core
       - huawei.com/Ascend910B3
       - huawei.com/Ascend910B3-memory
+      - huawei.com/Ascend910B3-core
       - huawei.com/Ascend910B4
       - huawei.com/Ascend910B4-memory
+      - huawei.com/Ascend910B4-core
       - huawei.com/Ascend910B4-1
       - huawei.com/Ascend910B4-1-memory
+      - huawei.com/Ascend910B4-1-core
       - huawei.com/Ascend310P
       - huawei.com/Ascend310P-memory
+      - huawei.com/Ascend310P-core
+      - huawei.com/Ascend910C
+      - huawei.com/Ascend910C-memory
+      - huawei.com/Ascend910C-core
   iluvatar:
     enabled: false
     customresources:

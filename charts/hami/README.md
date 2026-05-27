@@ -54,8 +54,9 @@ This document provides detailed descriptions of all configurable values paramete
 ### Enflame GCU Resources
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `enflameResourceNameVGCU` | vGCU resource name | `"enflame.com/vgcu"` |
-| `enflameResourceNameVGCUPercentage` | vGCU percentage resource name | `"enflame.com/vgcu-percentage"` |
+| `enflameResourceNameDRSGCU` | DRS GCU resource name | `"enflame.com/drs-gcu"` |
+| `enflameResourceNameGCUMemory` | GCU memory request resource name | `"enflame.com/gcu-memory"` |
+| `enflameResourceNameGCUCore` | GCU core request resource name | `"enflame.com/gcu-core"` |
 
 ### Kunlunxin XPU Resources
 | Parameter | Description | Default Value |

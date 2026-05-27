@@ -31,7 +31,7 @@ import (
 )
 
 func Test_LockNode(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	type args struct {
 		nodeName func() string
 		lockname string
@@ -137,7 +137,7 @@ func Test_LockNode(t *testing.T) {
 }
 
 func TestLockNodeWithTimeout(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	// Set a custom timeout for testing
 	originalTimeout := NodeLockTimeout
@@ -193,7 +193,7 @@ func TestLockNodeWithTimeout(t *testing.T) {
 }
 
 func TestLockNodeWithDangling(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 
 	// Set a custom timeout for testing
 	originalTimeout := NodeLockTimeout
@@ -233,7 +233,7 @@ func TestLockNodeWithDangling(t *testing.T) {
 }
 
 func TestReleaseNodeLock(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	type args struct {
 		nodeName func() string
 		lockname string
@@ -337,7 +337,7 @@ func TestReleaseNodeLock(t *testing.T) {
 
 // TestConcurrentNodeLocks verifies that locks on different nodes can be acquired concurrently.
 func TestConcurrentNodeLocks(t *testing.T) {
-	client.KubeClient = fake.NewSimpleClientset()
+	client.KubeClient = fake.NewClientset()
 	nodeLocks = newNodeLockManager()
 
 	prevProcs := runtime.GOMAXPROCS(0)

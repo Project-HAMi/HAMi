@@ -461,7 +461,7 @@ func TestDevices_LockNode(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Initialize fake clientset and pre-load test data
-			client.KubeClient = fake.NewSimpleClientset()
+			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
@@ -525,7 +525,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			// Initialize fake clientset and pre-load test data
-			client.KubeClient = fake.NewSimpleClientset()
+			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",

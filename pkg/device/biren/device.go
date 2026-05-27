@@ -19,6 +19,7 @@ package biren
 import (
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -134,7 +135,7 @@ func (dev *BirenDevices) checkType(annos map[string]string, d device.DeviceUsage
 }
 
 func (dev *BirenDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
 func (dev *BirenDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
@@ -192,8 +193,7 @@ func (br *BirenDevices) Fit(devices []*device.DeviceUsage, request device.Contai
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, _ := br.checkType(pod.GetAnnotations(), *dev, k)

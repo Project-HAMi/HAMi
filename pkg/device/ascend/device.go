@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -37,10 +38,13 @@ import (
 )
 
 const (
-	NodeLockAscend         = "hami.io/mutex.lock"
-	Ascend910Prefix        = "Ascend910"
-	Ascend910CType         = "Ascend910C"
-	Ascend910NetworkWeight = 10
+	NodeLockAscend             = "hami.io/mutex.lock"
+	Ascend910Prefix            = "Ascend910"
+	Ascend910CType             = "Ascend910C"
+	Ascend910NetworkWeight     = 10
+	VNPUModeAnnotation         = "huawei.com/vnpu-mode"
+	VNPUModeHamiCore           = "hami-core"
+	VNPUNodeSelectorAnnotation = "hami-vnpu-core"
 )
 
 type Devices struct {
@@ -49,11 +53,14 @@ type Devices struct {
 	useUUIDAnno      string
 	noUseUUIDAnno    string
 	handshakeAnno    string
+	hamiVnpuCore     bool
 }
 
 type RuntimeInfo struct {
-	UUID string `json:"UUID,omitempty"`
-	Temp string `json:"temp,omitempty"`
+	UUID   string `json:"UUID,omitempty"`
+	Temp   string `json:"temp,omitempty"`
+	Memory int64  `json:"memory,omitempty"`
+	Core   int32  `json:"core,omitempty"`
 }
 
 var (
@@ -73,12 +80,12 @@ func (dev *Devices) trimMemory(m int64) (int64, string) {
 	return 0, ""
 }
 
-func InitDevices(config []VNPUConfig) []*Devices {
+func InitDevices(vnpus VNPUs) []*Devices {
 	var devs []*Devices
 	if !enableAscend {
 		return devs
 	}
-	for _, vnpu := range config {
+	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
 			config:           vnpu,
@@ -86,6 +93,7 @@ func InitDevices(config []VNPUConfig) []*Devices {
 			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
 			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+			hamiVnpuCore:     vnpus.HamiVnpuCore,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -113,6 +121,12 @@ func (dev *Devices) CommonWord() string {
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
+		if dev.config.OverwriteEnv {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "ASCEND_VISIBLE_DEVICES",
+				Value: "",
+			})
+		}
 		return false, nil
 	}
 
@@ -134,21 +148,55 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		}
 	}
 
+	// Check if hami-core is declared
+	vnpuMode := p.Annotations[VNPUModeAnnotation]
+	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+
+	if isHAMiCore {
+		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
+
+		if ctr.Lifecycle == nil {
+			ctr.Lifecycle = &corev1.Lifecycle{}
+		}
+
+		// Inject PostStart hook to start the limiter process
+		if ctr.Lifecycle.PostStart == nil {
+			ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
+				Exec: &corev1.ExecAction{
+					Command: []string{
+						"bash",
+						"-c",
+						"export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
+					},
+				},
+			}
+		}
+	}
+
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
-		trimMem, _ = dev.trimMemory(memory.Value())
-		if trimMem <= 0 {
-			return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, memory.Value())
+		if isHAMiCore {
+			trimMem = memory.Value()
+		} else {
+			trimMem, _ = dev.trimMemory(memory.Value())
+			if trimMem <= 0 {
+				return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, memory.Value())
+			}
 		}
 	}
-	if count.Value() > 1 {
+	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU nor supported for multiple devices")
 		}
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
+
+	// Set runtime class name if it is not set by user and the runtime class name is configured
+	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
+		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
+	}
 	return true, nil
 }
 
@@ -158,12 +206,12 @@ func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) 
 		return []*device.DeviceInfo{}, fmt.Errorf("annos not found %s", dev.nodeRegisterAnno)
 	}
 	nodeDevices, err := device.UnMarshalNodeDevices(anno)
-	for idx := range nodeDevices {
-		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
-	}
 	if err != nil {
 		klog.ErrorS(err, "failed to unmarshal node devices", "node", n.Name, "device annotation", anno)
 		return []*device.DeviceInfo{}, err
+	}
+	for idx := range nodeDevices {
+		nodeDevices[idx].DeviceVendor = dev.config.CommonWord
 	}
 	if len(nodeDevices) == 0 {
 		klog.InfoS("no gpu device found", "node", n.Name, "device annotation", anno)
@@ -179,15 +227,27 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 		(*annoInput)[device.InRequestDevices[commonWord]] = device.EncodePodSingleDevice(devList)
 		(*annoInput)[device.SupportDevices[commonWord]] = device.EncodePodSingleDevice(devList)
 		(*annoInput)["predicate-time"] = strconv.FormatInt(time.Now().Unix(), 10)
+
+		// Check if hami-core is declared
+		vnpuMode := pod.Annotations[VNPUModeAnnotation]
+		klog.V(4).Infof("Patching pod %s with vnpu mode: %s", pod.Name, vnpuMode)
+
 		allocateStr := fmt.Sprintf("huawei.com/%s", dev.CommonWord())
 		var rtInfo []RuntimeInfo
 		for _, dp := range devList {
 			for _, val := range dp {
-				_, temp := dev.trimMemory(int64(val.Usedmem))
-				rtInfo = append(rtInfo, RuntimeInfo{
-					UUID: val.UUID,
-					Temp: temp,
-				})
+				info := RuntimeInfo{UUID: val.UUID}
+
+				// If is hami core, populate Memory and Core directly without using Temp
+				if vnpuMode == VNPUModeHamiCore {
+					info.Memory = int64(val.Usedmem)
+					info.Core = val.Usedcores
+				} else {
+					_, temp := dev.trimMemory(int64(val.Usedmem))
+					info.Temp = temp
+				}
+
+				rtInfo = append(rtInfo, info)
 			}
 		}
 		s, err := json.Marshal(rtInfo)
@@ -241,12 +301,14 @@ func (dev *Devices) checkType(annos map[string]string, d device.DeviceUsage, n d
 }
 
 func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
 func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
 	ascendResourceCount := corev1.ResourceName(dev.config.ResourceName)
 	ascendResourceMem := corev1.ResourceName(dev.config.ResourceMemoryName)
+	ascendResourceCore := corev1.ResourceName(dev.config.ResourceCoreName)
+
 	v, ok := ctr.Resources.Limits[ascendResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[ascendResourceCount]
@@ -268,11 +330,34 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						memnums = memnums * int64(dev.config.MemoryFactor)
 						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
-					m, _ := dev.trimMemory(memnums)
-					memnum = int(m)
+					// If "core" is requested, it explicitly indicates the use of soft-partitioning.
+					isCoreRequested := false
+					if ascendResourceCore != "" {
+						_, isCoreRequested = ctr.Resources.Limits[ascendResourceCore]
+						if !isCoreRequested {
+							_, isCoreRequested = ctr.Resources.Requests[ascendResourceCore]
+						}
+					}
+
+					if isCoreRequested {
+						// Soft-partitioning: Use the raw value directly.
+						memnum = int(memnums)
+					} else {
+						m, _ := dev.trimMemory(memnums)
+						memnum = int(m)
+					}
 				}
 			}
+
+			// Process Core Resources
 			corenum := int32(0)
+			if ascendResourceCore != "" {
+				if cv, ok := ctr.Resources.Limits[ascendResourceCore]; ok {
+					corenum = int32(cv.Value())
+				} else if cv, ok := ctr.Resources.Requests[ascendResourceCore]; ok {
+					corenum = int32(cv.Value())
+				}
+			}
 
 			mempnum := 0
 			if memnum == 0 {
@@ -340,7 +425,7 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
 		ResourceCountName:  dev.config.ResourceName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
-		ResourceCoreName:   "",
+		ResourceCoreName:   dev.config.ResourceCoreName,
 	}
 }
 
@@ -352,13 +437,49 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+
+	vnpuMode := ""
+	if pod != nil && pod.Annotations != nil {
+		vnpuMode = pod.Annotations[VNPUModeAnnotation]
+	}
+
+	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
+
+	// Verify whether the Node supports hami vnpu core.
+	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
+	nodeSupportHamiCore := npu.hamiVnpuCore
+
+	if nodeInfo != nil && nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
+		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok {
+			nodeSupportHamiCore = val == "true"
+		}
+	}
+
+	var totalMemPerCard int32 = 0
+	if len(devices) > 0 {
+		totalMemPerCard = devices[0].Totalmem
+	}
+
+	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
+		if !nodeSupportHamiCore && isHAMiCore {
+			reason[common.ModeNotFit]++
+			klog.V(4).InfoS("Node filtered: Node does not support hami-core mode", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			return false, nil, common.GenReason(reason, len(devices))
+		} else if nodeSupportHamiCore && !isHAMiCore {
+			reason[common.ModeNotFit]++
+			klog.V(4).InfoS("Node filtered: Reserved for hami-core but pod is legacy vNPU", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			return false, nil, common.GenReason(reason, len(devices))
+		}
+	}
+	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
+
 	needTopology := false
 	if strings.HasPrefix(npu.CommonWord(), Ascend910Prefix) && hasNetworkID(devices) {
 		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
 		needTopology = true
 	}
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, v := range slices.Backward(devices) {
+		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)
@@ -405,19 +526,25 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		if dev.Totalcore-dev.Usedcores < k.Coresreq {
+		// Set dev.Totalcore to 100 if vnpuMode is hami-core
+		effectiveTotalCore := dev.Totalcore
+		if isHAMiCore {
+			effectiveTotalCore = 100
+		}
+
+		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
 			reason[common.CardInsufficientCore]++
-			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
+			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
 		// Coresreq=100 indicates it want this card exclusively
-		if dev.Totalcore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+		if effectiveTotalCore == 100 && k.Coresreq == 100 && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU
-		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
+		if effectiveTotalCore != 0 && dev.Usedcores == effectiveTotalCore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue

@@ -38,7 +38,8 @@ jobs:
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.8.0
+          version: v2.12.2
+          install-mode: goinstall
       - name: import alias
         run: hack/verify-import-aliases.sh
 
@@ -158,15 +159,15 @@ jobs:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
-        uses: docker/build-push-action@v7.0.0
+        uses: docker/build-push-action@v7.2.0
         with:
           context: .
           file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.25.5-bookworm
-            NVIDIA_IMAGE=nvidia/cuda:12.2.0-devel-ubuntu20.04
+            GOLANG_IMAGE=golang:1.26.2-bookworm
+            NVIDIA_IMAGE=nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
           push: false
@@ -212,6 +213,11 @@ jobs:
         uses: azure/setup-helm@v5
         with:
           version: ${{ env.HELM_VERSION }}
+
+      - name: Add HAMi DRA Helm repository
+        run: |
+          helm repo add hami-dra https://project-hami.github.io/HAMi-DRA/
+          helm repo update hami-dra
 
       - name: Build helm dependencies
         run: |

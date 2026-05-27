@@ -28,7 +28,7 @@ docker:
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
-	. -f=docker/Dockerfile -t ${IMG_TAG}
+	. -f=docker/Dockerfile -t ${IMG_NAME}:${IMG_TAG}
 
 dockerwithlib:
 	docker build \
@@ -39,7 +39,7 @@ dockerwithlib:
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
-	. -f=docker/Dockerfile.withlib -t ${IMG_TAG}
+	. -f=docker/Dockerfile.withlib -t ${IMG_NAME}:${IMG_TAG}
 
 tidy:
 	$(GO) mod tidy
@@ -100,6 +100,10 @@ e2e-env-setup:
 .PHONY: helm-deploy
 helm-deploy:
 	./hack/deploy-helm.sh "${E2E_TYPE}" "${KUBE_CONF}" "${HAMI_VERSION}"
+
+.PHONY: local-deploy
+local-deploy: docker
+	IMG_NAME="${IMG_NAME}" IMG_TAG="${IMG_TAG}" ./hack/deploy-helm.sh "local" "${KUBE_CONF}"
 
 .PHONY: e2e-test
 e2e-test:
