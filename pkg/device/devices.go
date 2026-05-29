@@ -25,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ccoveille/go-safecast"
+	"github.com/ccoveille/go-safecast/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
