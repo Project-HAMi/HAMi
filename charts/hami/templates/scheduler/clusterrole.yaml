@@ -22,6 +22,9 @@ rules:
   - apiGroups: [""]
     resources: ["resourcequotas"]
     verbs: ["get", "list", "watch"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["deviceclasses", "resourceclaims", "resourceclaimtemplates", "resourceslices"]
+    verbs: ["get", "list", "watch"]
 ---
 {{- if .Values.mockDevicePlugin.enabled }}
 apiVersion: rbac.authorization.k8s.io/v1
