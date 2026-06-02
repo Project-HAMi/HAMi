@@ -33,6 +33,9 @@ jobs:
       - name: checkout code
         uses: actions/checkout@v6
 
+      - name: Acquire shared e2e runner lock
+        run: bash hack/e2e-runner-lock.sh acquire
+
       - name: install Go
         uses: actions/setup-go@v6
         with:
@@ -86,3 +89,7 @@ jobs:
             hami.io/node-nvidia-register- hami.io/nvidia-license- \
             --kubeconfig "${KUBE_CONF:-${HOME}/.kube/config}" 2>/dev/null || true
           echo "Cleanup done."
+
+      - name: Release shared e2e runner lock
+        if: always()
+        run: bash hack/e2e-runner-lock.sh release

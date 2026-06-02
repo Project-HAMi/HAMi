@@ -29,7 +29,7 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 
-	safecast "github.com/ccoveille/go-safecast"
+	safecast "github.com/ccoveille/go-safecast/v2"
 )
 
 // P2PLinkType defines the link information between two devices.
