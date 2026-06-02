@@ -652,6 +652,11 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 	}{
 		{"nil pod", "binpack", nil, "binpack"},
 		{"no annotation", "binpack", &corev1.Pod{}, "binpack"},
+		{"other annotations", "binpack", &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{"other-annotation": "value"},
+			},
+		}, "binpack"},
 		{"with annotation", "binpack", &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: "spread"},
@@ -660,7 +665,7 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			assert.Equal(t, tt.want, GetGPUSchedulerPolicyByPod(tt.defaultPolicy, tt.pod))
+			assert.Equal(t, GetGPUSchedulerPolicyByPod(tt.defaultPolicy, tt.pod), tt.want)
 		})
 	}
 }
