@@ -22,8 +22,8 @@ all: build
 
 docker:
 	docker build \
+	--platform ${TARGET_ARCH} \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
-	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
@@ -33,8 +33,8 @@ docker:
 dockerwithlib:
 	docker build \
 	--no-cache \
+	--platform ${TARGET_ARCH} \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
-	--build-arg TARGET_ARCH=${TARGET_ARCH} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
@@ -108,4 +108,3 @@ local-deploy: docker
 .PHONY: e2e-test
 e2e-test:
 	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
-
