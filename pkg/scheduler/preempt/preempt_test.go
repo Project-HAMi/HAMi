@@ -365,6 +365,17 @@ func TestSortVictimsByPreference(t *testing.T) {
 		sortVictimsByPreference(pods)
 		assert.Equal(t, "new", pods[0].Name)
 	})
+	t.Run("identical timestamp tiebreak", func(t *testing.T) {
+		commonTime := metav1.NewTime(now)
+		p1 := mkPod("b-pod", 10, time.Minute)
+		p1.CreationTimestamp = commonTime
+		p2 := mkPod("a-pod", 10, time.Minute)
+		p2.CreationTimestamp = commonTime
+
+		pods := []*corev1.Pod{p1, p2}
+		sortVictimsByPreference(pods)
+		assert.Len(t, pods, 2)
+	})
 }
 
 func TestExtractDeviceTypeFromResourceName(t *testing.T) {
@@ -373,8 +384,11 @@ func TestExtractDeviceTypeFromResourceName(t *testing.T) {
 	}{
 		{"nvidia gpu", "nvidia.com/gpu", "nvidia"},
 		{"nvidia uppercase", "NVIDIA.com/gpu", "nvidia"},
+		{"nvidia mixed internal", "NviDia.CoM/vGpu", "nvidia"},
 		{"amd gpu", "amd.com/gpu", "amd"},
+		{"amd mixed", "Amd.Com/Gpu", "amd"},
 		{"huawei ascend", "huawei.com/Ascend910", "huawei"},
+		{"huawei mixed case", "Huawei.Com/ascend910", "huawei"},
 		{"cambricon", "cambricon.com/mlu", "cambricon"},
 		{"unknown", "unknown.com/device", ""},
 	}
@@ -433,16 +447,11 @@ func TestViolatePDB(t *testing.T) {
 
 	// Case 1: PDB has 0 disruptions allowed — pod must violate it.
 	pdbRestricted := newPDB("critical-pdb", "default", pdbSelector, 1)
-	// newPDB already sets DisruptionsAllowed = 0; the informer cache is populated
-	// with this value when the plugin is created.
 	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{pod}, nil, pdbRestricted)
 	defer cleanup()
 	assert.True(t, plugin.violatesPDB(pod))
 
 	// Case 2: PDB allows 1 disruption — pod must NOT violate it.
-	// A fresh plugin instance is required because the informer cache is an immutable
-	// snapshot taken at WaitForCacheSync time; mutating the Go struct in-place after
-	// that point has no effect on the cached copy.
 	pdbPermissive := newPDB("critical-pdb", "default", pdbSelector, 1)
 	pdbPermissive.Status.DisruptionsAllowed = 1
 	plugin2, cleanup2 := newPreemptPluginWithSync(t, []*corev1.Pod{pod}, nil, pdbPermissive)
@@ -650,9 +659,6 @@ func TestPreemptPDBViolation(t *testing.T) {
 	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{protectedPod, evictablePod, preemptor}, []*corev1.Node{node}, pdb)
 	defer cleanup()
 
-	// Propose evictablePod as victim, but it's not enough. The algorithm will search
-	// for additional victims. It should find protectedPod but skip it due to PDB violation,
-	// and accept evictablePod alone.
 	args := extenderv1.ExtenderPreemptionArgs{
 		Pod: preemptor,
 		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
@@ -779,4 +785,106 @@ func TestPassthroughMetaVictims(t *testing.T) {
 	res := plugin.Preempt(context.Background(), args)
 	require.Contains(t, res.NodeNameToMetaVictims, "node1")
 	assert.Len(t, res.NodeNameToMetaVictims["node1"].Pods, 1)
+}
+
+// ============================================================================
+// Enhanced Coverage Expansion Tests
+// ============================================================================
+
+func TestPreemptHardwareDriverError(t *testing.T) {
+	mockDev := newDefaultMockDevice()
+	mockDev.failGetNodeDevices = true
+	cleanupMock := registerMock(mockDev)
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowPod := newVGPUPod("low", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowPod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowPod.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name, "Node must be excluded when device driver retrieval errors out")
+}
+
+func TestPreemptDeviceFitFails(t *testing.T) {
+	mockDev := newDefaultMockDevice()
+	mockDev.fitReturnsTrue = false
+	cleanupMock := registerMock(mockDev)
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowPod := newVGPUPod("low", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowPod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowPod.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name, "Node must be dropped if preemption scenario still does not satisfy device placement constraints")
+}
+
+func TestPreemptNodeNotFoundInCache(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{preemptor}, nil) // Cache has no nodes registered
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			"ghost-node": {Pods: []*extenderv1.MetaPod{{UID: "any-uid"}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, "ghost-node", "Missing nodes from informer cache must be skipped gracefully")
+}
+
+func TestPreemptVictimNotFoundInCache(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{preemptor}, []*corev1.Node{node}) // Cache lacks proposed victim pods
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: "ghost-pod-uid"}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Empty(t, res.NodeNameToMetaVictims[node.Name].Pods, "ghost pod should be ignored")
+}
+
+func TestResolveVictimsMapEmptyAndMinimal(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	plugin, cleanup := newPreemptPluginWithSync(t, nil, nil)
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{}
+	got, err := plugin.resolveVictimsMap(args)
+	assert.NoError(t, err)
+	assert.Empty(t, got, "Empty inputs must resolve to an empty map cleanly")
 }

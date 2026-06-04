@@ -20,7 +20,7 @@ import (
 	"maps"
 	"sort"
 	"strings"
-	"sync"
+	"sync/atomic"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -40,7 +40,7 @@ import (
 const Name = "PreemptPredicate"
 
 // criticalPriorityThreshold is the numeric value of the system-cluster-critical
-// PriorityClass.  Any pod whose Spec.Priority is at or above this value is
+// PriorityClass. Any pod whose Spec.Priority is at or above this value is
 // treated as a critical system pod and is protected from preemption.
 const criticalPriorityThreshold = int32(2000000000)
 
@@ -80,13 +80,11 @@ var nativeWholeGPUResources = map[string]bool{
 
 // VgpuPreempt refines victim selection proposed by kube-scheduler.
 type VgpuPreempt struct {
-	nodeLister      corelisters.NodeLister
-	podLister       corelisters.PodLister
-	pdbLister       policylisters.PodDisruptionBudgetLister
-	recorder        record.EventRecorder
-	hasSyncFunc     func(ctx context.Context) bool
-	devicesSnapshot map[string]device.Devices
-	mutex           sync.RWMutex
+	nodeLister  corelisters.NodeLister
+	podLister   corelisters.PodLister
+	pdbLister   policylisters.PodDisruptionBudgetLister
+	recorder    record.EventRecorder
+	hasSyncFunc func(ctx context.Context) bool
 }
 
 // New creates a new VgpuPreempt plugin.
@@ -117,7 +115,6 @@ func New(
 		pdbLister:   pdbLister,
 		recorder:    recorder,
 		hasSyncFunc: hasSyncFunc,
-		mutex:       sync.RWMutex{},
 	}, nil
 }
 
@@ -136,38 +133,33 @@ func (p *VgpuPreempt) getDevicesSnapshot() map[string]device.Devices {
 }
 
 var (
-	preemptionAttempts   int64
-	preemptionSucceeded  int64
-	preemptionDropped    int64
-	victimsFittedWOEvict int64
-	metricsMutex         sync.RWMutex
+	preemptionAttempts   atomic.Int64
+	preemptionSucceeded  atomic.Int64
+	preemptionDropped    atomic.Int64
+	victimsFittedWOEvict atomic.Int64
 )
 
 // IncPreemptionCounter increments the appropriate preemption counter in a thread-safe manner.
 func IncPreemptionCounter(counterType string) {
-	metricsMutex.Lock()
-	defer metricsMutex.Unlock()
 	switch counterType {
 	case "attempts":
-		preemptionAttempts++
+		preemptionAttempts.Add(1)
 	case "succeeded":
-		preemptionSucceeded++
+		preemptionSucceeded.Add(1)
 	case "dropped":
-		preemptionDropped++
+		preemptionDropped.Add(1)
 	case "fitted_no_evict":
-		victimsFittedWOEvict++
+		victimsFittedWOEvict.Add(1)
 	}
 }
 
 // GetPreemptionMetrics returns current preemption metrics for monitoring.
 func GetPreemptionMetrics() map[string]int64 {
-	metricsMutex.RLock()
-	defer metricsMutex.RUnlock()
 	return map[string]int64{
-		"preemption_attempts":     preemptionAttempts,
-		"preemption_succeeded":    preemptionSucceeded,
-		"preemption_dropped":      preemptionDropped,
-		"victims_fitted_no_evict": victimsFittedWOEvict,
+		"preemption_attempts":     preemptionAttempts.Load(),
+		"preemption_succeeded":    preemptionSucceeded.Load(),
+		"preemption_dropped":      preemptionDropped.Load(),
+		"victims_fitted_no_evict": victimsFittedWOEvict.Load(),
 	}
 }
 
@@ -447,35 +439,39 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 		state[devType] = usages
 	}
 
-	// Track existing allocations from active co-located pods.
+	// Group co-located pods to process them in a deterministic, optimal order.
+	var annotatedPods []*corev1.Pod
+	var nativePods []*corev1.Pod
+	var vgpuPods []*corev1.Pod
+
+	hasNativeGPU := func(pod *corev1.Pod) bool {
+		for _, c := range append(pod.Spec.Containers, pod.Spec.InitContainers...) {
+			for rName := range c.Resources.Requests {
+				if nativeWholeGPUResources[string(rName)] {
+					return true
+				}
+			}
+		}
+		return false
+	}
+
 	for _, vPod := range nodeVGPUPods {
 		if _, skip := excluded[vPod.UID]; skip {
 			continue
 		}
-
 		podDevs, err := device.DecodePodDevices(device.SupportDevices, vPod.Annotations)
-		if err != nil || len(podDevs) == 0 {
-			// First try native GPU accounting.
-			errNative := p.accountNativeWholeGPUs(state, vPod, devMap)
-			if errNative == nil {
-				continue
-			}
-			// Only continue to vGPU fallback if the pod simply didn't request native resources.
-			if !errors.Is(errNative, errNoNativeGPURequested) {
-				klog.V(3).ErrorS(errNative, "Failed to account native pod resource usage", "pod", klog.KObj(vPod))
-				return false
-			}
-
-			// Fallback: account for vGPU resource requests from pod spec.
-			if err := p.accountVGPURequests(state, vPod, devMap); err != nil {
-				klog.V(3).ErrorS(err, "Failed to account pod resource usage",
-					"pod", klog.KObj(vPod))
-				return false
-			}
-			continue
+		if err == nil && len(podDevs) > 0 {
+			annotatedPods = append(annotatedPods, vPod)
+		} else if hasNativeGPU(vPod) {
+			nativePods = append(nativePods, vPod)
+		} else {
+			vgpuPods = append(vgpuPods, vPod)
 		}
+	}
 
-		// Apply HAMi-annotated usage.
+	// 1. Process annotated pods first (fixed UUIDs)
+	for _, vPod := range annotatedPods {
+		podDevs, _ := device.DecodePodDevices(device.SupportDevices, vPod.Annotations)
 		for devType, pds := range podDevs {
 			usages := state[devType]
 			if usages == nil {
@@ -498,6 +494,22 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 					du.Usedcores += cd.Usedcores
 				}
 			}
+		}
+	}
+
+	// 2. Process native GPU pods (require whole unused devices)
+	for _, vPod := range nativePods {
+		if err := p.accountNativeWholeGPUs(state, vPod, devMap); err != nil {
+			klog.V(3).ErrorS(err, "Failed to account native pod resource usage", "pod", klog.KObj(vPod))
+			return false
+		}
+	}
+
+	// 3. Process unannotated vGPU pods (can share remaining capacity)
+	for _, vPod := range vgpuPods {
+		if err := p.accountVGPURequests(state, vPod, devMap); err != nil {
+			klog.V(3).ErrorS(err, "Failed to account pod resource usage", "pod", klog.KObj(vPod))
+			return false
 		}
 	}
 
@@ -526,19 +538,11 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 			curCopy := deepCopyUsageSlice(state[devType])
 
 			var alloc device.PodDevices
-			fitOK, allocated, _ := devMap[devType].Fit(curCopy, cReq, preemptor, ni, &alloc)
+			fitOK, _, _ := devMap[devType].Fit(curCopy, cReq, preemptor, ni, &alloc)
 			if !fitOK {
 				return false
 			}
-			// Apply the allocation to the original state for subsequent containers.
-			var assigned []device.ContainerDevice
-			for _, devs := range allocated {
-				assigned = devs
-				break
-			}
-			if err := applyAllocation(state[devType], assigned); err != nil {
-				return false
-			}
+			state[devType] = curCopy
 		}
 	}
 	return true
@@ -643,26 +647,6 @@ func deepCopyUsageSlice(src []*device.DeviceUsage) []*device.DeviceUsage {
 		dst[i] = &copy
 	}
 	return dst
-}
-
-// applyAllocation increases Used/Usedmem/Usedcores on the matching device.
-func applyAllocation(usages []*device.DeviceUsage, assigned []device.ContainerDevice) error {
-	for _, cd := range assigned {
-		var du *device.DeviceUsage
-		for _, u := range usages {
-			if u.ID == cd.UUID {
-				du = u
-				break
-			}
-		}
-		if du == nil {
-			return fmt.Errorf("device %q not found in usage state", cd.UUID)
-		}
-		du.Used++
-		du.Usedmem += cd.Usedmem
-		du.Usedcores += cd.Usedcores
-	}
-	return nil
 }
 
 // findAdditionalVictims searches for lower-priority pods that are not PDB-protected.
@@ -818,14 +802,6 @@ func isProtectedFromPreemption(pod *corev1.Pod) bool {
 }
 
 // isCriticalPod checks if a pod has critical priority or is in kube-system.
-//
-// A pod is considered critical when ANY of the following is true:
-//  1. Its PriorityClassName is "system-node-critical" or "system-cluster-critical".
-//  2. Its numeric Spec.Priority is at or above criticalPriorityThreshold (2000000000),
-//     which is the value assigned to the "system-cluster-critical" class.  Checking
-//     the numeric value protects pods that were scheduled with that priority even when
-//     the PriorityClass object is absent from the cluster (e.g. test environments).
-//  3. It lives in the "kube-system" or "kube-public" namespace.
 func isCriticalPod(pod *corev1.Pod) bool {
 	if pod.Spec.PriorityClassName == "system-node-critical" ||
 		pod.Spec.PriorityClassName == "system-cluster-critical" {
