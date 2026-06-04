@@ -36,6 +36,7 @@ data:
     {{- end }}
       filterVerb: filter
       bindVerb: bind
+      preemptVerb: preempt
       nodeCacheCapable: true
       weight: 1
       httpTimeout: 30s
@@ -61,6 +62,7 @@ data:
                 {{- end }}
                 "filterVerb": "filter",
                 "bindVerb": "bind",
+                "preemptVerb": "preempt",
                 "weight": 1,
                 "nodeCacheCapable": true,
                 "httpTimeout": 30000000000,

@@ -17,6 +17,7 @@ limitations under the License.
 package routes
 
 import (
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -133,5 +134,41 @@ func TestCheckBodyNil(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Errorf("Expected status 400 for nil body, got %d", w.Code)
+	}
+}
+
+func TestPreemptRouteMethodNotAllowed(t *testing.T) {
+	req := httptest.NewRequest("GET", "/preempt", nil)
+	w := httptest.NewRecorder()
+
+	// We can pass nil for *preempt.VgpuPreempt since the method check happens
+	// before the handler attempts to use the preemptor.
+	handler := PreemptRoute(nil)
+	handler(w, req, nil)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("Expected status 405 Method Not Allowed for GET request, got %d", w.Code)
+	}
+}
+
+func TestMaxRequestSizePreempt(t *testing.T) {
+	hugePayload := strings.Repeat(" ", maxRequestSize+100)
+	req := httptest.NewRequest("POST", "/preempt", strings.NewReader(hugePayload))
+	w := httptest.NewRecorder()
+
+	// Passing nil for *preempt.VgpuPreempt is safe here. The LimitReader will trigger
+	// an EOF error during json.Decode, which skips the p.Preempt() call entirely.
+	handler := PreemptRoute(nil)
+	handler(w, req, nil)
+
+	respBody := w.Body.String()
+
+	// Since ExtenderPreemptionResult doesn't have an Error string field like the others,
+	// the handler defaults to returning an empty NodeNameToMetaVictims map upon decode failure.
+	if w.Code != http.StatusOK {
+		t.Errorf("Expected status 200 on handled parse error, got %d", w.Code)
+	}
+	if !strings.Contains(respBody, "NodeNameToMetaVictims") {
+		t.Errorf("LimitReader failed in PreemptRoute or returned unexpected body. Response: %s", respBody)
 	}
 }

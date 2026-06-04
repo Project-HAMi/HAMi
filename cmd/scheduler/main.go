@@ -33,6 +33,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/preempt"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -45,6 +46,7 @@ import (
 
 var (
 	sher            *scheduler.Scheduler
+	vgpu            *preempt.VgpuPreempt
 	tlsKeyFile      string
 	tlsCertFile     string
 	enableProfiling bool
@@ -139,6 +141,10 @@ func start() error {
 		return err
 	}
 	defer sher.Stop()
+	vgpu, err = preempt.New(sher.GetInformerFactory(), sher.GetEventRecorder())
+	if err != nil {
+		return fmt.Errorf("failed to initialize vgpu preemptor: %w", err)
+	}
 
 	// start monitor metrics
 	go initMetrics(config.MetricsBindAddress, legacyMetrics)
@@ -150,8 +156,9 @@ func start() error {
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
 	router.GET("/readyz", routes.ReadyzRoute(sher))
-	klog.Info("listen on ", config.HTTPBind)
+	router.POST("/preempt", routes.PreemptRoute(vgpu))
 
+	klog.Info("listen on ", config.HTTPBind)
 	if enableProfiling {
 		injectProfilingRoute(router)
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)

@@ -18,16 +18,19 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/preempt"
 )
 
 const maxRequestSize = 1024 * 1024 // 1MB limit
@@ -166,5 +169,52 @@ func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 			klog.V(3).Infoln("Scheduler extender has not become leader yet")
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+func PreemptRoute(p *preempt.VgpuPreempt) httprouter.Handle {
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		klog.V(5).Infoln("Entering Preempt Route handler")
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+
+		checkBody(w, r)
+
+		var buf bytes.Buffer
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		body := io.TeeReader(limitedReader, &buf)
+
+		var args extenderv1.ExtenderPreemptionArgs
+		var result *extenderv1.ExtenderPreemptionResult
+
+		if err := json.NewDecoder(body).Decode(&args); err != nil {
+			klog.ErrorS(err, "Failed to decode extender preemption arguments")
+
+			result = &extenderv1.ExtenderPreemptionResult{
+				NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{},
+			}
+		} else {
+			ctx, cancel := context.WithTimeout(r.Context(), 30*time.Second)
+			defer cancel()
+
+			result = p.Preempt(ctx, args)
+
+			if result == nil {
+				result = &extenderv1.ExtenderPreemptionResult{
+					NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{},
+				}
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+
+		if err := json.NewEncoder(w).Encode(result); err != nil {
+			klog.ErrorS(err, "Failed to encode preemption result")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 	}
 }

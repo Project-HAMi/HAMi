@@ -73,9 +73,10 @@ type Scheduler struct {
 	//Node status returned by filter
 	cachedstatus map[string]*NodeUsage
 	//Node Overview
-	overviewstatus map[string]*NodeUsage
-	eventRecorder  record.EventRecorder
-	started        uint32 // 0 = false, 1 = true
+	overviewstatus  map[string]*NodeUsage
+	eventRecorder   record.EventRecorder
+	informerFactory informers.SharedInformerFactory
+	started         uint32 // 0 = false, 1 = true
 
 	lock   sync.RWMutex
 	synced bool
@@ -131,6 +132,14 @@ func (s *Scheduler) doNodeNotify() {
 	case s.nodeNotify <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Scheduler) GetEventRecorder() record.EventRecorder {
+	return s.eventRecorder
+}
+
+func (s *Scheduler) GetInformerFactory() informers.SharedInformerFactory {
+	return s.informerFactory
 }
 
 func (s *Scheduler) onAddPod(obj any) {
