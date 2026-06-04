@@ -124,6 +124,7 @@ func TestDeviceUsageList_Less(t *testing.T) {
 	tests := []struct {
 		name         string
 		policy       string
+		numaIgnore   bool
 		deviceLists  []*DeviceListsScore
 		expectedLess bool
 	}{
@@ -181,12 +182,33 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			},
 			expectedLess: true,
 		},
+		{
+			name:       "Binpack NumaIgnore score primary",
+			policy:     "binpack",
+			numaIgnore: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
+			},
+			expectedLess: true,
+		},
+		{
+			name:       "Spread NumaIgnore score primary",
+			policy:     "spread",
+			numaIgnore: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+			},
+			expectedLess: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			l := DeviceUsageList{
 				Policy:      tt.policy,
+				NumaIgnore:  tt.numaIgnore,
 				DeviceLists: tt.deviceLists,
 			}
 			i, j := 0, 1

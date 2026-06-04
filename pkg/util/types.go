@@ -78,6 +78,8 @@ const (
 	NodeSchedulerPolicyAnnotationKey = "hami.io/node-scheduler-policy"
 	// GPUSchedulerPolicyAnnotationKey is user set Pod annotation to change this default GPU policy.
 	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
+	// GPUTopologyAwareAnnotationKey disables NUMA-first sorting when set to "false".
+	GPUTopologyAwareAnnotationKey = "hami.io/topology-aware-scoring"
 )
 
 func (s SchedulerPolicyName) String() string {

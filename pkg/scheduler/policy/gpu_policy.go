@@ -32,6 +32,7 @@ type DeviceListsScore struct {
 type DeviceUsageList struct {
 	DeviceLists []*DeviceListsScore
 	Policy      string
+	NumaIgnore  bool
 }
 
 func (l DeviceUsageList) Len() int {
@@ -43,17 +44,17 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
-		if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
-			return l.DeviceLists[i].Score < l.DeviceLists[j].Score
+	di, dj := l.DeviceLists[i], l.DeviceLists[j]
+	if !l.NumaIgnore && di.Device.Numa != dj.Device.Numa {
+		if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
+			return di.Device.Numa > dj.Device.Numa
 		}
-		return l.DeviceLists[i].Device.Numa > l.DeviceLists[j].Device.Numa
+		return di.Device.Numa < dj.Device.Numa
 	}
-	// default policy is spread
-	if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
-		return l.DeviceLists[i].Score > l.DeviceLists[j].Score
+	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
+		return di.Score < dj.Score
 	}
-	return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
+	return di.Score > dj.Score
 }
 
 func (l DeviceUsageList) DeepCopy() DeviceUsageList {
@@ -67,6 +68,7 @@ func (l DeviceUsageList) DeepCopy() DeviceUsageList {
 	return DeviceUsageList{
 		DeviceLists: deviceLists,
 		Policy:      l.Policy,
+		NumaIgnore:  l.NumaIgnore,
 	}
 }
 
