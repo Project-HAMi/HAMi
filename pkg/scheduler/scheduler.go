@@ -670,6 +670,13 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
+		// Clean up podManager entry added by Filter. The pod may have been
+		// deleted externally between Filter and Bind. Without this cleanup,
+		// the leaked entry causes getNodesUsage() to permanently overcount
+		// allocated resources, blocking future pod scheduling on the node.
+		s.podManager.DelPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: args.PodUID},
+		})
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 
@@ -679,6 +686,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
+		s.podManager.DelPod(current)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
@@ -717,6 +725,7 @@ ReleaseNodeLocks:
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
 	}
+	s.podManager.DelPod(current)
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
