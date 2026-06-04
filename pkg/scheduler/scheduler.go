@@ -279,6 +279,7 @@ func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
+	s.informerFactory = informerFactory
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()
