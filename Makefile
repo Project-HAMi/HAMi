@@ -22,7 +22,7 @@ all: build
 
 docker:
 	docker build \
-	--platform ${TARGET_OS}/${TARGET_ARCH} \
+	--platform ${TARGET_PLATFORMS} \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
@@ -33,7 +33,7 @@ docker:
 dockerwithlib:
 	docker build \
 	--no-cache \
-	--platform ${TARGET_OS}/${TARGET_ARCH} \
+	--platform ${TARGET_PLATFORMS} \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
 	--build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} \
 	--build-arg DEST_DIR=${DEST_DIR} \
