@@ -23,6 +23,7 @@ import (
 	"sync/atomic"
 
 	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
@@ -87,6 +88,31 @@ type VgpuPreempt struct {
 	hasSyncFunc func(ctx context.Context) bool
 }
 
+// dummyPDBLister implements PodDisruptionBudgetLister without requiring the policy API.
+type dummyPDBLister struct{}
+
+func (d *dummyPDBLister) List(selector labels.Selector) ([]*policyv1.PodDisruptionBudget, error) {
+	return nil, nil
+}
+
+func (d *dummyPDBLister) GetPodPodDisruptionBudgets(pod *corev1.Pod) ([]*policyv1.PodDisruptionBudget, error) {
+	return nil, nil
+}
+
+func (d *dummyPDBLister) PodDisruptionBudgets(namespace string) policylisters.PodDisruptionBudgetNamespaceLister {
+	return &dummyPDBNamespaceLister{}
+}
+
+type dummyPDBNamespaceLister struct{}
+
+func (d *dummyPDBNamespaceLister) List(selector labels.Selector) ([]*policyv1.PodDisruptionBudget, error) {
+	return nil, nil
+}
+
+func (d *dummyPDBNamespaceLister) Get(name string) (*policyv1.PodDisruptionBudget, error) {
+	return nil, nil
+}
+
 // New creates a new VgpuPreempt plugin.
 func New(
 	factory informers.SharedInformerFactory,
@@ -94,19 +120,32 @@ func New(
 ) (*VgpuPreempt, error) {
 	podInformer := factory.Core().V1().Pods().Informer()
 	nodeInformer := factory.Core().V1().Nodes().Informer()
-	pdbInformer := factory.Policy().V1().PodDisruptionBudgets().Informer()
 
 	nodeLister := factory.Core().V1().Nodes().Lister()
 	podLister := factory.Core().V1().Pods().Lister()
-	pdbLister := factory.Policy().V1().PodDisruptionBudgets().Lister()
+
+	var pdbInformer cache.SharedIndexInformer
+	var pdbLister policylisters.PodDisruptionBudgetLister
+
+	// Access policy/v1 only if available.  On older clusters the factory may return nil.
+	if policyV1 := factory.Policy().V1(); policyV1 != nil {
+		pdbInformer = policyV1.PodDisruptionBudgets().Informer()
+		pdbLister = policyV1.PodDisruptionBudgets().Lister()
+	} else {
+		klog.Warning("policy/v1 API not available; PDB-aware preemption is disabled")
+		// Use a dummy lister so violatesPDB() always returns false.
+		pdbLister = &dummyPDBLister{}
+	}
 
 	hasSyncFunc := func(ctx context.Context) bool {
-		return cache.WaitForCacheSync(
-			ctx.Done(),
+		syncs := []cache.InformerSynced{
 			podInformer.HasSynced,
 			nodeInformer.HasSynced,
-			pdbInformer.HasSynced,
-		)
+		}
+		if pdbInformer != nil {
+			syncs = append(syncs, pdbInformer.HasSynced)
+		}
+		return cache.WaitForCacheSync(ctx.Done(), syncs...)
 	}
 
 	return &VgpuPreempt{
@@ -688,6 +727,10 @@ func (p *VgpuPreempt) findAdditionalVictims(
 
 // violatesPDB checks if evicting the pod would violate any applicable PodDisruptionBudget.
 func (p *VgpuPreempt) violatesPDB(pod *corev1.Pod) bool {
+	if p.pdbLister == nil {
+		return false
+	}
+
 	if pod == nil || pod.Namespace == "" {
 		return false
 	}

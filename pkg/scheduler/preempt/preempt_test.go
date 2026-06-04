@@ -888,3 +888,9 @@ func TestResolveVictimsMapEmptyAndMinimal(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Empty(t, got, "Empty inputs must resolve to an empty map cleanly")
 }
+
+func TestViolatePDBWithDummyLister(t *testing.T) {
+	plugin := &VgpuPreempt{pdbLister: &dummyPDBLister{}}
+	pod := newVGPUPod("p", vgpuRequest{1, 1000, 10})
+	assert.False(t, plugin.violatesPDB(pod), "dummy lister should never report a PDB violation")
+}
