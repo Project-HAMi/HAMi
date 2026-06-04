@@ -24,6 +24,8 @@ rules:
     verbs: ["get", "list", "watch"]
   - apiGroups: ["policy"]
     resources: ["poddisruptionbudgets"]
+  - apiGroups: ["resource.k8s.io"]
+    resources: ["deviceclasses", "resourceclaims", "resourceclaimtemplates", "resourceslices"]
     verbs: ["get", "list", "watch"]
 ---
 {{- if .Values.mockDevicePlugin.enabled }}
