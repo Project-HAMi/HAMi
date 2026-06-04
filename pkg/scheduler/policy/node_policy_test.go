@@ -412,3 +412,46 @@ func TestComputeDefaultScore(t *testing.T) {
 		})
 	}
 }
+
+func TestSnapshotDevice(t *testing.T) {
+	ns := &NodeScore{}
+	tests := []struct {
+		name    string
+		devices DeviceUsageList
+		want    int
+	}{
+		{
+			name:    "empty list",
+			devices: DeviceUsageList{DeviceLists: []*DeviceListsScore{}},
+			want:    0,
+		},
+		{
+			name: "single device",
+			devices: DeviceUsageList{DeviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{ID: "gpu0", Usedmem: 100}},
+			}},
+			want: 1,
+		},
+		{
+			name: "multiple devices",
+			devices: DeviceUsageList{DeviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{ID: "gpu0", Usedmem: 100}},
+				{Device: &device.DeviceUsage{ID: "gpu1", Usedmem: 200}},
+				{Device: &device.DeviceUsage{ID: "gpu2", Usedmem: 300}},
+			}},
+			want: 3,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			snap := ns.SnapshotDevice(tt.devices)
+			assert.Equal(t, tt.want, len(snap))
+			for i, d := range snap {
+				assert.Equal(t, tt.devices.DeviceLists[i].Device.ID, d.ID)
+				originalUsedmem := d.Usedmem
+				tt.devices.DeviceLists[i].Device.Usedmem = 9999
+				assert.Equal(t, originalUsedmem, d.Usedmem)
+			}
+		})
+	}
+}
