@@ -555,3 +555,28 @@ func TestSimulateRetryStorm(t *testing.T) {
 		})
 	}
 }
+
+func TestSetupNodeLockTimeout(t *testing.T) {
+	original := NodeLockTimeout
+	t.Cleanup(func() { NodeLockTimeout = original })
+
+	tests := []struct {
+		name string
+		env  string
+		want time.Duration
+	}{
+		{"empty env uses default", "", original},
+		{"valid duration sets timeout", "10m", 10 * time.Minute},
+		{"invalid duration keeps default", "notaduration", original},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			NodeLockTimeout = original
+			t.Setenv("HAMI_NODELOCK_EXPIRE", tt.env)
+			setupNodeLockTimeout()
+			if NodeLockTimeout != tt.want {
+				t.Errorf("got %v, want %v", NodeLockTimeout, tt.want)
+			}
+		})
+	}
+}
