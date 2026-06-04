@@ -118,6 +118,10 @@ func New(
 	factory informers.SharedInformerFactory,
 	recorder record.EventRecorder,
 ) (*VgpuPreempt, error) {
+	if factory == nil {
+		return nil, fmt.Errorf("informerFactory cannot be nil")
+	}
+
 	podInformer := factory.Core().V1().Pods().Informer()
 	nodeInformer := factory.Core().V1().Nodes().Informer()
 
@@ -189,6 +193,38 @@ func IncPreemptionCounter(counterType string) {
 		preemptionDropped.Add(1)
 	case "fitted_no_evict":
 		victimsFittedWOEvict.Add(1)
+	}
+}
+
+// getNativeWholeGPUResources returns resource names that represent entire physical GPUs.
+// Dynamically built from common patterns HAMi supports.
+func getNativeWholeGPUResources() map[string]bool {
+	return map[string]bool{
+		// NVIDIA
+		"nvidia.com/gpu": true,
+		// AMD
+		"amd.com/gpu": true,
+		// Intel
+		"intel.com/gpu": true,
+		// Huawei Ascend (all variants)
+		"huawei.com/Ascend310":  true,
+		"huawei.com/Ascend310B": true,
+		"huawei.com/Ascend310P": true,
+		"huawei.com/Ascend910":  true,
+		"huawei.com/Ascend910B": true,
+		"huawei.com/Ascend910C": true,
+		// Cambricon MLU
+		"cambricon.com/mlu": true,
+		// Hygon DCU
+		"hygon.com/dcu": true,
+		// Iluvatar
+		"iluvatar.ai/gpu":       true,
+		"metax-tech.com/gpu":    true,
+		"mthreads.com/gpu":      true,
+		"kunlun.com/gpu":        true,
+		"aws.amazon.com/neuron": true,
+		"vastai.com/gpu":        true,
+		"enflame.com/gpu":       true,
 	}
 }
 
@@ -380,7 +416,7 @@ func (p *VgpuPreempt) refineForNode(
 	keptFromInput := len(keep)
 
 	if p.podFitsAfterPreemption(preemptor, *node, nodeVGPUPods, excluded, devMap) {
-		return keep, pdbViolationsUpperBound(victims.NumPDBViolations, keptFromInput, 0), true
+		return keep, pdbViolationsUpperBound(victims.NumPDBViolations, keptFromInput), true
 	}
 
 	// Only search for additional victims when the scheduler originally proposed at least one victim.
@@ -395,8 +431,8 @@ func (p *VgpuPreempt) refineForNode(
 		excluded[cand.UID] = struct{}{}
 		keep = append(keep, cand)
 		if p.podFitsAfterPreemption(preemptor, *node, nodeVGPUPods, excluded, devMap) {
-			added := len(keep) - keptFromInput
-			return keep, pdbViolationsUpperBound(victims.NumPDBViolations, keptFromInput, added), true
+			// added := len(keep) - keptFromInput
+			return keep, pdbViolationsUpperBound(victims.NumPDBViolations, len(keep)), true
 		}
 	}
 	return nil, 0, false
@@ -593,11 +629,12 @@ func (p *VgpuPreempt) accountNativeWholeGPUs(
 	pod *corev1.Pod,
 	devMap map[string]device.Devices,
 ) error {
+	wholeGPUResources := getNativeWholeGPUResources()
 	wholeRequested := map[string]int64{}
 
 	for _, c := range append(pod.Spec.Containers, pod.Spec.InitContainers...) {
 		for rName, rQuant := range c.Resources.Requests {
-			if !nativeWholeGPUResources[string(rName)] {
+			if !wholeGPUResources[string(rName)] {
 				continue
 			}
 			devType := extractDeviceTypeFromResourceName(string(rName))
@@ -648,6 +685,9 @@ func (p *VgpuPreempt) accountVGPURequests(
 		for devType, req := range cReqs {
 			usages := state[devType]
 			if usages == nil {
+				if req.Nums > 0 || req.Memreq > 0 || req.Coresreq > 0 {
+					return fmt.Errorf("no device state available for type %q", devType)
+				}
 				continue
 			}
 			satisfied := false
@@ -663,8 +703,10 @@ func (p *VgpuPreempt) accountVGPURequests(
 				}
 			}
 			if !satisfied {
-				klog.V(4).InfoS("no device could satisfy vGPU request; usage may be understated",
-					"pod", klog.KObj(pod), "devType", devType, "request", fmt.Sprintf("%+v", req))
+				return fmt.Errorf(
+					"no device could satisfy vGPU request: pod=%s/%s, devType=%s, request=%+v",
+					pod.Namespace, pod.Name, devType, req,
+				)
 			}
 		}
 	}
@@ -766,7 +808,6 @@ func (p *VgpuPreempt) violatesPDB(pod *corev1.Pod) bool {
 	return false
 }
 
-// extractDeviceTypeFromResourceName maps a resource name to its device type.
 func extractDeviceTypeFromResourceName(rName string) string {
 	lower := strings.ToLower(rName)
 
@@ -791,31 +832,62 @@ func extractDeviceTypeFromResourceName(rName string) string {
 	if strings.Contains(lower, "iluvatar") {
 		return "iluvatar"
 	}
+	if strings.Contains(lower, "metax") {
+		return "metax-tech"
+	}
+	if strings.Contains(lower, "mthreads") {
+		return "mthreads"
+	}
+	if strings.Contains(lower, "kunlun") {
+		return "kunlun"
+	}
+	if strings.Contains(lower, "neuron") {
+		return "aws"
+	}
+	if strings.Contains(lower, "vastai") {
+		return "vastai"
+	}
+	if strings.Contains(lower, "enflame") {
+		return "enflame"
+	}
 	return ""
 }
 
-// isVGPUResourcePod checks if a pod requests GPU or device resources.
 func isVGPUResourcePod(pod *corev1.Pod) bool {
 	if pod == nil {
 		return false
 	}
+	// Check for annotation-based device allocation
 	if _, ok := pod.Annotations["hami.io/container-devices"]; ok {
 		return true
+	}
+
+	// All GPU vendor prefixes - extended to cover all HAMi-supported vendors
+	vendorPrefixes := []string{
+		"hami.io/",
+		"nvidia.com/",
+		"amd.com/",
+		"intel.com/",
+		"huawei.com/",
+		"cambricon.com/",
+		"hygon.com/",
+		"iluvatar.ai/",
+		"metax-tech.com/",
+		"mthreads.com/",
+		"kunlun.com/",
+		"aws.amazon.com/",
+		"vastai.com/",
+		"enflame.com/",
 	}
 
 	checkContainers := func(containers []corev1.Container) bool {
 		for _, c := range containers {
 			for rName := range c.Resources.Requests {
 				sName := string(rName)
-				if strings.HasPrefix(sName, "hami.io/") ||
-					strings.HasPrefix(sName, "nvidia.com/") ||
-					strings.HasPrefix(sName, "amd.com/") ||
-					strings.HasPrefix(sName, "intel.com/") ||
-					strings.HasPrefix(sName, "huawei.com/") ||
-					strings.HasPrefix(sName, "cambricon.com/") ||
-					strings.HasPrefix(sName, "hygon.com/") ||
-					strings.HasPrefix(sName, "iluvatar.ai/") {
-					return true
+				for _, prefix := range vendorPrefixes {
+					if strings.HasPrefix(sName, prefix) {
+						return true
+					}
 				}
 			}
 		}
@@ -855,7 +927,7 @@ func isCriticalPod(pod *corev1.Pod) bool {
 	if pod.Spec.Priority != nil && *pod.Spec.Priority >= criticalPriorityThreshold {
 		return true
 	}
-	return pod.Namespace == "kube-system" || pod.Namespace == "kube-public"
+	return pod.Namespace == "kube-system"
 }
 
 // getPodPriority returns the pod's priority value.
@@ -915,7 +987,7 @@ func getPodVGPURequest(pod *corev1.Pod) (mem, cores, count int64) {
 }
 
 // pdbViolationsUpperBound computes a conservative upper bound on PDB violations.
-func pdbViolationsUpperBound(originalCount int64, keptLen, addedLen int) int64 {
+func pdbViolationsUpperBound(originalCount int64, keptLen int) int64 {
 	return min(originalCount, int64(keptLen))
 }
 
