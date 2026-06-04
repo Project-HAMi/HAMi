@@ -669,3 +669,20 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 		})
 	}
 }
+
+func TestSchedulerPolicyName_String(t *testing.T) {
+	tests := []struct {
+		policy SchedulerPolicyName
+		want   string
+	}{
+		{NodeSchedulerPolicyBinpack, "binpack"},
+		{NodeSchedulerPolicySpread, "spread"},
+		{GPUSchedulerPolicyTopology, "topology-aware"},
+		{SchedulerPolicyName("custom"), "custom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.policy.String())
+		})
+	}
+}
