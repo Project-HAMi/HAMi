@@ -48,37 +48,6 @@ const criticalPriorityThreshold = int32(2000000000)
 // Sentinel error for distinguishing "pod has no native GPU request" from "insufficient native GPUs".
 var errNoNativeGPURequested = errors.New("no native whole GPU resources requested")
 
-// nativeWholeGPUResources lists resource names that represent an entire
-// physical GPU and therefore consume the whole device.
-// Expanded to cover all major HAMi-supported hardware vendors.
-var nativeWholeGPUResources = map[string]bool{
-	// NVIDIA
-	"nvidia.com/gpu": true,
-
-	// AMD
-	"amd.com/gpu": true,
-
-	// Intel
-	"intel.com/gpu": true,
-
-	// Huawei Ascend (includes all variants)
-	"huawei.com/Ascend310":  true,
-	"huawei.com/Ascend310B": true,
-	"huawei.com/Ascend310P": true,
-	"huawei.com/Ascend910":  true,
-	"huawei.com/Ascend910B": true,
-	"huawei.com/Ascend910C": true,
-
-	// Cambricon MLU
-	"cambricon.com/mlu": true,
-
-	// Hygon DCU
-	"hygon.com/dcu": true,
-
-	// Iluvatar
-	"iluvatar.ai/gpu": true,
-}
-
 // VgpuPreempt refines victim selection proposed by kube-scheduler.
 type VgpuPreempt struct {
 	nodeLister  corelisters.NodeLister
@@ -446,6 +415,8 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 	excluded map[types.UID]struct{},
 	devMap map[string]device.Devices,
 ) bool {
+	nativeGPUResources := getNativeWholeGPUResources()
+
 	ni := &device.NodeInfo{
 		ID:      node.Name,
 		Node:    &node,
@@ -466,8 +437,8 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 	// Also add native whole GPU requests to requestedDevTypes
 	for _, c := range append(preemptor.Spec.Containers, preemptor.Spec.InitContainers...) {
 		for rName := range c.Resources.Requests {
-			if nativeWholeGPUResources[string(rName)] {
-				devType := extractDeviceTypeFromResourceName(string(rName))
+			if nativeGPUResources[string(rName)] {
+				devType := extractDeviceTypeFromResourceName(string(rName), devMap)
 				if devType != "" {
 					requestedDevTypes[devType] = true
 				}
@@ -522,7 +493,7 @@ func (p *VgpuPreempt) podFitsAfterPreemption(
 	hasNativeGPU := func(pod *corev1.Pod) bool {
 		for _, c := range append(pod.Spec.Containers, pod.Spec.InitContainers...) {
 			for rName := range c.Resources.Requests {
-				if nativeWholeGPUResources[string(rName)] {
+				if nativeGPUResources[string(rName)] {
 					return true
 				}
 			}
@@ -637,7 +608,7 @@ func (p *VgpuPreempt) accountNativeWholeGPUs(
 			if !wholeGPUResources[string(rName)] {
 				continue
 			}
-			devType := extractDeviceTypeFromResourceName(string(rName))
+			devType := extractDeviceTypeFromResourceName(string(rName), devMap)
 			if devType == "" {
 				continue
 			}
@@ -808,48 +779,21 @@ func (p *VgpuPreempt) violatesPDB(pod *corev1.Pod) bool {
 	return false
 }
 
-func extractDeviceTypeFromResourceName(rName string) string {
-	lower := strings.ToLower(rName)
+func extractDeviceTypeFromResourceName(rName string, devMap map[string]device.Devices) string {
+	resourceStr := string(rName)
 
-	if strings.Contains(lower, "nvidia") {
-		return "nvidia"
+	for registryKey, dev := range devMap {
+		resourceNames := dev.GetResourceNames()
+
+		// Check if the requested resource matches any of the three field values
+		// that this device declares it supports
+		if resourceStr == resourceNames.ResourceCountName ||
+			resourceStr == resourceNames.ResourceMemoryName ||
+			resourceStr == resourceNames.ResourceCoreName {
+			return registryKey
+		}
 	}
-	if strings.Contains(lower, "amd") {
-		return "amd"
-	}
-	if strings.Contains(lower, "intel") {
-		return "intel"
-	}
-	if strings.Contains(lower, "huawei") || strings.Contains(lower, "ascend") {
-		return "huawei"
-	}
-	if strings.Contains(lower, "cambricon") {
-		return "cambricon"
-	}
-	if strings.Contains(lower, "hygon") || strings.Contains(lower, "dcu") {
-		return "hygon"
-	}
-	if strings.Contains(lower, "iluvatar") {
-		return "iluvatar"
-	}
-	if strings.Contains(lower, "metax") {
-		return "metax-tech"
-	}
-	if strings.Contains(lower, "mthreads") {
-		return "mthreads"
-	}
-	if strings.Contains(lower, "kunlun") {
-		return "kunlun"
-	}
-	if strings.Contains(lower, "neuron") {
-		return "aws"
-	}
-	if strings.Contains(lower, "vastai") {
-		return "vastai"
-	}
-	if strings.Contains(lower, "enflame") {
-		return "enflame"
-	}
+
 	return ""
 }
 
@@ -862,7 +806,6 @@ func isVGPUResourcePod(pod *corev1.Pod) bool {
 		return true
 	}
 
-	// All GPU vendor prefixes - extended to cover all HAMi-supported vendors
 	vendorPrefixes := []string{
 		"hami.io/",
 		"nvidia.com/",
