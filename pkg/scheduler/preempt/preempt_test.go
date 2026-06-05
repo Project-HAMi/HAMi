@@ -312,10 +312,6 @@ func newPreemptPluginWithSync(t *testing.T, pods []*corev1.Pod, nodes []*corev1.
 	return plugin, cleanup
 }
 
-// ============================================================================
-// UNIT TESTS - NO DUPLICATES, ALL PRODUCTION-READY
-// ============================================================================
-
 func TestNewWithNilFactory(t *testing.T) {
 	plugin, err := New(nil, nil)
 	assert.Nil(t, plugin)
@@ -442,7 +438,6 @@ func TestSortVictimsByPreference(t *testing.T) {
 	})
 }
 
-// FIXED: Test extractDeviceTypeFromResourceName with devMap parameter
 func TestExtractDeviceTypeFromResourceName(t *testing.T) {
 	cleanupMock := registerMock(newDefaultMockDevice())
 	defer cleanupMock()
@@ -454,7 +449,6 @@ func TestExtractDeviceTypeFromResourceName(t *testing.T) {
 		resourceName string
 		expected     string
 	}{
-		// Mock device supports these resources
 		{"hami vgpu", "hami.io/vgpu", "nvidia"},
 		{"hami vgpu memory", "hami.io/vgpu-memory", "nvidia"},
 		{"hami vgpu cores", "hami.io/vgpu-cores", "nvidia"},
