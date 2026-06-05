@@ -667,26 +667,37 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 
+	// Clean up podManager and quotaManager entries added by Filter, on Bind failure.
+	// The pod may have been deleted between Filter and Bind; without
+	// this cleanup both internal bookkeepers leak permanently.
+	var podToDelete *corev1.Pod
+	defer func() {
+		if podToDelete == nil {
+			return
+		}
+		if pi, ok := s.podManager.TakeAndDeletePod(podToDelete); ok {
+			if len(pi.Devices) > 0 {
+				s.quotaManager.RmUsage(podToDelete, pi.Devices)
+			}
+		}
+	}()
+
 	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
-		// Clean up podManager and quotaManager entries added by Filter.
-		// The pod may have been deleted between Filter and Bind; without
-		// this cleanup both internal bookkeepers leak permanently.
-		podToDelete := &corev1.Pod{
+		// current is nil, construct a minimal pod object from args for
+		// TakeAndDeletePod to look up the podManager entry by UID.
+		podToDelete = &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
 				UID:       args.PodUID,
 				Name:      args.PodName,
 				Namespace: args.PodNamespace,
 			},
 		}
-		if podInfosToDelete, ok := s.podManager.TakeAndDeletePod(podToDelete); ok {
-			if len(podInfosToDelete.Devices) > 0 {
-				s.quotaManager.RmUsage(podToDelete, podInfosToDelete.Devices)
-			}
-		}
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
+
+	podToDelete = current
 
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 
@@ -694,11 +705,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
-		if podInfosToDelete, ok := s.podManager.TakeAndDeletePod(current); ok {
-			if len(podInfosToDelete.Devices) > 0 {
-				s.quotaManager.RmUsage(current, podInfosToDelete.Devices)
-			}
-		}
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
@@ -728,6 +734,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		goto ReleaseNodeLocks
 	}
 
+	podToDelete = nil
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
@@ -736,11 +743,6 @@ ReleaseNodeLocks:
 	klog.InfoS("Release node locks", "node", args.Node)
 	for _, val := range device.GetDevices() {
 		val.ReleaseNodeLock(node, current)
-	}
-	if podInfosToDelete, ok := s.podManager.TakeAndDeletePod(current); ok {
-		if len(podInfosToDelete.Devices) > 0 {
-			s.quotaManager.RmUsage(current, podInfosToDelete.Devices)
-		}
 	}
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
