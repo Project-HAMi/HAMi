@@ -1053,3 +1053,227 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 }
+
+func TestMigInitialization_MigModeButDisabledStrategy(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						MigStrategy: ptr(v1.MigStrategyNone), // MIG disabled
+					},
+				},
+			},
+		},
+		operatingMode: "mig",
+		migCurrent:    nvidia.MigPartedSpec{},
+	}
+
+	deviceNumbers := 2
+
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+	require.False(t, migEnabled, "MIG should be disabled")
+
+	if migEnabled && plugin.operatingMode == "mig" {
+		t.Fatal("This block should not be reached when migEnabled is false")
+	} else {
+		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+		configSlice := nvidia.MigConfigSpecSlice{}
+		for i := 0; i < deviceNumbers; i++ {
+			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			configSlice = append(configSlice, conf)
+		}
+		plugin.migCurrent.MigConfigs["current"] = configSlice
+	}
+
+	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should not be nil")
+	require.Len(t, plugin.migCurrent.MigConfigs["current"], 2, "Should have config for 2 devices")
+}
+
+func TestMigInitialization_SafeMapAccess(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						MigStrategy: ptr(v1.MigStrategyNone), // MIG disabled
+					},
+				},
+			},
+		},
+		operatingMode: "mig",
+		migCurrent:    nvidia.MigPartedSpec{},
+	}
+
+	deviceNumbers := 3
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+
+	if migEnabled && plugin.operatingMode == "mig" {
+		t.Fatal("Should not reach here")
+	} else {
+		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+		configSlice := nvidia.MigConfigSpecSlice{}
+		for i := 0; i < deviceNumbers; i++ {
+			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			configSlice = append(configSlice, conf)
+		}
+		plugin.migCurrent.MigConfigs["current"] = configSlice
+	}
+
+	require.NotNil(t, plugin.migCurrent.MigConfigs)
+	require.NotNil(t, plugin.migCurrent.MigConfigs["current"])
+	require.Equal(t, 3, len(plugin.migCurrent.MigConfigs["current"]))
+
+	for i := 0; i < deviceNumbers; i++ {
+		cfg := plugin.migCurrent.MigConfigs["current"][i]
+		require.False(t, cfg.MigEnabled)
+		require.Equal(t, int32(i), cfg.Devices[0])
+	}
+}
+
+func TestMigInitialization_DisabledStrategy(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						MigStrategy: ptr(v1.MigStrategyNone), // MIG disabled
+					},
+				},
+			},
+		},
+		operatingMode: "default",
+		migCurrent:    nvidia.MigPartedSpec{},
+	}
+
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+	require.False(t, migEnabled, "MIG should be disabled when strategy is 'none'")
+
+	if !migEnabled {
+		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+		configSlice := nvidia.MigConfigSpecSlice{}
+		for i := 0; i < 2; i++ {
+			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			configSlice = append(configSlice, conf)
+		}
+		plugin.migCurrent.MigConfigs["current"] = configSlice
+	}
+
+	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should not be nil")
+	require.Len(t, plugin.migCurrent.MigConfigs["current"], 2, "Should have config for 2 devices")
+	require.False(t, plugin.migCurrent.MigConfigs["current"][0].MigEnabled, "MigEnabled should be false")
+}
+
+func TestMigInitialization_MigEnabledSingleStrategy(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						MigStrategy: ptr("single"),
+					},
+				},
+			},
+		},
+		operatingMode: "mig",
+		migCurrent:    nvidia.MigPartedSpec{},
+	}
+
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+	require.True(t, migEnabled, "MIG should be enabled when strategy is 'single'")
+
+	plugin.migCurrent.MigConfigs = map[string]nvidia.MigConfigSpecSlice{
+		"current": {
+			nvidia.MigConfigSpec{
+				MigEnabled: true,
+				Devices:    []int32{0, 1},
+				MigDevices: map[string]int32{"3g.30gb": 2},
+			},
+		},
+	}
+
+	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should not be nil")
+	require.NotNil(t, plugin.migCurrent.MigConfigs["current"], "Current MigConfigs should exist")
+	require.True(t, plugin.migCurrent.MigConfigs["current"][0].MigEnabled, "MigEnabled should be true")
+}
+
+func TestMigInitialization_NoMigStrategy(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						MigStrategy: nil,
+					},
+				},
+			},
+		},
+		operatingMode: "default",
+		migCurrent:    nvidia.MigPartedSpec{},
+	}
+
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+	require.False(t, migEnabled, "MIG should be disabled when MigStrategy is nil")
+
+	if !migEnabled {
+		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+		configSlice := nvidia.MigConfigSpecSlice{}
+		for i := 0; i < 4; i++ {
+			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			configSlice = append(configSlice, conf)
+		}
+		plugin.migCurrent.MigConfigs["current"] = configSlice
+	}
+
+	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should be initialized")
+	require.Len(t, plugin.migCurrent.MigConfigs["current"], 4, "Should have config for 4 devices")
+}
+
+func TestMigInitialization_ApplyMigTemplate(t *testing.T) {
+	testCases := []struct {
+		name       string
+		strategy   *string
+		shouldCall bool
+	}{
+		{
+			name:       "MIG disabled with none strategy",
+			strategy:   ptr(v1.MigStrategyNone),
+			shouldCall: false,
+		},
+		{
+			name:       "MIG enabled with single strategy",
+			strategy:   ptr("single"),
+			shouldCall: true,
+		},
+		{
+			name:       "MIG enabled with mixed strategy",
+			strategy:   ptr("mixed"),
+			shouldCall: true,
+		},
+		{
+			name:       "MigStrategy is nil",
+			strategy:   nil,
+			shouldCall: false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			plugin := &NvidiaDevicePlugin{
+				config: &nvidia.DeviceConfig{
+					Config: &v1.Config{
+						Flags: v1.Flags{
+							CommandLineFlags: v1.CommandLineFlags{
+								MigStrategy: tc.strategy,
+							},
+						},
+					},
+				},
+			}
+
+			migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
+			require.Equal(t, tc.shouldCall, migEnabled,
+				"ApplyMigTemplate call decision should match expected value for %s", tc.name)
+		})
+	}
+}

@@ -291,38 +291,36 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 			break
 		}
 	}
-	if deviceSupportMig {
-		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != "none"
-		if migEnabled {
-			cmd := exec.Command("nvidia-mig-parted", "export")
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			if err != nil {
-				klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
-			}
-			outStr := stdout.Bytes()
-			yaml.Unmarshal(outStr, &plugin.migCurrent)
-			os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
+	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
+	if migEnabled {
+		cmd := exec.Command("nvidia-mig-parted", "export")
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+		err := cmd.Run()
+		if err != nil {
+			klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
 		}
-		if plugin.operatingMode == "mig" {
-			HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-			if err != nil {
-				klog.Infof("no device in node:%v", err)
-			}
-			plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-			klog.Infoln("Open Mig export", plugin.migCurrent)
-		} else {
-			plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-			configSlice := nvidia.MigConfigSpecSlice{}
-			for i := 0; i < deviceNumbers; i++ {
-				conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-				configSlice = append(configSlice, conf)
-			}
-			plugin.migCurrent.MigConfigs["current"] = configSlice
-			klog.Infoln("Close Mig export", plugin.migCurrent)
+		outStr := stdout.Bytes()
+		yaml.Unmarshal(outStr, &plugin.migCurrent)
+		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
+	}
+	if migEnabled && plugin.operatingMode == "mig" {
+		HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+		if err != nil {
+			klog.Infof("no device in node:%v", err)
 		}
+		plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+		klog.Infoln("Open Mig export", plugin.migCurrent)
+	} else {
+		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+		configSlice := nvidia.MigConfigSpecSlice{}
+		for i := 0; i < deviceNumbers; i++ {
+			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			configSlice = append(configSlice, conf)
+		}
+		plugin.migCurrent.MigConfigs["current"] = configSlice
+		klog.Infoln("Close Mig export", plugin.migCurrent)
 	}
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
@@ -336,7 +334,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}()
 
 	if deviceSupportMig {
-		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != "none"
+		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
 		if migEnabled {
 			plugin.ApplyMigTemplate()
 		}
