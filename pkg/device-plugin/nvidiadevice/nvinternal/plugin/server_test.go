@@ -399,7 +399,6 @@ func Test_processMigConfigs(t *testing.T) {
 
 func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
-	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
 	available := []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
@@ -446,7 +445,7 @@ func TestSelectPreferredDeviceIDsFromAnnotatedDevicesErrorsWhenAnnotatedUUIDMiss
 	}
 	desired := device.ContainerDevices{
 		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"}, // Missing from available
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"},
 	}
 
 	_, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, len(desired))
@@ -696,23 +695,16 @@ func TestGetPreferredAllocationSkipsEmptyAnnotations(t *testing.T) {
 }
 
 func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
-	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (5 dashes)
-	// Virtual devices have 6 dashes: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-N
 	tests := []struct {
 		input    string
 		expected string
 	}{
-		// Virtual device format (6 dashes)
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-10", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// MIG format with template index
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[1-2]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// Replica format
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a::replica-1", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// Plain UUID (5 dashes, should not be modified)
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// UUID ending with -123 (5 dashes total, should NOT be treated as virtual device)
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb123", "GPU-03f69c50-207a-2038-9b45-23cac89cb123"},
 	}
 
@@ -726,22 +718,20 @@ func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
 
 func TestSelectPreferredDeviceIDsWithMIGUUIDs(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
-	// Use real NVIDIA GPU UUID format
 	available := []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
 	}
 	desired := device.ContainerDevices{
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]"}, // MIG format
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]"},
 		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c[1-2]"}, // MIG format with different index
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c[1-2]"},
 	}
 
 	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, 3)
 	require.NoError(t, err)
 	require.Len(t, got, 3)
-	// Should select one slice from each physical GPU
 	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0")
 	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0")
 	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0")
@@ -1024,7 +1014,6 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	// Simulate erase behavior: modifies annotation to move to next container's devices
 	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
 	eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
-		// Simulate erasing first container's request so second call gets second container
 		// After erase, first container becomes empty (;), second container keeps its devices
 		pod.Annotations["hami.io/vgpu-devices-to-allocate"] = ";GPU-annotated-b,NVIDIA,4000,60:;"
 		return nil
@@ -1052,42 +1041,6 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", response.ContainerResponses[1].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
-}
-
-func TestMigInitialization_MigModeButDisabledStrategy(t *testing.T) {
-	plugin := &NvidiaDevicePlugin{
-		config: &nvidia.DeviceConfig{
-			Config: &v1.Config{
-				Flags: v1.Flags{
-					CommandLineFlags: v1.CommandLineFlags{
-						MigStrategy: ptr(v1.MigStrategyNone), // MIG disabled
-					},
-				},
-			},
-		},
-		operatingMode: "mig",
-		migCurrent:    nvidia.MigPartedSpec{},
-	}
-
-	deviceNumbers := 2
-
-	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
-	require.False(t, migEnabled, "MIG should be disabled")
-
-	if migEnabled && plugin.operatingMode == "mig" {
-		t.Fatal("This block should not be reached when migEnabled is false")
-	} else {
-		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-		configSlice := nvidia.MigConfigSpecSlice{}
-		for i := 0; i < deviceNumbers; i++ {
-			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-			configSlice = append(configSlice, conf)
-		}
-		plugin.migCurrent.MigConfigs["current"] = configSlice
-	}
-
-	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should not be nil")
-	require.Len(t, plugin.migCurrent.MigConfigs["current"], 2, "Should have config for 2 devices")
 }
 
 func TestMigInitialization_SafeMapAccess(t *testing.T) {
@@ -1129,39 +1082,6 @@ func TestMigInitialization_SafeMapAccess(t *testing.T) {
 		require.False(t, cfg.MigEnabled)
 		require.Equal(t, int32(i), cfg.Devices[0])
 	}
-}
-
-func TestMigInitialization_DisabledStrategy(t *testing.T) {
-	plugin := &NvidiaDevicePlugin{
-		config: &nvidia.DeviceConfig{
-			Config: &v1.Config{
-				Flags: v1.Flags{
-					CommandLineFlags: v1.CommandLineFlags{
-						MigStrategy: ptr(v1.MigStrategyNone), // MIG disabled
-					},
-				},
-			},
-		},
-		operatingMode: "default",
-		migCurrent:    nvidia.MigPartedSpec{},
-	}
-
-	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != v1.MigStrategyNone
-	require.False(t, migEnabled, "MIG should be disabled when strategy is 'none'")
-
-	if !migEnabled {
-		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-		configSlice := nvidia.MigConfigSpecSlice{}
-		for i := 0; i < 2; i++ {
-			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-			configSlice = append(configSlice, conf)
-		}
-		plugin.migCurrent.MigConfigs["current"] = configSlice
-	}
-
-	require.NotNil(t, plugin.migCurrent.MigConfigs, "MigConfigs should not be nil")
-	require.Len(t, plugin.migCurrent.MigConfigs["current"], 2, "Should have config for 2 devices")
-	require.False(t, plugin.migCurrent.MigConfigs["current"][0].MigEnabled, "MigEnabled should be false")
 }
 
 func TestMigInitialization_MigEnabledSingleStrategy(t *testing.T) {
