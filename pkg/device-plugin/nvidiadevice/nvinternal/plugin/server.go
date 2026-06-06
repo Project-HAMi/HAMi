@@ -292,17 +292,20 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		}
 	}
 	if deviceSupportMig {
-		cmd := exec.Command("nvidia-mig-parted", "export")
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err != nil {
-			klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != "none"
+		if migEnabled {
+			cmd := exec.Command("nvidia-mig-parted", "export")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if err != nil {
+				klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+			}
+			outStr := stdout.Bytes()
+			yaml.Unmarshal(outStr, &plugin.migCurrent)
+			os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
 		}
-		outStr := stdout.Bytes()
-		yaml.Unmarshal(outStr, &plugin.migCurrent)
-		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
 		if plugin.operatingMode == "mig" {
 			HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
 			if err != nil {
@@ -333,7 +336,10 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}()
 
 	if deviceSupportMig {
-		plugin.ApplyMigTemplate()
+		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != "none"
+		if migEnabled {
+			plugin.ApplyMigTemplate()
+		}
 	}
 
 	return nil
