@@ -658,6 +658,12 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 	return podUsageStat, nil
 }
 
+func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
+		s.quotaManager.RmUsage(pod, pi.Devices)
+	}
+}
+
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
@@ -670,6 +676,13 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
+		s.cleanupStalePodAllocation(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       args.PodUID,
+				Name:      args.PodName,
+				Namespace: args.PodNamespace,
+			},
+		})
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 
@@ -679,6 +692,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
+		s.cleanupStalePodAllocation(current)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
