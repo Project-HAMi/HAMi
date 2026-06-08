@@ -1493,6 +1493,7 @@ func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 	_, ok := s.podManager.GetPod(pod)
 	assert.Equal(t, false, ok)
 }
+
 func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1505,8 +1506,6 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 		},
 	}
 
-	// Create scheduler with minimal setup — no device initialization needed
-	// because Bind returns early at Get(pod) failure before touching devices.
 	s := NewScheduler()
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
@@ -1518,15 +1517,12 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 
-	// Pre-populate podManager as Filter would have done
 	s.podManager.AddPod(pod, "node1", nil)
 
-	// Verify podManager has the entry before Bind
 	podsBefore, _ := s.podManager.ListPodsUID()
 	require.Len(t, podsBefore, 1)
 	require.Equal(t, podUID, podsBefore[0].UID)
 
-	// Bind with a non-existent pod (not in fake client)
 	args := extenderv1.ExtenderBindingArgs{
 		PodName:      pod.Name,
 		PodNamespace: pod.Namespace,
@@ -1537,16 +1533,10 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not found")
 
-	// Verify podManager entry was cleaned up
 	podsAfter, _ := s.podManager.ListPodsUID()
-	require.Len(t, podsAfter, 0,
-		"Bind should clean up podManager entry when Get(pod) fails, "+
-			"otherwise Filter's addPod leaks resources permanently")
+	require.Len(t, podsAfter, 0)
 }
 
-// Test_Bind_DelPodOnGetNodeFailure verifies that when Bind's nodeLister.Get
-// returns "not found", the podManager entry added by Filter is cleaned up.
-// This ensures every error path in Bind cleans up its podManager entry.
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	t.Parallel()
 
@@ -1564,21 +1554,15 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
 
-	// Use an independent fake client to avoid interference from other tests.
 	fakeClient := fake.NewSimpleClientset()
 	s.kubeClient = fakeClient
 
-	// Create the pod in fake client so podLister.Get succeeds,
-	// but leave the node uncreated so nodeLister.Get fails.
 	_, err := fakeClient.CoreV1().Pods(pod.Namespace).Create(
 		context.Background(), pod, metav1.CreateOptions{})
 	require.NoError(t, err)
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour*1)
 
-	// Manually add the pod to the informer cache. In real environments,
-	// the reflector does this automatically, but fake client's informer
-	// does not reconcile already-created objects without this step.
 	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
 	require.NoError(t, err)
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
@@ -1586,7 +1570,6 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
 
-	// Pre-populate podManager as Filter would have done
 	s.podManager.AddPod(pod, "non-existent-node", nil)
 
 	podsBefore, _ := s.podManager.ListPodsUID()
@@ -1600,13 +1583,10 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 		Node:         "non-existent-node",
 	}
 	res, err := s.Bind(args)
-	// nodeLister.Get failure returns (res, nil) — the error is
-	// embedded in result.Error, not as a Go error.
-	require.NoError(t, err, "node failure returns result-level error not Go error")
+
+	require.NoError(t, err)
 	require.Contains(t, res.Error, "not found")
 
-	// Verify podManager entry was cleaned up
 	podsAfter, _ := s.podManager.ListPodsUID()
-	require.Len(t, podsAfter, 0,
-		"Bind should clean up podManager entry when Get(node) fails")
+	require.Len(t, podsAfter, 0)
 }
