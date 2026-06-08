@@ -195,7 +195,7 @@ spec:
       {{- if .Values.scheduler.leaderElect }}
       affinity:
         podAntiAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
+          preferredDuringSchedulingIgnoredDuringExecution:
           - labelSelector:
               matchExpressions:
               - key: app.kubernetes.io/component
