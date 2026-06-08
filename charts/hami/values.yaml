@@ -531,3 +531,20 @@ legacyMetrics: false
 
 prometheus:
   enabled: false
+
+# MCP Server configuration (experimental)
+mcpServer:
+  enabled: false
+  image:
+    repository: "hami-mcp"
+    tag: ""
+    pullPolicy: IfNotPresent
+  prometheusUrl: "http://localhost:9090"
+  logLevel: "info"
+  resources:
+    limits:
+      cpu: 100m
+      memory: 128Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi

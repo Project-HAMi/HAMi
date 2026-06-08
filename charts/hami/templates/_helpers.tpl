@@ -49,6 +49,13 @@ The app name for DevicePlugin
 {{- end -}}
 
 {{/*
+The app name for MCP Server
+*/}}
+{{- define "hami-vgpu.mcp-server" -}}
+{{- printf "%s-mcp-server" ( include "hami-vgpu.fullname" . ) | trunc 63 | trimSuffix "-" -}}
+{{- end -}}
+
+{{/*
   The app name for MockDevicePlugin
   */}}
 {{- define "hami-vgpu.mock-device-plugin" -}}

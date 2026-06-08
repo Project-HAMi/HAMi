@@ -1,0 +1,15 @@
+ARG GOLANG_IMAGE=golang:1.26.2-bookworm
+
+FROM $GOLANG_IMAGE AS builder
+ARG GOPROXY
+ARG VERSION
+WORKDIR /workspace
+COPY . .
+RUN go mod vendor
+RUN make mcp-server VERSION=$VERSION
+
+FROM gcr.io/distroless/static:nonroot
+WORKDIR /
+COPY --from=builder /workspace/bin/mcp-server /mcp-server
+USER nonroot:nonroot
+ENTRYPOINT ["/mcp-server"]
