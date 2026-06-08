@@ -264,15 +264,12 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		return err
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
-	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
-	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
+
 	err = CreateMigApplyLockDir()
 	if err != nil {
 		klog.Fatalf("CreateMIGLockSubDir failed:%v", err)
 	}
 
-	// If the temporary lock file still exists, it may be a leftover from the last incomplete mig  application process.
-	// Delete the temporary lock file to make sure vgpu monitor can start.
 	err = RemoveMigApplyLock()
 	if err != nil {
 		klog.Fatalf("RemoveMigApplyLock failed:%v", err)
@@ -291,28 +288,56 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 			break
 		}
 	}
-	migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
-	if migEnabled {
+
+	isMigMode := plugin.operatingMode == "mig"
+	hasMigStrategy := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
+
+	shouldUseMig := isMigMode || hasMigStrategy
+
+	// Graceful degradation check for configuration mismatches
+	if shouldUseMig && !deviceSupportMig {
+		klog.Warningf("MIG mode requested but the GPU does not support MIG. Disabling MIG mode.")
+		shouldUseMig = false
+	}
+
+	migSuccessfullyInitialized := false
+
+	if deviceSupportMig && shouldUseMig {
+		klog.Infof("Initializing MIG mode (operatingMode=%s, hasMigStrategy=%v)", plugin.operatingMode, hasMigStrategy)
+
 		cmd := exec.Command("nvidia-mig-parted", "export")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err != nil {
-			klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
+
+		if err := cmd.Run(); err != nil {
+			klog.Warningf("nvidia-mig-parted failed: %v (stderr: %s).", err, stderr.String())
+		} else {
+			outStr := stdout.Bytes()
+			if err = yaml.Unmarshal(outStr, &plugin.migCurrent); err != nil {
+				klog.Warningf("Failed to parse nvidia-mig-parted output: %v.", err)
+			} else {
+				_ = os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
+
+				if plugin.migCurrent.MigConfigs == nil {
+					klog.Warningf("nvidia-mig-parted returned empty MigConfigs.")
+				} else {
+					HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+					if err != nil {
+						klog.Warningf("Failed to process MIG configs: %v.", err)
+					} else {
+						plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+						klog.Infoln("MIG mode enabled successfully")
+						migSuccessfullyInitialized = true
+					}
+				}
+			}
 		}
-		outStr := stdout.Bytes()
-		yaml.Unmarshal(outStr, &plugin.migCurrent)
-		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
 	}
-	if migEnabled && plugin.operatingMode == "mig" {
-		HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-		if err != nil {
-			klog.Infof("no device in node:%v", err)
-		}
-		plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-		klog.Infoln("Open Mig export", plugin.migCurrent)
-	} else {
+
+	// Fallback execution block if MIG was not desired or failed to safely initialize
+	if !migSuccessfullyInitialized {
+		klog.Infoln("Initializing with MIG disabled")
 		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
 		configSlice := nvidia.MigConfigSpecSlice{}
 		for i := 0; i < deviceNumbers; i++ {
@@ -320,8 +345,8 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 			configSlice = append(configSlice, conf)
 		}
 		plugin.migCurrent.MigConfigs["current"] = configSlice
-		klog.Infoln("Close Mig export", plugin.migCurrent)
 	}
+
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
 		if err != nil {
@@ -333,11 +358,9 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
 
-	if deviceSupportMig {
-		migEnabled := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
-		if migEnabled {
-			plugin.ApplyMigTemplate()
-		}
+	// Only apply layouts if the MIG subsystem was configured end-to-end without errors
+	if migSuccessfullyInitialized {
+		plugin.ApplyMigTemplate()
 	}
 
 	return nil
