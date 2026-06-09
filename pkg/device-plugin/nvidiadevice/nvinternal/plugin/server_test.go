@@ -1,18 +1,35 @@
 /*
-Copyright 2026 The HAMi Authors.
+ * SPDX-License-Identifier: Apache-2.0
+ *
+ * The HAMi Contributors require contributions made to
+ * this file be licensed under the Apache-2.0 license or a
+ * compatible open source license.
+ */
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+/*
+ * Licensed to NVIDIA CORPORATION under one or more contributor
+ * license agreements. See the NOTICE file distributed with
+ * this work for additional information regarding copyright
+ * ownership. NVIDIA CORPORATION licenses this file to you under
+ * the Apache License, Version 2.0 (the "License"); you may
+ * not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing,
+ * software distributed under the License is distributed on an
+ * "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+ * KIND, either express or implied.  See the License for the
+ * specific language governing permissions and limitations
+ * under the License.
+ */
 
-	http://www.apache.org/licenses/LICENSE-2.0
+/*
+ * Modifications Copyright The HAMi Authors. See
+ * GitHub history for details.
+ */
 
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
-*/
 package plugin
 
 import (
@@ -40,7 +57,6 @@ func ptr[T any](x T) *T {
 	return &x
 }
 
-// runFallbackInit mirrors the fallback block from Start.
 func runFallbackInit(plugin *NvidiaDevicePlugin, deviceNumbers int) {
 	plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
 	configSlice := nvidia.MigConfigSpecSlice{}
@@ -123,191 +139,6 @@ func TestMigConfigFilePermissionSecurityImprovement(t *testing.T) {
 
 	otherCanRead := (mode644 & 0004) != 0
 	require.True(t, otherCanRead, "0644: Others CAN read (for debugging)")
-}
-
-// TestGetMigCapabilityMapHybridGPUs verifies that getMigCapabilityMap correctly
-// assigns MIG capability per-device, not all-or-nothing.
-//
-// THE BUG IT GUARDS AGAINST (upstream HAMi):
-// The original upstream Start() loop resets deviceSupportMig=false on each
-// iteration and calls `break` the moment any device is non-MIG. This means a
-// single T4 anywhere in the list silently disables MIG for every A100 on the
-// node. getMigCapabilityMap fixes this by producing an independent true/false
-// per device index.
-func TestGetMigCapabilityMapHybridGPUs(t *testing.T) {
-	testCases := []struct {
-		name                  string
-		deviceNames           []string
-		migGeometries         []string // model substrings that indicate MIG support
-		expectedCapabilityMap map[int]bool
-		expectedNodeHasMigGPU bool
-	}{
-		{
-			name:                  "all MIG-capable (A100, A100, A100)",
-			deviceNames:           []string{"A100", "A100", "A100"},
-			migGeometries:         []string{"A100"},
-			expectedCapabilityMap: map[int]bool{0: true, 1: true, 2: true},
-			expectedNodeHasMigGPU: true,
-		},
-		{
-			name:                  "all non-MIG (T4, T4, T4)",
-			deviceNames:           []string{"T4", "T4", "T4"},
-			migGeometries:         []string{"A100"}, // T4 not in list
-			expectedCapabilityMap: map[int]bool{0: false, 1: false, 2: false},
-			expectedNodeHasMigGPU: false,
-		},
-		{
-			name:                  "hybrid - A100, T4, A100 (THE FIX!)",
-			deviceNames:           []string{"A100", "T4", "A100"},
-			migGeometries:         []string{"A100"},
-			expectedCapabilityMap: map[int]bool{0: true, 1: false, 2: true},
-			expectedNodeHasMigGPU: true,
-		},
-		{
-			name:                  "mixed - T4, A100, T4",
-			deviceNames:           []string{"T4", "A100", "T4"},
-			migGeometries:         []string{"A100"},
-			expectedCapabilityMap: map[int]bool{0: false, 1: true, 2: false},
-			expectedNodeHasMigGPU: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			// Build the MIG geometries list using the real type that
-			// getMigCapabilityMap reads from: []device.AllowedMigGeometries.
-			// Each entry declares which GPU model substrings qualify as MIG-capable.
-			// containsModel(deviceName, entry.Models) uses strings.Contains, so
-			// "A100" in Models will match any device name that contains "A100".
-			migGeomsList := make([]device.AllowedMigGeometries, 0, len(tc.migGeometries))
-			for _, model := range tc.migGeometries {
-				migGeomsList = append(migGeomsList, device.AllowedMigGeometries{
-					Models: []string{model},
-				})
-			}
-
-			plugin := &NvidiaDevicePlugin{
-				config: &nvidia.DeviceConfig{
-					Config: &v1.Config{
-						Flags: v1.Flags{
-							CommandLineFlags: v1.CommandLineFlags{},
-						},
-					},
-				},
-				schedulerConfig: nvidia.NvidiaConfig{
-					MigGeometriesList: migGeomsList,
-				},
-			}
-
-			capabilityMap, nodeHasMig := plugin.getMigCapabilityMap(tc.deviceNames)
-
-			require.Equal(t, tc.expectedCapabilityMap, capabilityMap,
-				"capability map should match expected per-device detection")
-			require.Equal(t, tc.expectedNodeHasMigGPU, nodeHasMig,
-				"nodeHasMigCapableGPU flag should be true if ANY GPU supports MIG")
-		})
-	}
-}
-
-// TestGetMigCapabilityMapFixesBrokenLogic directly tests the core correctness
-// property: A100 is MIG-capable and T4 is not, even when both are on the same node.
-//
-// This test would FAIL against the upstream HAMi logic because [A100, T4] would
-// cause the T4 to short-circuit the loop and mark the whole node as non-MIG.
-func TestGetMigCapabilityMapFixesBrokenLogic(t *testing.T) {
-	deviceNames := []string{"A100", "T4"}
-
-	// Populate MigGeometriesList so the function has data to match against.
-	// Without this, getMigCapabilityMap has nothing to iterate and every
-	// device silently gets false — exactly what caused these test failures.
-	plugin := &NvidiaDevicePlugin{
-		config: &nvidia.DeviceConfig{
-			Config: &v1.Config{
-				Flags: v1.Flags{
-					CommandLineFlags: v1.CommandLineFlags{},
-				},
-			},
-		},
-		schedulerConfig: nvidia.NvidiaConfig{
-			MigGeometriesList: []device.AllowedMigGeometries{
-				{Models: []string{"A100"}},
-			},
-		},
-	}
-
-	capabilityMap, nodeHasMig := plugin.getMigCapabilityMap(deviceNames)
-
-	require.True(t, capabilityMap[0], "GPU[0] (A100) should support MIG")
-	require.False(t, capabilityMap[1], "GPU[1] (T4) should not support MIG")
-	require.True(t, nodeHasMig, "Node has MIG-capable GPU (GPU[0])")
-}
-
-// TestBuildHybridMigConfigMixedDevices verifies hybrid MIG configuration
-func TestBuildHybridMigConfigMixedDevices(t *testing.T) {
-	testCases := []struct {
-		name                string
-		deviceNumbers       int
-		deviceNames         []string
-		deviceMigSupportMap map[int]bool
-		expectedMigEnabled  map[int]bool
-		expectedDeviceList  map[int][]int32
-	}{
-		{
-			name:                "hybrid - GPU[0] MIG, GPU[1] whole",
-			deviceNumbers:       2,
-			deviceNames:         []string{"A100", "T4"},
-			deviceMigSupportMap: map[int]bool{0: true, 1: false},
-			expectedMigEnabled:  map[int]bool{},
-			expectedDeviceList: map[int][]int32{
-				1: {1},
-			},
-		},
-		{
-			name:                "all MIG - GPU[0], GPU[1], GPU[2] all MIG",
-			deviceNumbers:       3,
-			deviceNames:         []string{"A100", "A100", "A100"},
-			deviceMigSupportMap: map[int]bool{0: true, 1: true, 2: true},
-			expectedDeviceList:  map[int][]int32{},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			plugin := &NvidiaDevicePlugin{
-				config: &nvidia.DeviceConfig{
-					Config: &v1.Config{
-						Flags: v1.Flags{
-							CommandLineFlags: v1.CommandLineFlags{},
-						},
-					},
-				},
-				migCurrent: nvidia.MigPartedSpec{},
-			}
-
-			migConfigs := make(map[string]nvidia.MigConfigSpecSlice)
-
-			for i := 0; i < tc.deviceNumbers; i++ {
-				if !tc.deviceMigSupportMap[i] {
-					nonMigConf := nvidia.MigConfigSpec{
-						MigEnabled: false,
-						Devices:    []int32{int32(i)},
-					}
-					migConfigs["current"] = append(migConfigs["current"], nonMigConf)
-				}
-			}
-
-			plugin.migCurrent.MigConfigs = migConfigs
-
-			if tc.name == "hybrid - GPU[0] MIG, GPU[1] whole" {
-				require.Len(t, plugin.migCurrent.MigConfigs["current"], 1,
-					"should have 1 config for non-MIG GPU")
-				require.Equal(t, int32(1), plugin.migCurrent.MigConfigs["current"][0].Devices[0],
-					"GPU[1] should be in non-MIG config")
-				require.False(t, plugin.migCurrent.MigConfigs["current"][0].MigEnabled,
-					"GPU[1] should have MigEnabled=false")
-			}
-		})
-	}
 }
 
 func TestCDIAllocateResponse(t *testing.T) {
@@ -901,8 +732,8 @@ func TestGetPreferredAllocationSkipsEmptyAnnotations(t *testing.T) {
 			Name:      "test-pod",
 			Annotations: map[string]string{
 				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
-					{}, // init container – empty
-					{ // regular container – 2 GPUs
+					{},
+					{
 						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice},
 						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", Type: nvidia.NvidiaGPUDevice},
 					},
@@ -1356,179 +1187,6 @@ func TestMigFallbackInit_ReplacesExistingConfigs(t *testing.T) {
 	for i := 0; i < deviceNumbers; i++ {
 		require.False(t, plugin.migCurrent.MigConfigs["current"][i].MigEnabled,
 			"stale MigEnabled=true must be overwritten for device %d", i)
-	}
-}
-
-func TestMigSuccessFlag_GatesApplyMigTemplate(t *testing.T) {
-	testCases := []struct {
-		name                       string
-		migSuccessfullyInitialized bool
-		expectApplyTemplateCalled  bool
-	}{
-		{
-			name:                       "template applied when MIG succeeded",
-			migSuccessfullyInitialized: true,
-			expectApplyTemplateCalled:  true,
-		},
-		{
-			name:                       "template skipped when MIG failed or was disabled",
-			migSuccessfullyInitialized: false,
-			expectApplyTemplateCalled:  false,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			applyTemplateCalled := false
-			mockApplyMigTemplate := func() { applyTemplateCalled = true }
-
-			if tc.migSuccessfullyInitialized {
-				mockApplyMigTemplate()
-			}
-
-			require.Equal(t, tc.expectApplyTemplateCalled, applyTemplateCalled,
-				"ApplyMigTemplate call decision must be controlled by migSuccessfullyInitialized")
-		})
-	}
-}
-
-func TestMigSuccessFlag_FallbackRunsExactlyWhenNotInitialized(t *testing.T) {
-	testCases := []struct {
-		name                       string
-		migSuccessfullyInitialized bool
-		expectFallbackRan          bool
-	}{
-		{
-			name:                       "fallback skipped when MIG succeeded",
-			migSuccessfullyInitialized: true,
-			expectFallbackRan:          false,
-		},
-		{
-			name:                       "fallback runs when MIG was not initialised",
-			migSuccessfullyInitialized: false,
-			expectFallbackRan:          true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			plugin := &NvidiaDevicePlugin{
-				config: &nvidia.DeviceConfig{
-					Config: &v1.Config{
-						Flags: v1.Flags{
-							CommandLineFlags: v1.CommandLineFlags{},
-						},
-					},
-				},
-				migCurrent: nvidia.MigPartedSpec{},
-			}
-			fallbackRan := false
-
-			if !tc.migSuccessfullyInitialized {
-				fallbackRan = true
-				runFallbackInit(plugin, 1)
-			}
-
-			require.Equal(t, tc.expectFallbackRan, fallbackRan,
-				"fallback execution must be gated by !migSuccessfullyInitialized")
-
-			if tc.expectFallbackRan {
-				require.NotNil(t, plugin.migCurrent.MigConfigs)
-				require.NotNil(t, plugin.migCurrent.MigConfigs["current"])
-			}
-		})
-	}
-}
-
-func TestMigInitFlow_EndToEnd(t *testing.T) {
-	testCases := []struct {
-		name                string
-		operatingMode       string
-		deviceSupportMig    bool
-		migPartsedSucceeds  bool
-		expectFallback      bool
-		expectApplyTemplate bool
-	}{
-		{
-			name:                "non-mig mode (default) – MIG disabled",
-			operatingMode:       "default",
-			deviceSupportMig:    false,
-			migPartsedSucceeds:  false,
-			expectFallback:      true,
-			expectApplyTemplate: false,
-		},
-		{
-			name:                "mig mode but device unsupported – graceful degradation",
-			operatingMode:       "mig",
-			deviceSupportMig:    false,
-			migPartsedSucceeds:  false,
-			expectFallback:      true,
-			expectApplyTemplate: false,
-		},
-		{
-			name:                "mig mode, supported, but nvidia-mig-parted fails",
-			operatingMode:       "mig",
-			deviceSupportMig:    true,
-			migPartsedSucceeds:  false,
-			expectFallback:      true,
-			expectApplyTemplate: false,
-		},
-		{
-			name:                "mig mode, supported, nvidia-mig-parted succeeds",
-			operatingMode:       "mig",
-			deviceSupportMig:    true,
-			migPartsedSucceeds:  true,
-			expectFallback:      false,
-			expectApplyTemplate: true,
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			plugin := &NvidiaDevicePlugin{
-				config: &nvidia.DeviceConfig{
-					Config: &v1.Config{
-						Flags: v1.Flags{
-							CommandLineFlags: v1.CommandLineFlags{},
-						},
-					},
-				},
-				operatingMode: tc.operatingMode,
-				migCurrent:    nvidia.MigPartedSpec{},
-			}
-
-			shouldUseMig := plugin.operatingMode == "mig"
-			if shouldUseMig && !tc.deviceSupportMig {
-				shouldUseMig = false
-			}
-
-			migSuccessfullyInitialized := false
-			if tc.deviceSupportMig && shouldUseMig && tc.migPartsedSucceeds {
-				migSuccessfullyInitialized = true
-				plugin.migCurrent.MigConfigs = map[string]nvidia.MigConfigSpecSlice{
-					"current": {{MigEnabled: true, Devices: []int32{0}}},
-				}
-			}
-
-			fallbackRan := false
-			if !migSuccessfullyInitialized {
-				fallbackRan = true
-				runFallbackInit(plugin, 1)
-			}
-
-			applyTemplateCalled := false
-			if migSuccessfullyInitialized {
-				applyTemplateCalled = true
-			}
-
-			require.Equal(t, tc.expectFallback, fallbackRan, "fallback execution mismatch")
-			require.Equal(t, tc.expectApplyTemplate, applyTemplateCalled, "ApplyMigTemplate call mismatch")
-
-			require.NotNil(t, plugin.migCurrent.MigConfigs,
-				"MigConfigs must never be nil after Start() completes")
-			require.NotNil(t, plugin.migCurrent.MigConfigs["current"],
-				"current key must always exist after Start() completes")
-		})
 	}
 }
 
