@@ -234,21 +234,103 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 	return plugin.rm.Devices()
 }
 
-// Start starts the gRPC server, registers the device plugin with the Kubelet,
-// and starts the device healthchecks.
+// Fixed getMigCapabilityMap - properly detects per-device MIG support
+func (plugin *NvidiaDevicePlugin) getMigCapabilityMap(deviceNames []string) (map[int]bool, bool) {
+	deviceMigSupportMap := make(map[int]bool)
+	nodeHasMigCapableGPU := false
+
+	for i, name := range deviceNames {
+		isSupported := false
+		for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
+			if containsModel(name, migTemplate.Models) {
+				isSupported = true
+				break
+			}
+		}
+		deviceMigSupportMap[i] = isSupported
+		if isSupported {
+			nodeHasMigCapableGPU = true
+		}
+	}
+	return deviceMigSupportMap, nodeHasMigCapableGPU
+}
+
+// buildHybridMigConfig - properly handles mixed MIG/non-MIG devices
+func (plugin *NvidiaDevicePlugin) buildHybridMigConfig(deviceNumbers int, deviceNames []string, deviceMigSupportMap map[int]bool) error {
+	cmd := exec.Command("nvidia-mig-parted", "export")
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("nvidia-mig-parted failed: %v (stderr: %s)", err, stderr.String())
+	}
+
+	outStr := stdout.Bytes()
+	if err := yaml.Unmarshal(outStr, &plugin.migCurrent); err != nil {
+		return fmt.Errorf("failed to parse nvidia-mig-parted output: %v", err)
+	}
+
+	// Save debug configuration
+	_ = os.WriteFile("/tmp/migconfig.yaml", outStr, 0644)
+
+	if plugin.migCurrent.MigConfigs == nil {
+		return fmt.Errorf("nvidia-mig-parted returned empty MigConfigs")
+	}
+
+	HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+	if err != nil {
+		return fmt.Errorf("failed to process MIG configs: %v", err)
+	}
+
+	// Explicitly map non-MIG GPUs as whole devices
+	for i := 0; i < deviceNumbers; i++ {
+		if !deviceMigSupportMap[i] {
+			klog.Infof("GPU [%d] (%s) does not support MIG. Retaining as whole GPU.", i, deviceNames[i])
+			nonMigConf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+			HamiInitMigConfig = append(HamiInitMigConfig, nonMigConf)
+		}
+	}
+
+	plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+	return nil
+}
+
+// BuildFallbackMigConfig - fallback to non-MIG mode
+func (plugin *NvidiaDevicePlugin) buildFallbackMigConfig(deviceNumbers int) {
+	plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+	configSlice := nvidia.MigConfigSpecSlice{}
+	for i := 0; i < deviceNumbers; i++ {
+		conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+		configSlice = append(configSlice, conf)
+	}
+	plugin.migCurrent.MigConfigs["current"] = configSlice
+}
+
+// Start function - keeps original structure, fixes MIG logic
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
 
+	// 1. Hardware Discovery
 	deviceNumbers, err := GetDeviceNums()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get device numbers: %w", err)
 	}
 
 	deviceNames, err := GetDeviceNames()
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get device names: %w", err)
 	}
 
+	// 2. Lock Management (before Serve and Register)
+	if err = CreateMigApplyLockDir(); err != nil {
+		klog.Fatalf("CreateMIGLockSubDir failed: %v", err)
+	}
+	if err = RemoveMigApplyLock(); err != nil {
+		klog.Fatalf("RemoveMigApplyLock failed: %v", err)
+	}
+
+	// 3. Start serving
 	err = plugin.Serve()
 	if err != nil {
 		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
@@ -257,6 +339,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 	klog.Infof("Starting to serve '%s' on %s", plugin.rm.Resource(), plugin.socket)
 
+	// 4. Register with kubelet
 	err = plugin.Register(kubeletSocket)
 	if err != nil {
 		klog.Infof("Could not register device plugin: %s", err)
@@ -265,103 +348,46 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
 
-	err = CreateMigApplyLockDir()
-	if err != nil {
-		klog.Fatalf("CreateMIGLockSubDir failed:%v", err)
-	}
+	// 5. Evaluate MIG Support (per-device, not all-or-nothing)
+	deviceMigSupportMap, nodeHasMigCapableGPU := plugin.getMigCapabilityMap(deviceNames)
+	shouldUseMig := plugin.operatingMode == "mig"
 
-	err = RemoveMigApplyLock()
-	if err != nil {
-		klog.Fatalf("RemoveMigApplyLock failed:%v", err)
-	}
-
-	var deviceSupportMig bool
-	for _, name := range deviceNames {
-		deviceSupportMig = false
-		for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
-			if containsModel(name, migTemplate.Models) {
-				deviceSupportMig = true
-				break
-			}
-		}
-		if !deviceSupportMig {
-			break
-		}
-	}
-
-	isMigMode := plugin.operatingMode == "mig"
-	hasMigStrategy := plugin.config.Flags.MigStrategy != nil && *plugin.config.Flags.MigStrategy != spec.MigStrategyNone
-
-	shouldUseMig := isMigMode || hasMigStrategy
-
-	// Graceful degradation check for configuration mismatches
-	if shouldUseMig && !deviceSupportMig {
-		klog.Warningf("MIG mode requested but the GPU does not support MIG. Disabling MIG mode.")
+	if shouldUseMig && !nodeHasMigCapableGPU {
+		klog.Warningf("MIG mode requested but no GPUs on this node support MIG. Disabling MIG mode.")
 		shouldUseMig = false
 	}
 
+	// 6. Configure Hardware State
 	migSuccessfullyInitialized := false
 
-	if deviceSupportMig && shouldUseMig {
-		klog.Infof("Initializing MIG mode (operatingMode=%s, hasMigStrategy=%v)", plugin.operatingMode, hasMigStrategy)
-
-		cmd := exec.Command("nvidia-mig-parted", "export")
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-
-		if err := cmd.Run(); err != nil {
-			klog.Warningf("nvidia-mig-parted failed: %v (stderr: %s).", err, stderr.String())
+	if nodeHasMigCapableGPU && shouldUseMig {
+		klog.Infof("Initializing Hybrid MIG mode (operatingMode=%s)", plugin.operatingMode)
+		if err := plugin.buildHybridMigConfig(deviceNumbers, deviceNames, deviceMigSupportMap); err != nil {
+			klog.Errorf("Failed to initialize hybrid MIG config: %v", err)
 		} else {
-			outStr := stdout.Bytes()
-			if err = yaml.Unmarshal(outStr, &plugin.migCurrent); err != nil {
-				klog.Warningf("Failed to parse nvidia-mig-parted output: %v.", err)
-			} else {
-				_ = os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
-
-				if plugin.migCurrent.MigConfigs == nil {
-					klog.Warningf("nvidia-mig-parted returned empty MigConfigs.")
-				} else {
-					HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-					if err != nil {
-						klog.Warningf("Failed to process MIG configs: %v.", err)
-					} else {
-						plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-						klog.Infoln("MIG mode enabled successfully")
-						migSuccessfullyInitialized = true
-					}
-				}
-			}
+			klog.Infoln("MIG and whole-GPU topologies evaluated successfully.")
+			migSuccessfullyInitialized = true
 		}
 	}
 
-	// Fallback execution block if MIG was not desired or failed to safely initialize
 	if !migSuccessfullyInitialized {
-		klog.Infoln("Initializing with MIG disabled")
-		plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-		configSlice := nvidia.MigConfigSpecSlice{}
-		for i := 0; i < deviceNumbers; i++ {
-			conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-			configSlice = append(configSlice, conf)
-		}
-		plugin.migCurrent.MigConfigs["current"] = configSlice
+		klog.Infoln("Proceeding with entire node as standard, non-MIG GPUs.")
+		plugin.buildFallbackMigConfig(deviceNumbers)
+	} else {
+		klog.Infoln("Applying MIG template to hardware...")
+		plugin.ApplyMigTemplate()
 	}
 
+	// 7. Start Asynchronous Monitors
 	go func() {
-		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
-		if err != nil {
-			klog.Infof("Failed to start health check: %v; continuing with health checks disabled", err)
+		if err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks); err != nil {
+			klog.Warningf("Failed to start health check: %v; continuing with health checks disabled", err)
 		}
 	}()
 
 	go func() {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
-
-	// Only apply layouts if the MIG subsystem was configured end-to-end without errors
-	if migSuccessfullyInitialized {
-		plugin.ApplyMigTemplate()
-	}
 
 	return nil
 }
