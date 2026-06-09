@@ -196,13 +196,15 @@ spec:
       affinity:
         podAntiAffinity:
           preferredDuringSchedulingIgnoredDuringExecution:
-          - labelSelector:
-              matchExpressions:
-              - key: app.kubernetes.io/component
-                operator: In
-                values:
-                - hami-scheduler
-            topologyKey: "kubernetes.io/hostname"
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app.kubernetes.io/component
+                  operator: In
+                  values:
+                  - hami-scheduler
+              topologyKey: "kubernetes.io/hostname"
       {{- end }}
       volumes:
         {{- if .Values.scheduler.admissionWebhook.enabled }}
