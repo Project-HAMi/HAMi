@@ -1,30 +1,42 @@
-apiVersion: v1
-kind: Pod
+apiVersion: apps/v1
+kind: Deployment
 metadata:
-  name: gpu-pod
+  name: cuda-sample-vector-add
+  labels:
+    app: cuda-sample-vector-add
 spec:
-  containers:
-    - name: ubuntu-container
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
-          #nvidia.com/gpumem: 3000 # identifies 3000M GPU memory each physical GPU allocates to the pod
-          nvidia.com/gpumem-percentage: 50 # identifies 50% GPU memory each physical GPU allocates to the pod. Can not be used with nvidia.com/gpumem
-          #nvidia.com/gpucores: 90 # identifies 90% GPU GPU core each physical GPU allocates to the pod 
-          #nvidia.com/priority: 0 # we only have two priority class, 0(high) and 1(low), default: 1 
-          #The utilization of high priority task won't be limited to resourceCores unless sharing GPU node with other high priority tasks.
-          #The utilization of low priority task won't be limited to resourceCores if no other tasks sharing its GPU.
-    - name: ubuntu-container0
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-    - name: ubuntu-container1
-      image: ubuntu:18.04
-      command: ["bash", "-c", "sleep 86400"]
-      resources:
-        limits:
-          nvidia.com/gpu: 2 # declare how many physical GPUs the pod needs
-          nvidia.com/gpumem: 2000 # identifies 2000M GPU memory each physical GPU allocates to the pod （Optional,Integer）
-          #nvidia.com/gpucores: 90 # identifies 90% GPU GPU core each physical GPU allocates to the pod
-
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cuda-sample-vector-add
+  template:
+    metadata:
+      labels:
+        app: cuda-sample-vector-add
+    spec:
+      containers:
+        - name: cuda-sample-vector-add
+          image: nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04
+          command:
+            - /bin/bash
+            - "-c"
+            - "--"
+          args:
+            - while true; do /cuda-samples/vectorAdd; done
+          resources:
+            limits:
+              nvidia.com/gpu: 1 # declare how many physical GPUs the pod needs
+              nvidia.com/gpumem: 3000 # Each vGPU contains 3000M device memory （Optional,Integer）
+              # nvidia.com/gpucores: 10 # identifies 10% GPU GPU core each physical GPU allocates to the pod
+              # nvidia.com/priority: 0 # we only have two priority class, 0(high) and 1(low), default: 1
+      restartPolicy: Always
+      terminationGracePeriodSeconds: 30
+      dnsPolicy: ClusterFirst
+      securityContext: {}
+      schedulerName: default-scheduler
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+  revisionHistoryLimit: 10
+  progressDeadlineSeconds: 600
