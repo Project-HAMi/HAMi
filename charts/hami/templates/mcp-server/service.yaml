@@ -1,0 +1,20 @@
+{{- if .Values.mcpServer.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "hami-vgpu.mcp-server" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: "hami-mcp-server"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9395
+      targetPort: http
+      protocol: TCP
+  selector:
+    app.kubernetes.io/component: "hami-mcp-server"
+    {{- include "hami-vgpu.selectorLabels" . | nindent 4 }}
+{{- end }}
