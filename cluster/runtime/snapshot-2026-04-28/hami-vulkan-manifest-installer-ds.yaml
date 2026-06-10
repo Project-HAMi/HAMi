@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  annotations:
+    deprecated.daemonset.template.generation: "2"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"annotations":{},"labels":{"app":"hami-vulkan-manifest-installer"},"name":"hami-vulkan-manifest-installer","namespace":"kube-system"},"spec":{"selector":{"matchLabels":{"app":"hami-vulkan-manifest-installer"}},"template":{"metadata":{"labels":{"app":"hami-vulkan-manifest-installer"}},"spec":{"containers":[{"command":["/bin/sh","-c","set -eu\nmkdir -p /host/usr/local/vgpu/vulkan/implicit_layer.d\ncp -f /manifest/hami.json \\\n      /host/usr/local/vgpu/vulkan/implicit_layer.d/hami.json\necho \"[hami-vulkan-manifest] installed at /usr/local/vgpu/vulkan/implicit_layer.d/hami.json\"\n# DaemonSet 이라 종료하지 않고 sleep — restart 루프 회피\nsleep infinity\n"],"image":"busybox:1.36","name":"installer","securityContext":{"runAsUser":0},"volumeMounts":[{"mountPath":"/manifest","name":"manifest","readOnly":true},{"mountPath":"/host/usr/local/vgpu","name":"host-vgpu"}]}],"hostPID":false,"nodeSelector":{"nvidia.com/gpu.present":"true"},"restartPolicy":"Always","tolerations":[{"operator":"Exists"}],"volumes":[{"configMap":{"name":"hami-vulkan-manifest"},"name":"manifest"},{"hostPath":{"path":"/usr/local/vgpu","type":"DirectoryOrCreate"},"name":"host-vgpu"}]}}}}
+  creationTimestamp: "2026-04-27T02:17:50Z"
+  generation: 2
+  labels:
+    app: hami-vulkan-manifest-installer
+  name: hami-vulkan-manifest-installer
+  namespace: kube-system
+  resourceVersion: "20897004"
+  uid: 6998669a-7bd7-463b-9564-94ad1a4f3feb
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      app: hami-vulkan-manifest-installer
+  template:
+    metadata:
+      labels:
+        app: hami-vulkan-manifest-installer
+    spec:
+      containers:
+      - command:
+        - /bin/sh
+        - -c
+        - |
+          set -eu
+          mkdir -p /host/usr/local/vgpu/vulkan/implicit_layer.d
+          cp -f /manifest/hami.json \
+                /host/usr/local/vgpu/vulkan/implicit_layer.d/hami.json
+          echo "[hami-vulkan-manifest] installed at /usr/local/vgpu/vulkan/implicit_layer.d/hami.json"
+          # DaemonSet 이라 종료하지 않고 sleep — restart 루프 회피
+          sleep infinity
+        image: busybox:1.36
+        imagePullPolicy: IfNotPresent
+        name: installer
+        resources: {}
+        securityContext:
+          runAsUser: 0
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /manifest
+          name: manifest
+          readOnly: true
+        - mountPath: /host/usr/local/vgpu
+          name: host-vgpu
+      dnsPolicy: ClusterFirst
+      nodeSelector:
+        hami.io/disabled: "true"
+      restartPolicy: Always
+      schedulerName: default-scheduler
+      securityContext: {}
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - operator: Exists
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: hami-vulkan-manifest
+        name: manifest
+      - hostPath:
+          path: /usr/local/vgpu
+          type: DirectoryOrCreate
+        name: host-vgpu
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+status:
+  currentNumberScheduled: 0
+  desiredNumberScheduled: 0
+  numberMisscheduled: 0
+  numberReady: 0
+  observedGeneration: 2

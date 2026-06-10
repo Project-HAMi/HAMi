@@ -1,0 +1,180 @@
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  annotations:
+    deprecated.daemonset.template.generation: "5"
+    kubectl.kubernetes.io/last-applied-configuration: |
+      {"apiVersion":"apps/v1","kind":"DaemonSet","metadata":{"annotations":{},"name":"volcano-device-plugin","namespace":"kube-system"},"spec":{"selector":{"matchLabels":{"name":"volcano-device-plugin"}},"template":{"metadata":{"annotations":{"scheduler.alpha.kubernetes.io/critical-pod":""},"labels":{"name":"volcano-device-plugin"}},"spec":{"containers":[{"args":["--device-split-count=10"],"env":[{"name":"NODE_NAME","valueFrom":{"fieldRef":{"fieldPath":"spec.nodeName"}}},{"name":"HOOK_PATH","value":"/usr/local/vgpu"},{"name":"NVIDIA_VISIBLE_DEVICES","value":"all"},{"name":"NVIDIA_MIG_MONITOR_DEVICES","value":"all"},{"name":"NVIDIA_DRIVER_CAPABILITIES","value":"utility"}],"image":"10.61.3.124:30002/library/volcano-vgpu-device-plugin:vulkan-v1","lifecycle":{"postStart":{"exec":{"command":["/bin/sh","-c","cp -rf /k8s-vgpu/lib/nvidia/. /usr/local/vgpu/"]}}},"name":"volcano-device-plugin","securityContext":{"allowPrivilegeEscalation":true,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]},"privileged":true},"volumeMounts":[{"mountPath":"/config","name":"deviceconfig"},{"mountPath":"/var/lib/kubelet/device-plugins","name":"device-plugin"},{"mountPath":"/usr/local/vgpu","name":"lib"},{"mountPath":"/tmp","name":"hosttmp"}]},{"command":["/bin/bash","-c","volcano-vgpu-monitor"],"env":[{"name":"NVIDIA_VISIBLE_DEVICES","value":"all"},{"name":"NVIDIA_MIG_MONITOR_DEVICES","value":"all"},{"name":"HOOK_PATH","value":"/tmp/vgpu"},{"name":"NODE_NAME","valueFrom":{"fieldRef":{"fieldPath":"spec.nodeName"}}}],"image":"10.61.3.124:30002/library/volcano-vgpu-device-plugin:vulkan-v1","name":"monitor","securityContext":{"allowPrivilegeEscalation":true,"capabilities":{"add":["SYS_ADMIN"],"drop":["ALL"]},"privileged":true},"volumeMounts":[{"mountPath":"/run/docker","name":"dockers"},{"mountPath":"/run/containerd","name":"containerds"},{"mountPath":"/sysinfo","name":"sysinfo"},{"mountPath":"/hostvar","name":"hostvar"},{"mountPath":"/tmp","name":"hosttmp"}]}],"priorityClassName":"system-node-critical","serviceAccount":"volcano-device-plugin","tolerations":[{"key":"CriticalAddonsOnly","operator":"Exists"},{"effect":"NoSchedule","key":"volcano.sh/gpu-memory","operator":"Exists"}],"volumes":[{"configMap":{"name":"volcano-vgpu-node-config"},"name":"deviceconfig"},{"hostPath":{"path":"/var/lib/kubelet/device-plugins","type":"Directory"},"name":"device-plugin"},{"hostPath":{"path":"/usr/local/vgpu","type":"DirectoryOrCreate"},"name":"lib"},{"hostPath":{"path":"/tmp","type":"DirectoryOrCreate"},"name":"hosttmp"},{"hostPath":{"path":"/run/docker","type":"DirectoryOrCreate"},"name":"dockers"},{"hostPath":{"path":"/run/containerd","type":"DirectoryOrCreate"},"name":"containerds"},{"hostPath":{"path":"/usr/bin","type":"Directory"},"name":"usrbin"},{"hostPath":{"path":"/sys","type":"Directory"},"name":"sysinfo"},{"hostPath":{"path":"/var","type":"Directory"},"name":"hostvar"}]}},"updateStrategy":{"type":"RollingUpdate"}}}
+  creationTimestamp: "2026-04-27T02:17:52Z"
+  generation: 5
+  name: volcano-device-plugin
+  namespace: kube-system
+  resourceVersion: "20250370"
+  uid: f0d77283-6b73-419e-8504-6d4965dde85a
+spec:
+  revisionHistoryLimit: 10
+  selector:
+    matchLabels:
+      name: volcano-device-plugin
+  template:
+    metadata:
+      annotations:
+        kubectl.kubernetes.io/restartedAt: "2026-04-27T17:44:34+09:00"
+        scheduler.alpha.kubernetes.io/critical-pod: ""
+      labels:
+        name: volcano-device-plugin
+    spec:
+      containers:
+      - args:
+        - --device-split-count=10
+        - --gpu-memory-factor=1024
+        env:
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        - name: HOOK_PATH
+          value: /usr/local/vgpu
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: all
+        - name: NVIDIA_MIG_MONITOR_DEVICES
+          value: all
+        - name: NVIDIA_DRIVER_CAPABILITIES
+          value: utility
+        image: 10.61.3.124:30002/library/volcano-vgpu-device-plugin:vulkan-v1
+        imagePullPolicy: IfNotPresent
+        lifecycle:
+          postStart:
+            exec:
+              command:
+              - /bin/sh
+              - -c
+              - cp -rf /k8s-vgpu/lib/nvidia/. /usr/local/vgpu/
+        name: volcano-device-plugin
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            drop:
+            - ALL
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /config
+          name: deviceconfig
+        - mountPath: /var/lib/kubelet/device-plugins
+          name: device-plugin
+        - mountPath: /usr/local/vgpu
+          name: lib
+        - mountPath: /tmp
+          name: hosttmp
+      - command:
+        - /bin/bash
+        - -c
+        - volcano-vgpu-monitor
+        env:
+        - name: NVIDIA_VISIBLE_DEVICES
+          value: all
+        - name: NVIDIA_MIG_MONITOR_DEVICES
+          value: all
+        - name: HOOK_PATH
+          value: /tmp/vgpu
+        - name: NODE_NAME
+          valueFrom:
+            fieldRef:
+              apiVersion: v1
+              fieldPath: spec.nodeName
+        image: 10.61.3.124:30002/library/volcano-vgpu-device-plugin:vulkan-v1
+        imagePullPolicy: IfNotPresent
+        name: monitor
+        resources: {}
+        securityContext:
+          allowPrivilegeEscalation: true
+          capabilities:
+            add:
+            - SYS_ADMIN
+            drop:
+            - ALL
+          privileged: true
+        terminationMessagePath: /dev/termination-log
+        terminationMessagePolicy: File
+        volumeMounts:
+        - mountPath: /run/docker
+          name: dockers
+        - mountPath: /run/containerd
+          name: containerds
+        - mountPath: /sysinfo
+          name: sysinfo
+        - mountPath: /hostvar
+          name: hostvar
+        - mountPath: /tmp
+          name: hosttmp
+      dnsPolicy: ClusterFirst
+      priorityClassName: system-node-critical
+      restartPolicy: Always
+      runtimeClassName: nvidia
+      schedulerName: default-scheduler
+      securityContext: {}
+      serviceAccount: volcano-device-plugin
+      serviceAccountName: volcano-device-plugin
+      terminationGracePeriodSeconds: 30
+      tolerations:
+      - key: CriticalAddonsOnly
+        operator: Exists
+      - effect: NoSchedule
+        key: volcano.sh/gpu-memory
+        operator: Exists
+      volumes:
+      - configMap:
+          defaultMode: 420
+          name: volcano-vgpu-node-config
+        name: deviceconfig
+      - hostPath:
+          path: /var/lib/kubelet/device-plugins
+          type: Directory
+        name: device-plugin
+      - hostPath:
+          path: /usr/local/vgpu
+          type: DirectoryOrCreate
+        name: lib
+      - hostPath:
+          path: /tmp
+          type: DirectoryOrCreate
+        name: hosttmp
+      - hostPath:
+          path: /run/docker
+          type: DirectoryOrCreate
+        name: dockers
+      - hostPath:
+          path: /run/containerd
+          type: DirectoryOrCreate
+        name: containerds
+      - hostPath:
+          path: /usr/bin
+          type: Directory
+        name: usrbin
+      - hostPath:
+          path: /sys
+          type: Directory
+        name: sysinfo
+      - hostPath:
+          path: /var
+          type: Directory
+        name: hostvar
+  updateStrategy:
+    rollingUpdate:
+      maxSurge: 0
+      maxUnavailable: 1
+    type: RollingUpdate
+status:
+  currentNumberScheduled: 1
+  desiredNumberScheduled: 1
+  numberAvailable: 1
+  numberMisscheduled: 0
+  numberReady: 1
+  observedGeneration: 5
+  updatedNumberScheduled: 1
