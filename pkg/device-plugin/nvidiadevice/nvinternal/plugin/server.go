@@ -234,8 +234,18 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 	return plugin.rm.Devices()
 }
 
-// Start starts the gRPC server, registers the device plugin with the Kubelet,
-// and starts the device healthchecks.
+// BuildFallbackMigConfig - fallback to non-MIG mode
+func (plugin *NvidiaDevicePlugin) buildFallbackMigConfig(deviceNumbers int) {
+	plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
+	configSlice := nvidia.MigConfigSpecSlice{}
+	for i := 0; i < deviceNumbers; i++ {
+		conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
+		configSlice = append(configSlice, conf)
+	}
+	plugin.migCurrent.MigConfigs["current"] = configSlice
+}
+
+// Start starts the gRPC server, registers the device plugin with the Kubelet,and starts the device healthchecks.
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
 
@@ -264,63 +274,63 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		return err
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
-	// Prepare the lock file sub directory.Due to the sequence of startup processes, both the device plugin
-	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
-	err = CreateMigApplyLockDir()
-	if err != nil {
-		klog.Fatalf("CreateMIGLockSubDir failed:%v", err)
-	}
 
-	// If the temporary lock file still exists, it may be a leftover from the last incomplete mig  application process.
-	// Delete the temporary lock file to make sure vgpu monitor can start.
-	err = RemoveMigApplyLock()
-	if err != nil {
-		klog.Fatalf("RemoveMigApplyLock failed:%v", err)
-	}
-
-	var deviceSupportMig bool
-	for _, name := range deviceNames {
-		deviceSupportMig = false
-		for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
-			if containsModel(name, migTemplate.Models) {
-				deviceSupportMig = true
+	migApplied := false
+	if plugin.operatingMode == "mig" {
+		deviceSupportMig := true
+		for _, name := range deviceNames {
+			supported := false
+			for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
+				if containsModel(name, migTemplate.Models) {
+					supported = true
+					break
+				}
+			}
+			if !supported {
+				deviceSupportMig = false
 				break
 			}
 		}
-		if !deviceSupportMig {
-			break
-		}
-	}
-	if deviceSupportMig {
-		cmd := exec.Command("nvidia-mig-parted", "export")
-		var stdout, stderr bytes.Buffer
-		cmd.Stdout = &stdout
-		cmd.Stderr = &stderr
-		err := cmd.Run()
-		if err != nil {
-			klog.Fatalf("nvidia-mig-parted failed with %s\n", err)
-		}
-		outStr := stdout.Bytes()
-		yaml.Unmarshal(outStr, &plugin.migCurrent)
-		os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
-		if plugin.operatingMode == "mig" {
-			HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+
+		if deviceSupportMig {
+			err = CreateMigApplyLockDir()
 			if err != nil {
-				klog.Infof("no device in node:%v", err)
+				klog.Fatalf("CreateMIGLockSubDir failed: %v", err)
 			}
-			plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-			klog.Infoln("Open Mig export", plugin.migCurrent)
-		} else {
-			plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-			configSlice := nvidia.MigConfigSpecSlice{}
-			for i := 0; i < deviceNumbers; i++ {
-				conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-				configSlice = append(configSlice, conf)
+			err = RemoveMigApplyLock()
+			if err != nil {
+				klog.Fatalf("RemoveMigApplyLock failed: %v", err)
 			}
-			plugin.migCurrent.MigConfigs["current"] = configSlice
-			klog.Infoln("Close Mig export", plugin.migCurrent)
+
+			cmd := exec.Command("nvidia-mig-parted", "export")
+			var stdout, stderr bytes.Buffer
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+			err := cmd.Run()
+			if err != nil {
+				klog.Errorf("nvidia-mig-parted failed: %v (stderr: %s)", err, stderr.String())
+				klog.Warning("Falling back to non‑MIG configuration")
+			} else {
+				outStr := stdout.Bytes()
+				yaml.Unmarshal(outStr, &plugin.migCurrent)
+				os.WriteFile("/tmp/migconfig.yaml", outStr, os.ModePerm)
+
+				HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+				if err != nil {
+					klog.Infof("no device in node: %v", err)
+				} else {
+					plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+					migApplied = true
+				}
+			}
 		}
 	}
+
+	if !migApplied {
+		plugin.buildFallbackMigConfig(deviceNumbers)
+		klog.Infoln("Using non‑MIG configuration")
+	}
+
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
 		if err != nil {
@@ -332,7 +342,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
 
-	if deviceSupportMig {
+	if migApplied {
 		plugin.ApplyMigTemplate()
 	}
 
