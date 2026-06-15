@@ -1,0 +1,102 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vllm-cross-vgpu-cache
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 60Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vllm-cross-vgpu
+  labels:
+    app: vllm-cross-vgpu
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: vllm-cross-vgpu
+  template:
+    metadata:
+      labels:
+        app: vllm-cross-vgpu
+    spec:
+      schedulerName: default-scheduler
+      containers:
+        - name: vllm
+          image: vllm/vllm-openai:latest
+          command:
+            - /bin/sh
+            - -c
+          args:
+            - >
+              vllm serve Qwen/Qwen2.5-3B-Instruct
+              --host 0.0.0.0
+              --port 8000
+              --tensor-parallel-size 2
+              --max-model-len 32768
+              --max-num-batched-tokens 16384
+              --gpu-memory-utilization 0.95
+              --max-num-seqs 32
+              --block-size 16
+              --enable-prefix-caching
+              --disable-custom-all-reduce
+          env:
+            - name: VLLM_NO_USAGE_STATS
+              value: "1"
+            - name: DO_NOT_TRACK
+              value: "1"
+            # Add HUGGING_FACE_HUB_TOKEN for gated models such as Llama.
+          ports:
+            - containerPort: 8000
+          resources:
+            limits:
+              cpu: "8"
+              memory: 20Gi
+              nvidia.com/gpu: 2 # Use 2 HAMi vGPUs for tensor parallel workers
+              nvidia.com/gpumem-percentage: 30 # Each vGPU gets 30% GPU memory
+              nvidia.com/gpucores: 30 # Each vGPU gets 30% GPU cores
+            requests:
+              cpu: "2"
+              memory: 6Gi
+              nvidia.com/gpu: 2
+              nvidia.com/gpumem-percentage: 30
+              nvidia.com/gpucores: 30
+          volumeMounts:
+            - name: hf-cache
+              mountPath: /root/.cache/huggingface
+            - name: shm
+              mountPath: /dev/shm
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 180
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 8000
+            initialDelaySeconds: 180
+            periodSeconds: 5
+      volumes:
+        - name: hf-cache
+          persistentVolumeClaim:
+            claimName: vllm-cross-vgpu-cache
+        - name: shm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 2Gi
+      tolerations:
+        - key: nvidia.com/gpu
+          operator: Exists
+          effect: NoSchedule
+
+# Important for HAMi cross-vGPU tensor parallel deployments:
+# vLLM custom all-reduce uses CUDA IPC between worker processes.
+# HAMi vGPU virtualizes CUDA contexts, so CUDA IPC can fail during engine init.
+# Keep --disable-custom-all-reduce when --tensor-parallel-size is greater than 1.
