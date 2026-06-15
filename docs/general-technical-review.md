@@ -14,7 +14,7 @@
 ### Scope
 
 - **Roadmap and scope process:** Scope is defined through issues/PRs and maintainer review, with governance maintained in the HAMi community repo. The roadmap is maintained in GitHub issues (for example, per-version tracking such as https://github.com/Project-HAMi/HAMi/issues/1615). After each version is released, the next weekly community meeting discusses roadmap goals for upcoming releases in detail, and each goal is assigned an assignee on the issue. Community users can reply on those issues to add or request features.  
-  - Design docs: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md  
+  - Design docs: https://project-hami.io/docs/developers/hami-core-design  
   - Governance: https://github.com/Project-HAMi/community/blob/main/governance.md  
 - **Target personas:**  
   - **Platform engineers:** Deploy HAMi as middleware on Kubernetes 1.23+ clusters with NVIDIA driver 440+ support for straightforward integration into existing platform products. GPU management and isolation are a common product differentiator that HAMi supports end to end.  
@@ -36,22 +36,22 @@
 - **Interaction model:** Operators and workload owners interact with HAMi through Helm, Kubernetes Pod specs, component Services, and chart-driven scheduler/webhook settings.  
   - **Lifecycle:** Install, upgrade, and uninstall with Helm (see **Installation** below and the repository README quick start).  
   - **Workloads:** Request shared accelerators with Pod `requests`/`limits` plus HAMi annotations for slices, device selection, and scheduling policy.  
-  - **Observability:** Inspect cluster-wide device and scheduling overview via the HAMi scheduler metrics HTTP endpoint; query the device-plugin vGPU monitor interface for live NVIDIA per-pod usage (listen ports are Helm-configurable—defaults are documented in the README and `docs/config.md`).  
+  - **Observability:** Inspect cluster-wide device and scheduling overview via the HAMi scheduler metrics HTTP endpoint; query the device-plugin vGPU monitor interface for live NVIDIA per-pod usage (listen ports are Helm-configurable; defaults are documented in the README and the [configure page](https://project-hami.io/docs/userguide/configure)).  
 
 - **UX/UI:** The default experience is Kubernetes-native: `kubectl`, the Pod/Node APIs, and YAML/Helm values. For graphical administration and monitoring, deploy the optional **HAMi WebUI**; Grafana-oriented examples are documented separately.  
   - HAMi WebUI user guide: https://project-hami.io/docs/userguide/hami-webui-user-guide  
-  - Dashboard examples: https://github.com/Project-HAMi/HAMi/blob/master/docs/dashboard.md  
+  - Dashboard examples: https://project-hami.io/docs/userguide/monitoring/device-allocation  
 
 - **Production integration:** HAMi is in-cluster middleware: teams must already run a supported Kubernetes cluster. In production it extends the control plane with a mutating admission webhook, scheduler extender integration (default `kube-scheduler` or the chart-managed scheduler), device plugins, and CDI-capable runtimes where applicable. Additional batch/AI scheduler ecosystems are documented or tracked as follows:  
-  - **Volcano:** Volcano-managed NVIDIA sharing via the Volcano vGPU device plugin (HAMi-core-based isolation)—see https://github.com/Project-HAMi/HAMi/blob/master/docs/how-to-use-volcano-vgpu.md  
-  - **Koordinator:** End-to-end GPU sharing with HAMi—see https://koordinator.sh/docs/user-manuals/device-scheduling-gpu-share-with-hami  
-  - **KAI Scheduler:** GPU sharing isolation design and implementation are still evolving—see https://github.com/kai-scheduler/KAI-Scheduler/pull/60  
+  - **Volcano:** Volcano-managed NVIDIA sharing via the Volcano vGPU device plugin (HAMi-core-based isolation); see https://project-hami.io/docs/installation/how-to-use-volcano-vgpu  
+  - **Koordinator:** End-to-end GPU sharing with HAMi; see https://koordinator.sh/docs/user-manuals/device-scheduling-gpu-share-with-hami  
+  - **KAI Scheduler:** GPU sharing isolation design and implementation are still evolving; see https://github.com/kai-scheduler/KAI-Scheduler/pull/60  
 
 ### Design
 
 #### Design principles
 
-The following principles guide HAMi's architecture and feature trade-offs (see also the in-repo [design overview](https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md)):
+The following principles guide HAMi's architecture and feature trade-offs (see also the [design overview](https://project-hami.io/docs/developers/hami-core-design)):
 
 1. **Kubernetes-native control paths**  
    - Accelerators are requested, scheduled, and allocated through standard Kubernetes surfaces: Pod specs, the scheduler extender protocol, the device plugin gRPC API, and admission webhooks.  
@@ -67,7 +67,7 @@ The following principles guide HAMi's architecture and feature trade-offs (see a
    - Placement uses filter/score semantics on the scheduler extender so administrators can steer binpack, spread, topology awareness, and vendor-specific constraints consistently.  
    - Decisions are recorded on Pods (via annotations), which enables scenario-specific scheduling behavior for different workload classes.
 5. **Hard isolation on shared accelerators**  
-   - Where the stack supports it, memory and compute caps are enforced inside containers—not only at admission time—so tenants cannot exceed declared slices on shared devices.
+   - Where the stack supports it, memory and compute caps are enforced inside containers, not only at admission time, so tenants cannot exceed declared slices on shared devices.
 6. **Clear separation of responsibilities**  
    - Mutating admission validates and normalizes requests; the extender selects nodes; device plugins allocate and mount; in-container libraries enforce limits.  
    - Each stage has a narrow contract, and intermediate state is written to Pod/Node annotations, which helps operators localize issues quickly.
@@ -90,7 +90,7 @@ Engineering and community practices that keep HAMi maintainable and safe to run 
 #### Architecture requirements
 
 Core components include MutatingWebhook, Scheduler Extender, Device Plugins, and in-container control libraries.  
-- Architecture and flow: https://github.com/Project-HAMi/HAMi/blob/master/docs/develop/design.md
+- Architecture and flow: https://project-hami.io/docs/developers/hami-core-design
 
 #### Environment differences
 
@@ -151,7 +151,7 @@ HAMi has no mandatory external database. Storage use is mainly image layers, log
 #### Release process
 
 Semantic versioning, tagged releases, release branches, automated image/chart/release-note workflows, with documented manual verification steps.  
-- Release process doc: https://github.com/Project-HAMi/HAMi/blob/master/docs/release-process.md
+- Release process doc: https://github.com/Project-HAMi/HAMi/blob/master/.github/release-process.md
 
 ### Installation
 
