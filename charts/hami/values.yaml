@@ -57,6 +57,9 @@ kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 #Vastai Parameters
 vastaiResourceName: "vastaitech.com/va"
 
+#Biren Parameters
+birenResourceName: "birentech.com/gpu"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -471,6 +474,10 @@ devices:
     enabled: true
     customresources:
       - vastaitech.com/va
+  biren:
+    enabled: true
+    customresources:
+      - birentech.com/gpu
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1

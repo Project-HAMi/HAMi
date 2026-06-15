@@ -286,6 +286,8 @@ data:
       resourceCountName: "amd.com/gpu"
     vastai:
       resourceCountName: {{ .Values.vastaiResourceName }}
+    biren:
+      resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
       configs:
