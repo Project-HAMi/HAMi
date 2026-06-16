@@ -36,7 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
-func Test_DefaultResourceNum(t *testing.T) {
+func TestResourceQuantityAsInt64(t *testing.T) {
 	v := *resource.NewQuantity(1, resource.BinarySI)
 	vv, ok := v.AsInt64()
 	assert.Equal(t, ok, true)
