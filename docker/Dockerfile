@@ -12,11 +12,11 @@ RUN cd /k8s-vgpu && make all VERSION=$VERSION
 RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM $NVIDIA_IMAGE AS nvbuild
+RUN dnf install -y cmake git && dnf clean all
 COPY ./libvgpu /libvgpu
 COPY .git/modules/libvgpu /libvgpu-git
 RUN rm -rf /libvgpu/.git && echo "gitdir: /libvgpu-git" > /libvgpu/.git
 WORKDIR /libvgpu
-RUN dnf install -y cmake git && dnf clean all
 RUN rm -rf /libvgpu/build
 RUN bash ./build.sh
 

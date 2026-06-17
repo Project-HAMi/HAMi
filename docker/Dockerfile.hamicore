@@ -1,11 +1,11 @@
 ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
 
 FROM $NVIDIA_IMAGE AS nvbuild
+RUN dnf install -y cmake git && dnf clean all
 COPY ./libvgpu /libvgpu
 COPY .git/modules/libvgpu /libvgpu-git
 RUN rm -rf /libvgpu/.git && echo "gitdir: /libvgpu-git" > /libvgpu/.git
 WORKDIR /libvgpu
-RUN dnf install -y cmake git && dnf clean all
 RUN rm -rf /libvgpu/build
 RUN bash ./build.sh
 
