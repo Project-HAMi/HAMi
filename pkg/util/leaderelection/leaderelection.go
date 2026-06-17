@@ -113,8 +113,6 @@ func (m *leaderManager) onAdd(obj any) {
 
 	m.leaseLock.Lock()
 	m.setObservedRecord(lease)
-	// Determine callback while holding the lock, then release before invoking
-	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
 	var callback func()
 	if m.isHolderOf(lease) {
 		callback = m.callbacks.OnStartedLeading
@@ -139,8 +137,6 @@ func (m *leaderManager) onUpdate(oldObj, newObj any) {
 
 	m.leaseLock.Lock()
 	m.setObservedRecord(newLease)
-	// Determine callback while holding the lock, then release before invoking
-	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
 	var callback func()
 	if !m.isHolderOf(oldLease) && m.isHolderOf(newLease) {
 		callback = m.callbacks.OnStartedLeading
@@ -157,8 +153,6 @@ func (m *leaderManager) onUpdate(oldObj, newObj any) {
 func (m *leaderManager) onDelete(obj any) {
 	m.leaseLock.Lock()
 	m.setObservedRecord(nil)
-	// Determine callback while holding the lock, then release before invoking
-	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
 	callback := m.callbacks.OnStoppedLeading
 	m.leaseLock.Unlock()
 
