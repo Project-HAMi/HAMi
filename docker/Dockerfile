@@ -1,5 +1,5 @@
 ARG GOLANG_IMAGE=golang:1.26.2-bookworm
-ARG NVIDIA_IMAGE=nvidia/cuda:12.9.1-cudnn-devel-ubuntu20.04
+ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
 
 FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
@@ -16,8 +16,8 @@ COPY ./libvgpu /libvgpu
 COPY .git/modules/libvgpu /libvgpu-git
 RUN rm -rf /libvgpu/.git && echo "gitdir: /libvgpu-git" > /libvgpu/.git
 WORKDIR /libvgpu
-ENV DEBIAN_FRONTEND=noninteractive
-RUN apt-get -y update; apt-get -y --no-install-recommends install cmake git && rm -rf /var/lib/apt/lists/*
+RUN dnf install -y cmake git && dnf clean all
+RUN rm -rf /libvgpu/build
 RUN bash ./build.sh
 
 FROM nvidia/cuda:13.3.0-base-ubuntu22.04
