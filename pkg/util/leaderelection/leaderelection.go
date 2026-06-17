@@ -112,12 +112,17 @@ func (m *leaderManager) onAdd(obj any) {
 	}
 
 	m.leaseLock.Lock()
-	defer m.leaseLock.Unlock()
-
 	m.setObservedRecord(lease)
-	// Notify if we are the leader from the very begging
-	if m.isHolderOf(lease) && m.callbacks.OnStartedLeading != nil {
-		m.callbacks.OnStartedLeading()
+	// Determine callback while holding the lock, then release before invoking
+	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
+	var callback func()
+	if m.isHolderOf(lease) {
+		callback = m.callbacks.OnStartedLeading
+	}
+	m.leaseLock.Unlock()
+
+	if callback != nil {
+		callback()
 	}
 }
 
@@ -133,29 +138,32 @@ func (m *leaderManager) onUpdate(oldObj, newObj any) {
 	}
 
 	m.leaseLock.Lock()
-	defer m.leaseLock.Unlock()
 	m.setObservedRecord(newLease)
-
-	// Notify if we have been elected to become the leader
+	// Determine callback while holding the lock, then release before invoking
+	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
+	var callback func()
 	if !m.isHolderOf(oldLease) && m.isHolderOf(newLease) {
-		if m.callbacks.OnStartedLeading != nil {
-			m.callbacks.OnStartedLeading()
-		}
+		callback = m.callbacks.OnStartedLeading
 	} else if m.isHolderOf(oldLease) && !m.isHolderOf(newLease) {
-		if m.callbacks.OnStoppedLeading != nil {
-			m.callbacks.OnStoppedLeading()
-		}
+		callback = m.callbacks.OnStoppedLeading
+	}
+	m.leaseLock.Unlock()
+
+	if callback != nil {
+		callback()
 	}
 }
 
 func (m *leaderManager) onDelete(obj any) {
-	// Do nothing on delete
 	m.leaseLock.Lock()
-	defer m.leaseLock.Unlock()
-
 	m.setObservedRecord(nil)
-	if m.callbacks.OnStoppedLeading != nil {
-		m.callbacks.OnStoppedLeading()
+	// Determine callback while holding the lock, then release before invoking
+	// to avoid AB-BA deadlock with callers that hold an external lock and call IsLeader().
+	callback := m.callbacks.OnStoppedLeading
+	m.leaseLock.Unlock()
+
+	if callback != nil {
+		callback()
 	}
 }
 
