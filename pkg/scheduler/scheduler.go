@@ -100,7 +100,10 @@ func NewScheduler() *Scheduler {
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
 			OnStartedLeading: func() {
-				s.leaderNotify <- struct{}{}
+				select {
+				case s.leaderNotify <- struct{}{}:
+				default:
+				}
 			},
 			OnStoppedLeading: func() {
 				s.lock.Lock()
