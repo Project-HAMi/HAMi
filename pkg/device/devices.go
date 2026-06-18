@@ -506,7 +506,14 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
+		_, timestampStr, found := strings.Cut(handshake, "_")
+		if !found {
+			return true, false
+		}
+		formertime, err := time.ParseInLocation(time.DateTime, timestampStr, time.Local)
+		if err != nil {
+			return true, false
+		}
 		if time.Now().Before(formertime.Add(time.Second * 60)) {
 			return true, false
 		}
