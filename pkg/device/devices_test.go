@@ -1390,6 +1390,32 @@ func TestCheckUUID(t *testing.T) {
 			id:   "1abc",
 			want: true,
 		},
+		{
+			name: "both GPUUseUUID and GPUNoUseUUID set, device in use list but also in nouse list",
+			annos: map[string]string{
+				GPUUseUUID:   "abc,123",
+				GPUNoUseUUID: "abc",
+			},
+			id:   "abc",
+			want: false,
+		},
+		{
+			name: "both GPUUseUUID and GPUNoUseUUID set, device in use list and not in nouse list",
+			annos: map[string]string{
+				GPUUseUUID:   "abc,123",
+				GPUNoUseUUID: "456",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "use list with spaces around uuids, device matches after trim",
+			annos: map[string]string{
+				GPUUseUUID: " abc , 123 ",
+			},
+			id:   "abc",
+			want: true,
+		},
 	}
 
 	for _, test := range tests {
