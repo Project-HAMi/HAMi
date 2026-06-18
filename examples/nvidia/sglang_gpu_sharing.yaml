@@ -1,0 +1,83 @@
+# Serve an LLM with SGLang on a HAMi-virtualized (shared) NVIDIA GPU.
+#
+# This mirrors the spirit of vllm_cross_vgpu.yaml but for the SGLang engine,
+# and focuses on GPU *sharing*: the pod is fenced to a fraction of one physical
+# GPU via HAMi's device memory (`nvidia.com/gpumem`) and compute-core
+# (`nvidia.com/gpucores`) limits. Because it only asks for a slice, other
+# workloads (another SGLang/vLLM server, batch jobs, etc.) can be scheduled
+# onto the SAME physical card at the same time.
+#
+# Inside the pod, `nvidia-smi` will report the *capped* memory total (here
+# 12000 MiB), not the full card — that is HAMi software vGPU sharing in action
+# (no hardware MIG required, so it works on any NVIDIA GPU, e.g. A10/A100/H100).
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: sglang-qwen
+  labels:
+    app: sglang-qwen
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: sglang-qwen
+  template:
+    metadata:
+      labels:
+        app: sglang-qwen
+    spec:
+      containers:
+        - name: sglang
+          image: lmsysorg/sglang:latest
+          command:
+            - python3
+            - -m
+            - sglang.launch_server
+            - --model-path=Qwen/Qwen3-1.7B   # pulled from Hugging Face by default
+            - --host=0.0.0.0
+            - --port=30000
+            - --mem-fraction-static=0.7       # fraction of the HAMi-granted slice
+            - --context-length=8192
+            - --attention-backend=triton
+          # To load the model from ModelScope instead of Hugging Face, set:
+          #   env:
+          #     - name: SGLANG_USE_MODELSCOPE
+          #       value: "true"
+          ports:
+            - containerPort: 30000
+          resources:
+            limits:
+              nvidia.com/gpu: 1            # request 1 (virtual) GPU
+              nvidia.com/gpumem: 12000     # hard cap: 12000 MiB of GPU memory in the pod
+              nvidia.com/gpucores: 30      # cap: 30% of the GPU's compute cores
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 30000
+            initialDelaySeconds: 30
+            periodSeconds: 10
+            timeoutSeconds: 5
+            failureThreshold: 60            # model load + CUDA graph capture can take minutes
+          volumeMounts:
+            - name: dshm
+              mountPath: /dev/shm
+      volumes:
+        # SGLang needs a larger /dev/shm than the container default.
+        - name: dshm
+          emptyDir:
+            medium: Memory
+            sizeLimit: 4Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: sglang-qwen
+spec:
+  selector:
+    app: sglang-qwen
+  ports:
+    - protocol: TCP
+      port: 8000          # OpenAI-compatible API: POST /v1/chat/completions
+      targetPort: 30000
+      name: sglang
+  type: ClusterIP
