@@ -542,3 +542,15 @@ func TestContainerDeviceDeepCopy(t *testing.T) {
 	_, exists := original.CustomInfo["key2"]
 	assert.False(t, exists, "original CustomInfo should not have key2")
 }
+
+func TestTakeAndDeletePodIsAtomic(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p", Namespace: "ns"}}
+	pm.AddPod(pod, "node-1", PodDevices{})
+	pi1, ok1 := pm.TakeAndDeletePod(pod)
+	pi2, ok2 := pm.TakeAndDeletePod(pod)
+	assert.True(t, ok1)
+	assert.NotNil(t, pi1)
+	assert.False(t, ok2)
+	assert.Nil(t, pi2)
+}

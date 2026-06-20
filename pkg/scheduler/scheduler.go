@@ -145,11 +145,9 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
-		pi, ok := s.podManager.GetPod(pod)
-		if ok {
+		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
-		s.podManager.DelPod(pod)
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -157,7 +155,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
-	podDev, _ := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+	podDev, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+	if err != nil {
+		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
+		return
+	}
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
@@ -191,10 +193,8 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
-	pi, ok := s.podManager.GetPod(pod)
-	if ok {
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
-		s.podManager.DelPod(pod)
 	}
 }
 
@@ -658,6 +658,12 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 	return podUsageStat, nil
 }
 
+func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
+	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
+		s.quotaManager.RmUsage(pod, pi.Devices)
+	}
+}
+
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
@@ -670,6 +676,13 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
+		s.cleanupStalePodAllocation(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID:       args.PodUID,
+				Name:      args.PodName,
+				Namespace: args.PodNamespace,
+			},
+		})
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
 
@@ -679,6 +692,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
+		s.cleanupStalePodAllocation(current)
 		res = &extenderv1.ExtenderBindingResult{Error: err.Error()}
 		return res, nil
 	}
@@ -760,7 +774,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-	s.podManager.DelPod(args.Pod)
+	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
+		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+	}
 	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
@@ -800,12 +816,17 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	if s.podManager.AddPod(args.Pod, m.NodeID, m.Devices) {
+	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
+	if added {
 		s.quotaManager.AddUsage(args.Pod, m.Devices)
 	}
+
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		if added {
+			s.quotaManager.RmUsage(args.Pod, m.Devices)
+		}
 		s.podManager.DelPod(args.Pod)
 		return nil, err
 	}

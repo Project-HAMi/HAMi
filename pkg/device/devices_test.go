@@ -293,6 +293,13 @@ func Test_DecodePodDevices(t *testing.T) {
 	}
 }
 
+func TestDecodePodDevices_BadAnnotation(t *testing.T) {
+	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
+	annos := map[string]string{"hami.io/vgpu-devices-to-allocate": "uuid,type,100:;"}
+	_, err := DecodePodDevices(checklist, annos)
+	assert.Assert(t, err != nil)
+}
+
 func TestMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		dlist []*DeviceInfo
@@ -461,8 +468,8 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				di  []*DeviceInfo
 				err error
 			}{
-				di:  []*DeviceInfo{},
-				err: errors.New("node annotations not decode successfully"),
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
 			},
 		},
 		{
@@ -509,6 +516,105 @@ func Test_DecodeNodeDevices(t *testing.T) {
 					},
 				},
 				err: nil,
+			},
+		},
+		{
+			name: "malformed segment without comma",
+			args: "garbage:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`malformed node annotation segment: "garbage"`),
+			},
+		},
+		{
+			name: "invalid count field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,notanint,7680,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid count field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid memory field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,notanint,100,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid memory field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid core field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,notanint,NVIDIA-Tesla P4,0,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid core field: strconv.ParseInt: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid numa field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,notanint,true:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid numa field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "invalid health field",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,notabool:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid health field: strconv.ParseBool: parsing "notabool": invalid syntax`),
+			},
+		},
+		{
+			name: "unexpected field count",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 5 in node annotation"),
+			},
+		},
+		{
+			name: "invalid index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,notanint,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New(`invalid index field: strconv.Atoi: parsing "notanint": invalid syntax`),
+			},
+		},
+		{
+			name: "negative index field in new format",
+			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,-1,hami-core:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("index field must not be negative: -1"),
 			},
 		},
 	}
@@ -579,8 +685,9 @@ func Test_CheckHealth(t *testing.T) {
 	tests := []struct {
 		name string
 		args struct {
-			devType string
-			n       corev1.Node
+			devType           string
+			resourceCountName string
+			n                 corev1.Node
 		}
 		want1 bool
 		want2 bool
@@ -588,8 +695,9 @@ func Test_CheckHealth(t *testing.T) {
 		{
 			name: "Requesting state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -606,8 +714,9 @@ func Test_CheckHealth(t *testing.T) {
 		{
 			name: "Deleted state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -622,10 +731,78 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
+			// Inside the 60-second deletedCooldown window — keep the conservative
+			// path; the scheduler should not yet re-add the node to its cache.
+			// The far-future timestamp (year 2128) ensures the cooldown has not
+			// elapsed regardless of when the test runs.
+			name: "Deleted state within cooldown",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2128-12-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Stale Deleted_ — the recovery path is taken but util.GetNode
+			// fails outside a real cluster, so the function falls back to
+			// (true, false). Behaviour matches the existing "Unknown state"
+			// case which exercises the same util.GetNode failure path.
+			name: "Deleted state stale",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2024-01-02 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			// Unparsable timestamp must keep the conservative (true, false)
+			// path — never recover from a malformed value.
+			name: "Deleted state with unparsable timestamp",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_not-a-timestamp",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
 			name: "Unknown state",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
 				devType: "huawei.com/Ascend910",
 				n: corev1.Node{
@@ -640,12 +817,16 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Requesting state expired",
+			// Expired Requesting_ and no Allocatable resources: the device-plugin
+			// is truly gone, so NodeCleanUp should be triggered → (false, false).
+			name: "Requesting state expired, no allocatable",
 			args: struct {
-				devType string
-				n       corev1.Node
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
 			}{
-				devType: "huawei.com/Ascend910",
+				devType:           "huawei.com/Ascend910",
+				resourceCountName: "huawei.com/Ascend910",
 				n: corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
@@ -657,10 +838,38 @@ func Test_CheckHealth(t *testing.T) {
 			want1: false,
 			want2: false,
 		},
+		{
+			// Expired Requesting_ but Allocatable still has the resource: the
+			// device-plugin gRPC stream is alive. Handshake is refreshed and the
+			// node stays healthy → (true, false).
+			name: "Requesting state expired, allocatable present",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType:           "huawei.com/Ascend910",
+				resourceCountName: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_2024-01-02 00:00:00",
+						},
+					},
+					Status: corev1.NodeStatus{
+						Allocatable: corev1.ResourceList{
+							"huawei.com/Ascend910": resource.MustParse("8"),
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			result1, result2 := CheckHealth(test.args.devType, &test.args.n)
+			result1, result2 := CheckHealth(test.args.devType, test.args.resourceCountName, &test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
 		})

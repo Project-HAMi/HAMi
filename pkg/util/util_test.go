@@ -642,3 +642,47 @@ func Test_IsPodTerminating(t *testing.T) {
 		})
 	}
 }
+
+func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
+	tests := []struct {
+		name          string
+		defaultPolicy string
+		pod           *corev1.Pod
+		want          string
+	}{
+		{"nil pod", "binpack", nil, "binpack"},
+		{"no annotation", "binpack", &corev1.Pod{}, "binpack"},
+		{"other annotations", "binpack", &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{"other-annotation": "value"},
+			},
+		}, "binpack"},
+		{"with annotation", "binpack", &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: "spread"},
+			},
+		}, "spread"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, GetGPUSchedulerPolicyByPod(tt.defaultPolicy, tt.pod))
+		})
+	}
+}
+
+func TestSchedulerPolicyName_String(t *testing.T) {
+	tests := []struct {
+		policy SchedulerPolicyName
+		want   string
+	}{
+		{NodeSchedulerPolicyBinpack, "binpack"},
+		{NodeSchedulerPolicySpread, "spread"},
+		{GPUSchedulerPolicyTopology, "topology-aware"},
+		{SchedulerPolicyName("custom"), "custom"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.want, func(t *testing.T) {
+			assert.Equal(t, tt.want, tt.policy.String())
+		})
+	}
+}

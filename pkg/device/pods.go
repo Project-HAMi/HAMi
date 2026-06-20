@@ -119,6 +119,18 @@ func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	return pi, ok
 }
 
+func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, ok := m.pods[pod.UID]
+	if ok {
+		delete(m.pods, pod.UID)
+		klog.InfoS("Pod taken and deleted", "pod", klog.KRef(pod.Namespace, pod.Name), "nodeID", pi.NodeID)
+	}
+	return pi, ok
+}
+
 func (m *PodManager) ListPodsUID() ([]*corev1.Pod, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()

@@ -56,7 +56,7 @@ Monitor will mmap control file into address space instead of reading it in each 
 **Core Utilization Oversubscribe and priority-base scheduling**
 Currently we have two priority, 0 for high and 1 for low. The core utilization of high priority task won't be limited to resourceCores unless sharing GPU node with other high priority tasks.
 The core utilization of low priority task won't be limited to resourceCores if no other tasks sharing its GPU.
-See example.yaml for more details
+See examples/nvidia/example.yaml for more details
 
 **Add Container Core Utilization policy**
 See details in docs/config.md(docs/config_cn.md)

@@ -48,8 +48,13 @@ func GetNode(nodename string) (*corev1.Node, error) {
 		return nil, fmt.Errorf("nodename is empty")
 	}
 
+	c := client.GetClient()
+	if c == nil {
+		return nil, fmt.Errorf("kubernetes client is not initialized")
+	}
+
 	klog.V(5).InfoS("Fetching node", "nodeName", nodename)
-	n, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
+	n, err := c.CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
 	if err != nil {
 		switch {
 		case apierrors.IsNotFound(err):

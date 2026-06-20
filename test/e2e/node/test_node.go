@@ -25,15 +25,20 @@ import (
 	"github.com/onsi/ginkgo/v2"
 	"github.com/onsi/gomega"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes"
 
 	"github.com/Project-HAMi/HAMi/test/utils"
 )
 
 var _ = ginkgo.Describe("[Node] Node E2E Tests", ginkgo.Ordered, func() {
-	var clientSet = utils.GetClientSet()
-	var nodeName string
+	var (
+		clientSet *kubernetes.Clientset
+		nodeName  string
+	)
 
 	ginkgo.BeforeAll(func() {
+		clientSet = utils.GetClientSet()
+
 		// Get all nodes in the cluster
 		nodes, err := utils.GetNodes(clientSet)
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())

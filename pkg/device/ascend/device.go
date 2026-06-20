@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ type Devices struct {
 	useUUIDAnno      string
 	noUseUUIDAnno    string
 	handshakeAnno    string
+	hamiVnpuCore     bool
 }
 
 type RuntimeInfo struct {
@@ -78,12 +80,12 @@ func (dev *Devices) trimMemory(m int64) (int64, string) {
 	return 0, ""
 }
 
-func InitDevices(config []VNPUConfig) []*Devices {
+func InitDevices(vnpus VNPUs) []*Devices {
 	var devs []*Devices
 	if !enableAscend {
 		return devs
 	}
-	for _, vnpu := range config {
+	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
 			config:           vnpu,
@@ -91,6 +93,7 @@ func InitDevices(config []VNPUConfig) []*Devices {
 			useUUIDAnno:      fmt.Sprintf("hami.io/use-%s-uuid", commonWord),
 			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
+			hamiVnpuCore:     vnpus.HamiVnpuCore,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -182,7 +185,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			}
 		}
 	}
-	if count.Value() > 1 {
+	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU nor supported for multiple devices")
 		}
@@ -298,7 +301,7 @@ func (dev *Devices) checkType(annos map[string]string, d device.DeviceUsage, n d
 }
 
 func (dev *Devices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
-	return device.CheckHealth(devType, n)
+	return device.CheckHealth(devType, dev.GetResourceNames().ResourceCountName, n)
 }
 
 func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
@@ -442,11 +445,14 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	// Verify whether the Node supports hami vnpu core
-	nodeSupportHamiCore := false
+	// Verify whether the Node supports hami vnpu core.
+	// Global hamiVnpuCore config acts as the default; node-level annotation takes higher priority.
+	nodeSupportHamiCore := npu.hamiVnpuCore
 
 	if nodeInfo != nil && nodeInfo.Node != nil && nodeInfo.Node.Annotations != nil {
-		nodeSupportHamiCore = nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation] == "true"
+		if val, ok := nodeInfo.Node.Annotations[VNPUNodeSelectorAnnotation]; ok {
+			nodeSupportHamiCore = val == "true"
+		}
 	}
 
 	var totalMemPerCard int32 = 0
@@ -472,8 +478,8 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
 		needTopology = true
 	}
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, v := range slices.Backward(devices) {
+		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)

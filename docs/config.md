@@ -58,6 +58,7 @@ kubectl -n kube-system edit cm hami-device-plugin
   * `uuid`: UUIDs of devices to ignore
   * `index`: Indexes of devices to ignore.
   * A device is ignored by HAMi if it's in `uuid` or `index` list.
+* `enablegetpreferredallocation`: Indicates whether GetPreferredAllocation is enabled.
 
 ## Chart Configs: parameters
 

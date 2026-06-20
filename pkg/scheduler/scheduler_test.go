@@ -32,10 +32,13 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -1447,6 +1450,37 @@ func Test_ListNodes_Concurrent(t *testing.T) {
 	<-done
 }
 
+func Test_Filter_EvictsStaleEntry(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-s2", Name: "stale", Namespace: "ns-evict"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpumem": *resource.NewQuantity(500, resource.BinarySI),
+			}},
+		}}},
+	}
+	devs := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{{device.ContainerDevice{Usedmem: 500, Usedcores: 10}}},
+	}
+	s.podManager.AddPod(pod, "node1", devs)
+	s.quotaManager.AddUsage(pod, devs)
+	s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{}})
+	_, inCache := s.podManager.GetPod(pod)
+	assert.Equal(t, false, inCache)
+	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
+		assert.Equal(t, int64(0), v.Used)
+	}
+}
+
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
@@ -1493,4 +1527,121 @@ func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 
 	_, ok = s.podManager.GetPod(terminatedPod)
 	assert.Equal(t, false, ok, "Pod should be removed from cache after reaching a terminal phase (Succeeded/Failed)")
+}
+
+func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
+	device.SupportDevices["TEST"] = "hami.io/test-allocated"
+	s := NewScheduler()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "bad-anno-uid",
+			Name:      "bad-anno-pod",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "node1",
+				"hami.io/test-allocated":     "uuid,type,100:;",
+			},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	s.onAddPod(pod)
+	_, ok := s.podManager.GetPod(pod)
+	assert.Equal(t, false, ok)
+}
+
+func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
+	t.Parallel()
+
+	podUID := types.UID("test-uid-1")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       podUID,
+		},
+	}
+
+	s := NewScheduler()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	s.podManager.AddPod(pod, "node1", nil)
+
+	podsBefore, _ := s.podManager.ListPodsUID()
+	require.Len(t, podsBefore, 1)
+	require.Equal(t, podUID, podsBefore[0].UID)
+
+	args := extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       podUID,
+		Node:         "node1",
+	}
+	_, err := s.Bind(args)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not found")
+
+	podsAfter, _ := s.podManager.ListPodsUID()
+	require.Len(t, podsAfter, 0)
+}
+
+func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
+	t.Parallel()
+
+	podUID := types.UID("test-uid-2")
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-nodefail",
+			Namespace: "default",
+			UID:       podUID,
+		},
+	}
+
+	s := NewScheduler()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
+
+	fakeClient := fake.NewSimpleClientset()
+	s.kubeClient = fakeClient
+
+	_, err := fakeClient.CoreV1().Pods(pod.Namespace).Create(
+		context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour*1)
+
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	s.podManager.AddPod(pod, "non-existent-node", nil)
+
+	podsBefore, _ := s.podManager.ListPodsUID()
+	require.Len(t, podsBefore, 1)
+	require.Equal(t, podUID, podsBefore[0].UID)
+
+	args := extenderv1.ExtenderBindingArgs{
+		PodName:      pod.Name,
+		PodNamespace: pod.Namespace,
+		PodUID:       podUID,
+		Node:         "non-existent-node",
+	}
+	res, err := s.Bind(args)
+
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "not found")
+
+	podsAfter, _ := s.podManager.ListPodsUID()
+	require.Len(t, podsAfter, 0)
 }

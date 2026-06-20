@@ -142,11 +142,12 @@ type FilterDevice struct {
 type DevicePluginConfigs struct {
 	Nodeconfig []struct {
 		// These configs is shared and will overwrite those in NvidiaConfig.
-		NodeDefaultConfig `json:",inline"`
-		Name              string        `json:"name"`
-		OperatingMode     string        `json:"operatingmode"`
-		Migstrategy       string        `json:"migstrategy"`
-		FilterDevice      *FilterDevice `json:"filterdevices"`
+		NodeDefaultConfig            `json:",inline"`
+		Name                         string        `json:"name"`
+		OperatingMode                string        `json:"operatingmode"`
+		Migstrategy                  string        `json:"migstrategy"`
+		FilterDevice                 *FilterDevice `json:"filterdevices"`
+		EnableGetPreferredAllocation bool          `json:"enablegetpreferredallocation"`
 	} `json:"nodeconfig"`
 }
 
@@ -231,7 +232,7 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	reported := dev.ReportedGPUNum[n.Name]
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
-	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, n)
+	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, dev.config.ResourceCountName, n)
 
 	if current == 0 {
 		if reported == 0 {

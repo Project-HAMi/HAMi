@@ -1,4 +1,4 @@
-# request 1 vgcu device
+# request 1g DRS profile
 apiVersion: v1
 kind: Pod
 metadata:
@@ -16,9 +16,11 @@ spec:
         - '100000'
       resources:
         limits:
-          enflame.com/vgcu: 1
+          enflame.com/drs-gcu: 1
+        requests:
+          enflame.com/drs-gcu: 1
 ---
-# request 22% vgcu devices
+# request 3g DRS profile
 apiVersion: v1
 kind: Pod
 metadata:
@@ -36,5 +38,30 @@ spec:
         - '100000'
       resources:
         limits:
-          enflame.com/vgcu: 1
-          enflame.com/vgcu-percentage: 22 # The GCU is divided into N portions, each as a percentage tier, and the requested percentage is rounded up to the nearest tier.
+          enflame.com/drs-gcu: 3
+        requests:
+          enflame.com/drs-gcu: 3
+---
+# request by memory/core, HAMi converts to DRS profile automatically
+apiVersion: v1
+kind: Pod
+metadata:
+  name: drs-pod-by-spec
+  namespace: kube-system
+spec:
+  terminationGracePeriodSeconds: 0
+  containers:
+    - name: pod-gcu-example1
+      image: ubuntu:18.04
+      imagePullPolicy: IfNotPresent
+      command:
+        - sleep
+      args:
+        - '100000'
+      resources:
+        limits:
+          enflame.com/gcu-memory: 20480
+          enflame.com/gcu-core: 40
+        requests:
+          enflame.com/gcu-memory: 20480
+          enflame.com/gcu-core: 40

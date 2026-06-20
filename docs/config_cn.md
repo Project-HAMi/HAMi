@@ -60,6 +60,7 @@ kubectl -n <namespace> edit cm hami-device-plugin
   * `uuid`: 所要排除设备的 UUID。
   * `index`: 所要排除设备的索引。
   * 一个设备只要在 `uuid` 或者 `index` 列表中，就不会被 HAMi 管理。
+* `enablegetpreferredallocation`: 是否开启 GetPreferredAllocation。
 
 ## Chart 参数
 

@@ -19,6 +19,7 @@ package awsneuron
 import (
 	"flag"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -393,8 +394,8 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		}
 		return true, tmpDevs, ""
 	}
-	for i := len(devices) - 1; i >= 0; i-- {
-		dev := devices[i]
+	for i, v := range slices.Backward(devices) {
+		dev := v
 		_, ok := dev.CustomInfo[AWSUsageInfo]
 		if !ok {
 			dev.CustomInfo[AWSUsageInfo] = int(dev.Usedcores)

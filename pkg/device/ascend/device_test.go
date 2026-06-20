@@ -151,7 +151,7 @@ func Test_InitDevices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			enableAscend = test.enableAscend
-			devices := InitDevices(test.args)
+			devices := InitDevices(VNPUs{Configs: test.args})
 			assert.Equal(t, len(devices), len(test.want), "Expected length of result to match want")
 			if enableAscend {
 				for k, v := range devices {
@@ -1382,7 +1382,7 @@ func TestDevices_Fit(t *testing.T) {
 		t.Fatalf("failed to unmarshal config: %v", err)
 	}
 	enableAscend = true
-	devs := InitDevices(config)
+	devs := InitDevices(VNPUs{Configs: config})
 
 	tests := []struct {
 		name           string
@@ -1907,7 +1907,7 @@ func TestDevices_Fit_910C(t *testing.T) {
 		t.Fatalf("failed to unmarshal config: %v", err)
 	}
 	enableAscend = true
-	devs := InitDevices(config)
+	devs := InitDevices(VNPUs{Configs: config})
 
 	tests := []struct {
 		name       string

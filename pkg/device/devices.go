@@ -18,7 +18,6 @@ package device
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -26,7 +25,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ccoveille/go-safecast"
+	"github.com/ccoveille/go-safecast/v2"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -240,52 +239,65 @@ func GetDevices() map[string]Devices {
 
 func DecodeNodeDevices(str string) ([]*DeviceInfo, error) {
 	if !strings.Contains(str, OneContainerMultiDeviceSplitSymbol) {
-		return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+		return nil, fmt.Errorf("node annotation missing device separator")
 	}
 	tmp := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
 	var retval []*DeviceInfo
 	for _, val := range tmp {
-		if strings.Contains(val, ",") {
-			items := strings.Split(val, ",")
-			if len(items) == 7 || len(items) == 9 {
-				count, _ := strconv.ParseInt(items[1], 10, 32)
-				devmem, _ := strconv.ParseInt(items[2], 10, 32)
-				devcore, _ := strconv.ParseInt(items[3], 10, 32)
-				health, _ := strconv.ParseBool(items[6])
-				numa, _ := strconv.Atoi(items[5])
-				mode := "hami-core"
-				index := 0
-				if len(items) == 9 {
-					index, _ = strconv.Atoi(items[7])
-					mode = items[8]
-				}
-				count32, err := safecast.Convert[int32](count)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				devmem32, err := safecast.Convert[int32](devmem)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				devcore32, err := safecast.Convert[int32](devcore)
-				if err != nil {
-					return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
-				}
-				i := DeviceInfo{
-					ID:      items[0],
-					Count:   count32,
-					Devmem:  devmem32,
-					Devcore: devcore32,
-					Type:    items[4],
-					Numa:    numa,
-					Health:  health,
-					Mode:    mode,
-					Index:   uint(index),
-				}
-				retval = append(retval, &i)
-			} else {
-				return []*DeviceInfo{}, errors.New("node annotations not decode successfully")
+		if val == "" {
+			continue
+		}
+		if !strings.Contains(val, ",") {
+			return nil, fmt.Errorf("malformed node annotation segment: %q", val)
+		}
+		items := strings.Split(val, ",")
+		if len(items) == 7 || len(items) == 9 {
+			count, err := strconv.ParseInt(items[1], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid count field: %w", err)
 			}
+			devmem, err := strconv.ParseInt(items[2], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid memory field: %w", err)
+			}
+			devcore, err := strconv.ParseInt(items[3], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid core field: %w", err)
+			}
+			health, err := strconv.ParseBool(items[6])
+			if err != nil {
+				return nil, fmt.Errorf("invalid health field: %w", err)
+			}
+			numa, err := strconv.Atoi(items[5])
+			if err != nil {
+				return nil, fmt.Errorf("invalid numa field: %w", err)
+			}
+			mode := "hami-core"
+			index := 0
+			if len(items) == 9 {
+				index, err = strconv.Atoi(items[7])
+				if err != nil {
+					return nil, fmt.Errorf("invalid index field: %w", err)
+				}
+				if index < 0 {
+					return nil, fmt.Errorf("index field must not be negative: %d", index)
+				}
+				mode = items[8]
+			}
+			i := DeviceInfo{
+				ID:      items[0],
+				Count:   int32(count),
+				Devmem:  int32(devmem),
+				Devcore: int32(devcore),
+				Type:    items[4],
+				Numa:    numa,
+				Health:  health,
+				Mode:    mode,
+				Index:   uint(index),
+			}
+			retval = append(retval, &i)
+		} else {
+			return nil, fmt.Errorf("unexpected field count %d in node annotation", len(items))
 		}
 	}
 	return retval, nil
@@ -411,16 +423,21 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	klog.V(5).Infof("Start to decode container device %s", str)
 	for _, val := range cd {
 		if strings.Contains(val, ",") {
-			//fmt.Println("cd is ", val)
 			tmpstr := strings.Split(val, ",")
 			if len(tmpstr) < 4 {
-				return ContainerDevices{}, fmt.Errorf("pod annotation format error; information missing, please do not use nodeName field in task")
+				return nil, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
 			}
 			tmpdev.UUID = tmpstr[0]
 			tmpdev.Type = tmpstr[1]
-			devmem, _ := strconv.ParseInt(tmpstr[2], 10, 32)
+			devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid memory field: %w", err)
+			}
 			tmpdev.Usedmem = int32(devmem)
-			devcores, _ := strconv.ParseInt(tmpstr[3], 10, 32)
+			devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid core field: %w", err)
+			}
 			tmpdev.Usedcores = int32(devcores)
 			contdev = append(contdev, tmpdev)
 		}
@@ -444,7 +461,7 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 		for s := range strings.SplitSeq(str, OnePodMultiContainerSplitSymbol) {
 			cd, err := DecodeContainerDevices(s)
 			if err != nil {
-				return PodDevices{}, nil
+				return PodDevices{}, err
 			}
 			// IMPORTANT: Do NOT skip empty ContainerDevices!
 			// We must preserve the index mapping between annotation entries and pod containers.
@@ -486,13 +503,63 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	return uuids
 }
 
-func CheckHealth(devType string, node *corev1.Node) (bool, bool) {
+func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.Parse(time.DateTime, strings.Split(handshake, "_")[1])
-		return time.Now().Before(formertime.Add(time.Second * 60)), false
+		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
+		if time.Now().Before(formertime.Add(time.Second * 60)) {
+			return true, false
+		}
+
+		qty := node.Status.Allocatable[corev1.ResourceName(resourceCountName)]
+		if qty.Value() > 0 {
+			klog.V(5).InfoS("Handshake expired but Allocatable still present, skipping NodeCleanUp", "nodeName", node.Name, "resource", resourceCountName)
+			return true, false
+		}
+		return false, false
 	} else if strings.Contains(handshake, "Deleted") {
-		return true, false
+		// Mirror the timestamp logic used by the Requesting branch: a
+		// Deleted_<ts> older than 60s on a node whose devices are otherwise
+		// reporting healthy means the previous cleanup is stale and the
+		// scheduler should bring the node back into its cache. Stamp
+		// Requesting_<now> and return (true, true) so the caller re-adds
+		// node devices on the next reconcile.
+		//
+		// Bare "Deleted" without a timestamp (used in some unit tests) and
+		// any unparsable timestamp must keep the conservative (true, false)
+		// path so we never recover from a malformed value.
+		annoKey, ok := util.HandshakeAnnos[devType]
+		if !ok {
+			return true, false
+		}
+		parts := strings.SplitN(handshake, "_", 2)
+		if len(parts) < 2 {
+			return true, false
+		}
+		formerTime, err := time.ParseInLocation(time.DateTime, parts[1], time.Local)
+		if err != nil {
+			return true, false
+		}
+		now := time.Now()
+		if now.Before(formerTime.Add(time.Second * 60)) {
+			return true, false
+		}
+		newHandshake := "Requesting_" + now.Format(time.DateTime)
+		tmppat := map[string]string{annoKey: newHandshake}
+		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", annoKey, "annotationValue", newHandshake)
+		// Mirror the empty-annotation branch: GetNode also acts as a guard
+		// for an empty node.Name and an uninitialised client (PatchNodeAnnotations
+		// panics in unit tests without it). Worth a follow-up to dedupe with
+		// the else branch into a helper.
+		n, err := util.GetNode(node.Name)
+		if err != nil {
+			klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
+			return true, false
+		}
+		if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
+			klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
+		}
+		return true, true
 	} else {
 		_, ok := util.HandshakeAnnos[devType]
 		if ok {

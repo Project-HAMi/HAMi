@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"time"
 
@@ -33,14 +34,31 @@ import (
 var kubeConfig string
 
 func init() {
-	flag.StringVar(&kubeConfig, "kubeconfig", defaultKubeConfigPath(), "Path to the kubeConfig file")
+	flag.StringVar(&kubeConfig, "kubeconfig", "", "Path to the kubeConfig file")
 }
 
-func defaultKubeConfigPath() string {
-	configPath := os.Getenv("KUBE_CONF")
-	if configPath == "" {
-		klog.Fatalf("Environment variable KUBE_CONF is not set or empty. Please set it to a valid kubeconfig file path.")
+// resolveKubeConfigPath picks kubeconfig in order: --kubeconfig flag, KUBE_CONF, ~/.kube/config.
+func resolveKubeConfigPath() string {
+	if kubeConfig != "" {
+		return validateKubeConfigPath(kubeConfig)
 	}
+	if configPath := os.Getenv("KUBE_CONF"); configPath != "" {
+		kubeConfig = validateKubeConfigPath(configPath)
+		return kubeConfig
+	}
+	home, err := os.UserHomeDir()
+	if err == nil {
+		defaultPath := filepath.Join(home, ".kube", "config")
+		if _, err := os.Stat(defaultPath); err == nil {
+			kubeConfig = defaultPath
+			return kubeConfig
+		}
+	}
+	klog.Fatalf("kubeconfig not set: pass --kubeconfig, set KUBE_CONF, or place config at ~/.kube/config")
+	return ""
+}
+
+func validateKubeConfigPath(configPath string) string {
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
 		klog.Fatalf("Kubeconfig file does not exist at path: %s", configPath)
 	}
@@ -48,19 +66,11 @@ func defaultKubeConfigPath() string {
 }
 
 func DefaultKubeConfigPath() string {
-	configPath := os.Getenv("KUBE_CONF")
-	if configPath == "" {
-		klog.Fatalf("Environment variable KUBE_CONF is not set or empty. Please set it to a valid kubeconfig file path.")
-	}
-
-	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		klog.Fatalf("lalala Kubeconfig file does not exist at path: %s, error is %s", configPath, err)
-	}
-	return configPath
+	return resolveKubeConfigPath()
 }
 
 func GetClientSet() *kubernetes.Clientset {
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfig)
+	config, err := clientcmd.BuildConfigFromFlags("", resolveKubeConfigPath())
 	if err != nil {
 		klog.Fatalf("Failed to load kubeConfig: %v", err)
 	}
