@@ -11,7 +11,7 @@ RUN bash ./build.sh
 
 FROM nvidia/cuda:13.3.0-base-ubuntu22.04
 RUN apt-get update && \
-    apt-mark hold cuda-toolkit-config-common cuda-toolkit-12-config-common && \
+    apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
