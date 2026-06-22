@@ -667,20 +667,22 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 }
 
 func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
-	userUUID, ok := annos[useKey]
-	if ok {
-		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, id)
+	match := func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(u string) bool {
+			return strings.TrimSpace(u) == id
+		})
 	}
-
-	noUserUUID, ok := annos[noUseKey]
-	if ok {
+	if userUUID, ok := annos[useKey]; ok {
+		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
+		if !match(userUUID) {
+			return false
+		}
+	}
+	if noUserUUID, ok := annos[noUseKey]; ok {
 		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, id)
+		if match(noUserUUID) {
+			return false
+		}
 	}
 	return true
 }
