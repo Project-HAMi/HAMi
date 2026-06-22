@@ -712,6 +712,44 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
+			name: "Requesting state without timestamp",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Requesting state with unparsable timestamp",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_not-a-timestamp",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
 			name: "Deleted state",
 			args: struct {
 				devType           string
