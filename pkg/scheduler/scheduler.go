@@ -520,7 +520,14 @@ func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 
 // InspectAllNodesUsage is used by metrics monitor.
 func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
-	return &s.overviewstatus
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+
+	snapshot := make(map[string]*NodeUsage, len(s.overviewstatus))
+	for nodeID, usage := range s.overviewstatus {
+		snapshot[nodeID] = usage.DeepCopy()
+	}
+	return &snapshot
 }
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
