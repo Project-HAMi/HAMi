@@ -70,8 +70,6 @@ type Scheduler struct {
 	nodeLister  listerscorev1.NodeLister
 	quotaLister listerscorev1.ResourceQuotaLister
 	leaseLister coordinationv1.LeaseLister
-	//Node status returned by filter
-	cachedstatus map[string]*NodeUsage
 	//Node Overview
 	overviewstatus map[string]*NodeUsage
 	eventRecorder  record.EventRecorder
@@ -84,12 +82,12 @@ type Scheduler struct {
 func NewScheduler() *Scheduler {
 	klog.InfoS("Initializing HAMi scheduler")
 	s := &Scheduler{
-		stopCh:       make(chan struct{}),
-		cachedstatus: make(map[string]*NodeUsage),
-		nodeNotify:   make(chan struct{}, 1),
-		leaderNotify: make(chan struct{}, 1),
-		started:      0,
-		synced:       false,
+		stopCh:         make(chan struct{}),
+		overviewstatus: make(map[string]*NodeUsage),
+		nodeNotify:     make(chan struct{}, 1),
+		leaderNotify:   make(chan struct{}, 1),
+		started:        0,
+		synced:         false,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -231,7 +229,7 @@ func (s *Scheduler) onDelNode(obj any) {
 	s.cleanupNodeUsage(nodeName)
 }
 
-// cleanupNodeUsage removes the node from overviewstatus and cachedstatus maps
+// cleanupNodeUsage removes the node from overviewstatus maps
 // to ensure metrics no longer report data for deleted nodes.
 func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 	s.lock.Lock()
@@ -239,10 +237,6 @@ func (s *Scheduler) cleanupNodeUsage(nodeID string) {
 	if _, ok := s.overviewstatus[nodeID]; ok {
 		delete(s.overviewstatus, nodeID)
 		klog.V(4).InfoS("Removed node from overviewstatus", "node", nodeID)
-	}
-	if _, ok := s.cachedstatus[nodeID]; ok {
-		delete(s.cachedstatus, nodeID)
-		klog.V(4).InfoS("Removed node from cachedstatus", "node", nodeID)
 	}
 }
 
@@ -438,11 +432,12 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			}
 		}
 	}
-	_, _, err = s.getNodesUsage(&nodeNames, nil)
+	_, overallnodeMap, _, err := s.getNodesUsage(&nodeNames, nil)
 	if err != nil {
 		klog.ErrorS(err, "Failed to get node usage", "nodeNames", nodeNames)
 		return
 	}
+	s.overviewstatus = *overallnodeMap
 
 	// Set synced to true only after getNodeUsage() succeeds
 	s.synced = true
@@ -532,13 +527,13 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
-func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, map[string]string, error) {
+func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
 	allNodes, err := s.ListNodes()
 	if err != nil {
-		return &overallnodeMap, failedNodes, err
+		return &overallnodeMap, &overallnodeMap, failedNodes, err
 	}
 
 	for _, node := range allNodes {
@@ -622,7 +617,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		klog.V(5).Infof("usage: pod %v assigned %v %v", p.Name, p.NodeID, p.Devices)
 	}
-	s.overviewstatus = overallnodeMap
 	for _, nodeID := range *nodes {
 		node, err := s.GetNode(nodeID)
 		if err != nil {
@@ -633,8 +627,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		cachenodeMap[node.ID] = overallnodeMap[node.ID]
 	}
-	s.cachedstatus = cachenodeMap
-	return &cachenodeMap, failedNodes, nil
+	return &cachenodeMap, &overallnodeMap, failedNodes, nil
 }
 
 func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
@@ -767,7 +760,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
-	nodeUsage, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
+	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
