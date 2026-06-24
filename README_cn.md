@@ -165,6 +165,17 @@ HAMi 还提供：
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
 
+## 生态系统集成
+
+| 项目 | 集成说明 |
+| --- | --- |
+| [vLLM](https://github.com/vllm-project/vllm) | 以 GPU 显存上限运行推理服务器，让多个模型共享同一 GPU |
+| [Volcano](https://volcano.sh/) | 为 GPU 工作负载提供 Gang 调度和基于队列的批量调度 |
+| [Kueue](https://kueue.sigs.k8s.io/) | 通过 ResourceTransformation 将 HAMi 资源暴露给 Kueue，实现批量作业排队 |
+| [Prometheus](https://prometheus.io/) | HAMi 上报每个容器的 GPU 指标，包括显存用量和利用率 |
+| [Grafana](https://grafana.com/) | 提供预构建仪表盘，用于可视化 HAMi GPU 指标 |
+| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | 当 HAMi 负责调度、GPU Operator 负责驱动管理时，两者可共存 |
+
 ## 路线图、治理与贡献
 
 HAMi 由[维护者](./MAINTAINERS.md)和[贡献者](./AUTHORS.md)共同治理。治理规则详见 [HAMi 社区仓库](https://github.com/Project-HAMi/community/blob/main/governance.md)。
