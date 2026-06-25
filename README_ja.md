@@ -165,6 +165,17 @@ HAMi は他にも以下を提供します：
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
 
+## エコシステム連携
+
+| プロジェクト | 連携内容 |
+| --- | --- |
+| [vLLM](https://github.com/vllm-project/vllm) | GPU メモリ上限付きで推論サーバーを実行し、複数モデルで 1 枚の GPU を共有 |
+| [Volcano](https://volcano.sh/) | GPU ワークロード向けのギャングスケジューリングおよびキューベースのバッチスケジューリング |
+| [Kueue](https://kueue.sigs.k8s.io/) | ResourceTransformation を通じて HAMi リソースを Kueue に公開し、バッチジョブのキューイングを実現 |
+| [Prometheus](https://prometheus.io/) | HAMi はコンテナごとの GPU メトリクス（メモリ使用量・利用率）を公開 |
+| [Grafana](https://grafana.com/) | HAMi GPU メトリクスを可視化するための事前構築済みダッシュボードを提供 |
+| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | HAMi がスケジューリング、GPU Operator がドライバー管理を担う構成で共存可能 |
+
 ## ロードマップ、ガバナンス、コントリビューション
 
 HAMi は[メンテナー](./MAINTAINERS.md)と[コントリビューター](./AUTHORS.md)によって管理されています。ガバナンスについては、[HAMi コミュニティリポジトリ](https://github.com/Project-HAMi/community/blob/main/governance.md)を参照してください。
