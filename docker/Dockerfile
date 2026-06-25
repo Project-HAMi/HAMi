@@ -1,7 +1,6 @@
 ARG GOLANG_IMAGE=golang:1.26.2-bookworm
 ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
 
-FROM $GOLANG_IMAGE AS build
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
 ARG VERSION
