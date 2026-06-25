@@ -6,9 +6,9 @@ The following table outlines which versions of HAMi receive security updates:
 
 | Version | Supported          |
 |---------|--------------------|
-| 2.5.x   | ✅ Security fixes |
-| 2.4.x   | ✅ Security fixes |
-| before 2.4.0   | ❌ No longer supported |
+| 2.9.x   | ✅ Security fixes |
+| 2.8.x   | ✅ Security fixes |
+| before 2.8.0   | ❌ No longer supported |
 
 ## Reporting a Vulnerability
 
