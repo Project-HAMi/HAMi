@@ -106,7 +106,7 @@ So, in `Binpack` policy we can select `Node1`.
 
 #### Spread
 
-Spread mainly considers node resource usage. The less it is used, the higher the score.
+Spread mainly considers node resource usage. The less it is used, the lower the score. Spread selects the node with the lowest score.
 
 ```
 score: ((request + used) / allocatable) * 10 
@@ -149,7 +149,7 @@ So, in `Binpack` policy we can select `GPU2`.
 
 #### Spread
 
-Spread mainly focuses on the computing power and video memory usage of each card. The less it is used, the higher the score.
+Spread mainly focuses on the computing power and video memory usage of each card. The less it is used, the lower the score. Spread selects the GPU with the lowest score.
 ```
 score: ((request.core + used.core) / allocatable.core + (request.mem + used.mem) / allocatable.mem)) * 10
 ```
