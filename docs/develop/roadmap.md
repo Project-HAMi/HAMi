@@ -1,5 +1,5 @@
 # roadmap
-| Production | Manufactor    | Type             | MemoryIsolation | CoreIsolation | MultiCard support |
+| Production | Manufacturer  | Type             | MemoryIsolation | CoreIsolation | MultiCard support |
 |------------|---------------|------------------|-----------------|---------------|-------------------|
 | GPU        | NVIDIA        | All              | ✅              | ✅            | ✅                |
 | MLU        | Cambricon     | 370, 590         | ✅              | ✅            | ❌                |
@@ -16,7 +16,7 @@
 
 
 - [ ] Support video codec processing
-- [ ] Support Multi-Instance GPUs (MIG)
+- [x] Support Multi-Instance GPUs (MIG)
 - [ ] Support Flexible scheduling policies
   - [x] binpack
   - [x] spread
@@ -25,5 +25,5 @@
 - [ ] Rich observability support
 - [ ] DRA Support
 - [ ] Support Intel GPU device
-- [ ] Support AMD GPU device
+- [x] Support AMD GPU device
 - [x] Support Enflame GCU device
