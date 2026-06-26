@@ -198,6 +198,15 @@ func TestAddUsageAndRmUsage(t *testing.T) {
 	if (*qm.Quotas[ns])[coreName].Used != 0 {
 		t.Errorf("RmUsage: expected Used core 0, got %d", (*qm.Quotas[ns])[coreName].Used)
 	}
+
+	// remove more than tracked: Used must not go below zero
+	qm.RmUsage(pod, podDev)
+	if (*qm.Quotas[ns])[memName].Used < 0 {
+		t.Errorf("RmUsage: Used memory went negative: %d", (*qm.Quotas[ns])[memName].Used)
+	}
+	if (*qm.Quotas[ns])[coreName].Used < 0 {
+		t.Errorf("RmUsage: Used core went negative: %d", (*qm.Quotas[ns])[coreName].Used)
+	}
 }
 
 func TestIsManagedQuota(t *testing.T) {
