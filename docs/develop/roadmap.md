@@ -9,7 +9,7 @@
 | GPU        | iluvatar      | All              | ✅              | ✅            | ❌                |
 | DPU        | Teco          | Checking         | In progress     | In progress   | ❌                |
 | GPU        | Moore Threads | MTT S4000        | ✅              | ✅            | ❌                |
-| GPU        | Birentech     | Model 110        | In progress     | In progress   | ❌                |
+| GPU        | Birentech     | Biren166M        | ✅              | ✅            | ❌                |
 | GPU        | MetaX         | MXC500           | ✅              | ✅            | ❌                |
 | XPU        | Kunlunxin     | P800             | ✅              | ✅            | ❌                |
 | GPU        | Vastai        | VA16             | ✅              | ✅            | ❌              |      
