@@ -388,7 +388,7 @@ func Test_PodAllocationTrySuccess(t *testing.T) {
 	lockName := "test-lock"
 
 	// Call the function under test
-	podAllocationTrySuccess(nodeName, devName, lockName, pod)
+	PodAllocationTrySuccess(nodeName, devName, lockName, pod)
 
 	// Refresh the pod state from the fake clientset and check the annotations
 	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
@@ -461,8 +461,8 @@ func Test_PodAllocationFailed(t *testing.T) {
 	nodeName := "test-node"
 	lockName := "test-lock"
 
-	// simulate a failed pod allocation
-	podAllocationFailed(nodeName, pod, lockName)
+	// simulate a failed pods
+	PodAllocationFailed(nodeName, pod, lockName)
 
 	// retrieve the pod from the fake client
 	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
