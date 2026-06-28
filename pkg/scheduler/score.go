@@ -35,8 +35,9 @@ import (
 // containerResourceSummary holds both the GPU count and total memory
 // for a group of containers, so we can compare them on both dimensions.
 type containerResourceSummary struct {
-	nums   int
-	memreq int32
+	nums     int
+	memreq   int32
+	coresreq int32
 }
 
 func viewStatus(usage NodeUsage) {
@@ -117,13 +118,16 @@ func podInitContainerMaxRequest(resourceReqs device.PodDeviceRequests, numInitCo
 	for i := range numInitContainers {
 		var nums int
 		var mem int32
+		var cores int32
 		for _, k := range resourceReqs[i] {
 			nums += int(k.Nums)
 			mem += k.Memreq
+			cores += k.Coresreq
 		}
 		if nums > maxReq.nums || (nums == maxReq.nums && mem > maxReq.memreq) {
 			maxReq.nums = nums
 			maxReq.memreq = mem
+			maxReq.coresreq = cores
 		}
 	}
 	return maxReq
@@ -148,7 +152,7 @@ func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitC
 // but no single device has enough memory/cores.
 func (node *NodeUsage) canFitInitContainer(maxInitReq containerResourceSummary) bool {
 	if node == nil {
-		return true // No node means no constraints
+		return false // nil node cannot satisfy any request
 	}
 
 	for _, deviceList := range node.Devices.DeviceLists {
@@ -161,7 +165,7 @@ func (node *NodeUsage) canFitInitContainer(maxInitReq containerResourceSummary) 
 		availableCores := device.Totalcore - device.Usedcores
 
 		// Check if this device individually satisfies init requirements
-		if availableMem >= maxInitReq.memreq && availableCores >= 0 {
+		if availableMem >= maxInitReq.memreq && availableCores >= maxInitReq.coresreq {
 			return true
 		}
 	}
@@ -200,9 +204,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			failedNodes[nodeID] = fmt.Sprintf(
 				"no single device has sufficient memory (%dMiB) for init container",
 				maxInitReq.memreq)
-			for reasonType := range map[string]bool{"InsufficientInitDeviceMemory": true} {
-				failureReason[reasonType] = append(failureReason[reasonType], nodeID)
-			}
+			failureReason["InsufficientInitDeviceMemory"] = append(failureReason["InsufficientInitDeviceMemory"], nodeID)
 			failedNodesMutex.Unlock()
 			klog.V(4).InfoS("Node filtered: insufficient per-device capacity for init container",
 				"pod", klog.KObj(task), "node", nodeID, "required_mem", maxInitReq.memreq)
@@ -224,9 +226,6 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			ctrfit := true
-			deviceType := ""
-
 			var appContainersNode *NodeUsage
 			if needsInitClone {
 				appContainersNode = node.DeepCopy()
@@ -234,68 +233,76 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				appContainersNode = node
 			}
 
+			ctrfit := true
 			for ctrid, n := range resourceReqs {
 				sums := 0
 				for _, k := range n {
 					sums += int(k.Nums)
 				}
 
+				// Capture the set of device types that existed BEFORE processing this container
+				existingBefore := make(map[string]bool)
+				for typ := range score.Devices {
+					existingBefore[typ] = true
+				}
+
+				// Skip device allocation for init containers if they don't need cloning.
 				if ctrid < numInitContainers && !needsInitClone {
-					if deviceType != "" {
-						score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
+					// Do nothing. Let it fall through to normalization.
+				} else if sums > 0 {
+					klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
+
+					var workingNode *NodeUsage
+					if needsInitClone && ctrid < numInitContainers {
+						workingNode = node.DeepCopy()
+					} else {
+						workingNode = appContainersNode
 					}
-					continue
-				}
 
-				if sums == 0 && deviceType != "" {
-					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
-					continue
-				}
-
-				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-
-				var workingNode *NodeUsage
-				if needsInitClone && ctrid < numInitContainers {
-					workingNode = node.DeepCopy()
-				} else {
-					workingNode = appContainersNode
-				}
-
-				fit, reason := fitInDevices(workingNode, n, task, nodeInfo, &score.Devices)
-
-				for idx := range score.Devices {
-					deviceType = idx
-					for len(score.Devices[idx]) <= ctrid {
-						emptyContainerDevices := device.ContainerDevices{}
-						emptyPodSingleDevice := device.PodSingleDevice{}
-						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
-						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+					fit, reason := fitInDevices(workingNode, n, task, nodeInfo, &score.Devices)
+					ctrfit = fit
+					if !fit {
+						klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+						failedNodesMutex.Lock()
+						failedNodes[nodeID] = common.NodeUnfitPod
+						for reasonType := range common.ParseReason(reason) {
+							failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+						}
+						failedNodesMutex.Unlock()
+						break
 					}
 				}
 
-				ctrfit = fit
-				if !fit {
-					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
-					failedNodesMutex.Lock()
-					failedNodes[nodeID] = common.NodeUnfitPod
-					for reasonType := range common.ParseReason(reason) {
-						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+				// NORMALIZATION: Ensure every device slice has exactly ctrid+1 entries,
+				// keeping previous allocations at their original indices.
+				for typ, devSlice := range score.Devices {
+					if len(devSlice) < ctrid+1 {
+						if !existingBefore[typ] {
+							// Brand new type for this container: allocation is at devSlice[0],
+							// shift it to index ctrid by prepending non‑nil empty slices.
+							pad := make(device.PodSingleDevice, 0, ctrid)
+							for i := 0; i < ctrid; i++ {
+								pad = append(pad, device.ContainerDevices{})
+							}
+							score.Devices[typ] = append(pad, devSlice...)
+						} else {
+							// Type existed before: just append empty (non‑nil) slices to reach the needed length.
+							for len(score.Devices[typ]) < ctrid+1 {
+								score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+							}
+						}
 					}
-					failedNodesMutex.Unlock()
-					break
 				}
 			}
 
-			// when needsInitClone=false, so the device plugin knows which devices to use
+			// When needsInitClone=false, copy the first app container's allocation
+			// into the init container slots so the device plugin knows which devices to use.
 			if numInitContainers > 0 && !needsInitClone {
 				for deviceType := range score.Devices {
 					containerList := score.Devices[deviceType]
-					// We need to fill empty init slots with app container allocations
-
 					if len(containerList) > numInitContainers {
 						firstAppAllocation := containerList[numInitContainers]
 
-						// Updated to modern Go range-over-int syntax
 						for initIdx := range numInitContainers {
 							if initIdx < len(containerList) {
 								containerList[initIdx] = firstAppAllocation
