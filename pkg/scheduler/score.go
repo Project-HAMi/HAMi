@@ -141,6 +141,7 @@ func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitC
 		for _, k := range resourceReqs[i] {
 			total.nums += int(k.Nums)
 			total.memreq += k.Memreq
+			total.coresreq += k.Coresreq
 		}
 	}
 	return total
@@ -195,19 +196,49 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	appReqTotal := podAppContainerTotalRequest(resourceReqs, numInitContainers)
 
 	needsInitClone := numInitContainers > 0 &&
-		(maxInitReq.nums > appReqTotal.nums || maxInitReq.memreq > appReqTotal.memreq)
+		(maxInitReq.nums > appReqTotal.nums ||
+			maxInitReq.memreq > appReqTotal.memreq ||
+			maxInitReq.coresreq > appReqTotal.coresreq)
 
 	for nodeID, node := range *nodes {
 		// Early exit: skip nodes that can't fit init containers on any single device
 		if numInitContainers > 0 && !node.canFitInitContainer(maxInitReq) {
 			failedNodesMutex.Lock()
-			failedNodes[nodeID] = fmt.Sprintf(
-				"no single device has sufficient memory (%dMiB) for init container",
-				maxInitReq.memreq)
-			failureReason["InsufficientInitDeviceMemory"] = append(failureReason["InsufficientInitDeviceMemory"], nodeID)
+			// FIXED: Check whether failure is due to memory or cores, and provide appropriate error message
+			var failureMsg string
+			var failureType string
+			hasDeviceWithEnoughMem := false
+			for _, deviceList := range node.Devices.DeviceLists {
+				device := deviceList.Device
+				if device == nil {
+					continue
+				}
+				availableMem := device.Totalmem - device.Usedmem
+				if availableMem >= maxInitReq.memreq {
+					hasDeviceWithEnoughMem = true
+					break
+				}
+			}
+
+			if hasDeviceWithEnoughMem {
+				// Failure is due to cores, not memory
+				failureMsg = fmt.Sprintf(
+					"no single device has sufficient cores (%d) for init container",
+					maxInitReq.coresreq)
+				failureType = "InsufficientInitDeviceCores"
+			} else {
+				// Failure is due to memory
+				failureMsg = fmt.Sprintf(
+					"no single device has sufficient memory (%dMiB) for init container",
+					maxInitReq.memreq)
+				failureType = "InsufficientInitDeviceMemory"
+			}
+
+			failedNodes[nodeID] = failureMsg
+			failureReason[failureType] = append(failureReason[failureType], nodeID)
 			failedNodesMutex.Unlock()
 			klog.V(4).InfoS("Node filtered: insufficient per-device capacity for init container",
-				"pod", klog.KObj(task), "node", nodeID, "required_mem", maxInitReq.memreq)
+				"pod", klog.KObj(task), "node", nodeID, "required_mem", maxInitReq.memreq, "required_cores", maxInitReq.coresreq)
 			continue
 		}
 		wg.Add(1)
@@ -281,7 +312,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 							// Brand new type for this container: allocation is at devSlice[0],
 							// shift it to index ctrid by prepending non‑nil empty slices.
 							pad := make(device.PodSingleDevice, 0, ctrid)
-							for i := 0; i < ctrid; i++ {
+							for range ctrid {
 								pad = append(pad, device.ContainerDevices{})
 							}
 							score.Devices[typ] = append(pad, devSlice...)
@@ -297,21 +328,27 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 
 			// When needsInitClone=false, copy the first app container's allocation
 			// into the init container slots so the device plugin knows which devices to use.
+			// FIXED: Aggregate all app container allocations instead of just copying the first app container
 			if numInitContainers > 0 && !needsInitClone {
 				for deviceType := range score.Devices {
 					containerList := score.Devices[deviceType]
 					if len(containerList) > numInitContainers {
-						firstAppAllocation := containerList[numInitContainers]
+						// Aggregate allocations from all app containers
+						aggregatedAllocation := device.ContainerDevices{}
+						for appIdx := numInitContainers; appIdx < len(containerList); appIdx++ {
+							aggregatedAllocation = append(aggregatedAllocation, containerList[appIdx]...)
+						}
 
+						// Copy aggregated allocation to all init container slots
 						for initIdx := range numInitContainers {
 							if initIdx < len(containerList) {
-								containerList[initIdx] = firstAppAllocation
+								containerList[initIdx] = aggregatedAllocation
 								klog.V(4).InfoS(
-									"Copied app container device allocation to init container slot",
+									"Copied aggregated app container device allocation to init container slot",
 									"pod", klog.KObj(task),
 									"init_idx", initIdx,
 									"device_type", deviceType,
-									"allocation", firstAppAllocation,
+									"allocation", aggregatedAllocation,
 								)
 							}
 						}
