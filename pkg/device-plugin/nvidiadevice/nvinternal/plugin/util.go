@@ -490,7 +490,7 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	return tmp
 }
 
-var podAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {
+var PodAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {
 	refreshed, err := client.GetClient().CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		klog.Errorf("Error getting pod %s/%s: %v", pod.Namespace, pod.Name, err)
@@ -523,7 +523,7 @@ func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockNa
 	}
 }
 
-var podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
+var PodAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
 	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
 }
