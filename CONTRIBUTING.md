@@ -137,6 +137,16 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 * Run and pass `make verify`
 
+## Issue and PR Lifecycle
+
+To keep the project manageable, we apply the following policy to all open issues and pull requests:
+
+- If a maintainer or contributor leaves a comment or review requesting a response, the author has **two weeks** to reply.
+- If there is no response within two weeks, the issue or PR will be closed.
+- Closing is not permanent. If the issue is still relevant or the PR is still needed, it can be reopened or submitted again at any time.
+
+This policy helps us keep the backlog focused and avoids letting stale work block active contributors.
+
 ## Code Review
 
 To make it easier for your PR to receive reviews, consider that reviewers will need you to:
