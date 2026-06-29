@@ -13,10 +13,11 @@ AMD ROCm GPUs, so multiple pods can share one Instinct GPU.
 
 ## 3. Approach
 
-**Why LD_AUDIT instead of LD_PRELOAD?** ROCm 7.x HIP's internal symbol
-resolution breaks under LD_PRELOAD due to recursive interception of HIP-internal
-calls. LD_AUDIT's `la_symbind64` intercepts only cross-library bindings, avoiding
-this. The existing NVIDIA LD_PRELOAD path is unchanged. 
+**Why LD_AUDIT instead of LD_PRELOAD?**
+In our prototype on ROCm 7.x, LD_PRELOAD broke HIP — interposing HIP symbols leads 
+to recursive re-entry through HIP-internal calls. 
+Switching to LD_AUDIT (`la_symbind64`), which intercepts only cross-library bindings, 
+resolved it. The existing NVIDIA LD_PRELOAD path is unchanged.
 
 **Advantages of CU masking, compared to hardware partitioning (CPX/NPS).**
 Masking (`ROC_GLOBAL_CU_MASK`) assigns an arbitrary and fine-grained per-pod CU partitioning at container start ([AMD Docs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html)). 
@@ -55,13 +56,13 @@ Registered under `hami.io/node-amd-register`, in JSON format — an array of `De
 
 The allocation result is written under the **AMD-specific** key (each vendor has its own):
 
-```
+```text
 hami.io/amd-devices-allocated: <UUID>,AMDGPU,<memMB>,<cuCount>:;
 ```
 
 Plus, an AMD-specific annotation carrying the CU bitmap:
 
-```
+```text
 hami.io/amd-cu-mask: <UUID>=<cu_mask_hex>:;
 ```
 
@@ -69,7 +70,7 @@ Exclusivity of CU bitmaps across pods on a device must be enforced
 under a node lock (`AMDDevices.LockNode` and `ReleaseNodeLock`) so multiple pods never receive overlapping masks.
 
 Optional handshake:
-```
+```text
 hami.io/amd-cu-mask-assigned: "false" -> "true"  (set by device-plugin)
 ```
 
