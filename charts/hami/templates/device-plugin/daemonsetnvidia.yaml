@@ -191,6 +191,10 @@ spec:
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 9394
+              protocol: TCP
           resources:
           {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:
