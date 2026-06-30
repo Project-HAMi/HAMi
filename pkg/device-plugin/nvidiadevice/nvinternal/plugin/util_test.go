@@ -461,7 +461,7 @@ func Test_PodAllocationFailed(t *testing.T) {
 	nodeName := "test-node"
 	lockName := "test-lock"
 
-	// simulate a failed pods
+	// simulate a failed pod allocation
 	PodAllocationFailed(nodeName, pod, lockName)
 
 	// retrieve the pod from the fake client
