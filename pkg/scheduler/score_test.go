@@ -2931,7 +2931,7 @@ func Test_calcScore(t *testing.T) {
 					NodeList: []*policy.NodeScore{},
 				},
 				failedNodes: map[string]string{
-					"node1": "no single device has sufficient memory (1000MiB) for init container",
+					"node1": "no single device has sufficient cores (30) for init container",
 				},
 				err: nil,
 			},

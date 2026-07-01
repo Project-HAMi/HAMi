@@ -201,13 +201,13 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			maxInitReq.coresreq > appReqTotal.coresreq)
 
 	for nodeID, node := range *nodes {
-		// Early exit: skip nodes that can't fit init containers on any single device
 		if numInitContainers > 0 && !node.canFitInitContainer(maxInitReq) {
 			failedNodesMutex.Lock()
-			// FIXED: Check whether failure is due to memory or cores, and provide appropriate error message
+
 			var failureMsg string
 			var failureType string
 			hasDeviceWithEnoughMem := false
+
 			for _, deviceList := range node.Devices.DeviceLists {
 				device := deviceList.Device
 				if device == nil {
@@ -241,6 +241,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				"pod", klog.KObj(task), "node", nodeID, "required_mem", maxInitReq.memreq, "required_cores", maxInitReq.coresreq)
 			continue
 		}
+
 		wg.Add(1)
 		go func(nodeID string, node *NodeUsage) {
 			defer wg.Done()
@@ -271,15 +272,12 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					sums += int(k.Nums)
 				}
 
-				// Capture the set of device types that existed BEFORE processing this container
 				existingBefore := make(map[string]bool)
 				for typ := range score.Devices {
 					existingBefore[typ] = true
 				}
 
-				// Skip device allocation for init containers if they don't need cloning.
 				if ctrid < numInitContainers && !needsInitClone {
-					// Do nothing. Let it fall through to normalization.
 				} else if sums > 0 {
 					klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 
@@ -304,8 +302,6 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					}
 				}
 
-				// NORMALIZATION: Ensure every device slice has exactly ctrid+1 entries,
-				// keeping previous allocations at their original indices.
 				for typ, devSlice := range score.Devices {
 					if len(devSlice) < ctrid+1 {
 						if !existingBefore[typ] {
@@ -326,31 +322,77 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 			}
 
-			// When needsInitClone=false, copy the first app container's allocation
-			// into the init container slots so the device plugin knows which devices to use.
-			// FIXED: Aggregate all app container allocations instead of just copying the first app container
 			if numInitContainers > 0 && !needsInitClone {
 				for deviceType := range score.Devices {
 					containerList := score.Devices[deviceType]
-					if len(containerList) > numInitContainers {
-						// Aggregate allocations from all app containers
-						aggregatedAllocation := device.ContainerDevices{}
-						for appIdx := numInitContainers; appIdx < len(containerList); appIdx++ {
-							aggregatedAllocation = append(aggregatedAllocation, containerList[appIdx]...)
+
+					if len(containerList) <= numInitContainers {
+						continue
+					}
+
+					for initIdx := range numInitContainers {
+						if initIdx >= len(resourceReqs) {
+							// Shouldn't happen, but safety check
+							continue
 						}
 
-						// Copy aggregated allocation to all init container slots
-						for initIdx := range numInitContainers {
-							if initIdx < len(containerList) {
-								containerList[initIdx] = aggregatedAllocation
-								klog.V(4).InfoS(
-									"Copied aggregated app container device allocation to init container slot",
-									"pod", klog.KObj(task),
-									"init_idx", initIdx,
-									"device_type", deviceType,
-									"allocation", aggregatedAllocation,
-								)
+						// ContainerDeviceRequests is map[string]ContainerDeviceRequest keyed
+						// by device type, so this is a direct lookup, not a search.
+						initDeviceReq, found := resourceReqs[initIdx][deviceType]
+						if !found {
+							containerList[initIdx] = device.ContainerDevices{}
+							continue
+						}
+
+						selectedAllocation := device.ContainerDevices{}
+						devicesNeeded := int(initDeviceReq.Nums)
+						memNeeded := initDeviceReq.Memreq
+						coresNeeded := initDeviceReq.Coresreq
+
+					outerLoop:
+						for appIdx := numInitContainers; appIdx < len(containerList); appIdx++ {
+							appAllocation := containerList[appIdx]
+
+							for deviceIdx := range appAllocation {
+								if devicesNeeded == 0 {
+									break outerLoop
+								}
+
+								dev := appAllocation[deviceIdx]
+
+								if dev.Usedmem >= memNeeded && dev.Usedcores >= coresNeeded {
+									selectedAllocation = append(selectedAllocation, dev)
+									devicesNeeded--
+								}
 							}
+						}
+
+						// Verify we found enough valid devices before assigning
+						if len(selectedAllocation) == int(initDeviceReq.Nums) {
+							containerList[initIdx] = selectedAllocation
+							klog.V(4).InfoS(
+								"Assigned validated app devices to init container",
+								"pod", klog.KObj(task),
+								"init_index", initIdx,
+								"device_type", deviceType,
+								"devices_assigned", len(selectedAllocation),
+								"required_mem", memNeeded,
+								"required_cores", coresNeeded,
+							)
+						} else {
+							klog.V(3).InfoS(
+								"ERROR: Insufficient validated devices for init container after canFitInitContainer passed",
+								"pod", klog.KObj(task),
+								"init_index", initIdx,
+								"device_type", deviceType,
+								"devices_needed", int(initDeviceReq.Nums),
+								"devices_found", len(selectedAllocation),
+								"required_mem", memNeeded,
+								"required_cores", coresNeeded,
+							)
+							// Still assign what we found (partial allocation)
+							// The device plugin will handle the error downstream
+							containerList[initIdx] = selectedAllocation
 						}
 					}
 				}
