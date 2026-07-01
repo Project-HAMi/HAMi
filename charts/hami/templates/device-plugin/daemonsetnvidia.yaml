@@ -40,7 +40,7 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
-      hostPID: {{ .Values.devicePlugin.hostPID | default true }}
+      hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
