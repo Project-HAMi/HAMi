@@ -77,8 +77,9 @@ A JSON value avoids inventing a delimiter scheme (and the :/; collision with
 The device-plugin translates each entry into the per-GPU `ROC_GLOBAL_CU_MASK` 
 at container start.
 
-Exclusivity of CU bitmaps across pods on a device must be enforced 
+Exclusivity of CU bitmaps across pods on a device will be enforced 
 under a node lock (`AMDDevices.LockNode` and `ReleaseNodeLock`) so multiple pods never receive overlapping masks.
+(These are currently stubs; the node-lock enforcement is not yet implemented — TODO.)
 
 Optional handshake:
 ```text
@@ -110,7 +111,7 @@ simple "set N bits" operation:
 
 1. **The hard guarantee is non-overlap.** The scheduler
    assigns each pod a CU bitmap that does **not overlap** any other pod's bitmap on the same device. 
-   We enforce it via the bitmap allocator under a node lock.
+   This will be enforced via the bitmap allocator under a node lock (`LockNode` / `ReleaseNodeLock`), which currently return `nil` (TODO: implement).
 
 2. **Zero-interference is not guaranteed.** Even with non-overlapping 
    masks, residual interference remains (as reported in #1707).
