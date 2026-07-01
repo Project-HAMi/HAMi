@@ -60,18 +60,29 @@ The allocation result is written under the **AMD-specific** key (each vendor has
 hami.io/amd-devices-allocated: <UUID>,AMDGPU,<memMB>,<cuCount>:;
 ```
 
-Plus, an AMD-specific annotation carrying the CU bitmap:
+Plus, a dedicated AMD annotation carrying the per-device CU bitmap. Following the
+convention other vendors use for allocation data that does not fit the standard
+`UUID,Type,mem,cores` encoding (e.g. Ascend's `huawei.com/<model>`), 
+this is a separate annotation under the **`amd.com/`** namespace with a JSON value, for example:
 
-```text
-hami.io/amd-cu-mask: <UUID>=<cu_mask_hex>:;
+```json
+amd.com/cu-mask: [{"uuid":"<UUID1>","cu_mask":"0x337f"},{"uuid":"<UUID2>","cu_mask":"0x00ff"}]
 ```
+
+`cu_mask` uses ROCm's hex-bitmask form of `CU_list` (`0x[0-F]*`, e.g. `0x337f`; see
+<https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html>). 
+A JSON value avoids inventing a delimiter scheme (and the :/; collision with 
+`ROC_GLOBAL_CU_MASK`'s own grammar).
+
+The device-plugin translates each entry into the per-GPU `ROC_GLOBAL_CU_MASK` 
+at container start.
 
 Exclusivity of CU bitmaps across pods on a device must be enforced 
 under a node lock (`AMDDevices.LockNode` and `ReleaseNodeLock`) so multiple pods never receive overlapping masks.
 
 Optional handshake:
 ```text
-hami.io/amd-cu-mask-assigned: "false" -> "true"  (set by device-plugin)
+amd.com/cu-mask-assigned: "false" -> "true"  (set by device-plugin)
 ```
 
 ## 5. Resource model and core_limit -> CU mask
