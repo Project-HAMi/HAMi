@@ -154,3 +154,4 @@ To make it easier for your PR to receive reviews, consider that reviewers will n
 * Follow [good coding guidelines](https://github.com/golang/go/wiki/CodeReviewComments)
 * Write [good commit messages](https://chris.beams.io/posts/git-commit/)
 * Break large changes into a logical series of smaller patches which individually make easily understandable changes, and in aggregate solve a broader issue
+* Separate cosmetics from functional changes. Cosmetic changes (reindentation, whitespace, comment wording, style fixes) must not be mixed with logic changes in the same commit — split them into their own commit. If the cosmetics are unrelated to the PR's purpose, they belong in a separate PR entirely. This keeps diffs reviewable: reviewers should not have to filter out formatting noise to find what actually changed.
