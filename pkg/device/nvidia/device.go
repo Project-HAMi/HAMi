@@ -571,11 +571,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				mempnums, ok := mem.AsInt64()
 				if ok {
-					mempnum = int32(mempnums)
-					if mempnum < 0 || mempnum > 100 {
-						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnum)
-						mempnum = 100
+					if mempnums < 0 || mempnums > 100 {
+						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
+						mempnums = 100
 					}
+					mempnum = int32(mempnums)
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
