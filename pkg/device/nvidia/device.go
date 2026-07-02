@@ -344,6 +344,16 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
+	if err := dev.validateMemoryPercentage(ctr); err != nil {
+		return false, err
+	}
+	// Init containers are scheduled by Resourcereqs but are not passed to
+	// MutateAdmission by the webhook, so validate them here as well.
+	for idx := range p.Spec.InitContainers {
+		if err := dev.validateMemoryPercentage(&p.Spec.InitContainers[idx]); err != nil {
+			return false, err
+		}
+	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -379,6 +389,15 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 	return hasResource, nil
+}
+
+func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		if pct < 0 || pct > 100 {
+			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, pct, ctr.Name)
+		}
+	}
+	return nil
 }
 
 func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
@@ -553,6 +572,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				mempnums, ok := mem.AsInt64()
 				if ok {
 					mempnum = int32(mempnums)
+					if mempnum < 0 || mempnum > 100 {
+						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnum)
+						mempnum = 100
+					}
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
