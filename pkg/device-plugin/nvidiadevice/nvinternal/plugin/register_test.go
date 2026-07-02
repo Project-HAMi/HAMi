@@ -23,45 +23,45 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
-func TestUint8SliceString(t *testing.T) {
+func TestInt8SliceString(t *testing.T) {
 	tests := []struct {
 		name     string
-		input    uint8Slice
+		input    int8Slice
 		expected string
 	}{
 		{
 			name:     "null terminated string",
-			input:    uint8Slice{'h', 'e', 'l', 'l', 'o', 0, 'x', 'y'},
+			input:    int8Slice{'h', 'e', 'l', 'l', 'o', 0, 'x', 'y'},
 			expected: "hello",
 		},
 		{
 			name:     "no null terminator",
-			input:    uint8Slice{'a', 'b', 'c'},
+			input:    int8Slice{'a', 'b', 'c'},
 			expected: "abc",
 		},
 		{
 			name:     "empty slice",
-			input:    uint8Slice{},
+			input:    int8Slice{},
 			expected: "",
 		},
 		{
 			name:     "only null byte",
-			input:    uint8Slice{0},
+			input:    int8Slice{0},
 			expected: "",
 		},
 		{
 			name:     "null at start",
-			input:    uint8Slice{0, 'a', 'b'},
+			input:    int8Slice{0, 'a', 'b'},
 			expected: "",
 		},
 		{
 			name:     "PCI bus ID format",
-			input:    uint8Slice{'0', '0', '0', '0', ':', '3', 'b', ':', '0', '0', '.', '0', 0, 0, 0, 0},
+			input:    int8Slice{'0', '0', '0', '0', ':', '3', 'b', ':', '0', '0', '.', '0', 0, 0, 0, 0},
 			expected: "0000:3b:00.0",
 		},
 		{
 			name:     "single character",
-			input:    uint8Slice{'Z', 0},
+			input:    int8Slice{'Z', 0},
 			expected: "Z",
 		},
 		{
@@ -75,7 +75,7 @@ func TestUint8SliceString(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := tt.input.String()
 			if got != tt.expected {
-				t.Errorf("uint8Slice.String() = %q, want %q", got, tt.expected)
+				t.Errorf("int8Slice.String() = %q, want %q", got, tt.expected)
 			}
 		})
 	}
