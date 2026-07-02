@@ -71,9 +71,10 @@ type Scheduler struct {
 	quotaLister listerscorev1.ResourceQuotaLister
 	leaseLister coordinationv1.LeaseLister
 	//Node Overview
-	overviewstatus map[string]*NodeUsage
-	eventRecorder  record.EventRecorder
-	started        uint32 // 0 = false, 1 = true
+	overviewstatus  map[string]*NodeUsage
+	eventRecorder   record.EventRecorder
+	informerFactory informers.SharedInformerFactory
+	started         uint32 // 0 = false, 1 = true
 
 	lock   sync.RWMutex
 	synced bool
@@ -132,6 +133,14 @@ func (s *Scheduler) doNodeNotify() {
 	case s.nodeNotify <- struct{}{}:
 	default:
 	}
+}
+
+func (s *Scheduler) GetEventRecorder() record.EventRecorder {
+	return s.eventRecorder
+}
+
+func (s *Scheduler) GetInformerFactory() informers.SharedInformerFactory {
+	return s.informerFactory
 }
 
 func (s *Scheduler) onAddPod(obj any) {
@@ -267,6 +276,7 @@ func (s *Scheduler) Start() error {
 	klog.InfoS("Starting HAMi scheduler components")
 	s.kubeClient = client.GetClient()
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(s.kubeClient, defaultResync)
+	s.informerFactory = informerFactory
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
 	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
 	s.quotaLister = informerFactory.Core().V1().ResourceQuotas().Lister()

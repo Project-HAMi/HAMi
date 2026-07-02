@@ -1,0 +1,1073 @@
+/*
+Copyright 2026 The HAMi Authors.
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+    http://www.apache.org/licenses/LICENSE-2.0
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
+package preempt
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
+
+	corev1 "k8s.io/api/core/v1"
+	policyv1 "k8s.io/api/policy/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
+	"k8s.io/client-go/informers"
+	"k8s.io/client-go/kubernetes/fake"
+	"k8s.io/client-go/kubernetes/scheme"
+	"k8s.io/client-go/tools/record"
+	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+)
+
+func init() {
+	if device.DevicesMap == nil {
+		device.DevicesMap = make(map[string]device.Devices)
+	}
+}
+
+type mockDevice struct {
+	devices            []*device.DeviceInfo
+	failGetNodeDevices bool
+	fitReturnsTrue     bool
+}
+
+func (m *mockDevice) CommonWord() string { return "nvidia" }
+
+func (m *mockDevice) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
+	return false, nil
+}
+
+func (m *mockDevice) CheckHealth(devType string, n *corev1.Node) (bool, bool) { return true, false }
+func (m *mockDevice) NodeCleanUp(nn string) error                             { return nil }
+
+func (m *mockDevice) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{
+		ResourceCountName:  "hami.io/vgpu",
+		ResourceMemoryName: "hami.io/vgpu-memory",
+		ResourceCoreName:   "hami.io/vgpu-cores",
+	}
+}
+
+func (m *mockDevice) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	if m.failGetNodeDevices {
+		return nil, errors.New("simulated hardware driver error")
+	}
+	return m.devices, nil
+}
+
+func (m *mockDevice) LockNode(n *corev1.Node, p *corev1.Pod) error        { return nil }
+func (m *mockDevice) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error { return nil }
+
+func (m *mockDevice) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	req := device.ContainerDeviceRequest{}
+	if qty, ok := ctr.Resources.Requests["nvidia.com/gpu"]; ok {
+		req.Nums = int32(qty.Value())
+	}
+	if qty, ok := ctr.Resources.Requests["hami.io/vgpu"]; ok {
+		req.Nums = int32(qty.Value())
+	}
+	if qty, ok := ctr.Resources.Requests["hami.io/vgpu-memory"]; ok {
+		req.Memreq = int32(qty.Value())
+	}
+	if qty, ok := ctr.Resources.Requests["hami.io/vgpu-cores"]; ok {
+		req.Coresreq = int32(qty.Value())
+	}
+	return req
+}
+
+func (m *mockDevice) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
+	return nil
+}
+
+func (m *mockDevice) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
+	return 0
+}
+
+func (m *mockDevice) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	return nil
+}
+
+func (m *mockDevice) Fit(
+	usages []*device.DeviceUsage,
+	req device.ContainerDeviceRequest,
+	pod *corev1.Pod,
+	nodeInfo *device.NodeInfo,
+	allocated *device.PodDevices,
+) (bool, map[string]device.ContainerDevices, string) {
+	if !m.fitReturnsTrue {
+		return false, nil, "insufficient mock device resources"
+	}
+	for _, du := range usages {
+		if du.Count-du.Used >= 1 &&
+			du.Totalmem-du.Usedmem >= req.Memreq &&
+			du.Totalcore-du.Usedcores >= req.Coresreq {
+			alloc := device.ContainerDevices{{
+				UUID:      du.ID,
+				Type:      "nvidia",
+				Usedmem:   req.Memreq,
+				Usedcores: req.Coresreq,
+			}}
+			return true, map[string]device.ContainerDevices{"compute-container": alloc}, ""
+		}
+	}
+	return false, nil, "no device with enough resources"
+}
+
+func newMockDevice(count, mem, cores int32) *mockDevice {
+	return &mockDevice{
+		fitReturnsTrue: true,
+		devices: []*device.DeviceInfo{
+			{
+				ID:      "mock-gpu-uuid-1",
+				Index:   0,
+				Count:   count,
+				Devmem:  mem,
+				Devcore: cores,
+				Type:    "nvidia",
+				Health:  true,
+			},
+		},
+	}
+}
+
+func newDefaultMockDevice() *mockDevice {
+	return newMockDevice(10, 20000, 100)
+}
+
+func registerMock(m *mockDevice) func() {
+	devs := device.GetDevices()
+	old, existed := devs["nvidia"]
+	devs["nvidia"] = m
+	return func() {
+		if existed {
+			devs["nvidia"] = old
+		} else {
+			delete(devs, "nvidia")
+		}
+	}
+}
+
+func newTestNode(name string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: name},
+		Status: corev1.NodeStatus{
+			Capacity: corev1.ResourceList{
+				corev1.ResourceName("hami.io/vgpu"):        resource.MustParse("2"),
+				corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse("20000"),
+				corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse("200"),
+			},
+			Allocatable: corev1.ResourceList{
+				corev1.ResourceName("hami.io/vgpu"):        resource.MustParse("2"),
+				corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse("20000"),
+				corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse("200"),
+			},
+		},
+	}
+}
+
+type podOpt func(*corev1.Pod)
+
+func withPriority(p int32) podOpt     { return func(pod *corev1.Pod) { pod.Spec.Priority = &p } }
+func withNodeName(node string) podOpt { return func(pod *corev1.Pod) { pod.Spec.NodeName = node } }
+func withDeletionTimestamp() podOpt {
+	return func(pod *corev1.Pod) {
+		now := metav1.NewTime(time.Now())
+		pod.DeletionTimestamp = &now
+	}
+}
+func withOwner(kind string) podOpt {
+	return func(pod *corev1.Pod) {
+		ctrl := true
+		pod.OwnerReferences = []metav1.OwnerReference{{
+			Kind: kind, Name: "test-owner", UID: types.UID(uuid.NewString()), APIVersion: "apps/v1", Controller: &ctrl,
+		}}
+	}
+}
+func withNamespace(ns string) podOpt { return func(pod *corev1.Pod) { pod.Namespace = ns } }
+func withLabels(labels map[string]string) podOpt {
+	return func(pod *corev1.Pod) { pod.Labels = labels }
+}
+func withAnnotations(annot map[string]string) podOpt {
+	return func(pod *corev1.Pod) { pod.Annotations = annot }
+}
+
+type vgpuRequest struct{ vgpu, mem, cores int64 }
+
+func newVGPUPod(name string, req vgpuRequest, opts ...podOpt) *corev1.Pod {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uuid.NewString())},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "compute-container",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName("hami.io/vgpu"):        resource.MustParse(fmt.Sprintf("%d", req.vgpu)),
+						corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse(fmt.Sprintf("%d", req.mem)),
+						corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse(fmt.Sprintf("%d", req.cores)),
+					},
+				},
+			}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	for _, o := range opts {
+		o(pod)
+	}
+	return pod
+}
+
+func newNativeGPUPod(name string, gpuCount int, opts ...podOpt) *corev1.Pod {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uuid.NewString())},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "gpu-container",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName("nvidia.com/gpu"): resource.MustParse(fmt.Sprintf("%d", gpuCount)),
+					},
+				},
+			}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	for _, o := range opts {
+		o(pod)
+	}
+	return pod
+}
+
+func newMultiContainerPod(name string, containers []corev1.Container, opts ...podOpt) *corev1.Pod {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default", UID: types.UID(uuid.NewString())},
+		Spec:       corev1.PodSpec{Containers: containers},
+		Status:     corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	for _, o := range opts {
+		o(pod)
+	}
+	return pod
+}
+
+func newPDB(name, namespace string, selector *metav1.LabelSelector, minAvailable int32) *policyv1.PodDisruptionBudget {
+	return &policyv1.PodDisruptionBudget{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: namespace},
+		Spec: policyv1.PodDisruptionBudgetSpec{
+			MinAvailable: &intstr.IntOrString{Type: intstr.Int, IntVal: minAvailable},
+			Selector:     selector,
+		},
+		Status: policyv1.PodDisruptionBudgetStatus{DisruptionsAllowed: 0},
+	}
+}
+
+func newPreemptPluginWithSync(t *testing.T, pods []*corev1.Pod, nodes []*corev1.Node, pdbs ...*policyv1.PodDisruptionBudget) (*VgpuPreempt, context.CancelFunc) {
+	t.Helper()
+	objs := make([]runtime.Object, 0, len(pods)+len(nodes)+len(pdbs))
+	for _, p := range pods {
+		objs = append(objs, p)
+	}
+	for _, n := range nodes {
+		objs = append(objs, n)
+	}
+	for _, pdb := range pdbs {
+		objs = append(objs, pdb)
+	}
+	k8sClient := fake.NewClientset(objs...)
+	factory := informers.NewSharedInformerFactory(k8sClient, 0)
+	broadcaster := record.NewBroadcaster()
+	recorder := broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "test-scheduler-extender"})
+
+	plugin, err := New(factory, recorder)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	factory.Start(ctx.Done())
+	factory.WaitForCacheSync(ctx.Done())
+
+	cleanup := func() {
+		cancel()
+		broadcaster.Shutdown()
+	}
+	return plugin, cleanup
+}
+
+func TestNewWithNilFactory(t *testing.T) {
+	plugin, err := New(nil, nil)
+	assert.Nil(t, plugin)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "informerFactory cannot be nil")
+}
+
+func TestNewWithValidFactory(t *testing.T) {
+	k8sClient := fake.NewClientset()
+	factory := informers.NewSharedInformerFactory(k8sClient, 0)
+	broadcaster := record.NewBroadcaster()
+	recorder := broadcaster.NewRecorder(scheme.Scheme, corev1.EventSource{Component: "test"})
+
+	plugin, err := New(factory, recorder)
+	assert.NoError(t, err)
+	assert.NotNil(t, plugin)
+	broadcaster.Shutdown()
+}
+
+func TestIsProtectedFromPreemption(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{"normal pod", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withPriority(10), withNodeName("n1")), false},
+		{"terminating", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withPriority(10), withNodeName("n1"), withDeletionTimestamp()), true},
+		{"DaemonSet owned", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withPriority(10), withNodeName("n1"), withOwner("DaemonSet")), true},
+		{"ReplicaSet owned", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withPriority(10), withNodeName("n1"), withOwner("ReplicaSet")), false},
+		{"critical priority", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withPriority(2000000001), withNodeName("n1")), true},
+		{"kube-system namespace", newVGPUPod("p", vgpuRequest{1, 1000, 10}, withNamespace("kube-system"), withNodeName("n1")), true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, isProtectedFromPreemption(tt.pod))
+		})
+	}
+}
+
+func TestIsCriticalPod(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name:     "kube-system namespace protected",
+			pod:      newVGPUPod("critical", vgpuRequest{1, 1000, 10}, withNamespace("kube-system")),
+			expected: true,
+		},
+		{
+			name:     "kube-public namespace NOT protected",
+			pod:      newVGPUPod("info", vgpuRequest{1, 1000, 10}, withNamespace("kube-public")),
+			expected: false,
+		},
+		{
+			name: "system-cluster-critical PriorityClass protected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "critical", Namespace: "my-app"},
+				Spec: corev1.PodSpec{
+					PriorityClassName: "system-cluster-critical",
+					Containers:        []corev1.Container{{Name: "c"}},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "system-node-critical PriorityClass protected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "critical", Namespace: "my-app"},
+				Spec: corev1.PodSpec{
+					PriorityClassName: "system-node-critical",
+					Containers:        []corev1.Container{{Name: "c"}},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "high priority value protected",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "critical", Namespace: "my-app"},
+				Spec: corev1.PodSpec{
+					Priority:   &[]int32{criticalPriorityThreshold + 100}[0],
+					Containers: []corev1.Container{{Name: "c"}},
+				},
+			},
+			expected: true,
+		},
+		{
+			name:     "regular pod NOT protected",
+			pod:      newVGPUPod("regular", vgpuRequest{1, 1000, 10}, withNamespace("default"), withPriority(5)),
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isCriticalPod(tt.pod))
+		})
+	}
+}
+
+func TestSortVictimsByPreference(t *testing.T) {
+	now := time.Now()
+	mkPod := func(name string, prio int32, createdAgo time.Duration) *corev1.Pod {
+		p := newVGPUPod(name, vgpuRequest{1, 1000, 10}, withPriority(prio), withNodeName("n1"))
+		p.CreationTimestamp = metav1.NewTime(now.Add(-createdAgo))
+		return p
+	}
+
+	t.Run("priority order ascending", func(t *testing.T) {
+		pods := []*corev1.Pod{mkPod("high", 100, time.Minute), mkPod("low", 10, time.Minute), mkPod("mid", 50, time.Minute)}
+		sortVictimsByPreference(pods)
+		assert.Equal(t, "low", pods[0].Name)
+		assert.Equal(t, "mid", pods[1].Name)
+		assert.Equal(t, "high", pods[2].Name)
+	})
+
+	t.Run("timestamp tiebreak - newer first", func(t *testing.T) {
+		older := mkPod("old", 10, time.Hour)
+		newer := mkPod("new", 10, time.Second)
+		pods := []*corev1.Pod{older, newer}
+		sortVictimsByPreference(pods)
+		assert.Equal(t, "new", pods[0].Name)
+	})
+}
+
+func TestExtractDeviceTypeFromResourceName(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	devMap := device.GetDevices()
+
+	tests := []struct {
+		name         string
+		resourceName string
+		expected     string
+	}{
+		{"hami vgpu", "hami.io/vgpu", "nvidia"},
+		{"hami vgpu memory", "hami.io/vgpu-memory", "nvidia"},
+		{"hami vgpu cores", "hami.io/vgpu-cores", "nvidia"},
+		{"unknown resource", "unknown.com/device", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := extractDeviceTypeFromResourceName(tt.resourceName, devMap)
+			assert.Equal(t, tt.expected, got, "Failed to extract device type for %s", tt.resourceName)
+		})
+	}
+}
+
+func TestIsVGPUResourcePod(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name:     "hami annotation",
+			pod:      newVGPUPod("p", vgpuRequest{1, 1000, 10}, withAnnotations(map[string]string{"hami.io/container-devices": "{}"})),
+			expected: true,
+		},
+		{
+			name:     "hami vgpu resource",
+			pod:      newVGPUPod("p", vgpuRequest{1, 1000, 10}),
+			expected: true,
+		},
+		{
+			name:     "native nvidia gpu",
+			pod:      newNativeGPUPod("p", 1),
+			expected: true,
+		},
+		{
+			name: "no gpu resources",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "c",
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{
+								corev1.ResourceCPU: resource.MustParse("1"),
+							},
+						},
+					}},
+				},
+			},
+			expected: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.expected, isVGPUResourcePod(tt.pod))
+		})
+	}
+}
+
+func TestViolatePDB(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	pod := newVGPUPod("victim", vgpuRequest{1, 1000, 10}, withLabels(map[string]string{"app": "critical"}), withPriority(5), withNodeName("n1"))
+
+	pdbSelector := &metav1.LabelSelector{
+		MatchLabels: map[string]string{"app": "critical"},
+	}
+
+	t.Run("PDB with zero disruptions allowed - violates", func(t *testing.T) {
+		pdbRestricted := newPDB("critical-pdb", "default", pdbSelector, 1)
+		plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{pod}, nil, pdbRestricted)
+		defer cleanup()
+		assert.True(t, plugin.violatesPDB(pod))
+	})
+
+	t.Run("PDB with disruptions allowed - does not violate", func(t *testing.T) {
+		pdbPermissive := newPDB("critical-pdb", "default", pdbSelector, 1)
+		pdbPermissive.Status.DisruptionsAllowed = 1
+		plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{pod}, nil, pdbPermissive)
+		defer cleanup()
+		assert.False(t, plugin.violatesPDB(pod))
+	})
+}
+
+func TestViolatePDBWithDummyLister(t *testing.T) {
+	plugin := &VgpuPreempt{pdbLister: &dummyPDBLister{}}
+	pod := newVGPUPod("p", vgpuRequest{1, 1000, 10})
+	assert.False(t, plugin.violatesPDB(pod))
+}
+
+func TestPDBViolationsUpperBound(t *testing.T) {
+	tests := []struct {
+		name          string
+		originalCount int64
+		keptLen       int
+		expected      int64
+	}{
+		{"original smaller", 10, 100, 10},
+		{"kept smaller", 100, 10, 10},
+		{"equal", 50, 50, 50},
+		{"zero original", 0, 50, 0},
+		{"zero kept", 50, 0, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := pdbViolationsUpperBound(tt.originalCount, tt.keptLen)
+			assert.Equal(t, tt.expected, result)
+		})
+	}
+}
+
+func TestGetNativeWholeGPUResourcesCompleteness(t *testing.T) {
+	resources := getNativeWholeGPUResources()
+	expectedVendors := []string{
+		"nvidia.com/gpu",
+		"amd.com/gpu",
+		"intel.com/gpu",
+		"huawei.com/Ascend310",
+		"huawei.com/Ascend910",
+		"cambricon.com/mlu",
+		"hygon.com/dcu",
+		"iluvatar.ai/gpu",
+		"metax-tech.com/gpu",
+		"mthreads.com/gpu",
+		"kunlun.com/gpu",
+		"aws.amazon.com/neuron",
+		"vastai.com/gpu",
+		"enflame.com/gpu",
+	}
+
+	for _, vendor := range expectedVendors {
+		assert.True(t, resources[vendor], "Missing vendor: %s", vendor)
+	}
+}
+
+func TestResolveVictimsMapLegacyFormat(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	pod := newVGPUPod("victim", vgpuRequest{1, 1000, 10}, withPriority(5), withNodeName("n1"))
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{pod}, nil)
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		NodeNameToVictims: map[string]*extenderv1.Victims{
+			"n1": {Pods: []*corev1.Pod{pod}},
+		},
+	}
+	got, err := plugin.resolveVictimsMap(args)
+	assert.NoError(t, err)
+	require.Len(t, got, 1)
+	assert.Equal(t, pod.UID, got["n1"].Pods[0].UID)
+}
+
+func TestResolveVictimsMapEmptyAndMinimal(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	plugin, cleanup := newPreemptPluginWithSync(t, nil, nil)
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{}
+	got, err := plugin.resolveVictimsMap(args)
+	assert.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+func TestPreemptHappyPath(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(2, 20000, 200))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowA := newVGPUPod("low-a", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	lowB := newVGPUPod("low-b", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high-preemptor", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowA, lowB, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowB.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Len(t, res.NodeNameToMetaVictims[node.Name].Pods, 1)
+	assert.Equal(t, string(lowB.UID), res.NodeNameToMetaVictims[node.Name].Pods[0].UID)
+}
+
+func TestPreemptNodeWithZeroVictims(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(1, 10000, 100))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	preemptor := newVGPUPod("fit", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Empty(t, res.NodeNameToMetaVictims[node.Name].Pods)
+}
+
+func TestPreemptProtectedPodDropsNode(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(1, 10000, 100))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	dsA := newVGPUPod("ds", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name), withOwner("DaemonSet"))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{dsA, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(dsA.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name)
+}
+
+func TestPreemptAddsAdditionalVictim(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(2, 20000, 200))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	protected := newVGPUPod("protected", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name), withOwner("DaemonSet"))
+	evictable := newVGPUPod("evict", vgpuRequest{1, 10000, 100}, withPriority(5), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{protected, evictable, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(protected.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	meta := res.NodeNameToMetaVictims[node.Name]
+	require.Len(t, meta.Pods, 1)
+	assert.Equal(t, string(evictable.UID), meta.Pods[0].UID)
+}
+
+func TestPreemptNativeGPUAccounting(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(1, 10000, 100))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	nativePod := newNativeGPUPod("native", 1, withPriority(5), withNodeName(node.Name))
+	preemptor := newVGPUPod("vgpu", vgpuRequest{1, 10000, 50}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{nativePod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	t.Run("native pod proposed as victim - preemptor fits", func(t *testing.T) {
+		args := extenderv1.ExtenderPreemptionArgs{
+			Pod: preemptor,
+			NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+				node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(nativePod.UID)}}},
+			},
+		}
+		res := plugin.Preempt(context.Background(), args)
+		require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+		assert.Len(t, res.NodeNameToMetaVictims[node.Name].Pods, 1)
+	})
+
+	t.Run("no victims proposed - preemptor cannot fit", func(t *testing.T) {
+		args := extenderv1.ExtenderPreemptionArgs{
+			Pod: preemptor,
+			NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+				node.Name: {Pods: []*extenderv1.MetaPod{}},
+			},
+		}
+		res := plugin.Preempt(context.Background(), args)
+		assert.NotContains(t, res.NodeNameToMetaVictims, node.Name)
+	})
+}
+
+func TestPreemptMultiContainerPod(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(3, 30000, 300))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+
+	victim := newMultiContainerPod("victim", []corev1.Container{
+		{
+			Name: "gpu-1",
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceName("hami.io/vgpu"):        resource.MustParse("1"),
+					corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse("10000"),
+					corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse("50"),
+				},
+			},
+		},
+		{
+			Name: "gpu-2",
+			Resources: corev1.ResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceName("hami.io/vgpu"):        resource.MustParse("1"),
+					corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse("10000"),
+					corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse("50"),
+				},
+			},
+		},
+	}, withPriority(5), withNodeName(node.Name))
+
+	preemptor := newVGPUPod("preemptor", vgpuRequest{2, 20000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{victim, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(victim.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Len(t, res.NodeNameToMetaVictims[node.Name].Pods, 1)
+}
+
+func TestPreemptPDBViolation(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(2, 20000, 200))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+
+	protectedPod := newVGPUPod("protected", vgpuRequest{1, 10000, 100},
+		withLabels(map[string]string{"app": "critical"}),
+		withPriority(5),
+		withNodeName(node.Name))
+
+	evictablePod := newVGPUPod("evictable", vgpuRequest{1, 10000, 100},
+		withPriority(5),
+		withNodeName(node.Name))
+
+	preemptor := newVGPUPod("preemptor", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	pdb := newPDB("critical-pdb", "default", &metav1.LabelSelector{
+		MatchLabels: map[string]string{"app": "critical"},
+	}, 1)
+	pdb.Status.DisruptionsAllowed = 0
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{protectedPod, evictablePod, preemptor}, []*corev1.Node{node}, pdb)
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(evictablePod.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Len(t, res.NodeNameToMetaVictims[node.Name].Pods, 1)
+	assert.Equal(t, string(evictablePod.UID), res.NodeNameToMetaVictims[node.Name].Pods[0].UID)
+}
+
+func TestPreemptInitContainerRecognition(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(2, 20000, 200))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	victim := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "victim", Namespace: "default", UID: types.UID(uuid.NewString())},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{
+				Name: "init",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName("hami.io/vgpu"):        resource.MustParse("1"),
+						corev1.ResourceName("hami.io/vgpu-memory"): resource.MustParse("10000"),
+						corev1.ResourceName("hami.io/vgpu-cores"):  resource.MustParse("50"),
+					},
+				},
+			}},
+		},
+		Status: corev1.PodStatus{Phase: corev1.PodRunning},
+	}
+	victim.Spec.NodeName = node.Name
+	victim.Spec.Priority = &[]int32{5}[0]
+
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 50}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{victim, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(victim.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Len(t, res.NodeNameToMetaVictims[node.Name].Pods, 1)
+}
+
+func TestPassthroughMetaVictims(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	plugin, cleanup := newPreemptPluginWithSync(t, nil, nil)
+	defer cleanup()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "cpu-only", Namespace: "default", UID: types.UID(uuid.NewString())},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "c",
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{corev1.ResourceCPU: resource.MustParse("1")},
+				},
+			}},
+		},
+	}
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: pod,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			"node1": {Pods: []*extenderv1.MetaPod{{UID: "some-uid"}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, "node1")
+	assert.Len(t, res.NodeNameToMetaVictims["node1"].Pods, 1)
+}
+
+func TestPreemptHardwareDriverError(t *testing.T) {
+	mockDev := newDefaultMockDevice()
+	mockDev.failGetNodeDevices = true
+	cleanupMock := registerMock(mockDev)
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowPod := newVGPUPod("low", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowPod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowPod.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name)
+}
+
+func TestPreemptDeviceFitFails(t *testing.T) {
+	mockDev := newDefaultMockDevice()
+	mockDev.fitReturnsTrue = false
+	cleanupMock := registerMock(mockDev)
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowPod := newVGPUPod("low", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowPod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowPod.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name)
+}
+
+func TestPreemptNodeNotFoundInCache(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{preemptor}, nil)
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			"ghost-node": {Pods: []*extenderv1.MetaPod{{UID: "any-uid"}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, "ghost-node")
+}
+
+func TestPreemptVictimNotFoundInCache(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: "ghost-pod-uid"}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	require.Contains(t, res.NodeNameToMetaVictims, node.Name)
+	assert.Empty(t, res.NodeNameToMetaVictims[node.Name].Pods)
+}
+
+func TestAccountVGPURequestsReturnErrorOnFailure(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	plugin, cleanup := newPreemptPluginWithSync(t, nil, nil)
+	defer cleanup()
+
+	state := make(map[string][]*device.DeviceUsage)
+	pod := newVGPUPod("test", vgpuRequest{1, 1000, 10})
+
+	err := plugin.accountVGPURequests(state, pod, nil)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "no device state available")
+}
+
+func TestAccountVGPURequestsNoSatisfyingDevice(t *testing.T) {
+	cleanupMock := registerMock(newDefaultMockDevice())
+	defer cleanupMock()
+
+	plugin, cleanup := newPreemptPluginWithSync(t, nil, nil)
+	defer cleanup()
+
+	state := map[string][]*device.DeviceUsage{
+		"nvidia": {
+			{
+				ID:        "gpu-0",
+				Count:     10,
+				Used:      10,
+				Totalmem:  10000,
+				Usedmem:   10000,
+				Totalcore: 100,
+				Usedcores: 100,
+			},
+		},
+	}
+
+	pod := newVGPUPod("test", vgpuRequest{1, 1000, 10})
+	err := plugin.accountVGPURequests(state, pod, nil)
+	assert.NotNil(t, err)
+	assert.Contains(t, err.Error(), "no device could satisfy vGPU request")
+}
+
+func TestPreemptMetricsIncrement(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(2, 20000, 200))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+	lowPod := newVGPUPod("low", vgpuRequest{1, 10000, 100}, withPriority(10), withNodeName(node.Name))
+	preemptor := newVGPUPod("high", vgpuRequest{1, 10000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{lowPod, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	initialMetrics := GetPreemptionMetrics()
+	initialAttempts := initialMetrics["preemption_attempts"]
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(lowPod.UID)}}},
+		},
+	}
+	plugin.Preempt(context.Background(), args)
+
+	finalMetrics := GetPreemptionMetrics()
+	assert.Greater(t, finalMetrics["preemption_attempts"], initialAttempts)
+}
+
+func TestRefineForNodeWithAccountingError(t *testing.T) {
+	cleanupMock := registerMock(newMockDevice(1, 5000, 50))
+	defer cleanupMock()
+
+	node := newTestNode("node1")
+
+	highRequest := newVGPUPod("demanding", vgpuRequest{1, 20000, 100},
+		withPriority(10), withNodeName(node.Name))
+
+	preemptor := newVGPUPod("high", vgpuRequest{1, 20000, 100}, withPriority(100))
+
+	plugin, cleanup := newPreemptPluginWithSync(t, []*corev1.Pod{highRequest, preemptor}, []*corev1.Node{node})
+	defer cleanup()
+
+	args := extenderv1.ExtenderPreemptionArgs{
+		Pod: preemptor,
+		NodeNameToMetaVictims: map[string]*extenderv1.MetaVictims{
+			node.Name: {Pods: []*extenderv1.MetaPod{{UID: string(highRequest.UID)}}},
+		},
+	}
+	res := plugin.Preempt(context.Background(), args)
+	assert.NotContains(t, res.NodeNameToMetaVictims, node.Name)
+}
