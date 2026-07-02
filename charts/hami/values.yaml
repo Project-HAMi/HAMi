@@ -273,6 +273,9 @@ devicePlugin:
   gpuOperatorToolkitReady:
     enabled: false
     hostPath: "/run/nvidia/validations"
+    securityContext:
+      privileged: true
+      runAsUser: 0
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
@@ -321,6 +324,11 @@ devicePlugin:
     extraArgs:
       - -v=4
     extraEnvs: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["SYS_ADMIN"]
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -390,6 +398,14 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
+  hostPID: true
+  hostNetwork: false
+  securityContext:
+    privileged: true
+    allowPrivilegeEscalation: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
