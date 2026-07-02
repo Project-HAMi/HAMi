@@ -536,12 +536,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		return &overallnodeMap, &overallnodeMap, failedNodes, err
 	}
 
+	userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
+	numaIgnore := task != nil && task.Annotations != nil && task.Annotations[util.GPUTopologyAwareAnnotationKey] == "false"
 	for _, node := range allNodes {
 		nodeInfo := &NodeUsage{}
-		userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
+			NumaIgnore:  numaIgnore,
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
 		for _, k := range node.Devices {
