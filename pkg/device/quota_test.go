@@ -126,8 +126,8 @@ func TestFitQuota(t *testing.T) {
 	coreName := "nvidia.com/gpucore"
 
 	qm.Quotas[ns] = &DeviceQuota{
-		memName:  &Quota{Used: 1000, Limit: 2000},
-		coreName: &Quota{Used: 200, Limit: 400},
+		memName:  &Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	// Should fit
@@ -157,6 +157,41 @@ func TestFitQuota(t *testing.T) {
 	// Should fit if device not present
 	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
+	}
+}
+
+func TestFitQuotaZeroLimitEnforced(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "zero-ns"
+	deviceName := "NVIDIA"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	// Explicit zero limit must reject any non-zero request.
+	qm.Quotas[ns] = &DeviceQuota{
+		memName:  &Quota{Used: 0, Limit: 0, LimitSet: true},
+		coreName: &Quota{Used: 0, Limit: 0, LimitSet: true},
+	}
+	if qm.FitQuota(ns, 1, 1, 0, deviceName) {
+		t.Error("FitQuota should reject any memory when limit is explicitly 0")
+	}
+	if qm.FitQuota(ns, 0, 1, 1, deviceName) {
+		t.Error("FitQuota should reject any core when limit is explicitly 0")
+	}
+	// Zero request against zero limit is still allowed.
+	if !qm.FitQuota(ns, 0, 1, 0, deviceName) {
+		t.Error("FitQuota should allow zero request against zero limit")
+	}
+
+	// LimitSet=false (e.g. only AddUsage created the entry) means no limit configured.
+	nsUnset := "unset-ns"
+	qm.Quotas[nsUnset] = &DeviceQuota{
+		memName:  &Quota{Used: 0, Limit: 0, LimitSet: false},
+		coreName: &Quota{Used: 0, Limit: 0, LimitSet: false},
+	}
+	if !qm.FitQuota(nsUnset, 9999, 1, 9999, deviceName) {
+		t.Error("FitQuota should allow requests when no limit is configured")
 	}
 }
 
@@ -240,15 +275,81 @@ func TestAddQuotaAndDelQuota(t *testing.T) {
 	if (*qm.Quotas[ns])[memName].Limit != 100 {
 		t.Errorf("AddQuota: expected memory limit 100, got %d", (*qm.Quotas[ns])[memName].Limit)
 	}
+	if !(*qm.Quotas[ns])[memName].LimitSet {
+		t.Error("AddQuota: expected LimitSet=true for memory quota")
+	}
 	if (*qm.Quotas[ns])[coreName].Limit != 10 {
 		t.Errorf("AddQuota: expected core limit 10, got %d", (*qm.Quotas[ns])[coreName].Limit)
+	}
+	if !(*qm.Quotas[ns])[coreName].LimitSet {
+		t.Error("AddQuota: expected LimitSet=true for core quota")
 	}
 
 	qm.DelQuota(rq)
 	if (*qm.Quotas[ns])[memName].Limit != 0 {
 		t.Errorf("DelQuota: expected memory limit 0, got %d", (*qm.Quotas[ns])[memName].Limit)
 	}
+	if (*qm.Quotas[ns])[memName].LimitSet {
+		t.Error("DelQuota: expected LimitSet=false for memory quota")
+	}
 	if (*qm.Quotas[ns])[coreName].Limit != 0 {
 		t.Errorf("DelQuota: expected core limit 0, got %d", (*qm.Quotas[ns])[coreName].Limit)
+	}
+	if (*qm.Quotas[ns])[coreName].LimitSet {
+		t.Error("DelQuota: expected LimitSet=false for core quota")
+	}
+}
+
+func TestAddQuotaExplicitZero(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "zero-quota-ns"
+	memName := "nvidia.com/gpumem"
+
+	rq := &corev1.ResourceQuota{}
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName): *resource.NewQuantity(0, resource.DecimalSI),
+	}
+
+	qm.AddQuota(rq)
+	q := (*qm.Quotas[ns])[memName]
+	if q == nil {
+		t.Fatal("AddQuota: expected entry for explicit zero limit")
+	}
+	if q.Limit != 0 {
+		t.Errorf("AddQuota: expected limit 0, got %d", q.Limit)
+	}
+	if !q.LimitSet {
+		t.Error("AddQuota: expected LimitSet=true even when value is 0")
+	}
+	// Verify FitQuota now rejects any non-zero request.
+	if qm.FitQuota(ns, 1, 1, 0, "NVIDIA") {
+		t.Error("FitQuota should deny request when explicit zero limit is set")
+	}
+}
+
+func TestGetResourceQuotaPreservesLimitSet(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "copy-ns"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	qm.Quotas[ns] = &DeviceQuota{
+		memName:  &Quota{Used: 100, Limit: 0, LimitSet: true},
+		coreName: &Quota{Used: 50, Limit: 200, LimitSet: false},
+	}
+
+	snapshot := qm.GetResourceQuota()
+	dq, ok := snapshot[ns]
+	if !ok {
+		t.Fatalf("GetResourceQuota: missing namespace %q", ns)
+	}
+	if !(*dq)[memName].LimitSet {
+		t.Error("GetResourceQuota: expected LimitSet=true to be preserved")
+	}
+	if (*dq)[coreName].LimitSet {
+		t.Error("GetResourceQuota: expected LimitSet=false to be preserved")
 	}
 }

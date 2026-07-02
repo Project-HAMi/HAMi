@@ -298,18 +298,22 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	)
 	for ns, val := range sher.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
+			limitLabel := "unlimited"
+			if q.LimitSet {
+				limitLabel = fmt.Sprint(q.Limit)
+			}
 			ch <- prometheus.MustNewConstMetric(
 				quotaUsedDesc,
 				prometheus.GaugeValue,
 				float64(q.Used),
-				ns, quotaname, fmt.Sprint(q.Limit),
+				ns, quotaname, limitLabel,
 			)
 			if legacy {
 				ch <- prometheus.MustNewConstMetric(
 					legacyQuotaUsed,
 					prometheus.GaugeValue,
 					float64(q.Used),
-					ns, quotaname, fmt.Sprint(q.Limit),
+					ns, quotaname, limitLabel,
 				)
 			}
 		}

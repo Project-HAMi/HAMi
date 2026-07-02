@@ -25,8 +25,9 @@ import (
 )
 
 type Quota struct {
-	Used  int64
-	Limit int64
+	Used     int64
+	Limit    int64
+	LimitSet bool
 }
 
 type DeviceQuota map[string]*Quota
@@ -69,19 +70,19 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 		return true
 	}
 	memQuota, ok := (*dq)[memResourceName]
-	if ok {
+	if ok && memQuota.LimitSet {
 		klog.V(4).InfoS("resourceMem quota judging", "quota limit", memQuota.Limit, "used", memQuota.Used, "alloc", memreq, "memoryFactor", memoryFactor)
 		limit := memQuota.Limit
 		if memoryFactor > 1 {
 			limit = limit * int64(memoryFactor)
 		}
-		if limit != 0 && memQuota.Used+memreq > limit {
+		if memQuota.Used+memreq > limit {
 			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
 	coreQuota, ok := (*dq)[coreResourceName]
-	if ok && coreQuota.Limit != 0 && coreQuota.Used+coresreq > coreQuota.Limit {
+	if ok && coreQuota.LimitSet && coreQuota.Used+coresreq > coreQuota.Limit {
 		klog.V(4).InfoS("resourceCores quota not fitted", "limit", coreQuota.Limit, "used", coreQuota.Used, "alloc", coresreq)
 		return false
 	}
@@ -210,6 +211,7 @@ func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 				}
 			}
 			(*dp)[dn].Limit = value
+			(*dp)[dn].LimitSet = true
 			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
 		}
 	}
@@ -239,6 +241,7 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 			if dq, ok := q.Quotas[quota.Namespace]; ok {
 				if quotaInfo, ok := (*dq)[dn]; ok {
 					quotaInfo.Limit = 0
+					quotaInfo.LimitSet = false
 				}
 			}
 		}
@@ -261,8 +264,9 @@ func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
 		curDQ := &DeviceQuota{}
 		for name, quota := range *dq {
 			(*curDQ)[name] = &Quota{
-				Used:  quota.Used,
-				Limit: quota.Limit,
+				Used:     quota.Used,
+				Limit:    quota.Limit,
+				LimitSet: quota.LimitSet,
 			}
 		}
 		quotasCopy[ns] = curDQ

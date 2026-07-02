@@ -268,8 +268,8 @@ func TestFitResourceQuota(t *testing.T) {
 	coreName := "nvidia.com/gpucores"
 
 	qm.Quotas[ns] = &device.DeviceQuota{
-		memName:  &device.Quota{Used: 1000, Limit: 2000},
-		coreName: &device.Quota{Used: 200, Limit: 400},
+		memName:  &device.Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &device.Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	testCases := []struct {
