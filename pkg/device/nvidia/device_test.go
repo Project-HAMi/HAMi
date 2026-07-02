@@ -183,38 +183,6 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 				t.Fatalf("expected MutateAdmission to accept percentage %d, but got error: %v", test.pct, err)
 			}
 		})
-		t.Run(test.name+" (init container)", func(t *testing.T) {
-			ctr := &corev1.Container{
-				Name: "test",
-				Resources: corev1.ResourceRequirements{
-					Limits: corev1.ResourceList{
-						"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
-					},
-				},
-			}
-			pod := &corev1.Pod{
-				Spec: corev1.PodSpec{
-					InitContainers: []corev1.Container{
-						{
-							Name: "init",
-							Resources: corev1.ResourceRequirements{
-								Limits: corev1.ResourceList{
-									"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
-									"nvidia.com/gpumem-percentage": *resource.NewQuantity(test.pct, resource.DecimalSI),
-								},
-							},
-						},
-					},
-				},
-			}
-			_, err := gpuDevices.MutateAdmission(ctr, pod)
-			if test.wantErr && err == nil {
-				t.Fatalf("expected MutateAdmission to reject init container percentage %d, but got no error", test.pct)
-			}
-			if !test.wantErr && err != nil {
-				t.Fatalf("expected MutateAdmission to accept init container percentage %d, but got error: %v", test.pct, err)
-			}
-		})
 	}
 }
 

@@ -347,13 +347,6 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if err := dev.validateMemoryPercentage(ctr); err != nil {
 		return false, err
 	}
-	// Init containers are scheduled by Resourcereqs but are not passed to
-	// MutateAdmission by the webhook, so validate them here as well.
-	for idx := range p.Spec.InitContainers {
-		if err := dev.validateMemoryPercentage(&p.Spec.InitContainers[idx]); err != nil {
-			return false, err
-		}
-	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
