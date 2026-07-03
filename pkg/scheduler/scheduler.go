@@ -42,6 +42,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -525,6 +526,19 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &snapshot
 }
 
+// numaBindingRequested reports whether the pod requests numa-bind affinity.
+func numaBindingRequested(task *corev1.Pod) bool {
+	if task == nil {
+		return false
+	}
+	v, ok := task.Annotations[nvidia.NumaBind]
+	if !ok {
+		return false
+	}
+	enforce, err := strconv.ParseBool(v)
+	return err == nil && enforce
+}
+
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
@@ -542,6 +556,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		nodeInfo.Node = node.Node
 		nodeInfo.Devices = policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
+			NumaBind:    numaBindingRequested(task),
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		}
 		for _, k := range node.Devices {

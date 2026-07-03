@@ -32,6 +32,9 @@ type DeviceListsScore struct {
 type DeviceUsageList struct {
 	DeviceLists []*DeviceListsScore
 	Policy      string
+	// NumaBind groups devices by NUMA so Fit can accumulate a same-NUMA run.
+	// When false, Score is the primary key and NUMA only breaks ties (#1806).
+	NumaBind bool
 }
 
 func (l DeviceUsageList) Len() int {
@@ -43,17 +46,37 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
-		if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
-			return l.DeviceLists[i].Score < l.DeviceLists[j].Score
+	si, sj := l.DeviceLists[i].Score, l.DeviceLists[j].Score
+	ni, nj := l.DeviceLists[i].Device.Numa, l.DeviceLists[j].Device.Numa
+	binpack := l.Policy == util.GPUSchedulerPolicyBinpack.String()
+
+	// numa-bind: keep NUMA groups contiguous for Fit's same-NUMA accumulation.
+	if l.NumaBind {
+		if binpack {
+			if ni == nj {
+				return si < sj
+			}
+			return ni > nj
 		}
-		return l.DeviceLists[i].Device.Numa > l.DeviceLists[j].Device.Numa
+		// default policy is spread
+		if ni == nj {
+			return si > sj
+		}
+		return ni < nj
+	}
+
+	// score primary, NUMA tiebreaker (#1806).
+	if binpack {
+		if si != sj {
+			return si < sj
+		}
+		return ni < nj
 	}
 	// default policy is spread
-	if l.DeviceLists[i].Device.Numa == l.DeviceLists[j].Device.Numa {
-		return l.DeviceLists[i].Score > l.DeviceLists[j].Score
+	if si != sj {
+		return si > sj
 	}
-	return l.DeviceLists[i].Device.Numa < l.DeviceLists[j].Device.Numa
+	return ni < nj
 }
 
 func (l DeviceUsageList) DeepCopy() DeviceUsageList {
@@ -67,6 +90,7 @@ func (l DeviceUsageList) DeepCopy() DeviceUsageList {
 	return DeviceUsageList{
 		DeviceLists: deviceLists,
 		Policy:      l.Policy,
+		NumaBind:    l.NumaBind,
 	}
 }
 
