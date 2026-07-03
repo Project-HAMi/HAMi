@@ -250,6 +250,33 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			},
 			expectedLess: true,
 		},
+		{
+			name:   "Mutex: busy GPU sorts before idle GPU",
+			policy: "mutex",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Used: 2, Numa: 0}},
+				{Device: &device.DeviceUsage{Used: 0, Numa: 0}},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Mutex: idle GPU sorts after busy GPU",
+			policy: "mutex",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Used: 0, Numa: 0}},
+				{Device: &device.DeviceUsage{Used: 1, Numa: 0}},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Mutex: NUMA tiebreaker when both idle",
+			policy: "mutex",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Used: 0, Numa: 0}},
+				{Device: &device.DeviceUsage{Used: 0, Numa: 1}},
+			},
+			expectedLess: true,
+		},
 	}
 
 	for _, tt := range tests {

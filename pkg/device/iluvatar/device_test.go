@@ -394,6 +394,29 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 }
 
+func TestFit_MutexRejectsUsedDevice(t *testing.T) {
+	dev := IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ChipName:           "MR-V100",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		},
+	}
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 1, Count: 100, Totalmem: 128, Totalcore: 100, Numa: 0, Type: "MR-V100", Health: true},
+	}
+	request := device.ContainerDeviceRequest{Nums: 1, Type: "MR-V100", Memreq: 64, Coresreq: 50}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
+	}}
+
+	ok, _, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, ok, false)
+	assert.Equal(t, reason, "1/1 ExclusiveDeviceAllocateConflict")
+}
+
 func Test_Fit(t *testing.T) {
 
 	dev := IluvatarDevices{
@@ -533,6 +556,35 @@ func Test_Fit(t *testing.T) {
 				Coresreq:         50,
 			},
 			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+		},
+		{
+			name: "mutex policy rejects used device",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      1,
+					Count:     2,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      "MR-V100",
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "MR-V100",
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
