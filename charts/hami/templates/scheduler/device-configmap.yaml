@@ -443,5 +443,14 @@ data:
         aiCPU: 7
         runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
         overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        templates:
+          - name: vir05_1c_16g
+            memory: 16384
+            aiCore: 5
+            aiCPU: 1
+          - name: vir10_3c_32g
+            memory: 32768
+            aiCore: 10
+            aiCPU: 3
   {{ end }}
 {{- end }}
