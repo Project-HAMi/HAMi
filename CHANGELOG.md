@@ -59,7 +59,7 @@ The core utilization of low priority task won't be limited to resourceCores if n
 See examples/nvidia/example.yaml for more details
 
 **Add Container Core Utilization policy**
-See details in docs/config.md(docs/config_cn.md)
+See details in [Configure HAMi](https://project-hami.io/docs/userguide/configure)
 
 ## v2.2
 

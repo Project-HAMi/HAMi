@@ -712,6 +712,44 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
+			name: "Requesting state without timestamp",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "Requesting state with unparsable timestamp",
+			args: struct {
+				devType           string
+				resourceCountName string
+				n                 corev1.Node
+			}{
+				devType: "huawei.com/Ascend910",
+				n: corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							util.HandshakeAnnos["huawei.com/Ascend910"]: "Requesting_not-a-timestamp",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
 			name: "Deleted state",
 			args: struct {
 				devType           string
@@ -1388,6 +1426,32 @@ func TestCheckUUID(t *testing.T) {
 				GPUNoUseUUID: "abc,123",
 			},
 			id:   "1abc",
+			want: true,
+		},
+		{
+			name: "both GPUUseUUID and GPUNoUseUUID set, device in use list but also in nouse list",
+			annos: map[string]string{
+				GPUUseUUID:   "abc,123",
+				GPUNoUseUUID: "abc",
+			},
+			id:   "abc",
+			want: false,
+		},
+		{
+			name: "both GPUUseUUID and GPUNoUseUUID set, device in use list and not in nouse list",
+			annos: map[string]string{
+				GPUUseUUID:   "abc,123",
+				GPUNoUseUUID: "456",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "use list with spaces around uuids, device matches after trim",
+			annos: map[string]string{
+				GPUUseUUID: " abc , 123 ",
+			},
+			id:   "abc",
 			want: true,
 		},
 	}

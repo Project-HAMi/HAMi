@@ -338,7 +338,15 @@ func (r *nvmlResourceManager) getMigDeviceParts(d *Device) (string, uint32, uint
 		//nolint:gosec  // We know that the values returned from Get*InstanceId are within the valid uint32 range.
 		return parentUUID, uint32(gi), uint32(ci), nil
 	}
-	return parseMigDeviceUUID(uuid)
+	// Fall back to parsing the legacy MIG UUID format (MIG-GPU-<parent-uuid>/<gi>/<ci>).
+	// Modern drivers assign opaque MIG UUIDs that carry no placement information,
+	// so if parsing fails the NVML error above must not be masked: it is the
+	// actual reason the device placement could not be determined.
+	parentUUID, gi, ci, err := parseMigDeviceUUID(uuid)
+	if err != nil {
+		return "", 0, 0, fmt.Errorf("failed to get MIG device handle for %s: %s; %v", uuid, nvml.ErrorString(ret), err)
+	}
+	return parentUUID, gi, ci, nil
 }
 
 // parseMigDeviceUUID splits the MIG device UUID into the parent device UUID and ci and gi

@@ -137,6 +137,16 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 * Run and pass `make verify`
 
+## Issue and PR Lifecycle
+
+To keep the project manageable, we apply the following policy to all open issues and pull requests:
+
+- If a maintainer or contributor leaves a comment or review requesting a response, the author has **two weeks** to reply.
+- If there is no response within two weeks, the issue or PR will be closed.
+- Closing is not permanent. If the issue is still relevant or the PR is still needed, it can be reopened or submitted again at any time.
+
+This policy helps us keep the backlog focused and avoids letting stale work block active contributors.
+
 ## Code Review
 
 To make it easier for your PR to receive reviews, consider that reviewers will need you to:
@@ -144,3 +154,4 @@ To make it easier for your PR to receive reviews, consider that reviewers will n
 * Follow [good coding guidelines](https://github.com/golang/go/wiki/CodeReviewComments)
 * Write [good commit messages](https://chris.beams.io/posts/git-commit/)
 * Break large changes into a logical series of smaller patches which individually make easily understandable changes, and in aggregate solve a broader issue
+* Separate cosmetics from functional changes. Cosmetic changes (reindentation, whitespace, comment wording, style fixes) must not be mixed with logic changes in the same commit — split them into their own commit. If the cosmetics are unrelated to the PR's purpose, they belong in a separate PR entirely. This keeps diffs reviewable: reviewers should not have to filter out formatting noise to find what actually changed.

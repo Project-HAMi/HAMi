@@ -344,6 +344,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
+	if err := dev.validateMemoryPercentage(ctr); err != nil {
+		return false, err
+	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -379,6 +382,15 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 	return hasResource, nil
+}
+
+func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		if pct < 0 || pct > 100 {
+			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, pct, ctr.Name)
+		}
+	}
+	return nil
 }
 
 func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
@@ -552,6 +564,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				mempnums, ok := mem.AsInt64()
 				if ok {
+					if mempnums < 0 || mempnums > 100 {
+						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
+						mempnums = 100
+					}
 					mempnum = int32(mempnums)
 				}
 			}

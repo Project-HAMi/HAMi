@@ -173,7 +173,7 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// 2. Calculate the SUM of requests among Regular Containers
 		for _, ctr := range pod.Spec.Containers {
 			req, ok := getRequest(&ctr, resourceName)
-			if ok && req == 1 {
+			if ok {
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
 					appMemoryReq += memReq
 				}

@@ -115,7 +115,7 @@ func Test_getNodesUsage(t *testing.T) {
 	}
 	nodes := make([]string, 0)
 	nodes = append(nodes, "node1")
-	cachenodeMap, _, err := s.getNodesUsage(&nodes, nil)
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
 	if err != nil {
 		t.Fatal(err)
 	}

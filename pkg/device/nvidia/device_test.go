@@ -36,7 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
-func Test_DefaultResourceNum(t *testing.T) {
+func TestResourceQuantityAsInt64(t *testing.T) {
 	v := *resource.NewQuantity(1, resource.BinarySI)
 	vv, ok := v.AsInt64()
 	assert.Equal(t, ok, true)
@@ -123,6 +123,64 @@ func Test_MutateAdmission(t *testing.T) {
 			got, _ := gpuDevices.MutateAdmission(test.args, &corev1.Pod{})
 			if test.want != got {
 				t.Fatalf("exec MutateAdmission method expect return is %+v, but got is %+v", test.want, got)
+			}
+		})
+	}
+}
+
+func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
+	tests := []struct {
+		name    string
+		pct     int64
+		wantErr bool
+	}{
+		{
+			name:    "percentage of 0 is accepted",
+			pct:     0,
+			wantErr: false,
+		},
+		{
+			name:    "percentage of 100 is accepted",
+			pct:     100,
+			wantErr: false,
+		},
+		{
+			name:    "percentage of 101 is rejected",
+			pct:     101,
+			wantErr: true,
+		},
+		{
+			name:    "percentage above 100 is rejected",
+			pct:     150,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(test.pct, resource.DecimalSI),
+					},
+				},
+			}
+			_, err := gpuDevices.MutateAdmission(ctr, &corev1.Pod{})
+			if test.wantErr && err == nil {
+				t.Fatalf("expected MutateAdmission to reject percentage %d, but got no error", test.pct)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected MutateAdmission to accept percentage %d, but got error: %v", test.pct, err)
 			}
 		})
 	}
@@ -1722,6 +1780,60 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Type:             NvidiaGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 50,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage above 100 — clamped to 100",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(150, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage beyond int32 range — clamped to 100 without wrapping",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(int64(1)<<32+50, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage equal to sentinel 101 — clamped to 100",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(101, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
 				Coresreq:         0,
 			},
 		},

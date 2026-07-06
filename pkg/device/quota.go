@@ -157,6 +157,10 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 	for idx, val := range usage {
 		if qInfo, ok := (*dp)[idx]; ok && qInfo != nil {
 			qInfo.Used -= val
+			if qInfo.Used < 0 {
+				klog.V(4).InfoS("RmUsage: clamping negative Used to zero", "quota", idx, "val", val)
+				qInfo.Used = 0
+			}
 		}
 	}
 	if klog.V(4).Enabled() {

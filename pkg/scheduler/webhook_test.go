@@ -356,6 +356,33 @@ func TestFitResourceQuota(t *testing.T) {
 					},
 				},
 			},
+			fit: false,
+		},
+		{
+			name: "request multiple gpus within quota",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					Containers: []corev1.Container{
+						{
+							Name: "container1",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: nil,
+							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("2"),
+									"nvidia.com/gpumem": resource.MustParse("400"),
+								},
+							},
+						},
+					},
+				},
+			},
 			fit: true,
 		},
 		{

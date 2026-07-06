@@ -171,7 +171,7 @@ func (d nvmlDevice) GetNumaNode() (bool, int, error) {
 	}
 
 	// Discard leading zeros.
-	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
+	busID := strings.ToLower(strings.TrimPrefix(int8Slice(info.BusId[:]).String(), "0000"))
 
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
