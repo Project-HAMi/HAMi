@@ -37,7 +37,10 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/stretchr/testify/require"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func TestNewHealthCheckXIDs(t *testing.T) {
@@ -234,6 +237,167 @@ func TestGetHealthCheckXids(t *testing.T) {
 				disabled[xid] = xids.IsDisabled(xid)
 			}
 			require.Equal(t, tc.expectedDisabled, disabled)
+		})
+	}
+}
+
+func TestParseMigDeviceUUID(t *testing.T) {
+	testCases := []struct {
+		description    string
+		uuid           string
+		expectedParent string
+		expectedGi     uint32
+		expectedCi     uint32
+		expectError    bool
+	}{
+		{
+			description:    "legacy MIG UUID format",
+			uuid:           "MIG-GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f/3/0",
+			expectedParent: "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f",
+			expectedGi:     3,
+			expectedCi:     0,
+		},
+		{
+			description: "opaque MIG UUID format carries no placement information",
+			uuid:        "MIG-30d00c09-8a98-59b8-8c1a-1d64b4ec3ad2",
+			expectError: true,
+		},
+		{
+			description: "full device UUID",
+			uuid:        "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f",
+			expectError: true,
+		},
+		{
+			description: "legacy format with missing compute instance",
+			uuid:        "MIG-GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f/3",
+			expectError: true,
+		},
+		{
+			description: "legacy format with non-numeric instance ids",
+			uuid:        "MIG-GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f/a/b",
+			expectError: true,
+		},
+		{
+			description: "empty string",
+			uuid:        "",
+			expectError: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			parent, gi, ci, err := parseMigDeviceUUID(tc.uuid)
+			if tc.expectError {
+				require.Error(t, err)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedParent, parent)
+			require.Equal(t, tc.expectedGi, gi)
+			require.Equal(t, tc.expectedCi, ci)
+		})
+	}
+}
+
+func TestGetMigDeviceParts(t *testing.T) {
+	newMigDevice := func(uuid string) *Device {
+		return &Device{
+			Device: kubeletdevicepluginv1beta1.Device{ID: uuid},
+			Index:  "0:0",
+		}
+	}
+
+	migHandle := &mock.Device{
+		GetDeviceHandleFromMigDeviceHandleFunc: func() (nvml.Device, nvml.Return) {
+			return &mock.Device{
+				GetUUIDFunc: func() (string, nvml.Return) {
+					return "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f", nvml.SUCCESS
+				},
+			}, nvml.SUCCESS
+		},
+		GetGpuInstanceIdFunc: func() (int, nvml.Return) {
+			return 3, nvml.SUCCESS
+		},
+		GetComputeInstanceIdFunc: func() (int, nvml.Return) {
+			return 0, nvml.SUCCESS
+		},
+	}
+
+	testCases := []struct {
+		description      string
+		device           *Device
+		nvmlRet          nvml.Return
+		expectedParent   string
+		expectedGi       uint32
+		expectedCi       uint32
+		expectError      bool
+		expectedInErrMsg []string
+	}{
+		{
+			description:    "placement resolved via NVML handle",
+			device:         newMigDevice("MIG-30d00c09-8a98-59b8-8c1a-1d64b4ec3ad2"),
+			nvmlRet:        nvml.SUCCESS,
+			expectedParent: "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f",
+			expectedGi:     3,
+			expectedCi:     0,
+		},
+		{
+			description:    "NVML lookup fails but legacy UUID format is parseable",
+			device:         newMigDevice("MIG-GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f/3/0"),
+			nvmlRet:        nvml.ERROR_NOT_SUPPORTED,
+			expectedParent: "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f",
+			expectedGi:     3,
+			expectedCi:     0,
+		},
+		{
+			description: "NVML lookup fails for opaque UUID: the NVML error is surfaced",
+			device:      newMigDevice("MIG-30d00c09-8a98-59b8-8c1a-1d64b4ec3ad2"),
+			nvmlRet:     nvml.ERROR_NO_PERMISSION,
+			expectError: true,
+			expectedInErrMsg: []string{
+				"MIG-30d00c09-8a98-59b8-8c1a-1d64b4ec3ad2",
+				nvml.ErrorString(nvml.ERROR_NO_PERMISSION),
+			},
+		},
+		{
+			description: "full device is rejected",
+			device: &Device{
+				Device: kubeletdevicepluginv1beta1.Device{ID: "GPU-5c89852c-d268-c3f3-1b07-005d5ae1dc3f"},
+				Index:  "0",
+			},
+			nvmlRet:     nvml.SUCCESS,
+			expectError: true,
+			expectedInErrMsg: []string{
+				"cannot get GI and CI of full device",
+			},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.description, func(t *testing.T) {
+			r := &nvmlResourceManager{
+				nvml: &mock.Interface{
+					DeviceGetHandleByUUIDFunc: func(string) (nvml.Device, nvml.Return) {
+						if tc.nvmlRet != nvml.SUCCESS {
+							return nil, tc.nvmlRet
+						}
+						return migHandle, nvml.SUCCESS
+					},
+				},
+			}
+
+			parent, gi, ci, err := r.getMigDeviceParts(tc.device)
+			if tc.expectError {
+				require.Error(t, err)
+				for _, msg := range tc.expectedInErrMsg {
+					require.Contains(t, err.Error(), msg)
+				}
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, tc.expectedParent, parent)
+			require.Equal(t, tc.expectedGi, gi)
+			require.Equal(t, tc.expectedCi, ci)
 		})
 	}
 }
