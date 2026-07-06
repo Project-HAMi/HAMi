@@ -10,6 +10,4 @@ metadata:
 data:
   config.json: |
 {{- .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
-  ld.so.preload: |
-    {{ .Values.devicePlugin.libPath }}/libvgpu.so
 {{- end }}
