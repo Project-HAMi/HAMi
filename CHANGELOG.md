@@ -233,7 +233,7 @@ Add support for Ascend910B3 device
 
 Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
-## v2.4.0
+## v2.4.0 - 2024-09-29
 
 **New features**
 - Add support for Ascend 910P device
@@ -248,7 +248,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix data race when reading pod info
 - Fix device ConfigMap errors
 
-## v2.4.1
+## v2.4.1 - 2024-11-15
 
 **New features**
 - Support MetaX scheduling optimization and topology awareness
@@ -262,7 +262,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix array out-of-bounds when GPU containers are placed between non-GPU containers
 - Fix wrong device assignment when one pod has multiple containers requesting GPU
 
-## v2.5.0
+## v2.5.0 - 2025-02-06
 
 **New features**
 - Support dynamic MIG partitioning
@@ -278,7 +278,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix vGPUmonitor deviceIdx always reporting 0
 - Fix Kubernetes version string handling with metadata
 
-## v2.5.1
+## v2.5.1 - 2025-05-06
 
 **Bug fixes**
 - Fix passDeviceSpecsEnabled defaulting to wrong value
@@ -289,17 +289,17 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix device memory count error on cuMallocAsync
 - Fix error handling for nvml.Init in device plugin
 
-## v2.5.2
+## v2.5.2 - 2025-05-26
 
 **Bug fixes**
 - Fix device usage metrics endpoint (port 31992) not accessible
 
-## v2.5.3
+## v2.5.3 - 2025-08-05
 
 **Bug fixes**
 - Fix multiple scheduler and vGPUmonitor stability issues
 
-## v2.6.0
+## v2.6.0 - 2025-06-07
 
 **New features**
 - Support Enflame GCU sharing
@@ -320,12 +320,12 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix scheduler crash when MIG task runs on HAMi-core GPU
 - Fix multi-process device memory count
 
-## v2.6.1
+## v2.6.1 - 2025-08-04
 
 **Bug fixes**
 - Fix multiple scheduler and node lock stability issues
 
-## v2.7.0
+## v2.7.0 - 2025-09-26
 
 **New features**
 - Add NVIDIA resource quota enforcement in webhook
@@ -346,7 +346,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix error when creating Iluvatar pod
 - Fix scheduler name overwrite option
 
-## v2.7.1
+## v2.7.1 - 2026-01-23
 
 **Bug fixes**
 - Update HAMi-core to fix vLLM-related issues
@@ -357,7 +357,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix device plugin still active after removal from GPU node
 - Upgrade nvidia-mig-parted to v0.12.2 for security fix
 
-## v2.8.0
+## v2.8.0 - 2026-01-20
 
 **New features**
 - Support DRA (Dynamic Resource Allocation) via HAMi-DRA
@@ -372,24 +372,24 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix scheduler allocating incorrect MIG instance
 - Fix concurrent map iteration and write fatal errors
 
-## v2.8.1
+## v2.8.1 - 2026-04-17
 
 **Bug fixes**
 - Fix vLLM with version above 0.18 failing to launch with multiple GPUs
 
-## v2.8.2
+## v2.8.2 - 2026-04-28
 
 **Bug fixes**
 - Fix device monitor not working properly
 
-## v2.8.3
+## v2.8.3 - 2026-05-19
 
 **Bug fixes**
 - Fix HAMi-core monitoring not working properly
 - Fix device utilization watcher not launching when gpucores not specified
 - Fix GetMemoryInfo error on unified memory GPUs
 
-## v2.9.0
+## v2.9.0 - 2026-05-19
 
 **New features**
 - Add HAMi-core mode for Ascend devices
