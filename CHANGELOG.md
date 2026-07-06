@@ -233,4 +233,178 @@ Add support for Ascend910B3 device
 
 Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
+## v2.4.0 - 2024-09-29
+
+**New features**
+- Add support for Ascend 910P device
+- Support multiple cudevshr versions in vGPUmonitor
+- Filter devices by UUID or index when registering nodes
+- Support Ascend custom config for NPU virtualization
+- Add event handler registration
+- Support arm architecture
+
+**Bug fixes**
+- Fix duplicate resource keys in ConfigMap
+- Fix data race when reading pod info
+- Fix device ConfigMap errors
+
+## v2.4.1 - 2024-11-15
+
+**New features**
+- Support MetaX scheduling optimization and topology awareness
+- Support Moore Threads sGPU
+- Add unified ConfigMap (hami-scheduler-device) for all HAMi configuration
+- Refactor Helm admission webhook config
+
+**Bug fixes**
+- Fix error when allocating Iluvatar device
+- Fix pod assignment when pod already has a node assigned
+- Fix array out-of-bounds when GPU containers are placed between non-GPU containers
+- Fix wrong device assignment when one pod has multiple containers requesting GPU
+
+## v2.5.0 - 2025-02-06
+
+**New features**
+- Support dynamic MIG partitioning
+- HAMi reinstall no longer crashes running GPU tasks
+- All configuration moved to a single ConfigMap
+- Add device plugin DaemonSet update strategy
+- Add informer-based pod cache to reduce API server load
+
+**Bug fixes**
+- Fix HAMi-core stuck on tasks using cuMallocAsync
+- Fix HAMi-core stuck on high glibc images
+- Fix device filter registry to node
+- Fix vGPUmonitor deviceIdx always reporting 0
+- Fix Kubernetes version string handling with metadata
+
+## v2.5.1 - 2025-05-06
+
+**Bug fixes**
+- Fix passDeviceSpecsEnabled defaulting to wrong value
+- Fix scheduler ignoring KUBECONFIG env variable
+- Fix device filter initialization order
+- Fix parseNvidiaNumaInfo index out of range
+- Fix Cambricon pods not recognized by HAMi scheduler
+- Fix device memory count error on cuMallocAsync
+- Fix error handling for nvml.Init in device plugin
+
+## v2.5.2 - 2025-05-26
+
+**Bug fixes**
+- Fix device usage metrics endpoint (port 31992) not accessible
+
+## v2.5.3 - 2025-08-05
+
+**Bug fixes**
+- Fix multiple scheduler and vGPUmonitor stability issues
+
+## v2.6.0 - 2025-06-07
+
+**New features**
+- Support Enflame GCU sharing
+- Support MetaX GPU and MetaX sGPU
+- Support RuntimeClass with NVIDIA devices
+- Add NVIDIA GPU topology score registry to node
+- Add MIG info metrics to vGPUmonitor
+- Add profiling support via net/http/pprof
+- Add Helm chart checksum annotation for ConfigMap-triggered restarts
+
+**Bug fixes**
+- Fix stuck in NVIDIA driver 570+
+- Fix device memory not counted properly in ComfyUI tasks
+- Fix Cambricon devices not allocated properly
+- Fix vgpu-devices-allocated annotation inconsistency
+- Fix dynamic GPU partitioning lacking single-GPU granularity
+- Fix device memory count error on cuMallocAsync
+- Fix scheduler crash when MIG task runs on HAMi-core GPU
+- Fix multi-process device memory count
+
+## v2.6.1 - 2025-08-04
+
+**Bug fixes**
+- Fix multiple scheduler and node lock stability issues
+
+## v2.7.0 - 2025-09-26
+
+**New features**
+- Add NVIDIA resource quota enforcement in webhook
+- Support Kunlunxin topology-aware scheduling and vXPU
+- Support Enflame GCU topology awareness
+- Support AWS Neuron device and core allocation
+- Support MetaX sGPU topology awareness
+- Add aggregated scheduling failure events
+- Make node lock timeout configurable
+- Support MIG mode change
+- Add option to disable admission webhook via Helm
+- Add option to disable device plugin per device type via Helm
+- Use scoped-down RBAC role for scheduler
+
+**Bug fixes**
+- Fix MIG partitioning NVML suppression before execution
+- Fix multi-node scoring inaccuracy
+- Fix error when creating Iluvatar pod
+- Fix scheduler name overwrite option
+
+## v2.7.1 - 2026-01-23
+
+**Bug fixes**
+- Update HAMi-core to fix vLLM-related issues
+- Fix quota calculation error
+- Fix ClusterRoleBinding failure when changing release or chart name
+- Fix nil pod check in ReleaseNodeLock
+- Fix concurrent map read/write fatal errors
+- Fix device plugin still active after removal from GPU node
+- Upgrade nvidia-mig-parted to v0.12.2 for security fix
+
+## v2.8.0 - 2026-01-20
+
+**New features**
+- Support DRA (Dynamic Resource Allocation) via HAMi-DRA
+- Enable leader election among multiple schedulers
+- Support CDI mode on NVIDIA devices
+- Sync NVIDIA device plugin with upstream v0.18.0
+- Add hami_build_info metrics and version output
+- Watch and hot-reload updated TLS certificates
+
+**Bug fixes**
+- Fix vXPU feature not working properly on P800 nodes
+- Fix scheduler allocating incorrect MIG instance
+- Fix concurrent map iteration and write fatal errors
+
+## v2.8.1 - 2026-04-17
+
+**Bug fixes**
+- Fix vLLM with version above 0.18 failing to launch with multiple GPUs
+
+## v2.8.2 - 2026-04-28
+
+**Bug fixes**
+- Fix device monitor not working properly
+
+## v2.8.3 - 2026-05-19
+
+**Bug fixes**
+- Fix HAMi-core monitoring not working properly
+- Fix device utilization watcher not launching when GPU cores are not specified
+- Fix GetMemoryInfo error on unified memory GPUs
+
+## v2.9.0 - 2026-05-19
+
+**New features**
+- Add HAMi-core mode for Ascend devices
+- HAMi-DRA for NVIDIA is ready for use
+- Sync Volcano vGPU device plugin with v0.19, add CDI support
+- Add Prometheus ServiceMonitor to Helm charts
+- Add resource quota check in webhook
+- Support module-pair allocation for Ascend 910C in SuperPod environments
+- Add support for VastAI devices
+- Add namespaceSelector and objectSelector config for webhook
+- Add Ascend core resource for HAMi-vNPU-core virtualization
+- Add enableGetPreferredAllocation flag
+- Add local-deploy target for minikube/kind clusters
+
+**Bug fixes**
+- Fix initialization error when using tensor parallelism on vLLM above 0.18
+- Fix multiple device typos
 
