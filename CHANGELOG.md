@@ -386,7 +386,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
 **Bug fixes**
 - Fix HAMi-core monitoring not working properly
-- Fix device utilization watcher not launching when gpucores not specified
+- Fix device utilization watcher not launching when GPU cores are not specified
 - Fix GetMemoryInfo error on unified memory GPUs
 
 ## v2.9.0 - 2026-05-19
