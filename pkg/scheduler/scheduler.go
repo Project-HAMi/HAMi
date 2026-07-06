@@ -170,8 +170,8 @@ func (s *Scheduler) onAddPod(obj any) {
 			}
 		}
 		if allInitDone {
-
-			podDev = stripInitContainerAliasSlots(pod, nil, podDev)
+			resourceReqs := device.Resourcereqs(pod)
+			podDev = stripInitContainerAliasSlots(pod, resourceReqs, podDev)
 		}
 	}
 

@@ -262,12 +262,15 @@ func TestFitResourceQuota(t *testing.T) {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 
-	qm := device.NewQuotaManager()
 	ns := "default"
 	memName := "nvidia.com/gpumem"
 	coreName := "nvidia.com/gpucores"
 
-	qm.Quotas[ns] = &device.DeviceQuota{
+	cache := device.GetLocalCache()
+	if cache.Quotas == nil {
+		cache.Quotas = make(map[string]*device.DeviceQuota)
+	}
+	cache.Quotas[ns] = &device.DeviceQuota{
 		memName:  &device.Quota{Used: 1000, Limit: 2000},
 		coreName: &device.Quota{Used: 200, Limit: 400},
 	}

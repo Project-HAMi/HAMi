@@ -156,28 +156,26 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		var initMemoryReq, initCoresReq int64
 		var appMemoryReq, appCoresReq int64
 
-		// 1. Calculate the MAX request among InitContainers
 		for _, ctr := range pod.Spec.InitContainers {
-			_, ok := getRequest(&ctr, resourceName)
+			req, ok := getRequest(&ctr, resourceName)
 			if ok {
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					initMemoryReq = max(initMemoryReq, memReq)
+					initMemoryReq = max(initMemoryReq, memReq*req)
 				}
 				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					initCoresReq = max(initCoresReq, coreReq)
+					initCoresReq = max(initCoresReq, coreReq*req)
 				}
 			}
 		}
 
-		// 2. Calculate the SUM of requests among Regular Containers
 		for _, ctr := range pod.Spec.Containers {
-			_, ok := getRequest(&ctr, resourceName)
+			req, ok := getRequest(&ctr, resourceName)
 			if ok {
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					appMemoryReq += memReq
+					appMemoryReq += memReq * req
 				}
 				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					appCoresReq += coreReq
+					appCoresReq += coreReq * req
 				}
 			}
 		}

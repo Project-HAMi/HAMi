@@ -95,7 +95,7 @@ func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
 	// Snapshot the entire node state before any modifications.
 	type devSnapshot struct {
-		idx       int
+		dev       *device.DeviceUsage
 		used      int32
 		usedcores int32
 		usedmem   int32
@@ -104,20 +104,17 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	for i := range node.Devices.DeviceLists {
 		d := node.Devices.DeviceLists[i].Device
 		saved[i] = devSnapshot{
-			idx:       i,
+			dev:       d,
 			used:      d.Used,
 			usedcores: d.Usedcores,
 			usedmem:   d.Usedmem,
 		}
 	}
-
-	// Global rollback function restores the node to its original state.
 	rollbackAll := func() {
-		for i := range saved {
-			dev := node.Devices.DeviceLists[i].Device
-			dev.Used = saved[i].used
-			dev.Usedcores = saved[i].usedcores
-			dev.Usedmem = saved[i].usedmem
+		for _, s := range saved {
+			s.dev.Used = s.used
+			s.dev.Usedcores = s.usedcores
+			s.dev.Usedmem = s.usedmem
 		}
 	}
 
@@ -308,18 +305,22 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 
 			baseTypes := nodeDeviceBaseTypes(node.Devices)
 
-			peakUsage := make([]struct {
+			type peakUsageSnapshot struct {
 				used      int32
 				usedcores int32
 				usedmem   int32
-			}, len(node.Devices.DeviceLists))
-			for i, dl := range node.Devices.DeviceLists {
-				peakUsage[i].used = dl.Device.Used
-				peakUsage[i].usedcores = dl.Device.Usedcores
-				peakUsage[i].usedmem = dl.Device.Usedmem
+			}
+			peakUsage := make(map[string]peakUsageSnapshot)
+			for _, dl := range node.Devices.DeviceLists {
+				id := dl.Device.ID
+				peakUsage[id] = peakUsageSnapshot{
+					used:      dl.Device.Used,
+					usedcores: dl.Device.Usedcores,
+					usedmem:   dl.Device.Usedmem,
+				}
 			}
 
-			//Check init containers (they run sequentially, each on a fresh copy)
+			// 1) Check init containers (they run sequentially, each on a fresh copy)
 			var initAllocs device.PodDevices
 			if numInitContainers > 0 {
 				initAllocs = make(device.PodDevices)
@@ -355,16 +356,26 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 						initFit = false
 						break
 					}
-					// Record how much this init container used, at its peak, per device.
-					for pi, dl := range nodeCopy.Devices.DeviceLists {
-						if dl.Device.Used > peakUsage[pi].used {
-							peakUsage[pi].used = dl.Device.Used
-						}
-						if dl.Device.Usedcores > peakUsage[pi].usedcores {
-							peakUsage[pi].usedcores = dl.Device.Usedcores
-						}
-						if dl.Device.Usedmem > peakUsage[pi].usedmem {
-							peakUsage[pi].usedmem = dl.Device.Usedmem
+					// Record peak usage for this init container per device (by device ID).
+					for _, dl := range nodeCopy.Devices.DeviceLists {
+						id := dl.Device.ID
+						if p, ok := peakUsage[id]; ok {
+							if dl.Device.Used > p.used {
+								p.used = dl.Device.Used
+							}
+							if dl.Device.Usedcores > p.usedcores {
+								p.usedcores = dl.Device.Usedcores
+							}
+							if dl.Device.Usedmem > p.usedmem {
+								p.usedmem = dl.Device.Usedmem
+							}
+							peakUsage[id] = p
+						} else {
+							peakUsage[id] = peakUsageSnapshot{
+								used:      dl.Device.Used,
+								usedcores: dl.Device.Usedcores,
+								usedmem:   dl.Device.Usedmem,
+							}
 						}
 					}
 					// Ensure every type has an entry for this container (even if empty)
@@ -379,7 +390,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				}
 			}
 
-			// Allocate app containers (they run concurrently, cumulative)
+			// 2) Allocate app containers (they run concurrently, cumulative)
 			appNodeCopy := node.DeepCopy()
 			score := policy.NodeScore{
 				NodeID:  nodeID,
@@ -438,30 +449,45 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 				return
 			}
 
-			//  Prepend init container allocations
+			// 3) Prepend init container allocations
 			if numInitContainers > 0 && initAllocs != nil {
 				for devType, initConList := range initAllocs {
 					score.Devices[devType] = append(initConList, score.Devices[devType]...)
 				}
 			}
 
-			// Commit the successful allocations to the original node.
-			for i := range node.Devices.DeviceLists {
-				finalUsed := appNodeCopy.Devices.DeviceLists[i].Device.Used
-				finalCores := appNodeCopy.Devices.DeviceLists[i].Device.Usedcores
-				finalMem := appNodeCopy.Devices.DeviceLists[i].Device.Usedmem
-				if peakUsage[i].used > finalUsed {
-					finalUsed = peakUsage[i].used
+			for _, dl := range node.Devices.DeviceLists {
+				id := dl.Device.ID
+				// Find the corresponding device in the app copy
+				var appDev *device.DeviceUsage
+				for _, adl := range appNodeCopy.Devices.DeviceLists {
+					if adl.Device.ID == id {
+						appDev = adl.Device
+						break
+					}
 				}
-				if peakUsage[i].usedcores > finalCores {
-					finalCores = peakUsage[i].usedcores
+				finalUsed := int32(0)
+				finalCores := int32(0)
+				finalMem := int32(0)
+				if appDev != nil {
+					finalUsed = appDev.Used
+					finalCores = appDev.Usedcores
+					finalMem = appDev.Usedmem
 				}
-				if peakUsage[i].usedmem > finalMem {
-					finalMem = peakUsage[i].usedmem
+				if p, ok := peakUsage[id]; ok {
+					if p.used > finalUsed {
+						finalUsed = p.used
+					}
+					if p.usedcores > finalCores {
+						finalCores = p.usedcores
+					}
+					if p.usedmem > finalMem {
+						finalMem = p.usedmem
+					}
 				}
-				node.Devices.DeviceLists[i].Device.Used = finalUsed
-				node.Devices.DeviceLists[i].Device.Usedcores = finalCores
-				node.Devices.DeviceLists[i].Device.Usedmem = finalMem
+				dl.Device.Used = finalUsed
+				dl.Device.Usedcores = finalCores
+				dl.Device.Usedmem = finalMem
 			}
 
 			score.OverrideScore(snapshot, userNodePolicy)
