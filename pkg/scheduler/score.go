@@ -32,8 +32,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// containerResourceSummary holds both the GPU count and total memory
-// for a group of containers, so we can compare them on both dimensions.
+// containerResourceSummary holds both the GPU count and total memory for a group of containers, so we can compare them on both dimensions.
 type containerResourceSummary struct {
 	nums     int
 	memreq   int32
@@ -47,130 +46,230 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
+// getNodeResources returns all devices of the exact given type from the node.
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(val.Device.Type, t) {
+		if val.Device == nil {
+			continue
+		}
+		// Exact match or prefix match (e.g., "NVIDIA" matches "NVIDIA A100-SXM4-40GB")
+		if val.Device.Type == t || strings.HasPrefix(val.Device.Type, t+" ") {
 			l = append(l, val.Device)
 		}
 	}
 	return l
 }
 
+// getDeviceBaseType maps a device model string (e.g., "NVIDIA A100-SXM4-40GB") to the base type key used in the device registry (e.g., "NVIDIA").
+func getDeviceBaseType(model string) string {
+	bestName := ""
+	bestWordLen := -1
+	for name, dev := range device.GetDevices() {
+		word := dev.CommonWord()
+		if !strings.HasPrefix(model, word) {
+			continue
+		}
+		if len(word) > bestWordLen || (len(word) == bestWordLen && name < bestName) {
+			bestName = name
+			bestWordLen = len(word)
+		}
+	}
+	if bestWordLen == -1 {
+		return model
+	}
+	return bestName
+}
+
+// nodeDeviceBaseTypes returns the set of base device types physically present on the node, computed once so that callers don't repeatedly re-derive it (which, combined with any residual
+// ambiguity in getDeviceBaseType, previously risked producing different results across calls within the same scheduling attempt).
+func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
+	types := make(map[string]struct{})
+	for _, dl := range list.DeviceLists {
+		if dl.Device != nil {
+			types[getDeviceBaseType(dl.Device.Type)] = struct{}{}
+		}
+	}
+	return types
+}
+
+// fitInDevices tries to allocate a single container's device requests on the given node.
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
-	devs := device.ContainerDevices{}
-	total, totalCore, totalMem := int32(0), int32(0), int32(0)
-	free, freeCore, freeMem := int32(0), int32(0), int32(0)
-	sums := 0
-	// compute all device scores for one node
+	// Snapshot the entire node state before any modifications.
+	type devSnapshot struct {
+		idx       int
+		used      int32
+		usedcores int32
+		usedmem   int32
+	}
+	saved := make([]devSnapshot, len(node.Devices.DeviceLists))
+	for i := range node.Devices.DeviceLists {
+		d := node.Devices.DeviceLists[i].Device
+		saved[i] = devSnapshot{
+			idx:       i,
+			used:      d.Used,
+			usedcores: d.Usedcores,
+			usedmem:   d.Usedmem,
+		}
+	}
+
+	// Global rollback function restores the node to its original state.
+	rollbackAll := func() {
+		for i := range saved {
+			dev := node.Devices.DeviceLists[i].Device
+			dev.Used = saved[i].used
+			dev.Usedcores = saved[i].usedcores
+			dev.Usedmem = saved[i].usedmem
+		}
+	}
+
 	for index := range node.Devices.DeviceLists {
 		node.Devices.DeviceLists[index].ComputeScore(requests)
 	}
-	// This loop is for requests for different devices
+
+	// Process each device type in the request.
 	for _, k := range requests {
-		sums += int(k.Nums)
-		if int(k.Nums) > len(node.Devices.DeviceLists) {
-			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
+		// Sort devices by score (best fit first).
+		sort.Sort(node.Devices)
+
+		devPlugin, ok := device.GetDevices()[k.Type]
+		if !ok {
+			rollbackAll()
+			errMsg := "Device type not found"
+			klog.ErrorS(nil, errMsg, "pod", klog.KObj(pod), "type", k.Type, "node", node.Node.Name)
+			return false, errMsg
+		}
+
+		typeDevices := getNodeResources(*node, k.Type)
+		if int(k.Nums) > len(typeDevices) {
+			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod),
+				"request devices nums", k.Nums, "node device nums (type)", len(typeDevices), "type", k.Type)
+			rollbackAll()
 			return false, common.NodeInsufficientDevice
 		}
-		sort.Sort(node.Devices)
-		_, ok := device.GetDevices()[k.Type]
-		if !ok {
-			return false, "Device type not found"
-		}
-		fit, tmpDevs, reason := device.GetDevices()[k.Type].Fit(getNodeResources(*node, k.Type), k, pod, nodeInfo, devinput)
-		if fit {
-			for idx, val := range tmpDevs[k.Type] {
-				for nidx, v := range node.Devices.DeviceLists {
-					// bc node.Devices has been sorted, so we should find out the correct device
-					if v.Device.ID != val.UUID {
-						continue
-					}
-					total += v.Device.Count
-					totalCore += v.Device.Totalcore
-					totalMem += v.Device.Totalmem
-					free += v.Device.Count - v.Device.Used
-					freeCore += v.Device.Totalcore - v.Device.Usedcores
-					freeMem += v.Device.Totalmem - v.Device.Usedmem
-					err := device.GetDevices()[k.Type].AddResourceUsage(pod, node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
-					if err != nil {
-						klog.Errorf("AddResourceUsage failed:%s", err.Error())
-						return false, "AddResourceUsage failed"
-					}
-					klog.V(5).Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
-				}
-			}
-			devs = append(devs, tmpDevs[k.Type]...)
-		} else {
+
+		fit, tmpDevs, reason := devPlugin.Fit(typeDevices, k, pod, nodeInfo, devinput)
+		if !fit {
+			rollbackAll()
 			return false, reason
 		}
-		(*devinput)[k.Type] = append((*devinput)[k.Type], devs)
+
+		type usageSnapshot struct {
+			idx       int
+			used      int32
+			usedcores int32
+			usedmem   int32
+		}
+		modified := make([]usageSnapshot, 0, len(tmpDevs[k.Type]))
+
+		for idx, val := range tmpDevs[k.Type] {
+			targetIdx := -1
+			for nidx, v := range node.Devices.DeviceLists {
+				if v.Device.ID == val.UUID {
+					targetIdx = nidx
+					break
+				}
+			}
+			if targetIdx == -1 {
+				rollbackAll()
+				errMsg := fmt.Sprintf("Device with UUID %q not found on node %s after Fit", val.UUID, node.Node.Name)
+				klog.ErrorS(nil, errMsg, "pod", klog.KObj(pod))
+				return false, errMsg
+			}
+			d := node.Devices.DeviceLists[targetIdx].Device
+
+			snap := usageSnapshot{
+				idx:       targetIdx,
+				used:      d.Used,
+				usedcores: d.Usedcores,
+				usedmem:   d.Usedmem,
+			}
+
+			err := devPlugin.AddResourceUsage(pod, d, &tmpDevs[k.Type][idx])
+			if err != nil {
+				klog.Errorf("AddResourceUsage failed for device %s: %v, rolling back all changes", d.ID, err)
+				for _, m := range modified {
+					dev := node.Devices.DeviceLists[m.idx].Device
+					dev.Used = m.used
+					dev.Usedcores = m.usedcores
+					dev.Usedmem = m.usedmem
+				}
+				rollbackAll()
+				errMsg := fmt.Sprintf("AddResourceUsage failed for device %s: %v", d.ID, err)
+				return false, errMsg
+			}
+			modified = append(modified, snap)
+			klog.V(5).Infof("Allocated device %s: used=%d, cores=%d, mem=%d",
+				d.ID, d.Used, d.Usedcores, d.Usedmem)
+		}
+
+		(*devinput)[k.Type] = append((*devinput)[k.Type], tmpDevs[k.Type])
 	}
+
 	return true, ""
 }
 
-// podInitContainerMaxRequest returns the maximum single-container device
-// request across all init containers, considering both GPU count AND memory.
-// Per Kubernetes semantics, init containers run sequentially, so the node
-// only needs to reserve capacity for the largest one at any moment.
-func podInitContainerMaxRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) containerResourceSummary {
-	maxReq := containerResourceSummary{}
+// podInitContainerMaxRequest returns a map of max requirements per device type.
+func podInitContainerMaxRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) map[string]containerResourceSummary {
+	maxReqs := make(map[string]containerResourceSummary)
 	for i := range numInitContainers {
-		var nums int
-		var mem int32
-		var cores int32
-		for _, k := range resourceReqs[i] {
-			nums += int(k.Nums)
-			mem += k.Memreq
-			cores += k.Coresreq
+		if i >= len(resourceReqs) {
+			break
 		}
-		if nums > maxReq.nums || (nums == maxReq.nums && mem > maxReq.memreq) {
-			maxReq.nums = nums
-			maxReq.memreq = mem
-			maxReq.coresreq = cores
+		for devType, req := range resourceReqs[i] {
+			existing := maxReqs[devType]
+			existing.nums = max(existing.nums, int(req.Nums))
+			existing.memreq = max(existing.memreq, req.Memreq)
+			existing.coresreq = max(existing.coresreq, req.Coresreq)
+			maxReqs[devType] = existing
 		}
 	}
-	return maxReq
+	return maxReqs
 }
 
-// podAppContainerTotalRequest returns the sum of device requests across all
-// regular (non-init) containers, considering both GPU count AND memory.
-func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) containerResourceSummary {
-	total := containerResourceSummary{}
+// podAppContainerTotalRequest returns the sum of device requests per device type.
+func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) map[string]containerResourceSummary {
+	totals := make(map[string]containerResourceSummary)
 	for i := numInitContainers; i < len(resourceReqs); i++ {
-		for _, k := range resourceReqs[i] {
-			total.nums += int(k.Nums)
-			total.memreq += k.Memreq
-			total.coresreq += k.Coresreq
+		for devType, req := range resourceReqs[i] {
+			current := totals[devType]
+			current.nums += int(req.Nums)
+			current.memreq += req.Memreq
+			current.coresreq += req.Coresreq
+			totals[devType] = current
 		}
 	}
-	return total
+	return totals
 }
 
-// canFitInitContainer checks if the node has at least one device that can
-// individually satisfy the init container's resource requirements.
-// This prevents allocation failures when total capacity appears sufficient
-// but no single device has enough memory/cores.
-func (node *NodeUsage) canFitInitContainer(maxInitReq containerResourceSummary) bool {
-	if node == nil {
-		return false // nil node cannot satisfy any request
+// stripInitContainerAliasSlots removes the device allocations of init containers from the
+// PodDevices structure, keeping only regular (non-init) container allocations.
+func stripInitContainerAliasSlots(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, devices device.PodDevices) device.PodDevices {
+	numInitContainers := len(pod.Spec.InitContainers)
+	if numInitContainers == 0 || len(devices) == 0 {
+		return devices
 	}
 
-	for _, deviceList := range node.Devices.DeviceLists {
-		device := deviceList.Device
-		if device == nil {
+	expectedTotal := -1
+	if resourceReqs != nil {
+		expectedTotal = len(resourceReqs)
+	}
+
+	result := make(device.PodDevices, len(devices))
+	for devType, containerList := range devices {
+		if expectedTotal >= 0 && len(containerList) != expectedTotal {
+			klog.ErrorS(nil, "device slot count does not match pod container count, skipping alias-slot strip for this device type to avoid misaligned data",
+				"pod", klog.KObj(pod), "deviceType", devType, "slots", len(containerList), "expectedContainers", expectedTotal)
+			result[devType] = containerList
 			continue
 		}
-
-		availableMem := device.Totalmem - device.Usedmem
-		availableCores := device.Totalcore - device.Usedcores
-
-		// Check if this device individually satisfies init requirements
-		if availableMem >= maxInitReq.memreq && availableCores >= maxInitReq.coresreq {
-			return true
+		if len(containerList) <= numInitContainers {
+			result[devType] = device.PodSingleDevice{}
+		} else {
+			result[devType] = containerList[numInitContainers:]
 		}
 	}
-	return false
+	return result
 }
 
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
@@ -192,219 +291,187 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	errCh := make(chan error, len(*nodes))
 
 	numInitContainers := len(task.Spec.InitContainers)
-	maxInitReq := podInitContainerMaxRequest(resourceReqs, numInitContainers)
-	appReqTotal := podAppContainerTotalRequest(resourceReqs, numInitContainers)
-
-	needsInitClone := numInitContainers > 0 &&
-		(maxInitReq.nums > appReqTotal.nums ||
-			maxInitReq.memreq > appReqTotal.memreq ||
-			maxInitReq.coresreq > appReqTotal.coresreq)
 
 	for nodeID, node := range *nodes {
-		if numInitContainers > 0 && !node.canFitInitContainer(maxInitReq) {
-			failedNodesMutex.Lock()
-
-			var failureMsg string
-			var failureType string
-			hasDeviceWithEnoughMem := false
-
-			for _, deviceList := range node.Devices.DeviceLists {
-				device := deviceList.Device
-				if device == nil {
-					continue
-				}
-				availableMem := device.Totalmem - device.Usedmem
-				if availableMem >= maxInitReq.memreq {
-					hasDeviceWithEnoughMem = true
-					break
-				}
-			}
-
-			if hasDeviceWithEnoughMem {
-				// Failure is due to cores, not memory
-				failureMsg = fmt.Sprintf(
-					"no single device has sufficient cores (%d) for init container",
-					maxInitReq.coresreq)
-				failureType = "InsufficientInitDeviceCores"
-			} else {
-				// Failure is due to memory
-				failureMsg = fmt.Sprintf(
-					"no single device has sufficient memory (%dMiB) for init container",
-					maxInitReq.memreq)
-				failureType = "InsufficientInitDeviceMemory"
-			}
-
-			failedNodes[nodeID] = failureMsg
-			failureReason[failureType] = append(failureReason[failureType], nodeID)
-			failedNodesMutex.Unlock()
-			klog.V(4).InfoS("Node filtered: insufficient per-device capacity for init container",
-				"pod", klog.KObj(task), "node", nodeID, "required_mem", maxInitReq.memreq, "required_cores", maxInitReq.coresreq)
-			continue
-		}
-
 		wg.Add(1)
 		go func(nodeID string, node *NodeUsage) {
 			defer wg.Done()
 
 			viewStatus(*node)
-			score := policy.NodeScore{NodeID: nodeID, Node: node.Node, Devices: make(device.PodDevices), Score: 0}
-			score.ComputeDefaultScore(node.Devices)
-			snapshot := score.SnapshotDevice(node.Devices)
-
 			nodeInfo, err := s.GetNode(nodeID)
 			if err != nil {
 				klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
+				failedNodesMutex.Lock()
+				failedNodes[nodeID] = fmt.Sprintf("failed to fetch node info: %v", err)
+				failedNodesMutex.Unlock()
 				errCh <- err
 				return
 			}
 
-			var appContainersNode *NodeUsage
-			if needsInitClone {
-				appContainersNode = node.DeepCopy()
-			} else {
-				appContainersNode = node
+			baseTypes := nodeDeviceBaseTypes(node.Devices)
+
+			peakUsage := make([]struct {
+				used      int32
+				usedcores int32
+				usedmem   int32
+			}, len(node.Devices.DeviceLists))
+			for i, dl := range node.Devices.DeviceLists {
+				peakUsage[i].used = dl.Device.Used
+				peakUsage[i].usedcores = dl.Device.Usedcores
+				peakUsage[i].usedmem = dl.Device.Usedmem
 			}
 
-			ctrfit := true
-			for ctrid, n := range resourceReqs {
-				sums := 0
-				for _, k := range n {
-					sums += int(k.Nums)
-				}
+			//Check init containers (they run sequentially, each on a fresh copy)
+			var initAllocs device.PodDevices
+			if numInitContainers > 0 {
+				initAllocs = make(device.PodDevices)
 
-				existingBefore := make(map[string]bool)
-				for typ := range score.Devices {
-					existingBefore[typ] = true
-				}
-
-				if ctrid < numInitContainers && !needsInitClone {
-				} else if sums > 0 {
-					klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-
-					var workingNode *NodeUsage
-					if needsInitClone && ctrid < numInitContainers {
-						workingNode = node.DeepCopy()
-					} else {
-						workingNode = appContainersNode
+				initFit := true
+				for i, req := range resourceReqs {
+					if i >= numInitContainers {
+						break
 					}
-
-					fit, reason := fitInDevices(workingNode, n, task, nodeInfo, &score.Devices)
-					ctrfit = fit
+					// Pad previous slots for all types to maintain index alignment
+					for typ := range baseTypes {
+						for len(initAllocs[typ]) < i {
+							initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
+						}
+					}
+					if len(req) == 0 {
+						for typ := range baseTypes {
+							initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
+						}
+						continue
+					}
+					nodeCopy := node.DeepCopy()
+					fit, reason := fitInDevices(nodeCopy, req, task, nodeInfo, &initAllocs)
 					if !fit {
-						klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+						klog.V(4).InfoS("Init container does not fit",
+							"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
 						failedNodesMutex.Lock()
-						failedNodes[nodeID] = common.NodeUnfitPod
+						failedNodes[nodeID] = reason
 						for reasonType := range common.ParseReason(reason) {
 							failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 						}
 						failedNodesMutex.Unlock()
+						initFit = false
 						break
 					}
-				}
-
-				for typ, devSlice := range score.Devices {
-					if len(devSlice) < ctrid+1 {
-						if !existingBefore[typ] {
-							// Brand new type for this container: allocation is at devSlice[0],
-							// shift it to index ctrid by prepending non‑nil empty slices.
-							pad := make(device.PodSingleDevice, 0, ctrid)
-							for range ctrid {
-								pad = append(pad, device.ContainerDevices{})
-							}
-							score.Devices[typ] = append(pad, devSlice...)
-						} else {
-							// Type existed before: just append empty (non‑nil) slices to reach the needed length.
-							for len(score.Devices[typ]) < ctrid+1 {
-								score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
-							}
+					// Record how much this init container used, at its peak, per device.
+					for pi, dl := range nodeCopy.Devices.DeviceLists {
+						if dl.Device.Used > peakUsage[pi].used {
+							peakUsage[pi].used = dl.Device.Used
+						}
+						if dl.Device.Usedcores > peakUsage[pi].usedcores {
+							peakUsage[pi].usedcores = dl.Device.Usedcores
+						}
+						if dl.Device.Usedmem > peakUsage[pi].usedmem {
+							peakUsage[pi].usedmem = dl.Device.Usedmem
+						}
+					}
+					// Ensure every type has an entry for this container (even if empty)
+					for typ := range baseTypes {
+						if len(initAllocs[typ]) == i {
+							initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
 						}
 					}
 				}
-			}
-
-			if numInitContainers > 0 && !needsInitClone {
-				for deviceType := range score.Devices {
-					containerList := score.Devices[deviceType]
-
-					if len(containerList) <= numInitContainers {
-						continue
-					}
-
-					for initIdx := range numInitContainers {
-						if initIdx >= len(resourceReqs) {
-							// Shouldn't happen, but safety check
-							continue
-						}
-
-						// ContainerDeviceRequests is map[string]ContainerDeviceRequest keyed
-						// by device type, so this is a direct lookup, not a search.
-						initDeviceReq, found := resourceReqs[initIdx][deviceType]
-						if !found {
-							containerList[initIdx] = device.ContainerDevices{}
-							continue
-						}
-
-						selectedAllocation := device.ContainerDevices{}
-						devicesNeeded := int(initDeviceReq.Nums)
-						memNeeded := initDeviceReq.Memreq
-						coresNeeded := initDeviceReq.Coresreq
-
-					outerLoop:
-						for appIdx := numInitContainers; appIdx < len(containerList); appIdx++ {
-							appAllocation := containerList[appIdx]
-
-							for deviceIdx := range appAllocation {
-								if devicesNeeded == 0 {
-									break outerLoop
-								}
-
-								dev := appAllocation[deviceIdx]
-
-								if dev.Usedmem >= memNeeded && dev.Usedcores >= coresNeeded {
-									selectedAllocation = append(selectedAllocation, dev)
-									devicesNeeded--
-								}
-							}
-						}
-
-						// Verify we found enough valid devices before assigning
-						if len(selectedAllocation) == int(initDeviceReq.Nums) {
-							containerList[initIdx] = selectedAllocation
-							klog.V(4).InfoS(
-								"Assigned validated app devices to init container",
-								"pod", klog.KObj(task),
-								"init_index", initIdx,
-								"device_type", deviceType,
-								"devices_assigned", len(selectedAllocation),
-								"required_mem", memNeeded,
-								"required_cores", coresNeeded,
-							)
-						} else {
-							klog.V(3).InfoS(
-								"ERROR: Insufficient validated devices for init container after canFitInitContainer passed",
-								"pod", klog.KObj(task),
-								"init_index", initIdx,
-								"device_type", deviceType,
-								"devices_needed", int(initDeviceReq.Nums),
-								"devices_found", len(selectedAllocation),
-								"required_mem", memNeeded,
-								"required_cores", coresNeeded,
-							)
-							// Still assign what we found (partial allocation)
-							// The device plugin will handle the error downstream
-							containerList[initIdx] = selectedAllocation
-						}
-					}
+				if !initFit {
+					return
 				}
 			}
 
-			if ctrfit {
-				fitNodesMutex.Lock()
-				res.NodeList = append(res.NodeList, &score)
-				fitNodesMutex.Unlock()
-				score.OverrideScore(snapshot, userNodePolicy)
-				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
+			// Allocate app containers (they run concurrently, cumulative)
+			appNodeCopy := node.DeepCopy()
+			score := policy.NodeScore{
+				NodeID:  nodeID,
+				Node:    node.Node,
+				Devices: make(device.PodDevices),
+				Score:   0,
 			}
+			score.ComputeDefaultScore(appNodeCopy.Devices)
+			snapshot := score.SnapshotDevice(appNodeCopy.Devices)
+
+			appIndex := 0
+			ctrfit := true
+
+			for ctrid, n := range resourceReqs {
+				if ctrid < numInitContainers {
+					continue
+				}
+				for typ := range baseTypes {
+					for len(score.Devices[typ]) < appIndex {
+						score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+					}
+				}
+				sums := 0
+				for _, k := range n {
+					sums += int(k.Nums)
+				}
+				if sums == 0 {
+					for typ := range baseTypes {
+						score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+					}
+					appIndex++
+					continue
+				}
+				fit, reason := fitInDevices(appNodeCopy, n, task, nodeInfo, &score.Devices)
+				ctrfit = fit
+				if !fit {
+					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
+					failedNodesMutex.Lock()
+					failedNodes[nodeID] = reason
+					for reasonType := range common.ParseReason(reason) {
+						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
+					}
+					failedNodesMutex.Unlock()
+					break
+				}
+				// Ensure every type has an entry for this container
+				for typ := range baseTypes {
+					if len(score.Devices[typ]) == appIndex {
+						score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
+					}
+				}
+				appIndex++
+			}
+
+			if !ctrfit {
+				return
+			}
+
+			//  Prepend init container allocations
+			if numInitContainers > 0 && initAllocs != nil {
+				for devType, initConList := range initAllocs {
+					score.Devices[devType] = append(initConList, score.Devices[devType]...)
+				}
+			}
+
+			// Commit the successful allocations to the original node.
+			for i := range node.Devices.DeviceLists {
+				finalUsed := appNodeCopy.Devices.DeviceLists[i].Device.Used
+				finalCores := appNodeCopy.Devices.DeviceLists[i].Device.Usedcores
+				finalMem := appNodeCopy.Devices.DeviceLists[i].Device.Usedmem
+				if peakUsage[i].used > finalUsed {
+					finalUsed = peakUsage[i].used
+				}
+				if peakUsage[i].usedcores > finalCores {
+					finalCores = peakUsage[i].usedcores
+				}
+				if peakUsage[i].usedmem > finalMem {
+					finalMem = peakUsage[i].usedmem
+				}
+				node.Devices.DeviceLists[i].Device.Used = finalUsed
+				node.Devices.DeviceLists[i].Device.Usedcores = finalCores
+				node.Devices.DeviceLists[i].Device.Usedmem = finalMem
+			}
+
+			score.OverrideScore(snapshot, userNodePolicy)
+			fitNodesMutex.Lock()
+			res.NodeList = append(res.NodeList, &score)
+			fitNodesMutex.Unlock()
+
+			klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 		}(nodeID, node)
 	}
 	wg.Wait()
