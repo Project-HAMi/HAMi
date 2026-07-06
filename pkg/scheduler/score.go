@@ -46,15 +46,13 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
-// getNodeResources returns all devices of the exact given type from the node.
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
 		if val.Device == nil {
 			continue
 		}
-		// Exact match or prefix match (e.g., "NVIDIA" matches "NVIDIA A100-SXM4-40GB")
-		if val.Device.Type == t || strings.HasPrefix(val.Device.Type, t+" ") {
+		if getDeviceBaseType(val.Device.Type) == t {
 			l = append(l, val.Device)
 		}
 	}
