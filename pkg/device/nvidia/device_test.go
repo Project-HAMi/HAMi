@@ -1632,6 +1632,8 @@ func TestCheckHealth(t *testing.T) {
 		current             int64
 		reported            int64
 		handshakeAnnotation string
+		cachedRegisterAnno  string
+		registerAnno        string
 		wantHealthy         bool
 		wantNeedReset       bool
 	}{
@@ -1683,6 +1685,46 @@ func TestCheckHealth(t *testing.T) {
 			wantHealthy:         false,
 			wantNeedReset:       false,
 		},
+		{
+			name:                "current>0 reported same: changed register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: false, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: true,
+		},
+		{
+			name:                "current>0 reported same: unchanged register annotation keeps cache",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: false,
+		},
+		{
+			name:                "current>0 reported same: deleted register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno:  "",
+			wantHealthy:   true,
+			wantNeedReset: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -1703,9 +1745,15 @@ func TestCheckHealth(t *testing.T) {
 				},
 				Status: corev1.NodeStatus{Allocatable: allocatable},
 			}
+			if tt.registerAnno != "" {
+				node.Annotations[RegisterAnnos] = tt.registerAnno
+			}
 
 			if tt.reported > 0 {
 				dev.ReportedGPUNum["test-node"] = tt.reported
+			}
+			if tt.cachedRegisterAnno != "" {
+				dev.ReportedRegisterAnnos["test-node"] = tt.cachedRegisterAnno
 			}
 
 			healthy, needReset := dev.CheckHealth("NVIDIA", node)
