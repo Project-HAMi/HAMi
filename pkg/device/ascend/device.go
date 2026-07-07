@@ -153,6 +153,10 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
 	if isHAMiCore {
+		if dev.config.ResourceCoreName != "" && !dev.hasPositiveCoreResourceRequest(ctr) {
+			return false, fmt.Errorf("ascend soft slicing requires positive core resource %s to be requested together with %s", dev.config.ResourceCoreName, dev.config.ResourceMemoryName)
+		}
+
 		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
 
 		if ctr.Lifecycle == nil {
@@ -198,6 +202,15 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		p.Spec.RuntimeClassName = &dev.config.RuntimeClassName
 	}
 	return true, nil
+}
+
+func (dev *Devices) hasPositiveCoreResourceRequest(ctr *corev1.Container) bool {
+	coreName := corev1.ResourceName(dev.config.ResourceCoreName)
+	if core, ok := ctr.Resources.Limits[coreName]; ok {
+		return core.Value() > 0
+	}
+	core, ok := ctr.Resources.Requests[coreName]
+	return ok && core.Value() > 0
 }
 
 func (dev *Devices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
