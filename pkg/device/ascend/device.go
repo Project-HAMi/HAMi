@@ -152,6 +152,21 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	vnpuMode := p.Annotations[VNPUModeAnnotation]
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
+	// -core is only meaningful in hami-core (soft split) mode. On hard split the
+	// compute is fixed by the driver template, so a requested -core is reserved by
+	// the scheduler but dropped by PatchAnnotations and never delivered to the
+	// container (and exceeding the physical core count leaves the pod Pending with
+	// CardInsufficientCore). Reject the invalid combination at admission.
+	if !isHAMiCore && dev.config.ResourceCoreName != "" {
+		coreQ, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+		if !ok {
+			coreQ, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceCoreName)]
+		}
+		if ok && coreQ.Value() > 0 {
+			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+		}
+	}
+
 	if isHAMiCore {
 		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
 
