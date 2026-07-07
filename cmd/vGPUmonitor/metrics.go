@@ -110,8 +110,8 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
-		`Container device memory usage breakdown in bytes (The label "context_size", "module_size", "buffer_size" and "offset" will be deprecated in v2.10.0, use hami_vgpu_memory_context_bytes, hami_vgpu_memory_module_bytes and hami_vgpu_memory_buffer_bytes instead)`,
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "context_size", "module_size", "buffer_size", "offset"}, nil,
+		`Container device memory usage breakdown in bytes`,
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"hami_container_device_utilization_ratio",
