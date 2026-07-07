@@ -110,7 +110,7 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
-		`Container device memory usage breakdown in bytes`,
+		`Container device memory usage in bytes`,
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
