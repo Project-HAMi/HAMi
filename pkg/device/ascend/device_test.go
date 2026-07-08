@@ -881,8 +881,6 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 // rejected on hard split (non hami-core) but accepted in hami-core soft-split
 // mode, and that a hard-split request without -core is unaffected.
 func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
-	// VNPUModeAnnotation and VNPUModeHamiCore are the package-level constants from device.go.
-
 	// 8738 maps to the vir08 template so hard-split memory trimming succeeds.
 	newCtr := func(core string) corev1.Container {
 		limits := corev1.ResourceList{
