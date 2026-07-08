@@ -460,21 +460,12 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		totalMemPerCard = devices[0].Totalmem
 	}
 
-	// A hami-core (soft-split) pod must land on a hami-core node regardless of
-	// how much memory it requests. Whole-card (Memreq == card capacity) and
-	// memory-less (Memreq == 0) requests skip the memory-range check below, so
-	// keeping this arm outside that condition closes the bypass of the node
-	// soft/hard exclusivity introduced in #1812.
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
 		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
 	}
 
-	// A node reserved for hami-core rejects legacy vNPU (template-based) pods
-	// that carve out part of a card. Whole-card legacy requests are intentionally
-	// left untouched so plain jobs are not stranded when a node, or the global
-	// hamiVnpuCore default, marks the node as hami-core.
 	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
 		if nodeSupportHamiCore && !isHAMiCore {
 			reason[common.ModeNotFit]++

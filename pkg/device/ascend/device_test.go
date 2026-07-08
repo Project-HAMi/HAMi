@@ -1814,9 +1814,6 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
 		{
-			// F5: whole-card memory request (Memreq == card capacity) must not
-			// bypass the node mode gate; a hami-core pod still requires a
-			// hami-core node.
 			name: "fit fail: whole-card hami-core pod on legacy node (ModeNotFit)",
 			devices: []*device.DeviceUsage{{
 				ID: "dev-0", Index: 0, Used: 0, Count: 100,
@@ -1836,8 +1833,6 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{},
 		},
 		{
-			// F5: memory-less request (Memreq == 0) must not bypass the node
-			// mode gate either.
 			name: "fit fail: memory-less hami-core pod on legacy node (ModeNotFit)",
 			devices: []*device.DeviceUsage{{
 				ID: "dev-0", Index: 0, Used: 0, Count: 100,
@@ -1857,8 +1852,6 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{},
 		},
 		{
-			// F5 guard: a whole-card hami-core pod on a hami-core node must
-			// still fit (the gate must not over-block matching modes).
 			name: "fit success: whole-card hami-core pod on hami-core node",
 			devices: []*device.DeviceUsage{{
 				ID: "dev-0", Index: 0, Used: 0, Count: 100,
@@ -1878,11 +1871,6 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
 		{
-			// F5 regression guard: a whole-card legacy (non hami-core) pod on a
-			// hami-core reserved node must still fit. Only the soft-pod arm is
-			// lifted out of the memory-range condition; a symmetric change would
-			// wrongly reject plain whole-card jobs (and break the global
-			// hamiVnpuCore=true default).
 			name: "fit success: whole-card legacy pod on hami-core node",
 			devices: []*device.DeviceUsage{{
 				ID: "dev-0", Index: 0, Used: 0, Count: 100,
