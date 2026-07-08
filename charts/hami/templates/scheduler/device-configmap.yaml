@@ -443,6 +443,7 @@ data:
         aiCPU: 7
         runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
         overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
+        superPod: true
         templates:
           - name: vir05_1c_16g
             memory: 16384
