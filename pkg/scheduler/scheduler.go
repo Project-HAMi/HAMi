@@ -160,21 +160,6 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 
-	numInit := len(pod.Spec.InitContainers)
-	if numInit > 0 {
-		allInitDone := len(pod.Status.InitContainerStatuses) >= numInit
-		for _, cs := range pod.Status.InitContainerStatuses {
-			if cs.State.Terminated == nil || cs.State.Terminated.ExitCode != 0 {
-				allInitDone = false
-				break
-			}
-		}
-		if allInitDone {
-			resourceReqs := device.Resourcereqs(pod)
-			podDev = stripInitContainerAliasSlots(pod, resourceReqs, podDev)
-		}
-	}
-
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
@@ -821,18 +806,16 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	usageDevices := stripInitContainerAliasSlots(args.Pod, resourceReqs, m.Devices)
-
-	added := s.podManager.AddPod(args.Pod, m.NodeID, usageDevices)
+	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
 	if added {
-		s.quotaManager.AddUsage(args.Pod, usageDevices)
+		s.quotaManager.AddUsage(args.Pod, m.Devices)
 	}
 
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		if added {
-			s.quotaManager.RmUsage(args.Pod, usageDevices)
+			s.quotaManager.RmUsage(args.Pod, m.Devices)
 		}
 		s.podManager.DelPod(args.Pod)
 		return nil, err
