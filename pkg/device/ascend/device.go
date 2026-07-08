@@ -478,7 +478,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
 		if nodeSupportHamiCore && !isHAMiCore {
 			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: Reserved for hami-core but pod is legacy vNPU", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			klog.V(4).InfoS("Node filtered: node reserved for hami-core but pod is legacy vNPU", "pod", klog.KObj(pod))
 			return false, nil, common.GenReason(reason, len(devices))
 		}
 	}
