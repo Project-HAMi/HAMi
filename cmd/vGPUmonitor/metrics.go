@@ -110,8 +110,8 @@ var (
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
-		`Container device memory usage breakdown in bytes (The label "context_size", "module_size", "buffer_size" and "offset" will be deprecated in v2.10.0, use hami_vgpu_memory_context_bytes, hami_vgpu_memory_module_bytes and hami_vgpu_memory_buffer_bytes instead)`,
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "context_size", "module_size", "buffer_size", "offset"}, nil,
+		`Container device memory usage in bytes`,
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"hami_container_device_utilization_ratio",
@@ -529,12 +529,12 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		}
 		sendLegacyMetric(ch, legacyCtrvGPUlimitdesc, prometheus.GaugeValue, float64(memoryLimit), labels...)
 
-		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
-		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
-		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...); err != nil {
+		if err := sendMetric(ch, ctrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
 			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
+		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
+		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
 		sendLegacyMetric(ch, legacyCtrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...)
 
 		if err := sendMetric(ch, ctrDeviceUtilizationdesc, prometheus.GaugeValue, float64(smUtil), labels...); err != nil {
