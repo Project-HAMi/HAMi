@@ -159,9 +159,10 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config         NvidiaConfig
-	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
-	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
+	config                NvidiaConfig
+	ReportedGPUNum        map[string]int64  // key: nodeName, value: reported GPU count
+	ReportedRegisterAnnos map[string]string // key: nodeName, value: last observed register annotation
+	mu                    sync.Mutex        // protects concurrent access to reported node state
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -174,8 +175,9 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	}
 	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
-		config:         nvconfig,
-		ReportedGPUNum: make(map[string]int64),
+		config:                nvconfig,
+		ReportedGPUNum:        make(map[string]int64),
+		ReportedRegisterAnnos: make(map[string]string),
 	}
 }
 
@@ -233,18 +235,27 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
 	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, dev.config.ResourceCountName, n)
+	registerAnno := n.Annotations[RegisterAnnos]
+	reportedRegisterAnno := dev.ReportedRegisterAnnos[n.Name]
 
 	if current == 0 {
 		if reported == 0 {
 			return handshakeHealthy, handshakeChanged
 		}
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return false, handshakeChanged
 	}
 
 	if reported != current {
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return true, true
+	}
+
+	if reportedRegisterAnno != registerAnno {
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
+		return handshakeHealthy, true
 	}
 
 	return handshakeHealthy, handshakeChanged
