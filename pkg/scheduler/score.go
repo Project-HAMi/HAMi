@@ -237,36 +237,6 @@ func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitC
 	return totals
 }
 
-// stripInitContainerAliasSlots removes the device allocations of init containers from the
-// PodDevices structure, keeping only regular (non-init) container allocations.
-func stripInitContainerAliasSlots(pod *corev1.Pod, resourceReqs device.PodDeviceRequests, devices device.PodDevices) device.PodDevices {
-	numInitContainers := len(pod.Spec.InitContainers)
-	if numInitContainers == 0 || len(devices) == 0 {
-		return devices
-	}
-
-	expectedTotal := -1
-	if resourceReqs != nil {
-		expectedTotal = len(resourceReqs)
-	}
-
-	result := make(device.PodDevices, len(devices))
-	for devType, containerList := range devices {
-		if expectedTotal >= 0 && len(containerList) != expectedTotal {
-			klog.ErrorS(nil, "device slot count does not match pod container count, skipping alias-slot strip for this device type to avoid misaligned data",
-				"pod", klog.KObj(pod), "deviceType", devType, "slots", len(containerList), "expectedContainers", expectedTotal)
-			result[devType] = containerList
-			continue
-		}
-		if len(containerList) <= numInitContainers {
-			result[devType] = device.PodSingleDevice{}
-		} else {
-			result[devType] = containerList[numInitContainers:]
-		}
-	}
-	return result
-}
-
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
