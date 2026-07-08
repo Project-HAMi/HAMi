@@ -688,6 +688,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -715,6 +716,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -742,6 +744,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -793,6 +796,67 @@ func Test_MutateAdmission910C(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_MutateAdmission910C_VNPUSplit(t *testing.T) {
+	devCfg := VNPUConfig{
+		CommonWord:         "Ascend910C",
+		ResourceName:       "huawei.com/Ascend910C",
+		ResourceMemoryName: "huawei.com/Ascend910C-memory",
+		MemoryAllocatable:  65536,
+		MemoryCapacity:     65536,
+		Templates: []Template{
+			{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
+			{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
+		},
+	}
+
+	t.Run("request 1 + vNPU memory slice is not rounded up", func(t *testing.T) {
+		ctr := corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"huawei.com/Ascend910C":        resource.MustParse("1"),
+					"huawei.com/Ascend910C-memory": resource.MustParse("16384"),
+				},
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("1"),
+				},
+			},
+		}
+		dev := Devices{config: devCfg}
+		result, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Assert(t, result)
+
+		npuQty := ctr.Resources.Limits["huawei.com/Ascend910C"]
+		gotNPU, _ := npuQty.AsInt64()
+		assert.Equal(t, gotNPU, int64(1), "vNPU request must stay at 1, not be rounded up to 2")
+
+		memQty := ctr.Resources.Limits["huawei.com/Ascend910C-memory"]
+		gotMem, _ := memQty.AsInt64()
+		assert.Equal(t, gotMem, int64(16384), "memory should map to the vir05_1c_16g template")
+	})
+
+	t.Run("odd NPU count is allowed when the card is split", func(t *testing.T) {
+		ctr := corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("3"),
+				},
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("3"),
+				},
+			},
+		}
+		dev := Devices{config: devCfg}
+		result, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Assert(t, result)
+
+		npuQty := ctr.Resources.Limits["huawei.com/Ascend910C"]
+		gotNPU, _ := npuQty.AsInt64()
+		assert.Equal(t, gotNPU, int64(3), "odd count must be preserved in split mode")
+	})
 }
 
 func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {

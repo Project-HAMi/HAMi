@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: Pod
+metadata:
+  name: ascend910c-job
+spec:
+  containers:
+    - name: ubuntu-container
+      image: ascendhub.huawei.com/public-ascendhub/ascend-mindspore:23.0.RC3-centos7
+      command: ["bash", "-c", "sleep 86400"]
+      resources:
+        limits:
+          huawei.com/Ascend910C: 1 # requesting 1 NPU
+          # requesting device memory; the value maps to a vNPU template (Ascend HDK 26.0.RC1):
+          #   16384 -> vir05_1c_16g (16GB, 5 aiCore, 1 aiCPU)
+          #   32768 -> vir10_3c_32g (32GB, 10 aiCore, 3 aiCPU)
+          huawei.com/Ascend910C-memory: 16384
