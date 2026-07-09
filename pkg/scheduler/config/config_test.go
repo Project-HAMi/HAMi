@@ -515,6 +515,12 @@ func Test_validateConfig(t *testing.T) {
 	emptyConfig := &Config{
 		IluvatarConfig: []iluvatar.IluvatarConfig{},
 	}
+	vastaiOnly := &Config{
+		VastaiConfig: vastai.VastaiConfig{ResourceCountName: "vastaitech.com/vgpu"},
+	}
+	birenOnly := &Config{
+		BirenConfig: biren.BirenConfig{ResourceCountName: "birentech.com/gpu"},
+	}
 
 	tests := []struct {
 		name        string
@@ -523,6 +529,8 @@ func Test_validateConfig(t *testing.T) {
 	}{
 		{"Valid config", validConfig, false},
 		{"Empty config", emptyConfig, true},
+		{"Vastai only", vastaiOnly, false},
+		{"Biren only", birenOnly, false},
 	}
 
 	for _, test := range tests {
