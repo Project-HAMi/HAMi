@@ -679,13 +679,14 @@ func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string)
 			return strings.TrimSpace(u) == id
 		})
 	}
-	if userUUID, ok := annos[useKey]; ok {
+	// An empty value means "no constraint" rather than "match nothing".
+	if userUUID, ok := annos[useKey]; ok && strings.TrimSpace(userUUID) != "" {
 		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
 		if !match(userUUID) {
 			return false
 		}
 	}
-	if noUserUUID, ok := annos[noUseKey]; ok {
+	if noUserUUID, ok := annos[noUseKey]; ok && strings.TrimSpace(noUserUUID) != "" {
 		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
 		if match(noUserUUID) {
 			return false

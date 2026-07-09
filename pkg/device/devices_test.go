@@ -1454,6 +1454,30 @@ func TestCheckUUID(t *testing.T) {
 			id:   "abc",
 			want: true,
 		},
+		{
+			name: "empty GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "whitespace-only GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "   ",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "empty GPUNoUseUUID annotation should not exclude any device",
+			annos: map[string]string{
+				GPUNoUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
 	}
 
 	for _, test := range tests {
