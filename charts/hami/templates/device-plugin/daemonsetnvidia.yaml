@@ -1,4 +1,4 @@
-{{- if and .Values.devicePlugin.enabled (not .Values.dra.enabled) }}
+{{- if .Values.devicePlugin.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
