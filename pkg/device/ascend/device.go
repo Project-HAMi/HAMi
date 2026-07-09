@@ -233,6 +233,8 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 				} else {
 					_, temp := dev.trimMemory(int64(val.Usedmem))
 					info.Temp = temp
+					info.Memory = int64(val.Usedmem)
+					info.Core = val.Usedcores
 				}
 
 				rtInfo = append(rtInfo, info)
@@ -443,23 +445,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 	}
 
-	var totalMemPerCard int32 = 0
-	if len(devices) > 0 {
-		totalMemPerCard = devices[0].Totalmem
-	}
-
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
 		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
-	}
-
-	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
-		if nodeSupportHamiCore && !isHAMiCore {
-			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: node reserved for hami-core but pod is legacy vNPU", "pod", klog.KObj(pod))
-			return false, nil, common.GenReason(reason, len(devices))
-		}
 	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
 
