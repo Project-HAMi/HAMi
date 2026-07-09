@@ -1680,6 +1680,90 @@ func TestFilterTemplateNodesMissingRegisterAnnotation(t *testing.T) {
 	require.Equal(t, "node unregistered", res.FailedNodes["template-node-cold-zero"])
 }
 
+// Test_Filter_PodLeakOnFailure reproduces bug #1491.
+// When Filter calls TakeAndDeletePod and then fails (no suitable node),
+// the pod was permanently removed from podManager, making the scheduler
+// see more free GPUs than actually exist.
+func Test_Filter_PodLeakOnFailure(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+
+	// Node with 2 GPUs
+	s.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {
+				{ID: "device1", Index: 0, Count: 10, Devmem: 8000, Devcore: 100, Health: true, Type: nvidia.NvidiaGPUDevice},
+				{ID: "device2", Index: 1, Count: 10, Devmem: 8000, Devcore: 100, Health: true, Type: nvidia.NvidiaGPUDevice},
+			},
+		},
+	})
+
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-leak-a", Name: "pod-a", Namespace: "ns"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c", Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI)},
+			},
+		}}},
+	}
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-leak-b", Name: "pod-b", Namespace: "ns"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c", Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI)},
+			},
+		}}},
+	}
+
+	devA := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			{
+				{Idx: 0, UUID: "device1", Usedmem: 1000, Usedcores: 10},
+				{Idx: 1, UUID: "device2", Usedmem: 1000, Usedcores: 10},
+			},
+		},
+	}
+	devB := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			{
+				{Idx: 0, UUID: "device1", Usedmem: 1000, Usedcores: 10},
+				{Idx: 1, UUID: "device2", Usedmem: 1000, Usedcores: 10},
+			},
+		},
+	}
+
+	s.podManager.AddPod(podA, "node1", devA)
+	s.podManager.AddPod(podB, "node1", devB)
+
+	// Both pods in cache
+	require.Equal(t, 2, len(s.podManager.ListPodsInfo()))
+
+	// Trigger a re-schedule for podA that fails.
+	// Pass the same node but both GPUs are fully occupied by podA + podB,
+	// so no device fits for podA's request.
+	result, err := s.Filter(extenderv1.ExtenderArgs{Pod: podA, NodeNames: &[]string{"node1"}})
+	// Filter returns nil error with FailedNodes set to indicate no node fits
+	require.NoError(t, err)
+	require.NotNil(t, result, "Filter result should not be nil")
+	require.NotEmpty(t, result.FailedNodes, "FailedNodes should report node1 as not fit")
+
+	// Before the fix, podA was taken by TakeAndDeletePod and never re-added,
+	// leaking its device usage. restorePod() now ensures it is re-added on
+	// error paths. Verify it's still in the cache.
+	pods := s.podManager.ListPodsInfo()
+	assert.Equal(t, 2, len(pods), "podA should remain in podManager after failed Filter")
+	_, ok := s.podManager.GetPod(podA)
+	assert.Equal(t, true, ok, "podA should be found in podManager after failed Filter")
+}
+}
+
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
