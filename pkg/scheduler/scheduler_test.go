@@ -42,6 +42,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -1424,6 +1425,259 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
 		assert.Equal(t, int64(0), v.Used)
 	}
+}
+
+func TestFilterUsesTemplateNodesWithoutSideEffects(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-pod",
+			Namespace: "default",
+			UID:       types.UID("template-pod-uid"),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(20, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(1024, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	templateNode := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "template-node-a",
+			Annotations: map[string]string{
+				nvidia.RegisterAnnos: `[{"id":"GPU-0","count":10,"devmem":8192,"devcore":100,"type":"NVIDIA-A100","numa":0,"health":true,"index":0,"mode":"hami-core"}]`,
+			},
+		},
+	}
+
+	res, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod:   pod,
+		Nodes: &corev1.NodeList{Items: []corev1.Node{templateNode}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Nil(t, res.NodeNames)
+	require.NotNil(t, res.Nodes)
+	require.Len(t, res.Nodes.Items, 1)
+	require.Equal(t, "template-node-a", res.Nodes.Items[0].Name)
+
+	cachedPod, ok := s.podManager.GetPod(pod)
+	require.False(t, ok)
+	require.Nil(t, cachedPod)
+
+	updatedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	require.Empty(t, updatedPod.Annotations[util.AssignedNodeAnnotations])
+	require.Empty(t, updatedPod.Annotations[util.AssignedTimeAnnotations])
+}
+
+func TestFilterTemplateNodesDoesNotTouchSchedulingCaches(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-quota",
+			Namespace: "default",
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				"limits.hami.io/gpucores": *resource.NewQuantity(1000, resource.BinarySI),
+				"limits.hami.io/gpumem":   *resource.NewQuantity(65536, resource.BinarySI),
+			},
+		},
+	}
+	s.onAddQuota(quota)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-pod-cache",
+			Namespace: "default",
+			UID:       types.UID("template-pod-cache-uid"),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(30, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(2048, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+
+	templateNode := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "template-node-b",
+			Annotations: map[string]string{
+				nvidia.RegisterAnnos: `[{"id":"GPU-1","count":10,"devmem":8192,"devcore":100,"type":"NVIDIA-A100","numa":0,"health":true,"index":1,"mode":"hami-core"}]`,
+			},
+		},
+	}
+
+	_, err = s.Filter(extenderv1.ExtenderArgs{
+		Pod:   pod,
+		Nodes: &corev1.NodeList{Items: []corev1.Node{templateNode}},
+	})
+	require.NoError(t, err)
+
+	pods, err := s.podManager.ListPodsUID()
+	require.NoError(t, err)
+	require.Len(t, pods, 0)
+
+	quotas := s.quotaManager.GetResourceQuota()
+	require.Contains(t, quotas, "default")
+	require.NotNil(t, quotas["default"])
+	require.Equal(t, int64(0), (*quotas["default"])["hami.io/gpucores"].Used)
+	require.Equal(t, int64(0), (*quotas["default"])["hami.io/gpumem"].Used)
+}
+
+func TestFilterTemplateNodesReturnsDetailedFailureReason(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-pod-unfit",
+			Namespace: "default",
+			UID:       types.UID("template-pod-unfit-uid"),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(20, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(16384, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	templateNode := corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "template-node-unfit",
+			Annotations: map[string]string{
+				nvidia.RegisterAnnos: `[{"id":"GPU-0","count":10,"devmem":8192,"devcore":100,"type":"NVIDIA-A100","numa":0,"health":true,"index":0,"mode":"hami-core"}]`,
+			},
+		},
+	}
+
+	res, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod:   pod,
+		Nodes: &corev1.NodeList{Items: []corev1.Node{templateNode}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Nil(t, res.Nodes)
+	require.Contains(t, res.FailedNodes, "template-node-unfit")
+	require.Contains(t, res.FailedNodes["template-node-unfit"], common.CardInsufficientMemory)
+}
+
+func TestFilterTemplateNodesMissingRegisterAnnotation(t *testing.T) {
+	s := NewScheduler()
+	client.KubeClient = fake.NewSimpleClientset()
+	s.kubeClient = client.KubeClient
+	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "template-pod-cold-zero",
+			Namespace: "default",
+			UID:       types.UID("template-pod-cold-zero-uid"),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+
+	res, err := s.Filter(extenderv1.ExtenderArgs{
+		Pod: pod,
+		Nodes: &corev1.NodeList{Items: []corev1.Node{{
+			ObjectMeta: metav1.ObjectMeta{Name: "template-node-cold-zero"},
+		}}},
+	})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Nil(t, res.Nodes)
+	require.Equal(t, "node unregistered", res.FailedNodes["template-node-cold-zero"])
 }
 
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
