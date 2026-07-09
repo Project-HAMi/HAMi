@@ -941,6 +941,76 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 	}
 }
 
+// Test_MutateAdmission_HardSplitCoreRejected verifies that a -core request is
+// rejected on hard split (non hami-core) but accepted in hami-core soft-split
+// mode, and that a hard-split request without -core is unaffected.
+func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
+	// 8738 maps to the vir08 template so hard-split memory trimming succeeds.
+	newCtr := func(core string) corev1.Container {
+		limits := corev1.ResourceList{
+			"huawei.com/Ascend910B3":        resource.MustParse("1"),
+			"huawei.com/Ascend910B3-memory": resource.MustParse("8738"),
+		}
+		requests := corev1.ResourceList{
+			"huawei.com/Ascend910B3":        resource.MustParse("1"),
+			"huawei.com/Ascend910B3-memory": resource.MustParse("8738"),
+		}
+		if core != "" {
+			limits["huawei.com/Ascend910B3-core"] = resource.MustParse(core)
+			requests["huawei.com/Ascend910B3-core"] = resource.MustParse(core)
+		}
+		return corev1.Container{
+			Name:      "test-container",
+			Resources: corev1.ResourceRequirements{Limits: limits, Requests: requests},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		ctr      corev1.Container
+		hamiCore bool
+		wantErr  bool
+	}{
+		{name: "hard split with core is rejected", ctr: newCtr("10"), hamiCore: false, wantErr: true},
+		{name: "hard split with core over physical is rejected", ctr: newCtr("25"), hamiCore: false, wantErr: true},
+		{name: "hard split with core=0 is allowed", ctr: newCtr("0"), hamiCore: false, wantErr: false},
+		{name: "hard split without core is allowed", ctr: newCtr(""), hamiCore: false, wantErr: false},
+		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), hamiCore: true, wantErr: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					MemoryAllocatable:  32768,
+					MemoryCapacity:     32768,
+					Templates: []Template{
+						{Name: "vir08", Memory: 8738, AICore: 8},
+						{Name: "vir16", Memory: 17476, AICore: 16},
+					},
+				},
+			}
+			pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+			if test.hamiCore {
+				pod.Annotations = map[string]string{VNPUModeAnnotation: VNPUModeHamiCore}
+			}
+			ctr := test.ctr
+			_, err := dev.MutateAdmission(&ctr, &pod)
+			if test.wantErr {
+				assert.Assert(t, err != nil, "expected admission to be rejected")
+				assert.Assert(t, strings.Contains(err.Error(), "hami-core"),
+					"error should mention hami-core, got %v", err)
+			} else {
+				assert.NilError(t, err)
+			}
+		})
+	}
+}
+
 func Test_GenerateResourceRequests(t *testing.T) {
 	tests := []struct {
 		name string

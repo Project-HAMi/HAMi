@@ -152,6 +152,18 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	vnpuMode := p.Annotations[VNPUModeAnnotation]
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
+	// -core only applies to hami-core (soft split); on hard split the template
+	// fixes compute, so reject it here.
+	if !isHAMiCore && dev.config.ResourceCoreName != "" {
+		coreQ, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+		if !ok {
+			coreQ, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceCoreName)]
+		}
+		if ok && coreQ.Value() > 0 {
+			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
+		}
+	}
+
 	if isHAMiCore {
 		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
 
@@ -187,7 +199,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
-			return true, errors.New("vNPU nor supported for multiple devices")
+			return true, errors.New("vNPU not supported for multiple devices")
 		}
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
