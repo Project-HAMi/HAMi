@@ -962,6 +962,11 @@ if args.Nodes != nil {
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		// Revert the tentative AddPod/AddUsage for the new device
+		// assignment before restorePod re-adds the original one.
+		if added {
+			s.quotaManager.RmUsage(args.Pod, m.Devices)
+		}
 		restorePod()
 		return nil, err
 	}
