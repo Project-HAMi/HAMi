@@ -1947,6 +1947,80 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason:     "1/1 ModeNotFit",
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
+		{
+			name: "fit fail: whole-card hami-core pod on legacy node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{},
+		},
+		{
+			name: "fit fail: memory-less hami-core pod on legacy node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 0, MemPercentagereq: 101, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{},
+		},
+		{
+			name: "fit success: whole-card hami-core pod on hami-core node",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
+		{
+			name: "fit success: whole-card legacy pod on hami-core node",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos:          map[string]string{},
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
 	}
 
 	for _, dev := range devs {
