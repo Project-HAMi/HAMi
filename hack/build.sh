@@ -46,14 +46,12 @@ function docker_build() {
       if [ -n "$_git_common" ] && [ -d "$_git_common/modules/libvgpu" ]; then
         _restore_git=$(mktemp)
         cp .git "$_restore_git"
+        # shellcheck disable=SC2064
+        trap "rm -rf .git && cp '$_restore_git' .git && rm -f '$_restore_git'" EXIT
         rm -f .git
         mkdir -p .git/modules
         cp -r "$_git_common/modules/libvgpu" .git/modules/
       fi
-    fi
-    if [ -n "$_restore_git" ]; then
-      # shellcheck disable=SC2064
-      trap "rm -rf .git && cp '$_restore_git' .git && rm -f '$_restore_git'" EXIT
     fi
 
     docker build --build-arg VERSION="${VERSION}" --build-arg GOLANG_IMAGE=${GOLANG_IMAGE} --build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} --build-arg DEST_DIR=${DEST_DIR} -t "${IMAGE}:${VERSION}" -f docker/Dockerfile .
