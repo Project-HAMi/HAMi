@@ -903,6 +903,7 @@ if args.Nodes != nil {
 		if removed {
 			s.quotaManager.AddUsage(args.Pod, pi.Devices)
 			s.podManager.AddPod(args.Pod, pi.NodeID, pi.Devices)
+			removed = false
 		}
 	}
 	}
