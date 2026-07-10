@@ -2420,6 +2420,16 @@ func TestCheckGPUtype_NoUse(t *testing.T) {
 	assert.Equal(t, checkGPUtype(annos, "NVIDIA-V100"), true)
 }
 
+func TestCheckGPUtype_EmptyAnnotation(t *testing.T) {
+	// An empty use/nouse type annotation means "no constraint": strings.Contains
+	// treats "" as a substring of every card type, so without a guard an empty
+	// nouse-gputype would wrongly exclude every device.
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: "   "}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: "   "}, "NVIDIA-A100"), true)
+}
+
 func TestCheckType_AllocateMode(t *testing.T) {
 	dev := &NvidiaGPUDevices{}
 	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice}

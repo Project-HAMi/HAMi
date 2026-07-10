@@ -96,7 +96,8 @@ func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
-	if inuse, ok := annos[DCUInUse]; ok {
+	// Empty value means "no constraint"; otherwise strings.Contains("") matches every type.
+	if inuse, ok := annos[DCUInUse]; ok && strings.TrimSpace(inuse) != "" {
 		if !strings.Contains(inuse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
 				return true
@@ -110,7 +111,7 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 		}
 		return false
 	}
-	if nouse, ok := annos[DCUNoUse]; ok {
+	if nouse, ok := annos[DCUNoUse]; ok && strings.TrimSpace(nouse) != "" {
 		if !strings.Contains(nouse, ",") {
 			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
 				return false
