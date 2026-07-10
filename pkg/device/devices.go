@@ -694,3 +694,27 @@ func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string)
 	}
 	return true
 }
+
+// CheckType reports whether a device model is allowed by the use/noUse type
+// constraints in annos. It mirrors CheckUUID but matches the card model as a
+// case-insensitive substring instead of an exact device id. An empty value
+// means "no constraint" rather than "match nothing".
+func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool {
+	cardType = strings.ToUpper(cardType)
+	match := func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(t string) bool {
+			return strings.Contains(cardType, strings.ToUpper(t))
+		})
+	}
+	if inuse, ok := annos[useKey]; ok && strings.TrimSpace(inuse) != "" {
+		if !match(inuse) {
+			return false
+		}
+	}
+	if noUse, ok := annos[noUseKey]; ok && strings.TrimSpace(noUse) != "" {
+		if match(noUse) {
+			return false
+		}
+	}
+	return true
+}

@@ -96,36 +96,7 @@ func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
-	// Empty value means "no constraint"; otherwise strings.Contains("") matches every type.
-	if inuse, ok := annos[DCUInUse]; ok && strings.TrimSpace(inuse) != "" {
-		if !strings.Contains(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
-				return true
-			}
-		} else {
-			for val := range strings.SplitSeq(inuse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if nouse, ok := annos[DCUNoUse]; ok && strings.TrimSpace(nouse) != "" {
-		if !strings.Contains(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
-				return false
-			}
-		} else {
-			for val := range strings.SplitSeq(nouse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	return true
+	return device.CheckType(annos, cardtype, DCUInUse, DCUNoUse)
 }
 
 func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
