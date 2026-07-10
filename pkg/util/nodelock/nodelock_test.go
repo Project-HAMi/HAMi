@@ -241,9 +241,10 @@ func TestReleaseNodeLock(t *testing.T) {
 		timeout  bool
 	}
 	tests := []struct {
-		name    string
-		args    args
-		wantErr bool
+		name          string
+		args          args
+		wantErr       bool
+		checkNodeLock bool
 	}{
 		{
 			name: "node not found",
@@ -323,7 +324,8 @@ func TestReleaseNodeLock(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
+			wantErr:       false,
+			checkNodeLock: true,
 		},
 		{
 			name: "node lock is legacy timestamp format",
@@ -344,13 +346,25 @@ func TestReleaseNodeLock(t *testing.T) {
 					},
 				},
 			},
-			wantErr: false,
+			wantErr:       false,
+			checkNodeLock: true,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := ReleaseNodeLock(tt.args.nodeName(), tt.args.lockname, tt.args.pod, tt.args.timeout); (err != nil) != tt.wantErr {
+			nodeName := tt.args.nodeName()
+			if err := ReleaseNodeLock(nodeName, tt.args.lockname, tt.args.pod, tt.args.timeout); (err != nil) != tt.wantErr {
 				t.Errorf("ReleaseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
+			}
+
+			if tt.checkNodeLock {
+				node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("failed to get node %s after releasing lock: %v", nodeName, err)
+				}
+				if _, ok := node.Annotations[NodeLockKey]; ok {
+					t.Errorf("expected %s annotation to be removed from node %s", NodeLockKey, nodeName)
+				}
 			}
 		})
 	}
