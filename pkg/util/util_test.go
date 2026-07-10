@@ -58,7 +58,7 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "mark annotations to delete",
+			name: "remove annotations",
 			args: args{
 				devType: "huawei.com/Ascend910",
 				nn:      "node-worker2",

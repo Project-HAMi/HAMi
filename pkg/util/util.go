@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -226,14 +225,32 @@ func InitKlogFlags() *flag.FlagSet {
 }
 
 func MarkAnnotationsToDelete(devType string, nn string) error {
-	tmppat := make(map[string]string)
-	tmppat[devType] = "Deleted_" + time.Now().Format(time.DateTime)
 	n, err := GetNode(nn)
 	if err != nil {
 		klog.Errorln("get node failed", err.Error())
 		return err
 	}
-	return PatchNodeAnnotations(n, tmppat)
+	return RemoveNodeAnnotation(n, devType)
+}
+
+func RemoveNodeAnnotation(node *corev1.Node, annotationKey string) error {
+	patch := map[string]interface{}{
+		"metadata": map[string]interface{}{
+			"annotations": map[string]interface{}{
+				annotationKey: nil,
+			},
+		},
+	}
+	bytes, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	_, err = client.GetClient().CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.Infoln("remove annotation failed for node", node.Name, "annotationKey", annotationKey)
+	}
+	return err
 }
 
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
