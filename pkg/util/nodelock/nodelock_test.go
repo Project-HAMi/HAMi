@@ -325,6 +325,27 @@ func TestReleaseNodeLock(t *testing.T) {
 			},
 			wantErr: false,
 		},
+		{
+			name: "node lock is legacy timestamp format",
+			args: args{
+				nodeName: func() string {
+					name := "worker-5"
+					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{
+							NodeLockKey: "2026-07-03T15:35:10+08:00",
+						}},
+					}, metav1.CreateOptions{})
+					return name
+				},
+				pod: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "hami",
+						Namespace: "hami-ns",
+					},
+				},
+			},
+			wantErr: false,
+		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
