@@ -587,6 +587,20 @@ func buildTransientNodeInfo(node *corev1.Node) (*device.NodeInfo, error) {
 	return nodeInfo, nil
 }
 
+func nodeNamesLen(nodeNames *[]string) int {
+	if nodeNames == nil {
+		return 0
+	}
+	return len(*nodeNames)
+}
+
+func nodeListLen(nodes *corev1.NodeList) int {
+	if nodes == nil {
+		return 0
+	}
+	return len(nodes.Items)
+}
+
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
@@ -664,17 +678,30 @@ func (s *Scheduler) getSimulationNodesUsage(nodes *corev1.NodeList, task *corev1
 	candidateNodes := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
 	if nodes == nil {
+		klog.V(3).InfoS("Simulation node usage requested with nil node list",
+			"pod", klog.KObj(task))
 		return &candidateNodes, failedNodes, nil
 	}
+	klog.V(3).InfoS("Building simulation node usage from request nodes",
+		"pod", klog.KObj(task),
+		"nodesLen", len(nodes.Items))
 	for i := range nodes.Items {
 		node := &nodes.Items[i]
 		nodeInfo, err := buildTransientNodeInfo(node)
 		if err != nil {
+			klog.V(4).InfoS("Simulation node rejected during transient node construction",
+				"pod", klog.KObj(task),
+				"node", node.Name,
+				"reason", err.Error())
 			failedNodes[node.Name] = err.Error()
 			continue
 		}
 		candidateNodes[node.Name] = buildNodeUsage(nodeInfo, task)
 	}
+	klog.V(3).InfoS("Built simulation node usage",
+		"pod", klog.KObj(task),
+		"candidateNodes", len(candidateNodes),
+		"failedNodes", len(failedNodes))
 	return &candidateNodes, failedNodes, nil
 }
 
@@ -813,8 +840,17 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}, nil
 	}
 	if args.Nodes != nil {
+		klog.V(2).InfoS("Choosing simulation filter path",
+			"pod", klog.KObj(args.Pod),
+			"reason", "request contains full nodes",
+			"nodesLen", nodeListLen(args.Nodes),
+			"nodeNamesLen", nodeNamesLen(args.NodeNames))
 		return s.filterSimulation(args, resourceReqs)
 	}
+	klog.V(2).InfoS("Choosing live filter path",
+		"pod", klog.KObj(args.Pod),
+		"reason", "request does not contain full nodes",
+		"nodeNamesLen", nodeNamesLen(args.NodeNames))
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
@@ -878,15 +914,25 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 }
 
 func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs device.PodDeviceRequests) (*extenderv1.ExtenderFilterResult, error) {
+	klog.V(2).InfoS("Entering simulation filter path",
+		"pod", klog.KObj(args.Pod),
+		"nodesLen", nodeListLen(args.Nodes))
 	nodeUsage, failedNodes, err := s.getSimulationNodesUsage(args.Nodes, args.Pod)
 	if err != nil {
 		return nil, err
 	}
+	klog.V(3).InfoS("Collected simulation node usage for filtering",
+		"pod", klog.KObj(args.Pod),
+		"candidateNodes", len(*nodeUsage),
+		"failedNodes", len(failedNodes))
 	nodeScores, err := s.calcScoreWithOptions(nodeUsage, resourceReqs, args.Pod, failedNodes, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 	}
 	if len(nodeScores.NodeList) == 0 {
+		klog.V(3).InfoS("Simulation filter found no fit nodes",
+			"pod", klog.KObj(args.Pod),
+			"failedNodes", failedNodes)
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -900,6 +946,10 @@ func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs 
 			break
 		}
 	}
+	klog.V(2).InfoS("Simulation filter selected best node",
+		"pod", klog.KObj(args.Pod),
+		"selectedNode", bestNodeID,
+		"filteredNodesLen", len(filteredNodes))
 	return &extenderv1.ExtenderFilterResult{
 		Nodes: &corev1.NodeList{
 			Items: filteredNodes,
