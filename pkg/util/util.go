@@ -234,9 +234,9 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 }
 
 func RemoveNodeAnnotation(node *corev1.Node, annotationKey string) error {
-	patch := map[string]interface{}{
-		"metadata": map[string]interface{}{
-			"annotations": map[string]interface{}{
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"annotations": map[string]any{
 				annotationKey: nil,
 			},
 		},
