@@ -245,7 +245,11 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKey string) error {
 	if err != nil {
 		return err
 	}
-	_, err = client.GetClient().CoreV1().Nodes().
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+	_, err = c.CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("remove annotation failed for node", node.Name, "annotationKey", annotationKey)
