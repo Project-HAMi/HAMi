@@ -233,12 +233,14 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 	return RemoveNodeAnnotation(n, devType)
 }
 
-func RemoveNodeAnnotation(node *corev1.Node, annotationKey string) error {
+func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
+	annos := make(map[string]any, len(annotationKeys))
+	for _, key := range annotationKeys {
+		annos[key] = nil
+	}
 	patch := map[string]any{
 		"metadata": map[string]any{
-			"annotations": map[string]any{
-				annotationKey: nil,
-			},
+			"annotations": annos,
 		},
 	}
 	bytes, err := json.Marshal(patch)
@@ -252,7 +254,7 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKey string) error {
 	_, err = c.CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
-		klog.Infoln("remove annotation failed for node", node.Name, "annotationKey", annotationKey)
+		klog.Infoln("remove annotation failed for node", node.Name, "annotationKeys", annotationKeys)
 	}
 	return err
 }

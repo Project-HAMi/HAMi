@@ -35,7 +35,7 @@ func init() {
 	inRequestDevices = make(map[string]string)
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
-func TestMarkAnnotationsToDelete(t *testing.T) {
+func TestRemoveAnnotation(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{Name: "node-worker2"},
@@ -69,7 +69,7 @@ func TestMarkAnnotationsToDelete(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			if err := MarkAnnotationsToDelete(tt.args.devType, tt.args.nn); (err != nil) != tt.wantErr {
-				t.Errorf("MarkAnnotationsToDelete() error = %v, wantErr %v", err, tt.wantErr)
+				t.Errorf("RemoveAnnotation() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
 	}
