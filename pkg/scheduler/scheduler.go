@@ -967,7 +967,14 @@ if args.Nodes != nil {
 		if added {
 			s.quotaManager.RmUsage(args.Pod, m.Devices)
 		}
-		restorePod()
+		if removed {
+			restorePod()
+		} else {
+			// Pod was not in podManager before (first scheduling attempt),
+			// just clean up the tentative AddPod so it doesn't orphan
+			// an entry in the manager.
+			s.podManager.DelPod(args.Pod)
+		}
 		return nil, err
 	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)

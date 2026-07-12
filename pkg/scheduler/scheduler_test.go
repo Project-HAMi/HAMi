@@ -1764,6 +1764,78 @@ func Test_Filter_PodLeakOnFailure(t *testing.T) {
 }
 }
 
+// Test_Filter_PodLeakOnPatchFailure verifies that when Filter succeeds
+// in finding a node but fails to patch annotations, the pod is properly
+// restored to podManager with its original nodeID and device state
+// (regression for mesutoezdil/gemini review feedback on #2044).
+func Test_Filter_PodLeakOnPatchFailure(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+
+	s := NewScheduler()
+
+	// Node with 1 GPU
+	s.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {
+				{ID: "GPU-1", Index: 0, Count: 10, Devmem: 8000, Devcore: 100, Health: true, Type: nvidia.NvidiaGPUDevice},
+			},
+		},
+	})
+
+	// Set up empty fake client so PatchPodAnnotations has a non-nil client
+	// but fails because no pod exists in the tracker.
+	fakeClient := fake.NewSimpleClientset()
+	client.KubeClient = fakeClient
+	s.kubeClient = fakeClient
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       types.UID("test-patch-fail-uid"),
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c", Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"hami.io/gpu": resource.MustParse("1")},
+			},
+		}}},
+	}
+
+	dev := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			{
+				{Idx: 0, UUID: "GPU-1", Usedmem: 1000, Usedcores: 10},
+			},
+		},
+	}
+
+	s.podManager.AddPod(pod, "node1", dev)
+	s.quotaManager.AddUsage(pod, dev)
+
+	require.Equal(t, 1, len(s.podManager.ListPodsInfo()),
+		"pod should be in podManager before Filter")
+
+	// Filter will find node1 suitable, call PatchPodAnnotations on a pod
+	// that doesn't exist in the fake client, triggering a patch error.
+	_, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{"node1"}})
+	require.Error(t, err, "Filter should fail when PatchPodAnnotations fails")
+
+	// After failure, pod must be restored to its original node + devices.
+	pi, ok := s.podManager.GetPod(pod)
+	assert.Assert(t, ok, "pod should still be in podManager after failed PatchPodAnnotations")
+	assert.Equal(t, "node1", pi.NodeID, "nodeID should be restored to original")
+	assert.Assert(t, len(pi.Devices[nvidia.NvidiaGPUDevice]) == len(dev[nvidia.NvidiaGPUDevice]),
+		"device group count should match original")
+	assert.DeepEqual(t, dev[nvidia.NvidiaGPUDevice], pi.Devices[nvidia.NvidiaGPUDevice])
+}
+
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
