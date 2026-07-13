@@ -92,8 +92,6 @@ func NewScheduler() *Scheduler {
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
-	// Use dummy leader manager when leaderElect is disabled
-	// This ensures IsLeader() always returns true and synced will not be set to false
 	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
@@ -161,6 +159,7 @@ func (s *Scheduler) onAddPod(obj any) {
 		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
+
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
@@ -400,7 +399,14 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
+				// klog.Warning does plain fmt.Print-style concatenation of its arguments -
+				// klog v2 has no structured WarningS variant. Passing alternating
+				// "key", value pairs to it (as if it were InfoS/ErrorS) produces a garbled,
+				// unstructured log line instead of the intended structured fields. Use
+				// ErrorS (nil error is fine here; this is a detected condition, not a Go
+				// error) to match the structured logging used throughout the rest of this
+				// file.
+				klog.ErrorS(nil, "Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
 					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -741,22 +747,25 @@ ReleaseNodeLocks:
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
-	resourceReqTotal := 0
-	for _, n := range resourceReqs {
-		for _, k := range n {
-			resourceReqTotal += int(k.Nums)
+
+	hasHAMiResource := false
+
+	for _, reqMap := range resourceReqs {
+		if len(reqMap) > 0 {
+			hasHAMiResource = true
+			break
 		}
 	}
-	if resourceReqTotal == 0 {
-		klog.V(1).InfoS("Pod does not request any resources",
-			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
+
+	if !hasHAMiResource {
+		klog.V(1).InfoS("Pod does not request any resources", "pod", args.Pod.Name)
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
 			Error:       "",
 		}, nil
 	}
+
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
@@ -766,8 +775,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
-		klog.V(5).InfoS("Nodes failed during usage retrieval",
-			"nodes", failedNodes)
+		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
@@ -776,8 +784,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).InfoS("No available nodes meet the required scores",
-			"pod", args.Pod.Name)
+		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,

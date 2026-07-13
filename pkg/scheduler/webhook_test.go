@@ -262,12 +262,15 @@ func TestFitResourceQuota(t *testing.T) {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 
-	qm := device.NewQuotaManager()
 	ns := "default"
 	memName := "nvidia.com/gpumem"
 	coreName := "nvidia.com/gpucores"
 
-	qm.Quotas[ns] = &device.DeviceQuota{
+	cache := device.GetLocalCache()
+	if cache.Quotas == nil {
+		cache.Quotas = make(map[string]*device.DeviceQuota)
+	}
+	cache.Quotas[ns] = &device.DeviceQuota{
 		memName:  &device.Quota{Used: 1000, Limit: 2000},
 		coreName: &device.Quota{Used: 200, Limit: 400},
 	}
@@ -384,6 +387,89 @@ func TestFitResourceQuota(t *testing.T) {
 				},
 			},
 			fit: true,
+		},
+		{
+			name: "InitContainers run sequentially: max init fits quota, but simple sum would exceed",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-init-fit",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					// Two init containers each asking for 800. Max = 800.
+					InitContainers: []corev1.Container{
+						{
+							Name: "init1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("800"),
+								},
+							},
+						},
+						{
+							Name: "init2",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("800"),
+								},
+							},
+						},
+					},
+					// App container asking for 500. Total effective requirement = max(800, 500) = 800.
+					// 800 is less than the available 1000 limit, so it should fit.
+					// If the quota manager wrongly sums everything (800+800+500=2100), this test will catch it by failing.
+					Containers: []corev1.Container{
+						{
+							Name: "app1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("500"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: true,
+		},
+		{
+			name: "InitContainer request exceeds quota directly",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod-init-fail",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					InitContainers: []corev1.Container{
+						{
+							Name: "init-massive",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("1500"), // 1500 > 1000 available limit
+								},
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name: "app1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("100"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: false,
 		},
 		{
 			name: "request ascend",
@@ -640,5 +726,105 @@ func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("Expected schedulerName patch to %q, got patches: %+v", config.SchedulerName, resp.Patches)
+	}
+}
+
+func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	ns := "default"
+	cache := device.GetLocalCache()
+	if cache.Quotas == nil {
+		cache.Quotas = make(map[string]*device.DeviceQuota)
+	}
+
+	// initial quota: 30000 limit, 0 used
+	cache.Quotas[ns] = &device.DeviceQuota{
+		"nvidia.com/gpumem":   &device.Quota{Used: 0, Limit: 30000},
+		"nvidia.com/gpucores": &device.Quota{Used: 0, Limit: 0},
+	}
+
+	makePod := func(name string, initMem, appMem int64) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: ns,
+			},
+			Spec: corev1.PodSpec{
+				SchedulerName: "hami-scheduler",
+				InitContainers: []corev1.Container{
+					{
+						Name:  "init",
+						Image: "busybox",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":    resource.MustParse("1"),
+								"nvidia.com/gpumem": *resource.NewQuantity(initMem, resource.DecimalSI),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name:  "app",
+						Image: "busybox",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":    resource.MustParse("1"),
+								"nvidia.com/gpumem": *resource.NewQuantity(appMem, resource.DecimalSI),
+							},
+						},
+					},
+				},
+			},
+		}
+	}
+
+	// Step 1: Pod1 (init 20000, app 10000) should be allowed
+	pod1 := makePod("pod1", 20000, 10000)
+	if !fitResourceQuota(pod1) {
+		t.Fatal("Step 1 failed: pod1 should be allowed (peak 20000 ≤ 30000)")
+	}
+
+	// Simulate pod1 scheduled → record its peak usage (20000)
+	if dq, ok := cache.Quotas[ns]; ok {
+		if q, ok := (*dq)["nvidia.com/gpumem"]; ok {
+			q.Used = 20000
+		} else {
+			(*dq)["nvidia.com/gpumem"] = &device.Quota{Used: 20000, Limit: 30000}
+		}
+	}
+
+	// Step 2: Pod2 (same) must be DENIED
+	pod2 := makePod("pod2", 20000, 10000)
+	if fitResourceQuota(pod2) {
+		t.Fatal("Step 2 failed: pod2 should be denied (total used 20000 + request 20000 > 30000)")
+	}
+
+	// Step 3: Pod1 init finished → usage drops to app only (10000)
+	if dq, ok := cache.Quotas[ns]; ok {
+		if q, ok := (*dq)["nvidia.com/gpumem"]; ok {
+			q.Used = 10000
+		}
+	}
+
+	// Now pod2 should be allowed
+	if !fitResourceQuota(pod2) {
+		t.Fatal("Step 3 failed: pod2 should be allowed after pod1 init finished (total 10000+20000=30000)")
 	}
 }
