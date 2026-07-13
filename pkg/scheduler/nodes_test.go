@@ -239,6 +239,38 @@ func TestNodeUsageDeepCopy(t *testing.T) {
 						Name: "test-node",
 					},
 				},
+				NodeInfo: &device.NodeInfo{
+					ID: "test-node",
+					Node: &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: "test-node-info",
+						},
+					},
+					Devices: map[string][]device.DeviceInfo{
+						"NVIDIA": {{
+							ID:      "GPU-info-0",
+							Count:   10,
+							Devmem:  8192,
+							Devcore: 100,
+							Type:    "NVIDIA-A100",
+							Mode:    "mig",
+							MIGTemplate: []device.Geometry{
+								{
+									{Name: "1g.5gb", Core: 14, Memory: 5120, Count: 1},
+								},
+							},
+							CustomInfo: map[string]any{
+								"profile": "gold",
+							},
+							DevicePairScore: device.DevicePairScore{
+								ID: "GPU-info-0",
+								Scores: map[string]int{
+									"GPU-info-1": 42,
+								},
+							},
+						}},
+					},
+				},
 				Devices: policy.DeviceUsageList{
 					Policy: "binpack",
 					DeviceLists: []*policy.DeviceListsScore{
@@ -294,6 +326,24 @@ func TestNodeUsageDeepCopy(t *testing.T) {
 				copy.Devices.DeviceLists[0].Device.ID = "mutated-gpu"
 				assert.Equal(t, tt.original.Devices.DeviceLists[0].Score, originalScore)
 				assert.Equal(t, tt.original.Devices.DeviceLists[0].Device.ID, originalDeviceID)
+			}
+			if copy.NodeInfo != nil {
+				if copy.NodeInfo.Node != nil {
+					originalNodeInfoName := tt.original.NodeInfo.Node.Name
+					copy.NodeInfo.Node.Name = "mutated-node-info"
+					assert.Equal(t, tt.original.NodeInfo.Node.Name, originalNodeInfoName)
+				}
+				if len(copy.NodeInfo.Devices["NVIDIA"]) > 0 {
+					originalTemplateName := tt.original.NodeInfo.Devices["NVIDIA"][0].MIGTemplate[0][0].Name
+					originalCustomInfo := tt.original.NodeInfo.Devices["NVIDIA"][0].CustomInfo["profile"]
+					originalPairScore := tt.original.NodeInfo.Devices["NVIDIA"][0].DevicePairScore.Scores["GPU-info-1"]
+					copy.NodeInfo.Devices["NVIDIA"][0].MIGTemplate[0][0].Name = "mutated-template"
+					copy.NodeInfo.Devices["NVIDIA"][0].CustomInfo["profile"] = "silver"
+					copy.NodeInfo.Devices["NVIDIA"][0].DevicePairScore.Scores["GPU-info-1"] = 7
+					assert.Equal(t, tt.original.NodeInfo.Devices["NVIDIA"][0].MIGTemplate[0][0].Name, originalTemplateName)
+					assert.Equal(t, tt.original.NodeInfo.Devices["NVIDIA"][0].CustomInfo["profile"], originalCustomInfo)
+					assert.Equal(t, tt.original.NodeInfo.Devices["NVIDIA"][0].DevicePairScore.Scores["GPU-info-1"], originalPairScore)
+				}
 			}
 		})
 	}

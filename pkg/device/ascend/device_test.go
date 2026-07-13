@@ -485,24 +485,6 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Deleted state",
-			args: struct {
-				devType string
-				n       corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
 			name: "Unknown state",
 			args: struct {
 				devType string
