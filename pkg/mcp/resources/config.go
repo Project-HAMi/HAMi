@@ -62,7 +62,7 @@ func (r *ConfigResource) Handler() func(ctx context.Context, req *mcp.ReadResour
 		}
 
 		// Extract config data
-		configData := make(map[string]interface{})
+		configData := make(map[string]any)
 		for key, value := range configMap.Data {
 			configData[key] = value
 		}

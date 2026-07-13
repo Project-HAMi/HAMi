@@ -66,7 +66,7 @@ func TestConfigResource_Handler_Success(t *testing.T) {
 		t.Errorf("unexpected metadata: %+v", c)
 	}
 
-	var data map[string]interface{}
+	var data map[string]any
 	if err := json.Unmarshal([]byte(c.Text), &data); err != nil {
 		t.Fatalf("invalid JSON: %v\nbody=%s", err, c.Text)
 	}
