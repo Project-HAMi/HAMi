@@ -536,7 +536,8 @@ prometheus:
 mcpServer:
   enabled: false
   image:
-    repository: "hami-mcp"
+    registry: "docker.io"
+    repository: "projecthami/hami"
     tag: ""
     pullPolicy: IfNotPresent
   prometheusUrl: "http://localhost:9090"

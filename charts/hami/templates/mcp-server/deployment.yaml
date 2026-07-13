@@ -22,8 +22,10 @@ spec:
       serviceAccountName: {{ include "hami-vgpu.mcp-server" . }}
       containers:
         - name: mcp-server
-          image: "{{ .Values.global.imageRegistry }}{{ .Values.mcpServer.image.repository }}:{{ .Values.mcpServer.image.tag | default .Values.global.imageTag }}"
+          image: "{{ .Values.mcpServer.image.registry }}/{{ .Values.mcpServer.image.repository }}:{{ .Values.mcpServer.image.tag | default .Values.global.imageTag }}"
           imagePullPolicy: {{ .Values.mcpServer.image.pullPolicy }}
+          command:
+            - /k8s-vgpu/bin/mcp-server
           args:
             - --listen-addr=:9395
             - --prometheus-url={{ .Values.mcpServer.prometheusUrl }}
