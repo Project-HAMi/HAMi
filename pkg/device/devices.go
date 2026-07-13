@@ -524,49 +524,6 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (b
 			return true, false
 		}
 		return false, false
-	} else if strings.Contains(handshake, "Deleted") {
-		// Mirror the timestamp logic used by the Requesting branch: a
-		// Deleted_<ts> older than 60s on a node whose devices are otherwise
-		// reporting healthy means the previous cleanup is stale and the
-		// scheduler should bring the node back into its cache. Stamp
-		// Requesting_<now> and return (true, true) so the caller re-adds
-		// node devices on the next reconcile.
-		//
-		// Bare "Deleted" without a timestamp (used in some unit tests) and
-		// any unparsable timestamp must keep the conservative (true, false)
-		// path so we never recover from a malformed value.
-		annoKey, ok := util.HandshakeAnnos[devType]
-		if !ok {
-			return true, false
-		}
-		parts := strings.SplitN(handshake, "_", 2)
-		if len(parts) < 2 {
-			return true, false
-		}
-		formerTime, err := time.ParseInLocation(time.DateTime, parts[1], time.Local)
-		if err != nil {
-			return true, false
-		}
-		now := time.Now()
-		if now.Before(formerTime.Add(time.Second * 60)) {
-			return true, false
-		}
-		newHandshake := "Requesting_" + now.Format(time.DateTime)
-		tmppat := map[string]string{annoKey: newHandshake}
-		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", annoKey, "annotationValue", newHandshake)
-		// Mirror the empty-annotation branch: GetNode also acts as a guard
-		// for an empty node.Name and an uninitialised client (PatchNodeAnnotations
-		// panics in unit tests without it). Worth a follow-up to dedupe with
-		// the else branch into a helper.
-		n, err := util.GetNode(node.Name)
-		if err != nil {
-			klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
-			return true, false
-		}
-		if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-			klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
-		}
-		return true, true
 	} else {
 		_, ok := util.HandshakeAnnos[devType]
 		if ok {

@@ -1638,38 +1638,6 @@ func TestCheckHealth(t *testing.T) {
 		wantNeedReset       bool
 	}{
 		{
-			name:                "current=0 reported=0: no devices registered yet",
-			current:             0,
-			reported:            0,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current=0 reported>0: devices disappeared",
-			current:             0,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         false,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current>0 reported differs: count changed",
-			current:             4,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       true,
-		},
-		{
-			name:                "current>0 reported same: stable",
-			current:             4,
-			reported:            4,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
-		{
 			name:                "Kernel 6.17 Bug: current=0 reported=0 but handshake pending",
 			current:             0,
 			reported:            0,
@@ -2213,8 +2181,8 @@ func TestNodeCleanUp(t *testing.T) {
 
 	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
 	assert.NilError(t, err)
-	anno := updated.Annotations[HandshakeAnnos]
-	assert.Assert(t, strings.HasPrefix(anno, "Deleted_"), "expected annotation to start with 'Deleted_', got %q", anno)
+	_, exists := updated.Annotations[HandshakeAnnos]
+	assert.Assert(t, !exists, "expected annotation to be removed, but it still exists")
 }
 
 func TestLockNode(t *testing.T) {
