@@ -287,9 +287,16 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 
 func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[CambriconMLUDevice]
-	if ok {
+	if ok && len(devlist) > 0 {
 		(*annoinput)[DsmluResourceAssigned] = "false"
-		(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", devlist[0][0].Idx, devlist[0][0].Usedcores, devlist[0][0].Usedmem/256)
+		for _, ctrdevs := range devlist {
+			// Leading containers that request no MLU are padded with empty entries; use the first one that holds a device.
+			if len(ctrdevs) > 0 {
+				d := ctrdevs[0]
+				(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", d.Idx, d.Usedcores, d.Usedmem/256)
+				break
+			}
+		}
 		deviceStr := device.EncodePodSingleDevice(devlist)
 		(*annoinput)[device.InRequestDevices[CambriconMLUDevice]] = deviceStr
 		(*annoinput)[device.SupportDevices[CambriconMLUDevice]] = deviceStr

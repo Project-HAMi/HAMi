@@ -351,6 +351,36 @@ func Test_PatchAnnotations(t *testing.T) {
 			},
 			want: map[string]string{},
 		},
+		{
+			// First container has no MLU (padded empty), real device in the second; used to panic on devlist[0][0].
+			name: "leading container without device",
+			args: struct {
+				annoinput map[string]string
+				pd        device.PodDevices
+			}{
+				annoinput: map[string]string{},
+				pd: device.PodDevices{
+					CambriconMLUDevice: device.PodSingleDevice{
+						[]device.ContainerDevice{},
+						[]device.ContainerDevice{
+							{
+								Idx:       0,
+								UUID:      "device-0",
+								Type:      "MLU",
+								Usedcores: 1,
+								Usedmem:   256000,
+							},
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				"CAMBRICON_DSMLU_ASSIGNED":                  "false",
+				"CAMBRICON_DSMLU_PROFILE":                   "0_1_1000",
+				"hami.io/cambricon-mlu-devices-to-allocate": ";device-0,MLU,256000,1:;",
+				"hami.io/cambricon-mlu-devices-allocated":   ";device-0,MLU,256000,1:;",
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

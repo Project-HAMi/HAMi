@@ -103,6 +103,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 }
 
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
+}
+
+func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -129,11 +133,15 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 			score.ComputeDefaultScore(node.Devices)
 			snapshot := score.SnapshotDevice(node.Devices)
 
-			nodeInfo, err := s.GetNode(nodeID)
-			if err != nil {
-				klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
-				errCh <- err
-				return
+			nodeInfo := node.NodeInfo
+			if nodeInfo == nil {
+				var err error
+				nodeInfo, err = s.GetNode(nodeID)
+				if err != nil {
+					klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
+					errCh <- err
+					return
+				}
 			}
 
 			// Assume the node is a fit by default. This handles pods with no device
@@ -169,6 +177,9 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 					failedNodesMutex.Lock()
 					failedNodes[nodeID] = common.NodeUnfitPod
+					if detailedFailureReason {
+						failedNodes[nodeID] = reason
+					}
 					for reasonType := range common.ParseReason(reason) {
 						failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 					}
@@ -190,7 +201,7 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 	close(errCh)
 
 	// only pod scheduler failure will record failure event
-	if len(res.NodeList) == 0 {
+	if recordEvents && len(res.NodeList) == 0 {
 		for reasonType, failureNodes := range failureReason {
 			sort.Strings(failureNodes)
 			reason := fmt.Errorf("%d nodes %s(%s)", len(failureNodes), reasonType, strings.Join(failureNodes, ","))

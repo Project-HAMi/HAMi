@@ -543,6 +543,22 @@ func TestContainerDeviceDeepCopy(t *testing.T) {
 	assert.False(t, exists, "original CustomInfo should not have key2")
 }
 
+func TestListPodsInfoReturnsDeepCopy(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p", Namespace: "ns"}}
+	pm.AddPod(pod, "node-1", PodDevices{"dev": {{{UUID: "GPU-0"}}}})
+
+	listed := pm.ListPodsInfo()
+	assert.Len(t, listed, 1)
+
+	listed[0].NodeID = "mutated"
+	listed[0].Devices["dev"][0][0].UUID = "mutated"
+
+	inner := pm.pods[k8stypes.UID("uid-1")]
+	assert.Equal(t, "node-1", inner.NodeID)
+	assert.Equal(t, "GPU-0", inner.Devices["dev"][0][0].UUID)
+}
+
 func TestTakeAndDeletePodIsAtomic(t *testing.T) {
 	pm := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p", Namespace: "ns"}}

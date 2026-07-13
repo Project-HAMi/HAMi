@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -485,24 +484,7 @@ func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	cardtype = strings.ToUpper(cardtype)
-	if inuse, ok := annos[GPUInUse]; ok {
-		useTypes := strings.Split(inuse, ",")
-		if !slices.ContainsFunc(useTypes, func(useType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(useType))
-		}) {
-			return false
-		}
-	}
-	if unuse, ok := annos[GPUNoUse]; ok {
-		unuseTypes := strings.Split(unuse, ",")
-		if slices.ContainsFunc(unuseTypes, func(unuseType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(unuseType))
-		}) {
-			return false
-		}
-	}
-	return true
+	return device.CheckType(annos, cardtype, GPUInUse, GPUNoUse)
 }
 
 func assertNuma(annos map[string]string) bool {

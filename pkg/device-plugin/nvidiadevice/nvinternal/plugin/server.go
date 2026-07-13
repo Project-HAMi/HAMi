@@ -404,7 +404,7 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 		}
 	}()
 
-	// Wait for server to start by launching a blocking connexion
+	// Wait for server to start by launching a blocking connection
 	conn, err := plugin.dial(plugin.socket, 5*time.Second)
 	if err != nil {
 		return err
