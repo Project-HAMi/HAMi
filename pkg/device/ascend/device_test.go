@@ -856,7 +856,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 		wantCore      int64
 	}{
 		{
-			name: "vNPU-mode hami-core: inject postStart and keep raw memory",
+			name: "vNPU-mode hami-core: keep raw memory without postStart",
 			args: struct {
 				ctr corev1.Container
 				pod corev1.Pod
@@ -884,7 +884,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 					},
 				},
 			},
-			wantPostStart: true,
+			wantPostStart: false,
 			wantMem:       15360,
 			wantCore:      20,
 		},
@@ -906,12 +906,10 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			assert.NilError(t, err)
 			assert.Equal(t, ok, true)
 
-			if test.wantPostStart {
-				assert.Assert(t, test.args.ctr.Lifecycle != nil, "Lifecycle should not be nil")
-				assert.Assert(t, test.args.ctr.Lifecycle.PostStart != nil, "PostStart should not be nil")
-				assert.Assert(t, test.args.ctr.Lifecycle.PostStart.Exec != nil)
-				commandStr := strings.Join(test.args.ctr.Lifecycle.PostStart.Exec.Command, " ")
-				assert.Assert(t, strings.Contains(commandStr, "/hami-vnpu-core/limiter"))
+			if !test.wantPostStart {
+				if test.args.ctr.Lifecycle != nil {
+					assert.Assert(t, test.args.ctr.Lifecycle.PostStart == nil, "PostStart should not be set")
+				}
 			}
 
 			memLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
