@@ -851,9 +851,10 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			ctr corev1.Container
 			pod corev1.Pod
 		}
-		wantPostStart bool
-		wantMem       int64
-		wantCore      int64
+		wantPostStart   bool
+		wantMem         int64
+		wantCore        int64
+		wantErrContains string
 	}{
 		{
 			name: "vNPU-mode hami-core: inject postStart and keep raw memory",
@@ -888,6 +889,66 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantMem:       15360,
 			wantCore:      20,
 		},
+		{
+			name: "vNPU-mode hami-core: reject memory-only request",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+					},
+				},
+				pod: corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							VNPUModeAnnotation: VNPUModeHamiCore,
+						},
+					},
+				},
+			},
+			wantErrContains: "positive core resource huawei.com/Ascend910B3-core",
+		},
+		{
+			name: "vNPU-mode hami-core: reject zero core request",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("0"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+							"huawei.com/Ascend910B3-core":   resource.MustParse("0"),
+						},
+					},
+				},
+				pod: corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							VNPUModeAnnotation: VNPUModeHamiCore,
+						},
+					},
+				},
+			},
+			wantErrContains: "positive core resource huawei.com/Ascend910B3-core",
+		},
 	}
 
 	for _, test := range tests {
@@ -903,6 +964,11 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			}
 
 			ok, err := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
+			if test.wantErrContains != "" {
+				assert.ErrorContains(t, err, test.wantErrContains)
+				assert.Equal(t, ok, false)
+				return
+			}
 			assert.NilError(t, err)
 			assert.Equal(t, ok, true)
 
