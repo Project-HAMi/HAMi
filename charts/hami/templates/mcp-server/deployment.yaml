@@ -28,6 +28,7 @@ spec:
             - --listen-addr=:9395
             - --prometheus-url={{ .Values.mcpServer.prometheusUrl }}
             - --log-level={{ .Values.mcpServer.logLevel }}
+            - --metrics-enabled=true
           ports:
             - name: http
               containerPort: 9395

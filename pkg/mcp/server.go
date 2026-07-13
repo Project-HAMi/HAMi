@@ -23,6 +23,8 @@ import (
 	"time"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/mcp/client"
@@ -32,9 +34,10 @@ import (
 
 // ServerConfig holds the configuration for the MCP server.
 type ServerConfig struct {
-	Kubeconfig    string
-	PrometheusURL string
-	MetricsPort   int
+	Kubeconfig     string
+	PrometheusURL  string
+	MetricsPort    int
+	MetricsEnabled bool
 }
 
 // Server wraps the MCP server with HAMi-specific functionality.
@@ -176,6 +179,14 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	})
+
+	if s.config.MetricsEnabled {
+		registry := prometheus.NewRegistry()
+		registry.MustRegister(prometheus.NewGoCollector())
+		registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
+		klog.InfoS("Metrics endpoint enabled", "path", "/metrics")
+	}
 
 	srv := &http.Server{
 		Addr:              addr,

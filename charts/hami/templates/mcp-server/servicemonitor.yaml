@@ -1,0 +1,18 @@
+{{- if and .Values.mcpServer.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/ServiceMonitor") .Values.prometheus.enabled }}
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: {{ include "hami-vgpu.mcp-server" . }}-metrics-monitor
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-mcp-server
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+spec:
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-mcp-server
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  endpoints:
+  - port: http
+    path: "/metrics"
+{{- end }}

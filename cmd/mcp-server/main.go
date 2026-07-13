@@ -58,15 +58,17 @@ func main() {
 		"prometheusURL", flags.PrometheusURL,
 		"logLevel", flags.LogLevel,
 		"listenAddr", flags.ListenAddr,
+		"metricsEnabled", flags.MetricsEnabled,
 	)
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
 	server, err := mcp.NewServer(ctx, &mcp.ServerConfig{
-		Kubeconfig:    flags.Kubeconfig,
-		PrometheusURL: flags.PrometheusURL,
-		MetricsPort:   flags.MetricsPort,
+		Kubeconfig:     flags.Kubeconfig,
+		PrometheusURL:  flags.PrometheusURL,
+		MetricsPort:    flags.MetricsPort,
+		MetricsEnabled: flags.MetricsEnabled,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Failed to create MCP server: %v\n", err)

@@ -22,21 +22,23 @@ import (
 
 // MCPFlags holds the CLI flags for the MCP server.
 type MCPFlags struct {
-	Kubeconfig    string
-	PrometheusURL string
-	LogLevel      string
-	ListenAddr    string
-	MetricsPort   int
+	Kubeconfig     string
+	PrometheusURL  string
+	LogLevel       string
+	ListenAddr     string
+	MetricsPort    int
+	MetricsEnabled bool
 }
 
 // NewMCPFlags creates a new MCPFlags instance with default values.
 func NewMCPFlags() *MCPFlags {
 	return &MCPFlags{
-		Kubeconfig:    "",
-		PrometheusURL: "http://localhost:9090",
-		LogLevel:      "info",
-		ListenAddr:    "",
-		MetricsPort:   9395,
+		Kubeconfig:     "",
+		PrometheusURL:  "http://localhost:9090",
+		LogLevel:       "info",
+		ListenAddr:     "",
+		MetricsPort:    9395,
+		MetricsEnabled: false,
 	}
 }
 
@@ -47,4 +49,5 @@ func (f *MCPFlags) AddFlags(fs *pflag.FlagSet) {
 	fs.StringVar(&f.LogLevel, "log-level", f.LogLevel, "Log level (debug, info, warn, error).")
 	fs.StringVar(&f.ListenAddr, "listen-addr", f.ListenAddr, "If set (e.g. ':9395'), serve the MCP streamable HTTP endpoint at /mcp on this address. If empty, run over stdio.")
 	fs.IntVar(&f.MetricsPort, "metrics-port", f.MetricsPort, "Port for HAMi scheduler metrics endpoint.")
+	fs.BoolVar(&f.MetricsEnabled, "metrics-enabled", f.MetricsEnabled, "Enable the /metrics endpoint for Prometheus scraping.")
 }
