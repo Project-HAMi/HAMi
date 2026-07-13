@@ -479,13 +479,6 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 	return nil
 }
 
-func (cc ClusterManagerCollector) isPodUIDMatched(pod *corev1.Pod, podUID string) bool {
-	if pod == nil {
-		return false
-	}
-	return string(pod.UID) == podUID
-}
-
 func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, pod *corev1.Pod, ctr corev1.Container, c *nvidia.ContainerUsage, nowSec int64) error {
 	// Validate inputs
 	if c == nil || c.Info == nil {

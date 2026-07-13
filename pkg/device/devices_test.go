@@ -1368,12 +1368,101 @@ func TestCheckUUID(t *testing.T) {
 			id:   "abc",
 			want: true,
 		},
+		{
+			name: "empty GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "whitespace-only GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "   ",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "empty GPUNoUseUUID annotation should not exclude any device",
+			annos: map[string]string{
+				GPUNoUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := CheckUUID(test.annos, test.id, GPUUseUUID, GPUNoUseUUID, "NVIDIA")
 			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestCheckType(t *testing.T) {
+	useKey := "example.com/use-gputype"
+	noUseKey := "example.com/nouse-gputype"
+	tests := []struct {
+		name     string
+		annos    map[string]string
+		cardType string
+		want     bool
+	}{
+		{
+			name:     "no annotation is no constraint",
+			annos:    map[string]string{},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use list matches by substring",
+			annos:    map[string]string{useKey: "A100,V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use list does not match",
+			annos:    map[string]string{useKey: "V100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+		{
+			name:     "nouse list matches excludes the device",
+			annos:    map[string]string{noUseKey: "A100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+		{
+			name:     "nouse list does not match keeps the device",
+			annos:    map[string]string{noUseKey: "V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "empty use value is no constraint",
+			annos:    map[string]string{useKey: ""},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "whitespace-only nouse value excludes nothing",
+			annos:    map[string]string{noUseKey: "   "},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use satisfied and nouse matches still excludes",
+			annos:    map[string]string{useKey: "A100", noUseKey: "A100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, CheckType(test.annos, test.cardType, useKey, noUseKey))
 		})
 	}
 }

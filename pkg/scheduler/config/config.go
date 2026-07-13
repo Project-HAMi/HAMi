@@ -266,6 +266,8 @@ func validateConfig(config *Config) error {
 		!reflect.DeepEqual(config.AWSNeuronConfig, awsneuron.AWSNeuronConfig{}) ||
 		!reflect.DeepEqual(config.EnflameConfig, enflame.EnflameConfig{}) ||
 		!reflect.DeepEqual(config.AMDGPUConfig, amd.AMDConfig{}) ||
+		!reflect.DeepEqual(config.VastaiConfig, vastai.VastaiConfig{}) ||
+		!reflect.DeepEqual(config.BirenConfig, biren.BirenConfig{}) ||
 		len(config.VNPUs.Configs) > 0 {
 		return nil
 	}

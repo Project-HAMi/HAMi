@@ -118,6 +118,38 @@ type DevicePairScore struct {
 	Scores map[string]int `json:"score,omitempty"`
 }
 
+func (d DeviceInfo) DeepCopy() DeviceInfo {
+	dup := d
+
+	if d.MIGTemplate != nil {
+		dup.MIGTemplate = make([]Geometry, len(d.MIGTemplate))
+		for i, g := range d.MIGTemplate {
+			dup.MIGTemplate[i] = slices.Clone(g)
+		}
+	}
+
+	if d.CustomInfo != nil {
+		dup.CustomInfo = maps.Clone(d.CustomInfo)
+	}
+
+	if d.DevicePairScore.Scores != nil {
+		dup.DevicePairScore.Scores = maps.Clone(d.DevicePairScore.Scores)
+	}
+
+	return dup
+}
+
+func DeepCopyDeviceInfos(devices []DeviceInfo) []DeviceInfo {
+	if devices == nil {
+		return nil
+	}
+	dup := make([]DeviceInfo, len(devices))
+	for i, dev := range devices {
+		dup[i] = dev.DeepCopy()
+	}
+	return dup
+}
+
 type NodeInfo struct {
 	ID      string
 	Node    *corev1.Node
@@ -636,15 +668,40 @@ func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string)
 			return strings.TrimSpace(u) == id
 		})
 	}
-	if userUUID, ok := annos[useKey]; ok {
+	// An empty value means "no constraint" rather than "match nothing".
+	if userUUID, ok := annos[useKey]; ok && strings.TrimSpace(userUUID) != "" {
 		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
 		if !match(userUUID) {
 			return false
 		}
 	}
-	if noUserUUID, ok := annos[noUseKey]; ok {
+	if noUserUUID, ok := annos[noUseKey]; ok && strings.TrimSpace(noUserUUID) != "" {
 		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
 		if match(noUserUUID) {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckType reports whether a device model is allowed by the use/noUse type
+// constraints in annos. It mirrors CheckUUID but matches the card model as a
+// case-insensitive substring instead of an exact device id. An empty value
+// means "no constraint" rather than "match nothing".
+func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool {
+	cardType = strings.ToUpper(cardType)
+	match := func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(t string) bool {
+			return strings.Contains(cardType, strings.ToUpper(t))
+		})
+	}
+	if inuse, ok := annos[useKey]; ok && strings.TrimSpace(inuse) != "" {
+		if !match(inuse) {
+			return false
+		}
+	}
+	if noUse, ok := annos[noUseKey]; ok && strings.TrimSpace(noUse) != "" {
+		if match(noUse) {
 			return false
 		}
 	}

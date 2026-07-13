@@ -6,7 +6,7 @@ This feature will not be implemented without the help of @sailorvii.
 
 ## Introduction
 
-The NVIDIA GPU build-in sharing method includes: time-slice, MPS and MIG. The context switch for time slice sharing would waste some time, so we chose the MPS and MIG. The GPU MIG profile is variable, the user could acquire the MIG device in the profile definition, but current implementation only defines the dedicated profile before the user requirement. That limits the usage of MIG. We want to develop an automatic slice plugin and create the slice when the user require it.
+The NVIDIA GPU built-in sharing methods include: time-slicing, MPS, and MIG. The context switch for time-slice sharing wastes time, so we chose MPS and MIG. The GPU MIG profile is variable; users can acquire the MIG device in the profile definition, but the current implementation only defines a dedicated profile before the user requires it. This limits the usage of MIG. We want to develop an automatic slice plugin to create the slice when the user requires it.
 For the scheduling method, node-level binpack and spread will be supported. Referring to the binpack plugin, we consider the CPU, Mem, GPU memory and other user-defined resource.
 HAMi is done by using [hami-core](https://github.com/Project-HAMi/HAMi-core), which is a cuda-hacking library. But mig is also widely used across the world. A unified API for dynamic-mig and hami-core is needed.
 
