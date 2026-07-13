@@ -211,7 +211,7 @@ add metrics bind address flag for scheduler
 
 Improved log messages
 
-fix: loss of metrics after vdeivce restart
+fix: loss of metrics after device restart
 
 bugfix: device-plugin monitor serves too slowly in big cluster
 
