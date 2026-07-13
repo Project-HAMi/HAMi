@@ -118,6 +118,38 @@ type DevicePairScore struct {
 	Scores map[string]int `json:"score,omitempty"`
 }
 
+func (d DeviceInfo) DeepCopy() DeviceInfo {
+	dup := d
+
+	if d.MIGTemplate != nil {
+		dup.MIGTemplate = make([]Geometry, len(d.MIGTemplate))
+		for i, g := range d.MIGTemplate {
+			dup.MIGTemplate[i] = slices.Clone(g)
+		}
+	}
+
+	if d.CustomInfo != nil {
+		dup.CustomInfo = maps.Clone(d.CustomInfo)
+	}
+
+	if d.DevicePairScore.Scores != nil {
+		dup.DevicePairScore.Scores = maps.Clone(d.DevicePairScore.Scores)
+	}
+
+	return dup
+}
+
+func DeepCopyDeviceInfos(devices []DeviceInfo) []DeviceInfo {
+	if devices == nil {
+		return nil
+	}
+	dup := make([]DeviceInfo, len(devices))
+	for i, dev := range devices {
+		dup[i] = dev.DeepCopy()
+	}
+	return dup
+}
+
 type NodeInfo struct {
 	ID      string
 	Node    *corev1.Node
