@@ -63,10 +63,7 @@ type RuntimeInfo struct {
 	Core   int32  `json:"core,omitempty"`
 }
 
-var (
-	enableAscend bool
-	configFile   string
-)
+var enableAscend bool
 
 func (dev *Devices) trimMemory(m int64) (int64, string) {
 	for i := range dev.config.Templates {
