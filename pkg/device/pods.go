@@ -112,8 +112,8 @@ func (m *PodManager) DelPod(pod *corev1.Pod) {
 }
 
 func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
+	m.mutex.RLock()
+	defer m.mutex.RUnlock()
 
 	pi, ok := m.pods[pod.UID]
 	return pi, ok
@@ -155,7 +155,7 @@ func (m *PodManager) ListPodsInfo() []*PodInfo {
 
 	pods := make([]*PodInfo, 0, len(m.pods))
 	for _, pod := range m.pods {
-		pods = append(pods, pod)
+		pods = append(pods, pod.DeepCopy())
 		klog.V(5).InfoS("Pod info",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
 			"nodeID", pod.NodeID,

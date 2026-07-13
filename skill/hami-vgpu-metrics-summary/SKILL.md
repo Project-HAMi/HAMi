@@ -271,7 +271,7 @@ Interpretation notes:
 - `gpu: N` usually means the mem/core constraints apply per assigned device
 - `gpumem` is best treated as MiB-like units in scheduler/quota contexts
 - `gpumem-percentage` is converted by the scheduler into absolute memory during placement
-- `defaultMem=0` in config means default to 100% memory
+- `defaultMemory=0` in config means default to 100% memory
 - `defaultCores=0` means no explicit core limit requested
 
 #### E. Utilization semantics

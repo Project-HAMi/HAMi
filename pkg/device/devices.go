@@ -118,6 +118,38 @@ type DevicePairScore struct {
 	Scores map[string]int `json:"score,omitempty"`
 }
 
+func (d DeviceInfo) DeepCopy() DeviceInfo {
+	dup := d
+
+	if d.MIGTemplate != nil {
+		dup.MIGTemplate = make([]Geometry, len(d.MIGTemplate))
+		for i, g := range d.MIGTemplate {
+			dup.MIGTemplate[i] = slices.Clone(g)
+		}
+	}
+
+	if d.CustomInfo != nil {
+		dup.CustomInfo = maps.Clone(d.CustomInfo)
+	}
+
+	if d.DevicePairScore.Scores != nil {
+		dup.DevicePairScore.Scores = maps.Clone(d.DevicePairScore.Scores)
+	}
+
+	return dup
+}
+
+func DeepCopyDeviceInfos(devices []DeviceInfo) []DeviceInfo {
+	if devices == nil {
+		return nil
+	}
+	dup := make([]DeviceInfo, len(devices))
+	for i, dev := range devices {
+		dup[i] = dev.DeepCopy()
+	}
+	return dup
+}
+
 type NodeInfo struct {
 	ID      string
 	Node    *corev1.Node
@@ -506,7 +538,14 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
-		formertime, _ := time.ParseInLocation(time.DateTime, strings.Split(handshake, "_")[1], time.Local)
+		_, timestampStr, found := strings.Cut(handshake, "_")
+		if !found {
+			return true, false
+		}
+		formertime, err := time.ParseInLocation(time.DateTime, timestampStr, time.Local)
+		if err != nil {
+			return true, false
+		}
 		if time.Now().Before(formertime.Add(time.Second * 60)) {
 			return true, false
 		}
@@ -517,49 +556,6 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (b
 			return true, false
 		}
 		return false, false
-	} else if strings.Contains(handshake, "Deleted") {
-		// Mirror the timestamp logic used by the Requesting branch: a
-		// Deleted_<ts> older than 60s on a node whose devices are otherwise
-		// reporting healthy means the previous cleanup is stale and the
-		// scheduler should bring the node back into its cache. Stamp
-		// Requesting_<now> and return (true, true) so the caller re-adds
-		// node devices on the next reconcile.
-		//
-		// Bare "Deleted" without a timestamp (used in some unit tests) and
-		// any unparsable timestamp must keep the conservative (true, false)
-		// path so we never recover from a malformed value.
-		annoKey, ok := util.HandshakeAnnos[devType]
-		if !ok {
-			return true, false
-		}
-		parts := strings.SplitN(handshake, "_", 2)
-		if len(parts) < 2 {
-			return true, false
-		}
-		formerTime, err := time.ParseInLocation(time.DateTime, parts[1], time.Local)
-		if err != nil {
-			return true, false
-		}
-		now := time.Now()
-		if now.Before(formerTime.Add(time.Second * 60)) {
-			return true, false
-		}
-		newHandshake := "Requesting_" + now.Format(time.DateTime)
-		tmppat := map[string]string{annoKey: newHandshake}
-		klog.V(5).InfoS("Recovering stale Deleted_ handshake", "nodeName", node.Name, "annotationKey", annoKey, "annotationValue", newHandshake)
-		// Mirror the empty-annotation branch: GetNode also acts as a guard
-		// for an empty node.Name and an uninitialised client (PatchNodeAnnotations
-		// panics in unit tests without it). Worth a follow-up to dedupe with
-		// the else branch into a helper.
-		n, err := util.GetNode(node.Name)
-		if err != nil {
-			klog.ErrorS(err, "Failed to get node", "nodeName", node.Name)
-			return true, false
-		}
-		if err := util.PatchNodeAnnotations(n, tmppat); err != nil {
-			klog.ErrorS(err, "Failed to patch node annotations", "nodeName", node.Name)
-		}
-		return true, true
 	} else {
 		_, ok := util.HandshakeAnnos[devType]
 		if ok {
@@ -667,20 +663,47 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 }
 
 func CheckUUID(annos map[string]string, id, useKey, noUseKey, deviceType string) bool {
-	userUUID, ok := annos[useKey]
-	if ok {
-		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
-		// use , symbol to connect multiple uuid
-		userUUIDs := strings.Split(userUUID, ",")
-		return slices.Contains(userUUIDs, id)
+	match := func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(u string) bool {
+			return strings.TrimSpace(u) == id
+		})
 	}
-
-	noUserUUID, ok := annos[noUseKey]
-	if ok {
+	// An empty value means "no constraint" rather than "match nothing".
+	if userUUID, ok := annos[useKey]; ok && strings.TrimSpace(userUUID) != "" {
+		klog.V(5).Infof("check uuid for %s user uuid [%s], device id is %s", deviceType, userUUID, id)
+		if !match(userUUID) {
+			return false
+		}
+	}
+	if noUserUUID, ok := annos[noUseKey]; ok && strings.TrimSpace(noUserUUID) != "" {
 		klog.V(5).Infof("check uuid for %s not user uuid [%s], device id is %s", deviceType, noUserUUID, id)
-		// use , symbol to connect multiple uuid
-		noUserUUIDs := strings.Split(noUserUUID, ",")
-		return !slices.Contains(noUserUUIDs, id)
+		if match(noUserUUID) {
+			return false
+		}
+	}
+	return true
+}
+
+// CheckType reports whether a device model is allowed by the use/noUse type
+// constraints in annos. It mirrors CheckUUID but matches the card model as a
+// case-insensitive substring instead of an exact device id. An empty value
+// means "no constraint" rather than "match nothing".
+func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool {
+	cardType = strings.ToUpper(cardType)
+	match := func(list string) bool {
+		return slices.ContainsFunc(strings.Split(list, ","), func(t string) bool {
+			return strings.Contains(cardType, strings.ToUpper(t))
+		})
+	}
+	if inuse, ok := annos[useKey]; ok && strings.TrimSpace(inuse) != "" {
+		if !match(inuse) {
+			return false
+		}
+	}
+	if noUse, ok := annos[noUseKey]; ok && strings.TrimSpace(noUse) != "" {
+		if match(noUse) {
+			return false
+		}
 	}
 	return true
 }

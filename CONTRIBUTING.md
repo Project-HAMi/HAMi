@@ -7,6 +7,7 @@ Welcome to HAMi!
   - [Code of Conduct](#code-of-conduct)
   - [Community Expectations](#community-expectations)
   - [AI Assistance Notice](#ai-assistance-notice)
+  - [Contribution Gates](#contribution-gates)
 - [Getting started](#getting-started)
 - [Your First Contribution](#your-first-contribution)
   - [Find something to work on](#find-something-to-work-on)
@@ -70,6 +71,22 @@ isn't a maintainer's job to review a PR so broken that it requires
 significant rework to be acceptable.
 
 Please be respectful to maintainers and disclose AI assistance.
+
+## Contribution Gates
+
+The following rules are enforced on all contributions.
+
+**1. Author-understanding gate.** If a maintainer asks how a change works and the author cannot explain it, the PR is closed. Repeated cases may result in interaction limits.
+
+**2. Hardware validation.** Changes affecting device allocation or in-container isolation must be validated on real GPU hardware before submitting. Record in the PR what was tested, the device type, and the driver version. Changes scoped to the scheduler extender may use mock or unit testing instead.
+
+**3. Scope and commit messages.** Large AI-generated PRs are not accepted. For AI-assisted contributions, anything beyond a small fix must start as an issue and be split into reviewable commits. Write your own commit messages; AI-generated commit messages are not accepted.
+
+**4. Review replies.** The reply you post must be written by you and must address the specific point raised. Verbatim or canned AI replies, or replies that do not engage the comment, lead to the PR being closed.
+
+**5. Commit trailer hygiene.** Do not list AI as a co-author. No `assisted-by`, `co-developed-by`, or similar trailers. Disclosure belongs in the PR description only.
+
+**6. AI-generated comments.** Do not post AI-generated comments in review threads. Remove any filler or redundant AI-generated text before posting. Exceptions apply only when the underlying technical assessment is entirely your own and AI is used solely to assist with language translation or formatting, provided you have fully verified and edited the output.
 
 # Getting started
 
@@ -137,6 +154,16 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 * Run and pass `make verify`
 
+## Issue and PR Lifecycle
+
+To keep the project manageable, we apply the following policy to all open issues and pull requests:
+
+- If a maintainer or contributor leaves a comment or review requesting a response, the author has **two weeks** to reply.
+- If there is no response within two weeks, the issue or PR will be closed.
+- Closing is not permanent. If the issue is still relevant or the PR is still needed, it can be reopened or submitted again at any time.
+
+This policy helps us keep the backlog focused and avoids letting stale work block active contributors.
+
 ## Code Review
 
 To make it easier for your PR to receive reviews, consider that reviewers will need you to:
@@ -144,3 +171,4 @@ To make it easier for your PR to receive reviews, consider that reviewers will n
 * Follow [good coding guidelines](https://github.com/golang/go/wiki/CodeReviewComments)
 * Write [good commit messages](https://chris.beams.io/posts/git-commit/)
 * Break large changes into a logical series of smaller patches which individually make easily understandable changes, and in aggregate solve a broader issue
+* Separate cosmetics from functional changes. Cosmetic changes (reindentation, whitespace, comment wording, style fixes) must not be mixed with logic changes in the same commit — split them into their own commit. If the cosmetics are unrelated to the PR's purpose, they belong in a separate PR entirely. This keeps diffs reviewable: reviewers should not have to filter out formatting noise to find what actually changed.

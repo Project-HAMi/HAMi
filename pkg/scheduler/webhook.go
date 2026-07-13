@@ -135,12 +135,12 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		}
 		for _, ctr := range pod.Spec.Containers {
 			req, ok := getRequest(&ctr, resourceName)
-			if ok && req == 1 {
+			if ok {
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					memoryReq += memReq
+					memoryReq += memReq * req
 				}
 				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					coresReq += coreReq
+					coresReq += coreReq * req
 				}
 			}
 		}

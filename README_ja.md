@@ -22,7 +22,7 @@
 
 HAMi は **Heterogeneous AI Computing Virtualization Middleware**（異種 AI コンピューティング仮想化ミドルウェア）の略称です。旧称 `k8s-vGPU-scheduler`。HAMi はプラットフォームチームが Kubernetes ワークロード間で高価な GPU やその他の AI アクセラレータを共有し、デバイスメモリとコンピュートを分離し、アプリケーションコードを変更することなくデバイスアウェアなスケジューリングポリシーで Pod をスケジュールできるようにします。
 
-HAMi は [CNCF Sandbox](https://www.cncf.io/sandbox-projects/) および [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) プロジェクトであり、[CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami) にも掲載されています。
+HAMi は [CNCF Incubating](https://www.cncf.io/projects/) および [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) プロジェクトであり、[CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami) にも掲載されています。
 
 ![CNCF logo](imgs/cncf-logo.png)
 
@@ -164,6 +164,17 @@ HAMi は他にも以下を提供します：
 - ベンチマーク素材 — ワークロードの動作とスケジューリング効果の評価用。
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
+
+## エコシステム連携
+
+| プロジェクト | 連携内容 |
+| --- | --- |
+| [vLLM](https://github.com/vllm-project/vllm) | GPU メモリ上限付きで推論サーバーを実行し、複数モデルで 1 枚の GPU を共有 |
+| [Volcano](https://volcano.sh/) | GPU ワークロード向けのギャングスケジューリングおよびキューベースのバッチスケジューリング |
+| [Kueue](https://kueue.sigs.k8s.io/) | ResourceTransformation を通じて HAMi リソースを Kueue に公開し、バッチジョブのキューイングを実現 |
+| [Prometheus](https://prometheus.io/) | HAMi はコンテナごとの GPU メトリクス（メモリ使用量・利用率）を公開 |
+| [Grafana](https://grafana.com/) | HAMi GPU メトリクスを可視化するための事前構築済みダッシュボードを提供 |
+| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | HAMi がスケジューリング、GPU Operator がドライバー管理を担う構成で共存可能 |
 
 ## ロードマップ、ガバナンス、コントリビューション
 

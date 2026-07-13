@@ -67,7 +67,7 @@ Update version information through PR and create a new tag
 
 ## [automatic] push a version tag
 
-> planing indicates that the plan is in progress and has not yet started.
+> planning indicates that the step is planned for automation but not yet implemented.
 
 If a tag vx.x.x is pushed , the following steps will automatically run:
 
@@ -86,14 +86,14 @@ If a tag vx.x.x is pushed , the following steps will automatically run:
     you cloud get the chart with command `helm repo add hami https://Project-HAMi.github.io/HAMi`
 
 6. generate release-notes and upload helm charts to github release
-   1. upload HAMi chart tgz to release <https://github.com/wawa0210/HAMi/releases>
-   2. **[planing]** save changelogs to <https://github.com/Project-HAMi/HAMi/blob/master/docs/CHANGELOG/${latest_tag}.md>
+   1. upload HAMi chart tgz to release <https://github.com/Project-HAMi/HAMi/releases>
+   2. **[planning]** save changelogs to <https://github.com/Project-HAMi/HAMi/blob/master/docs/CHANGELOG/${latest_tag}.md>
 
-7. **[planing]** build HAMi website
+7. **[planning]** build HAMi website
 
-8. **[planing]** Running e2e tests
+8. **[planning]** Run e2e tests
 
-9. **[planing]** Run version compatibility e2e test
+9. **[planning]** Run version compatibility e2e test
 
 For the detail, refer to <https://github.com/Project-HAMi/HAMi/blob/master/.github/workflows/auto-release.yaml>
 

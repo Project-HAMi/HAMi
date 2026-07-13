@@ -36,7 +36,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
-func Test_DefaultResourceNum(t *testing.T) {
+func TestResourceQuantityAsInt64(t *testing.T) {
 	v := *resource.NewQuantity(1, resource.BinarySI)
 	vv, ok := v.AsInt64()
 	assert.Equal(t, ok, true)
@@ -123,6 +123,64 @@ func Test_MutateAdmission(t *testing.T) {
 			got, _ := gpuDevices.MutateAdmission(test.args, &corev1.Pod{})
 			if test.want != got {
 				t.Fatalf("exec MutateAdmission method expect return is %+v, but got is %+v", test.want, got)
+			}
+		})
+	}
+}
+
+func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
+	tests := []struct {
+		name    string
+		pct     int64
+		wantErr bool
+	}{
+		{
+			name:    "percentage of 0 is accepted",
+			pct:     0,
+			wantErr: false,
+		},
+		{
+			name:    "percentage of 100 is accepted",
+			pct:     100,
+			wantErr: false,
+		},
+		{
+			name:    "percentage of 101 is rejected",
+			pct:     101,
+			wantErr: true,
+		},
+		{
+			name:    "percentage above 100 is rejected",
+			pct:     150,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(test.pct, resource.DecimalSI),
+					},
+				},
+			}
+			_, err := gpuDevices.MutateAdmission(ctr, &corev1.Pod{})
+			if test.wantErr && err == nil {
+				t.Fatalf("expected MutateAdmission to reject percentage %d, but got no error", test.pct)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected MutateAdmission to accept percentage %d, but got error: %v", test.pct, err)
 			}
 		})
 	}
@@ -1574,41 +1632,11 @@ func TestCheckHealth(t *testing.T) {
 		current             int64
 		reported            int64
 		handshakeAnnotation string
+		cachedRegisterAnno  string
+		registerAnno        string
 		wantHealthy         bool
 		wantNeedReset       bool
 	}{
-		{
-			name:                "current=0 reported=0: no devices registered yet",
-			current:             0,
-			reported:            0,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current=0 reported>0: devices disappeared",
-			current:             0,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         false,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current>0 reported differs: count changed",
-			current:             4,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       true,
-		},
-		{
-			name:                "current>0 reported same: stable",
-			current:             4,
-			reported:            4,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
 		{
 			name:                "Kernel 6.17 Bug: current=0 reported=0 but handshake pending",
 			current:             0,
@@ -1624,6 +1652,46 @@ func TestCheckHealth(t *testing.T) {
 			handshakeAnnotation: "Requesting_" + pastTime,
 			wantHealthy:         false,
 			wantNeedReset:       false,
+		},
+		{
+			name:                "current>0 reported same: changed register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: false, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: true,
+		},
+		{
+			name:                "current>0 reported same: unchanged register annotation keeps cache",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: false,
+		},
+		{
+			name:                "current>0 reported same: deleted register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno:  "",
+			wantHealthy:   true,
+			wantNeedReset: true,
 		},
 	}
 
@@ -1645,9 +1713,15 @@ func TestCheckHealth(t *testing.T) {
 				},
 				Status: corev1.NodeStatus{Allocatable: allocatable},
 			}
+			if tt.registerAnno != "" {
+				node.Annotations[RegisterAnnos] = tt.registerAnno
+			}
 
 			if tt.reported > 0 {
 				dev.ReportedGPUNum["test-node"] = tt.reported
+			}
+			if tt.cachedRegisterAnno != "" {
+				dev.ReportedRegisterAnnos["test-node"] = tt.cachedRegisterAnno
 			}
 
 			healthy, needReset := dev.CheckHealth("NVIDIA", node)
@@ -1722,6 +1796,60 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Type:             NvidiaGPUDevice,
 				Memreq:           0,
 				MemPercentagereq: 50,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage above 100 — clamped to 100",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(150, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage beyond int32 range — clamped to 100 without wrapping",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(int64(1)<<32+50, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + memory percentage equal to sentinel 101 — clamped to 100",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(101, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
 				Coresreq:         0,
 			},
 		},
@@ -2053,8 +2181,8 @@ func TestNodeCleanUp(t *testing.T) {
 
 	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
 	assert.NilError(t, err)
-	anno := updated.Annotations[HandshakeAnnos]
-	assert.Assert(t, strings.HasPrefix(anno, "Deleted_"), "expected annotation to start with 'Deleted_', got %q", anno)
+	_, exists := updated.Annotations[HandshakeAnnos]
+	assert.Assert(t, !exists, "expected annotation to be removed, but it still exists")
 }
 
 func TestLockNode(t *testing.T) {
@@ -2258,6 +2386,16 @@ func TestCheckGPUtype_NoUse(t *testing.T) {
 	}
 	assert.Equal(t, checkGPUtype(annos, "NVIDIA-A100"), false)
 	assert.Equal(t, checkGPUtype(annos, "NVIDIA-V100"), true)
+}
+
+func TestCheckGPUtype_EmptyAnnotation(t *testing.T) {
+	// An empty use/nouse type annotation means "no constraint": strings.Contains
+	// treats "" as a substring of every card type, so without a guard an empty
+	// nouse-gputype would wrongly exclude every device.
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: "   "}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: "   "}, "NVIDIA-A100"), true)
 }
 
 func TestCheckType_AllocateMode(t *testing.T) {

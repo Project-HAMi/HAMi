@@ -49,17 +49,17 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// uint8Slice wraps an []uint8 with more functions.
-type uint8Slice []uint8
+// int8Slice wraps an []int8 with more functions.
+type int8Slice []int8
 
-// String turns a nil terminated uint8Slice into a string
-func (s uint8Slice) String() string {
+// String turns a nil terminated int8Slice into a string
+func (s int8Slice) String() string {
 	var b []byte
 	for _, c := range s {
 		if c == 0 {
 			break
 		}
-		b = append(b, c)
+		b = append(b, byte(c))
 	}
 	return string(b)
 }
@@ -71,7 +71,7 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 		return false, 0, fmt.Errorf("error getting PCI Bus Info of device: %v", ret)
 	}
 	// Discard leading zeros.
-	busID := strings.ToLower(strings.TrimPrefix(uint8Slice(info.BusId[:]).String(), "0000"))
+	busID := strings.ToLower(strings.TrimPrefix(int8Slice(info.BusId[:]).String(), "0000"))
 	b, err := os.ReadFile(fmt.Sprintf("/sys/bus/pci/devices/%s/numa_node", busID))
 	if err != nil {
 		return false, 0, err

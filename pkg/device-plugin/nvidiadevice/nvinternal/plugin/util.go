@@ -507,6 +507,10 @@ var podAllocationTrySuccess = func(nodeName string, devName string, lockName str
 	PodAllocationSuccess(nodeName, pod, lockName)
 }
 
+func PodAllocationTrySuccess(nodeName string, devName string, lockName string, pod *corev1.Pod) {
+	podAllocationTrySuccess(nodeName, devName, lockName, pod)
+}
+
 func PodAllocationSuccess(nodeName string, pod *corev1.Pod, lockName string) {
 	klog.Infof("Pod allocation successful for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
@@ -526,6 +530,10 @@ func updatePodAnnotationsAndReleaseLock(nodeName string, pod *corev1.Pod, lockNa
 var podAllocationFailed = func(nodeName string, pod *corev1.Pod, lockName string) {
 	klog.Infof("Pod allocation failed for pod %s/%s on node %s", pod.Namespace, pod.Name, nodeName)
 	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindFailed)
+}
+
+func PodAllocationFailed(nodeName string, pod *corev1.Pod, lockName string) {
+	podAllocationFailed(nodeName, pod, lockName)
 }
 
 func checkCDISpecFile(filePath, kind string) error {

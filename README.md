@@ -22,7 +22,7 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 HAMi stands for **Heterogeneous AI Computing Virtualization Middleware**. Formerly known as `k8s-vGPU-scheduler`, HAMi helps platform teams share expensive GPUs and other AI accelerators across Kubernetes workloads, isolate device memory and compute, and schedule pods with device-aware policies without changing application code.
 
-HAMi is a [CNCF Sandbox](https://www.cncf.io/sandbox-projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
+HAMi is a [CNCF Incubating](https://www.cncf.io/projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
 
 ![CNCF logo](imgs/cncf-logo.png)
 
@@ -164,6 +164,17 @@ HAMi also provides:
 - Benchmark material for evaluating workload behavior and scheduling effects.
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
+
+## Ecosystem Integrations
+
+| Project | What the integration enables |
+| --- | --- |
+| [vLLM](https://github.com/vllm-project/vllm) | Run inference servers with GPU memory caps, enabling multiple models to share one GPU |
+| [Volcano](https://volcano.sh/) | Gang scheduling and queue-based batch scheduling for GPU workloads |
+| [Kueue](https://kueue.sigs.k8s.io/) | HAMi resources exposed to Kueue via ResourceTransformation for batch job queueing |
+| [Prometheus](https://prometheus.io/) | HAMi exposes per-container GPU metrics including memory usage and utilization |
+| [Grafana](https://grafana.com/) | Pre-built dashboard available for visualizing HAMi GPU metrics |
+| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | Can coexist with GPU Operator when HAMi manages scheduling and the Operator manages drivers |
 
 ## Roadmap, Governance, And Contributing
 

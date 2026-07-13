@@ -57,6 +57,9 @@ kunlunResourceVMemoryName: "kunlunxin.com/vxpu-memory"
 #Vastai Parameters
 vastaiResourceName: "vastaitech.com/va"
 
+#Biren Parameters
+birenResourceName: "birentech.com/gpu"
+
 schedulerName: "hami-scheduler"
 
 podSecurityPolicy:
@@ -270,6 +273,9 @@ devicePlugin:
   gpuOperatorToolkitReady:
     enabled: false
     hostPath: "/run/nvidia/validations"
+    securityContext:
+      privileged: true
+      runAsUser: 0
   ## @param image.registry devicePlugin image registry
   ## @param image.repository devicePlugin image repository
   ## @param image.tag devicePlugin image tag (immutable tags are recommended)
@@ -318,6 +324,11 @@ devicePlugin:
     extraArgs:
       - -v=4
     extraEnvs: {}
+    securityContext:
+      allowPrivilegeEscalation: false
+      capabilities:
+        drop: ["ALL"]
+        add: ["SYS_ADMIN"]
     resources: {}
       # If you do want to specify resources, uncomment the following lines, adjust them as necessary.
       # and remove the curly braces after 'resources:'.
@@ -387,6 +398,14 @@ devicePlugin:
   libPath: /usr/local/vgpu
 
   podAnnotations: {}
+  hostPID: true
+  hostNetwork: false
+  securityContext:
+    privileged: true
+    allowPrivilegeEscalation: true
+    capabilities:
+      drop: ["ALL"]
+      add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
   tolerations: []
@@ -423,24 +442,6 @@ mockDevicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
-# If this option is enabled, the DRA will be installed and the scheduler extender will not be installed.
-dra:
-  enabled: false
-
-# Configuration for the hami-dra subchart, which includes DRA drivers.
-# This is part of config for DRA, please refer to the DRA documentation for more details.
-hami-dra:
-  monitor:
-    enabled: true
-  drivers:
-    nvidia:
-      enabled: true
-      # If you are using gpu driver on host, you need to set this to false
-      containerDriver: true
-      image:
-        repository: ghcr.io/project-hami/k8s-dra-driver
-        tag: "main"
-
 devices:
   amd:
     customresources:
@@ -471,6 +472,10 @@ devices:
     enabled: true
     customresources:
       - vastaitech.com/va
+  biren:
+    enabled: true
+    customresources:
+      - birentech.com/gpu
   nvidia:
     gpuCorePolicy: default
     libCudaLogLevel: 1

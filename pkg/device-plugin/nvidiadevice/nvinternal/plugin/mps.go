@@ -64,6 +64,6 @@ func (m *mpsOptions) waitForDaemon() error {
 	return nil
 }
 
-func (m *mpsOptions) updateReponse(response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) {
+func (m *mpsOptions) updateResponse(response *kubeletdevicepluginv1beta1.ContainerAllocateResponse) {
 	return
 }

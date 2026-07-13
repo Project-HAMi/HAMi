@@ -2,7 +2,7 @@
 
 <img src="../../imgs/arch.png" width = "800" /> 
 
-The architect of HAMi is shown in the figure above, It is organized in the form of "chart".
+The architecture of HAMi is shown in the figure above. It is organized in the form of a "chart".
 
 - MutatingWebhook
 
@@ -17,7 +17,7 @@ When a pod with sharable device request arrives, 'Filter' searches the cluster a
 - DevicePlugin
 
 When the schedule decision is made, scheduler calls devicePlugin on that node to generate environment variables and mounts according to pod annotations.
-Please note that, the DP used here is a customized version, you need to install according to [README](../../README.md) document with that device. Most officaial DP will not fit in HAMi, and will result in unexpected behaviour
+Please note that the DP used here is a customized version; you need to install it according to the [README](../../README.md) document for that device. Most official DPs will not fit in HAMi, and will result in unexpected behavior.
 
 - InContainer Control
 

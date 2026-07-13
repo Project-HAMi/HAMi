@@ -404,7 +404,7 @@ func (plugin *NvidiaDevicePlugin) Serve() error {
 		}
 	}()
 
-	// Wait for server to start by launching a blocking connexion
+	// Wait for server to start by launching a blocking connection
 	conn, err := plugin.dial(plugin.socket, 5*time.Second)
 	if err != nil {
 		return err
@@ -608,21 +608,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		if strings.Contains(req.DevicesIds[0], "MIG") {
 			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
 				if len(req.DevicesIds) > 1 {
-					podAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
 				}
 			}
 
 			for _, id := range req.DevicesIds {
 				if !plugin.rm.Devices().Contains(id) {
-					podAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("invalid allocation request for '%s': unknown device: %s", plugin.rm.Resource(), id)
 				}
 			}
 
 			response, err := plugin.getAllocateResponse(req.DevicesIds)
 			if err != nil {
-				podAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
@@ -630,17 +630,17 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
-				podAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if len(devreq) != len(reqs.ContainerRequests[idx].DevicesIds) {
-				podAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
 				if err != nil {
-					podAllocationFailed(nodename, current, NodeLockNvidia)
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 				}
 				devreq = alignedDevreq
@@ -652,7 +652,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 
 			err = eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
 			if err != nil {
-				podAllocationFailed(nodename, current, NodeLockNvidia)
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
@@ -727,7 +727,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
-	podAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
+	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
 }
 

@@ -22,7 +22,7 @@
 
 HAMi 全称**异构 AI 计算虚拟化中间件**（Heterogeneous AI Computing Virtualization Middleware）。前身为 `k8s-vGPU-scheduler`，HAMi 帮助平台团队在 Kubernetes 工作负载间共享昂贵的 GPU 及其他 AI 加速器，隔离设备显存和算力，并通过设备感知的调度策略调度 Pod，无需修改应用代码。
 
-HAMi 是 [CNCF Sandbox](https://www.cncf.io/sandbox-projects/) 和 [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) 项目，同时也被列入 [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami)。
+HAMi 是 [CNCF Incubating](https://www.cncf.io/projects/) 和 [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) 项目，同时也被列入 [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami)。
 
 ![CNCF logo](imgs/cncf-logo.png)
 
@@ -164,6 +164,17 @@ HAMi 还提供：
 - 基准测试材料用于评估工作负载行为和调度效果。
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
+
+## 生态系统集成
+
+| 项目 | 集成说明 |
+| --- | --- |
+| [vLLM](https://github.com/vllm-project/vllm) | 以 GPU 显存上限运行推理服务器，让多个模型共享同一 GPU |
+| [Volcano](https://volcano.sh/) | 为 GPU 工作负载提供 Gang 调度和基于队列的批量调度 |
+| [Kueue](https://kueue.sigs.k8s.io/) | 通过 ResourceTransformation 将 HAMi 资源暴露给 Kueue，实现批量作业排队 |
+| [Prometheus](https://prometheus.io/) | HAMi 上报每个容器的 GPU 指标，包括显存用量和利用率 |
+| [Grafana](https://grafana.com/) | 提供预构建仪表盘，用于可视化 HAMi GPU 指标 |
+| [NVIDIA GPU Operator](https://github.com/NVIDIA/gpu-operator) | 当 HAMi 负责调度、GPU Operator 负责驱动管理时，两者可共存 |
 
 ## 路线图、治理与贡献
 

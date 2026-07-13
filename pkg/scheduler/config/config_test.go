@@ -31,6 +31,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/amd"
 	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
 	"github.com/Project-HAMi/HAMi/pkg/device/awsneuron"
+	"github.com/Project-HAMi/HAMi/pkg/device/biren"
 	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
 	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
@@ -435,6 +436,7 @@ func setupTest(t *testing.T) (map[string]string, map[string]device.Devices) {
 		awsneuron.AWSNeuronDevice:    awsneuron.AWSNeuronCommonWord,
 		amd.AMDDevice:                amd.AMDDevice,
 		vastai.VastaiDevice:          vastai.VastaiCommonWord,
+		biren.BirenDevice:            biren.BirenCommonWord,
 	}
 
 	return expectedDevices, device.DevicesMap
@@ -513,6 +515,12 @@ func Test_validateConfig(t *testing.T) {
 	emptyConfig := &Config{
 		IluvatarConfig: []iluvatar.IluvatarConfig{},
 	}
+	vastaiOnly := &Config{
+		VastaiConfig: vastai.VastaiConfig{ResourceCountName: "vastaitech.com/vgpu"},
+	}
+	birenOnly := &Config{
+		BirenConfig: biren.BirenConfig{ResourceCountName: "birentech.com/gpu"},
+	}
 
 	tests := []struct {
 		name        string
@@ -521,6 +529,8 @@ func Test_validateConfig(t *testing.T) {
 	}{
 		{"Valid config", validConfig, false},
 		{"Empty config", emptyConfig, true},
+		{"Vastai only", vastaiOnly, false},
+		{"Biren only", birenOnly, false},
 	}
 
 	for _, test := range tests {

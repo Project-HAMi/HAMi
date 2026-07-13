@@ -24,7 +24,7 @@ hami.io/node-mlu-register: MLU-45013011-2257-0000-0000-000000000000,10,23308,0,M
 hami.io/node-nvidia-register: GPU-00552014-5c87-89ac-b1a6-7b53aa24b0ec,10,32768,100,NVIDIA-Tesla V100-PCIE-32GB,0,true:GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,10,32768,100,NVIDIA-Tesla V100-PCIE-32GB,0,true:
 
 ```
-In this example, this node has two different AI devices, 2 Nvidia-V100 GPUs, and 2 Cambircon 370-X4 MLUs
+In this example, this node has two different AI devices, 2 Nvidia-V100 GPUs, and 2 Cambricon 370-X4 MLUs
 
 Note that a device node may become unavailable due to hardware or network failure, if a node hasn't registered in last 5 minutes, scheduler will mark that node as 'unavailable'.
 
@@ -44,9 +44,9 @@ If hami.io/node-handshake annotations remains in "Requesting_xxxx" and {schedule
 HAMi scheduler needs to patch schedule decisions into pod annotations, in the format of the following:
 
 ```
-hami.io/devices-to-allocate:{ctr1 request}:{ctr2 request}:...{Last ctr request}:
-hami.io/device-node: {schedule decision node}
-hami.io/device-schedule-time: {timestamp}
+hami.io/{device-type}-devices-to-allocate:{ctr1 request}:{ctr2 request}:...{Last ctr request}:
+hami.io/vgpu-node: {schedule decision node}
+hami.io/vgpu-time: {timestamp}
 ```
 
 each container request is in the following format:

@@ -485,24 +485,6 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Deleted state",
-			args: struct {
-				devType string
-				n       corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
 			name: "Unknown state",
 			args: struct {
 				devType string
@@ -688,6 +670,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -715,6 +698,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -742,6 +726,7 @@ func Test_MutateAdmission910C(t *testing.T) {
 				ResourceName:      "huawei.com/Ascend910C",
 				MemoryAllocatable: 65536,
 				MemoryCapacity:    65536,
+				SuperPod:          true,
 			},
 			args: struct {
 				ctr corev1.Container
@@ -793,6 +778,67 @@ func Test_MutateAdmission910C(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_MutateAdmission910C_VNPUSplit(t *testing.T) {
+	devCfg := VNPUConfig{
+		CommonWord:         "Ascend910C",
+		ResourceName:       "huawei.com/Ascend910C",
+		ResourceMemoryName: "huawei.com/Ascend910C-memory",
+		MemoryAllocatable:  65536,
+		MemoryCapacity:     65536,
+		Templates: []Template{
+			{Name: "vir05_1c_16g", Memory: 16384, AICore: 5, AICPU: 1},
+			{Name: "vir10_3c_32g", Memory: 32768, AICore: 10, AICPU: 3},
+		},
+	}
+
+	t.Run("request 1 + vNPU memory slice is not rounded up", func(t *testing.T) {
+		ctr := corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"huawei.com/Ascend910C":        resource.MustParse("1"),
+					"huawei.com/Ascend910C-memory": resource.MustParse("16384"),
+				},
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("1"),
+				},
+			},
+		}
+		dev := Devices{config: devCfg}
+		result, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Assert(t, result)
+
+		npuQty := ctr.Resources.Limits["huawei.com/Ascend910C"]
+		gotNPU, _ := npuQty.AsInt64()
+		assert.Equal(t, gotNPU, int64(1), "vNPU request must stay at 1, not be rounded up to 2")
+
+		memQty := ctr.Resources.Limits["huawei.com/Ascend910C-memory"]
+		gotMem, _ := memQty.AsInt64()
+		assert.Equal(t, gotMem, int64(16384), "memory should map to the vir05_1c_16g template")
+	})
+
+	t.Run("odd NPU count is allowed when the card is split", func(t *testing.T) {
+		ctr := corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("3"),
+				},
+				Requests: corev1.ResourceList{
+					"huawei.com/Ascend910C": resource.MustParse("3"),
+				},
+			},
+		}
+		dev := Devices{config: devCfg}
+		result, err := dev.MutateAdmission(&ctr, &corev1.Pod{})
+		assert.NilError(t, err)
+		assert.Assert(t, result)
+
+		npuQty := ctr.Resources.Limits["huawei.com/Ascend910C"]
+		gotNPU, _ := npuQty.AsInt64()
+		assert.Equal(t, gotNPU, int64(3), "odd count must be preserved in split mode")
+	})
 }
 
 func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
@@ -873,6 +919,76 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 
 			coreLimit := test.args.ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
 			assert.Equal(t, coreLimit.Value(), test.wantCore)
+		})
+	}
+}
+
+// Test_MutateAdmission_HardSplitCoreRejected verifies that a -core request is
+// rejected on hard split (non hami-core) but accepted in hami-core soft-split
+// mode, and that a hard-split request without -core is unaffected.
+func Test_MutateAdmission_HardSplitCoreRejected(t *testing.T) {
+	// 8738 maps to the vir08 template so hard-split memory trimming succeeds.
+	newCtr := func(core string) corev1.Container {
+		limits := corev1.ResourceList{
+			"huawei.com/Ascend910B3":        resource.MustParse("1"),
+			"huawei.com/Ascend910B3-memory": resource.MustParse("8738"),
+		}
+		requests := corev1.ResourceList{
+			"huawei.com/Ascend910B3":        resource.MustParse("1"),
+			"huawei.com/Ascend910B3-memory": resource.MustParse("8738"),
+		}
+		if core != "" {
+			limits["huawei.com/Ascend910B3-core"] = resource.MustParse(core)
+			requests["huawei.com/Ascend910B3-core"] = resource.MustParse(core)
+		}
+		return corev1.Container{
+			Name:      "test-container",
+			Resources: corev1.ResourceRequirements{Limits: limits, Requests: requests},
+		}
+	}
+
+	tests := []struct {
+		name     string
+		ctr      corev1.Container
+		hamiCore bool
+		wantErr  bool
+	}{
+		{name: "hard split with core is rejected", ctr: newCtr("10"), hamiCore: false, wantErr: true},
+		{name: "hard split with core over physical is rejected", ctr: newCtr("25"), hamiCore: false, wantErr: true},
+		{name: "hard split with core=0 is allowed", ctr: newCtr("0"), hamiCore: false, wantErr: false},
+		{name: "hard split without core is allowed", ctr: newCtr(""), hamiCore: false, wantErr: false},
+		{name: "hami-core soft split with core is allowed", ctr: newCtr("10"), hamiCore: true, wantErr: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					MemoryAllocatable:  32768,
+					MemoryCapacity:     32768,
+					Templates: []Template{
+						{Name: "vir08", Memory: 8738, AICore: 8},
+						{Name: "vir16", Memory: 17476, AICore: 16},
+					},
+				},
+			}
+			pod := corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+			if test.hamiCore {
+				pod.Annotations = map[string]string{VNPUModeAnnotation: VNPUModeHamiCore}
+			}
+			ctr := test.ctr
+			_, err := dev.MutateAdmission(&ctr, &pod)
+			if test.wantErr {
+				assert.Assert(t, err != nil, "expected admission to be rejected")
+				assert.Assert(t, strings.Contains(err.Error(), "hami-core"),
+					"error should mention hami-core, got %v", err)
+			} else {
+				assert.NilError(t, err)
+			}
 		})
 	}
 }
@@ -1811,6 +1927,80 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:        0,
 			wantDevIDs:     []string{},
 			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
+		{
+			name: "fit fail: whole-card hami-core pod on legacy node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{},
+		},
+		{
+			name: "fit fail: memory-less hami-core pod on legacy node (ModeNotFit)",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 0, MemPercentagereq: 101, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        false,
+			wantLen:        0,
+			wantDevIDs:     []string{},
+			wantReason:     "1/1 ModeNotFit",
+			nodeAnnotation: map[string]string{},
+		},
+		{
+			name: "fit success: whole-card hami-core pod on hami-core node",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos: map[string]string{
+				VNPUModeAnnotation: VNPUModeHamiCore,
+			},
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
+			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
+		},
+		{
+			name: "fit success: whole-card legacy pod on hami-core node",
+			devices: []*device.DeviceUsage{{
+				ID: "dev-0", Index: 0, Used: 0, Count: 100,
+				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
+				Numa: 0, Health: true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums: 1, Memreq: 32768, MemPercentagereq: 0, Coresreq: 0,
+			},
+			annos:          map[string]string{},
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
 	}

@@ -1,4 +1,4 @@
-{{- if and .Values.devicePlugin.enabled (not .Values.dra.enabled) }}
+{{- if .Values.devicePlugin.enabled }}
 apiVersion: apps/v1
 kind: DaemonSet
 metadata:
@@ -40,17 +40,18 @@ spec:
       {{- end }}
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
-      hostPID: true
-      hostNetwork: false
+      hostPID: {{ .Values.devicePlugin.hostPID }}
+      hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
         - name: toolkit-validation
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+          {{- with .Values.devicePlugin.gpuOperatorToolkitReady.securityContext }}
           securityContext:
-            privileged: true
-            runAsUser: 0
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           command: ["sh", "-c"]
           args:
             - |
@@ -124,12 +125,10 @@ spec:
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
+          {{- with .Values.devicePlugin.securityContext }}
           securityContext:
-            privileged: true
-            allowPrivilegeEscalation: true
-            capabilities:
-              drop: ["ALL"]
-              add: ["SYS_ADMIN"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           resources:
           {{- toYaml .Values.devicePlugin.resources | nindent 12 }}
           volumeMounts:
@@ -148,10 +147,6 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
-            - name: deviceconfig
-              mountPath: /k8s-vgpu/lib/nvidia/ld.so.preload
-              subPath: ld.so.preload
-              readOnly: true
             {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
@@ -170,11 +165,10 @@ spec:
             {{- range .Values.devicePlugin.monitor.extraArgs }}
             - {{ . }}
             {{- end }}
+          {{- with .Values.devicePlugin.monitor.securityContext }}
           securityContext:
-            allowPrivilegeEscalation: false
-            capabilities:
-              drop: ["ALL"]
-              add: ["SYS_ADMIN"]
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
           env:
             - name: NODE_NAME
               valueFrom:
@@ -191,6 +185,10 @@ spec:
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 9394
+              protocol: TCP
           resources:
           {{- toYaml .Values.devicePlugin.monitor.resources | nindent 12 }}
           volumeMounts:

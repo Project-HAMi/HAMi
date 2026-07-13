@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -159,9 +158,10 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config         NvidiaConfig
-	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
-	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
+	config                NvidiaConfig
+	ReportedGPUNum        map[string]int64  // key: nodeName, value: reported GPU count
+	ReportedRegisterAnnos map[string]string // key: nodeName, value: last observed register annotation
+	mu                    sync.Mutex        // protects concurrent access to reported node state
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -174,8 +174,9 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	}
 	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
-		config:         nvconfig,
-		ReportedGPUNum: make(map[string]int64),
+		config:                nvconfig,
+		ReportedGPUNum:        make(map[string]int64),
+		ReportedRegisterAnnos: make(map[string]string),
 	}
 }
 
@@ -233,18 +234,27 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
 	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, dev.config.ResourceCountName, n)
+	registerAnno := n.Annotations[RegisterAnnos]
+	reportedRegisterAnno := dev.ReportedRegisterAnnos[n.Name]
 
 	if current == 0 {
 		if reported == 0 {
 			return handshakeHealthy, handshakeChanged
 		}
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return false, handshakeChanged
 	}
 
 	if reported != current {
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return true, true
+	}
+
+	if reportedRegisterAnno != registerAnno {
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
+		return handshakeHealthy, true
 	}
 
 	return handshakeHealthy, handshakeChanged
@@ -344,6 +354,9 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 
 func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	/*gpu related */
+	if err := dev.validateMemoryPercentage(ctr); err != nil {
+		return false, err
+	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -379,6 +392,15 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		})
 	}
 	return hasResource, nil
+}
+
+func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) error {
+	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
+		if pct < 0 || pct > 100 {
+			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, pct, ctr.Name)
+		}
+	}
+	return nil
 }
 
 func (dev *NvidiaGPUDevices) mutateContainerResource(ctr *corev1.Container) bool {
@@ -462,24 +484,7 @@ func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	cardtype = strings.ToUpper(cardtype)
-	if inuse, ok := annos[GPUInUse]; ok {
-		useTypes := strings.Split(inuse, ",")
-		if !slices.ContainsFunc(useTypes, func(useType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(useType))
-		}) {
-			return false
-		}
-	}
-	if unuse, ok := annos[GPUNoUse]; ok {
-		unuseTypes := strings.Split(unuse, ",")
-		if slices.ContainsFunc(unuseTypes, func(unuseType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(unuseType))
-		}) {
-			return false
-		}
-	}
-	return true
+	return device.CheckType(annos, cardtype, GPUInUse, GPUNoUse)
 }
 
 func assertNuma(annos map[string]string) bool {
@@ -552,6 +557,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				mempnums, ok := mem.AsInt64()
 				if ok {
+					if mempnums < 0 || mempnums > 100 {
+						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
+						mempnums = 100
+					}
 					mempnum = int32(mempnums)
 				}
 			}

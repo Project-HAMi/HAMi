@@ -23,7 +23,7 @@ export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
 export LATEST_VERSION="latest"
 export GOLANG_IMAGE="golang:1.26.2-bookworm"
-export NVIDIA_IMAGE="nvidia/cuda:12.2.0-devel-ubuntu20.04"
+export NVIDIA_IMAGE="nvidia/cuda:13.3.0-cudnn-devel-ubi8"
 export DEST_DIR="/usr/local"
 
 IMAGE=${IMAGE-"projecthami/hami"}
