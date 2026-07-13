@@ -39,10 +39,10 @@ var nonSensitiveKeys = map[string]struct{}{
 // - Container env entries whose name matches sensitive pattern
 // - Annotation keys that match sensitive pattern
 // - imagePullSecrets
-// - Pod spec.volumes[*].secret
+// - Pod spec.volumes[*].secret.
 func Redact(input string) string {
 	// Try to parse as JSON
-	var data interface{}
+	var data any
 	if err := json.Unmarshal([]byte(input), &data); err != nil {
 		// If not valid JSON, return as-is
 		return input
@@ -62,11 +62,11 @@ func Redact(input string) string {
 }
 
 // redactValue recursively redacts sensitive information from a value.
-func redactValue(v interface{}) interface{} {
+func redactValue(v any) any {
 	switch val := v.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		return redactMap(val)
-	case []interface{}:
+	case []any:
 		return redactSlice(val)
 	default:
 		return v
@@ -74,8 +74,8 @@ func redactValue(v interface{}) interface{} {
 }
 
 // redactMap redacts sensitive information from a map.
-func redactMap(m map[string]interface{}) map[string]interface{} {
-	result := make(map[string]interface{})
+func redactMap(m map[string]any) map[string]any {
+	result := make(map[string]any)
 
 	for key, value := range m {
 		// Check if this is a sensitive key
@@ -111,8 +111,8 @@ func redactMap(m map[string]interface{}) map[string]interface{} {
 }
 
 // redactSlice redacts sensitive information from a slice.
-func redactSlice(s []interface{}) []interface{} {
-	result := make([]interface{}, len(s))
+func redactSlice(s []any) []any {
+	result := make([]any, len(s))
 	for i, v := range s {
 		result[i] = redactValue(v)
 	}
@@ -120,15 +120,15 @@ func redactSlice(s []interface{}) []interface{} {
 }
 
 // redactEnv redacts sensitive environment variables.
-func redactEnv(env interface{}) interface{} {
-	envSlice, ok := env.([]interface{})
+func redactEnv(env any) any {
+	envSlice, ok := env.([]any)
 	if !ok {
 		return env
 	}
 
-	var result []interface{}
+	var result []any
 	for _, item := range envSlice {
-		envMap, ok := item.(map[string]interface{})
+		envMap, ok := item.(map[string]any)
 		if !ok {
 			result = append(result, item)
 			continue
@@ -138,7 +138,7 @@ func redactEnv(env interface{}) interface{} {
 		// and any valueFrom (which may reference a secret/configmap key whose
 		// name leaks information).
 		if name, ok := envMap["name"].(string); ok && isSensitiveKey(name) {
-			redacted := make(map[string]interface{})
+			redacted := make(map[string]any)
 			for k, v := range envMap {
 				switch k {
 				case "value", "valueFrom":
@@ -158,19 +158,19 @@ func redactEnv(env interface{}) interface{} {
 
 // redactImagePullSecrets masks the name field of each pull-secret reference
 // while preserving the array shape.
-func redactImagePullSecrets(v interface{}) interface{} {
-	slice, ok := v.([]interface{})
+func redactImagePullSecrets(v any) any {
+	slice, ok := v.([]any)
 	if !ok {
 		return v
 	}
-	result := make([]interface{}, len(slice))
+	result := make([]any, len(slice))
 	for i, item := range slice {
-		m, ok := item.(map[string]interface{})
+		m, ok := item.(map[string]any)
 		if !ok {
 			result[i] = item
 			continue
 		}
-		redacted := make(map[string]interface{}, len(m))
+		redacted := make(map[string]any, len(m))
 		for k, val := range m {
 			if k == "name" {
 				redacted[k] = "[REDACTED]"
@@ -184,13 +184,13 @@ func redactImagePullSecrets(v interface{}) interface{} {
 }
 
 // redactAnnotations redacts sensitive annotations.
-func redactAnnotations(annotations interface{}) interface{} {
-	annotMap, ok := annotations.(map[string]interface{})
+func redactAnnotations(annotations any) any {
+	annotMap, ok := annotations.(map[string]any)
 	if !ok {
 		return annotations
 	}
 
-	result := make(map[string]interface{})
+	result := make(map[string]any)
 	for key, value := range annotMap {
 		if isSensitiveKey(key) {
 			result[key] = "[REDACTED]"
@@ -203,15 +203,15 @@ func redactAnnotations(annotations interface{}) interface{} {
 }
 
 // redactVolumes redacts secret volumes.
-func redactVolumes(volumes interface{}) interface{} {
-	volumeSlice, ok := volumes.([]interface{})
+func redactVolumes(volumes any) any {
+	volumeSlice, ok := volumes.([]any)
 	if !ok {
 		return volumes
 	}
 
-	var result []interface{}
+	var result []any
 	for _, item := range volumeSlice {
-		volumeMap, ok := item.(map[string]interface{})
+		volumeMap, ok := item.(map[string]any)
 		if !ok {
 			result = append(result, item)
 			continue
@@ -220,7 +220,7 @@ func redactVolumes(volumes interface{}) interface{} {
 		// Check if volume has secret
 		if _, hasSecret := volumeMap["secret"]; hasSecret {
 			// Redact the entire volume
-			redacted := make(map[string]interface{})
+			redacted := make(map[string]any)
 			for k, v := range volumeMap {
 				if k == "secret" {
 					redacted[k] = "[REDACTED]"

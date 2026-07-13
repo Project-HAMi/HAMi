@@ -164,7 +164,7 @@ func splitAndClean(s, sep string) []string {
 		return nil
 	}
 	var result []string
-	for _, part := range strings.Split(s, sep) {
+	for part := range strings.SplitSeq(s, sep) {
 		if trimmed := strings.TrimSpace(part); trimmed != "" {
 			result = append(result, trimmed)
 		}

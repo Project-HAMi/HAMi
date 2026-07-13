@@ -17,7 +17,6 @@ limitations under the License.
 package mcp
 
 import (
-	"context"
 	"net/http"
 	"net/http/httptest"
 	"sort"
@@ -92,8 +91,7 @@ func TestServer_ListToolsViaInMemoryTransport(t *testing.T) {
 		t.Fatalf("NewServerWithClients: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	clientTr, serverTr := mcpsdk.NewInMemoryTransports()
 

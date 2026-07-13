@@ -170,7 +170,7 @@ func (t *DescribeNodeTool) extractGPUDevices(annotations map[string]string) []GP
 func parseDeviceString(deviceStr string) []GPUDeviceInfo {
 	var devices []GPUDeviceInfo
 
-	for _, part := range strings.Split(deviceStr, ":") {
+	for part := range strings.SplitSeq(deviceStr, ":") {
 		if part == "" {
 			continue
 		}

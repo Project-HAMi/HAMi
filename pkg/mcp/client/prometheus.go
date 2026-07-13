@@ -41,7 +41,7 @@ type PrometheusClient struct {
 type PrometheusResponse struct {
 	Status string `json:"status"`
 	Data   struct {
-		ResultType string            `json:"resultType"`
+		ResultType string             `json:"resultType"`
 		Result     []PrometheusResult `json:"result"`
 	} `json:"data"`
 	Error     string `json:"error,omitempty"`
@@ -51,7 +51,7 @@ type PrometheusResponse struct {
 // PrometheusResult represents a single Prometheus query result.
 type PrometheusResult struct {
 	Metric map[string]string `json:"metric"`
-	Value  []interface{}     `json:"value"`
+	Value  []any             `json:"value"`
 }
 
 // MetricValue represents a parsed metric value.

@@ -24,6 +24,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	klog "k8s.io/klog/v2"
 
@@ -42,10 +43,10 @@ type ServerConfig struct {
 
 // Server wraps the MCP server with HAMi-specific functionality.
 type Server struct {
-	mcpServer *mcp.Server
-	k8sClient *client.K8sClient
+	mcpServer  *mcp.Server
+	k8sClient  *client.K8sClient
 	promClient *client.PrometheusClient
-	config    *ServerConfig
+	config     *ServerConfig
 }
 
 // NewServer creates a new HAMi MCP server with all tools registered.
@@ -182,8 +183,8 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 
 	if s.config.MetricsEnabled {
 		registry := prometheus.NewRegistry()
-		registry.MustRegister(prometheus.NewGoCollector())
-		registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		registry.MustRegister(collectors.NewGoCollector())
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 		mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 		klog.InfoS("Metrics endpoint enabled", "path", "/metrics")
 	}

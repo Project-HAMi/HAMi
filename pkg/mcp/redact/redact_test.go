@@ -98,19 +98,25 @@ func TestRedact_Annotations(t *testing.T) {
 func TestRedact_ImagePullSecrets(t *testing.T) {
 	in := `{"imagePullSecrets":[{"name":"regcred"},{"name":"other","extra":1}]}`
 	got := Redact(in)
-	var parsed map[string]interface{}
+	var parsed map[string]any
 	if err := json.Unmarshal([]byte(got), &parsed); err != nil {
 		t.Fatalf("invalid JSON: %v\n%s", err, got)
 	}
-	arr, ok := parsed["imagePullSecrets"].([]interface{})
+	arr, ok := parsed["imagePullSecrets"].([]any)
 	if !ok || len(arr) != 2 {
 		t.Fatalf("expected array of length 2, got %T %v", parsed["imagePullSecrets"], parsed["imagePullSecrets"])
 	}
-	first := arr[0].(map[string]interface{})
+	first, ok := arr[0].(map[string]any)
+	if !ok {
+		t.Fatal("expected first element to be a map")
+	}
 	if first["name"] != "[REDACTED]" {
 		t.Errorf("expected name to be redacted, got %v", first["name"])
 	}
-	second := arr[1].(map[string]interface{})
+	second, ok := arr[1].(map[string]any)
+	if !ok {
+		t.Fatal("expected second element to be a map")
+	}
 	if second["name"] != "[REDACTED]" {
 		t.Errorf("expected second name to be redacted, got %v", second["name"])
 	}
