@@ -233,7 +233,7 @@ Add support for Ascend910B3 device
 
 Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 
-## v2.4.0 - 2024-09-29
+## v2.4.0 - 2024-09-28
 
 **New features**
 - Add support for Ascend 910P device
@@ -346,7 +346,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix error when creating Iluvatar pod
 - Fix scheduler name overwrite option
 
-## v2.7.1 - 2026-01-23
+## v2.7.1 - 2025-11-07
 
 **Bug fixes**
 - Update HAMi-core to fix vLLM-related issues
