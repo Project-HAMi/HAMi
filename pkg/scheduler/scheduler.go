@@ -768,6 +768,7 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 		if err == nil {
 			return nil
 		}
+		s.releaseAllDevices(node, pod)
 		if !nodelockutil.IsNodeLockContention(err) {
 			return err
 		}
@@ -775,8 +776,11 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
 				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
 		}
-		s.releaseAllDevices(node, pod)
-		time.Sleep(100 * time.Millisecond)
+		select {
+		case <-s.stopCh:
+			return fmt.Errorf("scheduler shutting down while waiting for node lock: %w", nodelockutil.ErrNodeLockContention)
+		case <-time.After(100 * time.Millisecond):
+		}
 	}
 }
 

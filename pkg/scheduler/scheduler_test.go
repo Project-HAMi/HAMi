@@ -1849,20 +1849,20 @@ type bindLockMockDevice struct {
 	registerMockDevice
 	lockErr      error
 	lockErrOnce  bool
-	lockCalls    int32
-	releaseCalls int32
+	lockCalls    atomic.Int32
+	releaseCalls atomic.Int32
 }
 
 func (m *bindLockMockDevice) CommonWord() string { return "bind-lock-mock" }
 func (m *bindLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
-	n := atomic.AddInt32(&m.lockCalls, 1)
+	n := m.lockCalls.Add(1)
 	if m.lockErr != nil && (!m.lockErrOnce || n == 1) {
 		return m.lockErr
 	}
 	return nil
 }
 func (m *bindLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
-	atomic.AddInt32(&m.releaseCalls, 1)
+	m.releaseCalls.Add(1)
 	return nil
 }
 
@@ -1917,7 +1917,7 @@ func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
 	res, err := s.Bind(args)
 	require.NoError(t, err)
 	require.Contains(t, res.Error, "node lock contention")
-	require.Equal(t, int32(1), atomic.LoadInt32(&mock.lockCalls),
+	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-PodGroup pod must not retry LockNode")
 }
 
@@ -1933,7 +1933,7 @@ func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
 	defer cleanup()
 
 	s.Bind(args)
-	require.GreaterOrEqual(t, atomic.LoadInt32(&mock.lockCalls), int32(2),
+	require.GreaterOrEqual(t, mock.lockCalls.Load(), int32(2),
 		"expected at least 2 LockNode calls (initial + retry)")
 }
 
@@ -1952,7 +1952,7 @@ func Test_Bind_PodGroupPodContendsUntilTimeout(t *testing.T) {
 	require.NoError(t, err)
 	require.Contains(t, res.Error, "node lock contention",
 		"timeout error should wrap ErrNodeLockContention for observability")
-	require.GreaterOrEqual(t, atomic.LoadInt32(&mock.releaseCalls), int32(1),
+	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(1),
 		"expected ReleaseNodeLock to be called at least once on timeout path")
 }
 
@@ -1970,6 +1970,6 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	res, err := s.Bind(args)
 	require.NoError(t, err)
 	require.Contains(t, res.Error, "apiserver 500")
-	require.Equal(t, int32(1), atomic.LoadInt32(&mock.lockCalls),
+	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
 }
