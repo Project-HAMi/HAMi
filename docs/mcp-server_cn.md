@@ -2,6 +2,10 @@
 
 HAMi MCP Server 通过模型上下文协议（MCP）提供对 Kubernetes 集群中 GPU 调度状态的只读访问。支持 Claude Desktop、Claude Code、Cursor 等 AI 助手查询 GPU 节点状态、Pod 分配情况和监控指标。
 
+> 本页是**使用指南**（安装、工具、客户端配置、故障排查）。
+> 关于服务器的**设计**（架构、数据流、图示），请见
+> [`mcp-server-design.md`](./mcp-server-design.md)。
+
 ## 功能特性
 
 - **只读访问**：所有操作均为只读，确保集群安全

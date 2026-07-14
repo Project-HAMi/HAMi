@@ -2,6 +2,10 @@
 
 The HAMi MCP Server provides read-only access to GPU scheduling state in Kubernetes clusters through the Model Context Protocol (MCP). This allows AI assistants like Claude Desktop, Claude Code, and Cursor to query GPU node status, pod allocations, and metrics.
 
+> This page is the **usage guide** (install, tools, client config, troubleshooting).
+> For how the server is **designed** (architecture, data flow, diagrams), see
+> [`mcp-server-design.md`](./mcp-server-design.md).
+
 ## Features
 
 - **Read-only access**: All operations are read-only, ensuring cluster safety
