@@ -165,6 +165,36 @@ residual interference remains (as reported in #1707).
   ([setting CUs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html))
   and land in a follow-up.
 
-## 7. Discussion points
+## 7. Multi-GPU validation required
+
+The current MI300X VF test node has only one GPU. It verifies the single-device
+case, but cannot establish the mapping between a reordered visible-device list
+and `HSA_CU_MASK` entries for more than one GPU.
+
+On that node, ROCr accepted the container-local device index:
+
+- `ROCR_VISIBLE_DEVICES=0` exposed the one GPU;
+- `ROCR_VISIBLE_DEVICES=1` exposed no GPU; and
+- the AMD SMI UUID recorded in the allocation annotation did not identify a
+  GPU to ROCr. `ROCR_VISIBLE_DEVICES` therefore needs a ROCr-compatible GPU
+  identifier, not an AMD SMI UUID.
+
+Before enabling multi-GPU workloads, validate on a node with at least two AMD
+GPUs that:
+
+1. The device plugin mounts only the allocated DRM devices and provides
+   `ROCR_VISIBLE_DEVICES` in the allocation order.
+2. ROCr/HIP enumerates those GPUs in exactly that order, so the first GPU is
+   index `0`, the second is index `1`, and so on.
+3. `HSA_CU_MASK=0:<range>;1:<range>` applies each range to the corresponding
+   container-local GPU. A HIP workload must be used to verify the active CU
+   mask; device discovery output alone can report the physical CU count.
+4. Two Pods that share one physical GPU receive disjoint CU ranges, including
+   a case where one Pod requests one GPU and another requests multiple GPUs.
+5. Reversing the allocation order still binds every `HSA_CU_MASK` entry to its
+   intended physical GPU, and each container of a multi-container Pod receives
+   an independent response.
+
+## 8. Discussion points
 
 - **Device-plugin layering.** In #1707, the AMD vGPU device-plugin is proposed to be built on ROCm/k8s-device-plugin, which already advertises whole-GPU `amd.com/gpu`. Since kubelet cannot register the same resource from two plugins, the natural path is to **extend the ROCm plugin** so a single plugin owns `amd.com/gpu` and also advertises the fractional `amd.com/gpumem` / `amd.com/gpucores` (optional, which is not a must-have for HAMi but can be useful for other schedulers).
