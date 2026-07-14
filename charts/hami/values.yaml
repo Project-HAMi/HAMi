@@ -342,6 +342,10 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Advertise the physical GPU's NUMA node on each vGPU replica so kubelet's
+  # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
+  # admission behavior when topologyManagerPolicy is single-numa-node.
+  enableNumaTopology: false
   # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
@@ -359,6 +363,7 @@ devicePlugin:
             "devicememoryscaling": 1,
             "devicesplitcount": 10,
             "preconfigureddevicememory": 0,
+            "enablenumatopology": false,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],

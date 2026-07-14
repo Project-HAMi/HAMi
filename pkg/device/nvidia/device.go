@@ -130,6 +130,10 @@ type NodeDefaultConfig struct {
 	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
+	// EnableNUMATopology advertises the physical GPU's NUMA node on each vGPU
+	// replica so kubelet's TopologyManager can align CPU and GPU NUMA nodes.
+	// Defaults to false to preserve existing admission behavior.
+	EnableNUMATopology *bool `yaml:"enableNumaTopology" json:"enablenumatopology"`
 }
 
 type FilterDevice struct {
