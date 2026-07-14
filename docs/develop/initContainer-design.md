@@ -2,12 +2,12 @@
 
 ## Problem Summary
 
-When a pod has both init containers and app containers requesting gpu resources , HAMi allocate the resources simultaneously/parallelly. But kubernetes runs the init container sequentially to completion before any app container starts,so init and app containers never execute at the same time.
+When a pod has both init containers and app containers requesting GPU resources, HAMi allocates the resources simultaneously/parallelly. But Kubernetes runs the init container sequentially to completion before any app container starts, so init and app containers never execute at the same time.
   
 
 ## The Problem in HAMi Today
 
-`device.Resourcereqs()` this is build for one request entry per container, **init
+`device.Resourcereqs()` this is built for one request entry per container, **init
 containers first, then app containers**, in this order.
 
 **1. Admission — `fitResourceQuota` (`webhook.go`)**
@@ -73,10 +73,10 @@ effective = max( sum(app container requests), max(single init container request)
 
 ## Proposal
 
-Applying this formula consistently, for all the resource dimension GPU count,
-memory, cores and per device UUID(a multi-GPU pod where init and app
-containers land on different physical devices must not have those
-devices usage merged together):
+Applying this formula consistently for all resource dimensions (GPU count,
+memory, cores, and per-device UUID; a multi-GPU pod where init and app
+containers land on different physical devices must not have usage on
+those devices merged):
 
 - **Admission quota check** computes this effective value and checks it
   against namespace quota.
@@ -146,6 +146,13 @@ different physical devices: each device gets its own effective value.
 2. `appReq` per resource = **sum** across app containers.
 3. `effectiveReq = max(appReq, initReq)`; deny if it exceeds quota.
 
+**GPU count:** today's quota check enforces **memory and cores only** —
+GPU count is not an independent quota dimension. `effectiveReq` is still
+computed for count (steps 1–2) so the scheduler and usage recorder have a
+consistent value to work with, but `FitQuota` does not compare it against
+a namespace quota. Threading count through `FitQuota` the same way memory
+and cores are is a possible future extension, not part of this change.
+
 **Memory factor:** applied **once**, to the already-computed effective
 value — not per container.
 
@@ -198,13 +205,23 @@ itself derived from container statuses by kubelet, so relying on only one
 risks acting on a momentarily stale read of the other.
 
 ```
-new_usage[uuid] = sum of app-container requests on uuid only
-delta[uuid]     = new_usage[uuid] - old_usage[uuid]  
+new_usage[uuid] = sum of app-container usage values on uuid only
+                  (the same per-container fields — e.g. Usedmem — that
+                  AddUsage/getNodesUsage already collapse; not raw
+                  requests)
+delta[uuid]     = new_usage[uuid] - old_usage[uuid]
 apply delta[uuid] to QuotaManager and PodManager
 ```
+
+Requests stay the basis for admission and scheduling decisions above;
+once a pod is running, the recorded/shrunk value — the number quota and
+node-capacity accounting compare against — is always derived from the
+same usage fields `AddUsage`/`getNodesUsage` already track, so it can
+never drift from what `CollapseInitContainerUsage` produced when the pod
+started.
 
 Only ever runs **after** `pod.Status` confirms completion.
 
 **Idempotency:** `PodManager` stores a boolean `initContainersShrunk` flag
 per pod. The shrink applies only while `false`; once applied it flips to
-`true` and is never re-applie.
+`true` and is never re-applied.
