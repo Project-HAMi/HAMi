@@ -232,7 +232,8 @@ func TestDeviceUsageListDeepCopy(t *testing.T) {
 		{
 			name: "fully populated",
 			original: DeviceUsageList{
-				Policy: "binpack",
+				Policy:     "binpack",
+				NumaIgnore: true,
 				DeviceLists: []*DeviceListsScore{
 					{
 						Device: &device.DeviceUsage{
