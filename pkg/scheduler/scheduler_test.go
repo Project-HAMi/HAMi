@@ -1844,3 +1844,132 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	podsAfter, _ := s.podManager.ListPodsUID()
 	require.Len(t, podsAfter, 0)
 }
+
+type bindLockMockDevice struct {
+	registerMockDevice
+	lockErr      error
+	lockErrOnce  bool
+	lockCalls    int32
+	releaseCalls int32
+}
+
+func (m *bindLockMockDevice) CommonWord() string { return "bind-lock-mock" }
+func (m *bindLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	n := atomic.AddInt32(&m.lockCalls, 1)
+	if m.lockErr != nil && (!m.lockErrOnce || n == 1) {
+		return m.lockErr
+	}
+	return nil
+}
+func (m *bindLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	atomic.AddInt32(&m.releaseCalls, 1)
+	return nil
+}
+
+var errContention = fmt.Errorf("contended: %w", nodelockutil.ErrNodeLockContention)
+
+func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev1.Pod, mock *bindLockMockDevice) (*Scheduler, extenderv1.ExtenderBindingArgs, func()) {
+	t.Helper()
+
+	oldRetry := config.NodeLockRetryTimeout
+	config.NodeLockRetryTimeout = retryTimeout
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"bind-lock-mock": mock}
+	cleanup := func() {
+		config.NodeLockRetryTimeout = oldRetry
+		device.DevicesMap = oldDevicesMap
+	}
+
+	s := NewScheduler()
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	fakeClient := fake.NewSimpleClientset(pod, node)
+	s.kubeClient = fakeClient
+	client.KubeClient = fakeClient
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour)
+	require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod))
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	args := extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: "node1",
+	}
+	return s, args, cleanup
+}
+
+func Test_Bind_NonPodGroupPodDoesNotRetry(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-nogroup", Namespace: "default", UID: types.UID("uid-nogroup"),
+		},
+	}
+	mock := &bindLockMockDevice{lockErr: errContention, lockErrOnce: true}
+	s, args, cleanup := setupBindLockRetryTest(t, 5*time.Second, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "node lock contention")
+	require.Equal(t, int32(1), atomic.LoadInt32(&mock.lockCalls),
+		"non-PodGroup pod must not retry LockNode")
+}
+
+func Test_Bind_PodGroupPodRetriesOnContention(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-gang", Namespace: "default", UID: types.UID("uid-gang"),
+			Labels: map[string]string{util.PodGroupLabel: "my-training-job"},
+		},
+	}
+	mock := &bindLockMockDevice{lockErr: errContention, lockErrOnce: true}
+	s, args, cleanup := setupBindLockRetryTest(t, 2*time.Second, pod, mock)
+	defer cleanup()
+
+	s.Bind(args)
+	require.GreaterOrEqual(t, atomic.LoadInt32(&mock.lockCalls), int32(2),
+		"expected at least 2 LockNode calls (initial + retry)")
+}
+
+func Test_Bind_PodGroupPodContendsUntilTimeout(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-timeout", Namespace: "default", UID: types.UID("uid-timeout"),
+			Labels: map[string]string{util.PodGroupLabel: "my-training-job"},
+		},
+	}
+	mock := &bindLockMockDevice{lockErr: errContention}
+	s, args, cleanup := setupBindLockRetryTest(t, 300*time.Millisecond, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "node lock contention",
+		"timeout error should wrap ErrNodeLockContention for observability")
+	require.GreaterOrEqual(t, atomic.LoadInt32(&mock.releaseCalls), int32(1),
+		"expected ReleaseNodeLock to be called at least once on timeout path")
+}
+
+func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-other-err", Namespace: "default", UID: types.UID("uid-other-err"),
+			Labels: map[string]string{util.PodGroupLabel: "my-training-job"},
+		},
+	}
+	mock := &bindLockMockDevice{lockErr: fmt.Errorf("apiserver 500"), lockErrOnce: true}
+	s, args, cleanup := setupBindLockRetryTest(t, 5*time.Second, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "apiserver 500")
+	require.Equal(t, int32(1), atomic.LoadInt32(&mock.lockCalls),
+		"non-contention error must not trigger retry")
+}
