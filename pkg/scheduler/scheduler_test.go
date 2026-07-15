@@ -1875,12 +1875,13 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	config.NodeLockRetryTimeout = retryTimeout
 	oldDevicesMap := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{"bind-lock-mock": mock}
+
+	s := NewScheduler()
 	cleanup := func() {
 		config.NodeLockRetryTimeout = oldRetry
 		device.DevicesMap = oldDevicesMap
+		close(s.stopCh)
 	}
-
-	s := NewScheduler()
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
