@@ -753,7 +753,9 @@ func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
 
 func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
 	for _, val := range device.GetDevices() {
-		val.ReleaseNodeLock(node, pod)
+		if err := val.ReleaseNodeLock(node, pod); err != nil {
+			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
+		}
 	}
 }
 
