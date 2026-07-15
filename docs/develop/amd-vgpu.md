@@ -135,12 +135,13 @@ outside this range are rejected at admission), not a CU count. The scheduler
 converts the requested percentage into a physical CU count with:
 
 ```text
-cuCount = round(percentage × devcore / 100)
+cuCount = floor(percentage × devcore / 100)
 ```
 
 where `devcore` is the device's total CU count from node registration. The
 result is clamped to `[1, devcore]`. For example, `25` on a 304-CU MI300X
-yields `76` CUs; `33` yields `100` CUs.
+yields `76` CUs; `33` yields `100` CUs (`floor(100.32)`); `67` yields
+`203` CUs (`floor(203.68)`).
 
 The scheduler records this `cuCount` in `hami.io/amd-devices-allocated`. The
 device-plugin selects a non-overlapping CU range of that size and injects it
