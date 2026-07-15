@@ -58,7 +58,6 @@ func TestPodInfo(t *testing.T) {
 						},
 					},
 				},
-				CtrIDs: []string{"ctr1", "ctr2"},
 			},
 			expected: PodInfo{
 				Pod: &corev1.Pod{
@@ -78,7 +77,6 @@ func TestPodInfo(t *testing.T) {
 						},
 					},
 				},
-				CtrIDs: []string{"ctr1", "ctr2"},
 			},
 		},
 	}
@@ -140,7 +138,6 @@ func TestGetScheduledPods(t *testing.T) {
 		},
 		NodeID:  "node1",
 		Devices: PodDevices{"device1": {{}}},
-		CtrIDs:  []string{"ctr1"},
 	}
 	pod2 := &PodInfo{
 		Pod: &corev1.Pod{
@@ -153,7 +150,6 @@ func TestGetScheduledPods(t *testing.T) {
 
 		NodeID:  "node2",
 		Devices: PodDevices{"device2": {{}}},
-		CtrIDs:  []string{"ctr2"},
 	}
 	podManager.pods[pod1.UID] = pod1
 	podManager.pods[pod2.UID] = pod2
@@ -176,7 +172,6 @@ func TestGetScheduledPods(t *testing.T) {
 		assert.Equal(t, expectedPod.UID, pod.UID, "UID should match")
 		assert.Equal(t, expectedPod.NodeID, pod.NodeID, "NodeID should match")
 		assert.Equal(t, expectedPod.Devices, pod.Devices, "Devices should match")
-		assert.Equal(t, expectedPod.CtrIDs, pod.CtrIDs, "CtrIDs should match")
 	}
 }
 
@@ -193,7 +188,6 @@ func TestGetPod(t *testing.T) {
 		},
 		NodeID:  "node1",
 		Devices: PodDevices{"device1": {{}}},
-		CtrIDs:  []string{"ctr1"},
 	}
 
 	podManager.pods["uid2"] = &PodInfo{
@@ -206,7 +200,6 @@ func TestGetPod(t *testing.T) {
 		},
 		NodeID:  "node2",
 		Devices: PodDevices{"device2": {{}}},
-		CtrIDs:  []string{"ctr2"},
 	}
 
 	for _, ts := range []struct {
@@ -248,7 +241,6 @@ func TestAddPod(t *testing.T) {
 		},
 		NodeID:  "node1",
 		Devices: PodDevices{"device1": {{}}},
-		CtrIDs:  []string{"ctr1"},
 	}
 
 	for _, ts := range []struct {
@@ -282,7 +274,6 @@ func TestAddPod(t *testing.T) {
 					},
 					NodeID:  "node1",
 					Devices: PodDevices{"device1": {{}}},
-					CtrIDs:  []string{"ctr1"},
 				},
 				"uid2": {
 					Pod: &corev1.Pod{
@@ -294,7 +285,6 @@ func TestAddPod(t *testing.T) {
 					},
 					NodeID:  "node2",
 					Devices: PodDevices{"device2": {{}}},
-					CtrIDs:  nil,
 				},
 			},
 		},
@@ -408,7 +398,6 @@ func TestPodInfoDeepCopy(t *testing.T) {
 						},
 					},
 				},
-				CtrIDs: []string{"ctr1", "ctr2"},
 			},
 		},
 	}
@@ -426,7 +415,6 @@ func TestPodInfoDeepCopy(t *testing.T) {
 
 			// 1. Copy must be deeply equal to original.
 			assert.Equal(t, tt.original.NodeID, copy.NodeID)
-			assert.Equal(t, tt.original.CtrIDs, copy.CtrIDs)
 			assert.Equal(t, tt.original.Devices, copy.Devices)
 			if tt.original.Pod != nil {
 				assert.Equal(t, tt.original.Name, copy.Name)
@@ -441,9 +429,6 @@ func TestPodInfoDeepCopy(t *testing.T) {
 			originalNodeID := tt.original.NodeID
 			copy.NodeID = "mutated-node"
 			assert.Equal(t, tt.original.NodeID, originalNodeID)
-			originalCtrIDsLen := len(tt.original.CtrIDs)
-			copy.CtrIDs = append(copy.CtrIDs, "ctr3")
-			assert.Equal(t, len(tt.original.CtrIDs), originalCtrIDsLen)
 			if copy.Devices == nil {
 				copy.Devices = make(PodDevices)
 			}
