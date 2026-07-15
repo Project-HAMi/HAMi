@@ -106,7 +106,7 @@ HSA_CU_MASK=0:0-75;1:0-75
 Each `CU_list` uses HSA's CU ID-list grammar, for example `0-3,8,10-12`.
 
 Exclusivity of CU ranges across pods on a device is enforced under the AMD
-node lock (`AMDDevices.LockNode` and `ReleaseNodeLock`).
+node lock (`AMDDevices.LockNode` and `ReleaseNodeLock` which are unimplemented now).
 
 ## 5. Resource model and core_limit -> CU mask
 
