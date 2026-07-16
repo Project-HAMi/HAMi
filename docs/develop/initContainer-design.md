@@ -199,17 +199,39 @@ add and remove always operate on the same number, so there's no drift.
 
 ![The journey of one pod](./imgs/pod-lifecycle-journey.svg)
 
-**Condition:** `pod.Status.Phase == Running` **and** every init container
-has `Status.Terminated{ExitCode: 0}`. Checked together — `Phase` is
-itself derived from container statuses by kubelet, so relying on only one
-risks acting on a momentarily stale read of the other.
+**Condition:** every init container has `Status.Terminated` set (finished,
+regardless of exit code), checked on every reconcile against current
+object state — not gated on observing any particular `Phase` value.
+`Phase == Running` is not required, since it was found to be unreliable
+(does not consistently appear before `Succeeded`).
+
+Two actions (shrink) and one no‑op (hold) once every init container has terminated:
+
+- **Pod reaches a terminal phase (`Succeeded` or `Failed`):** every
+  container in the pod — init and app — has finished. Usage shrinks to
+  zero regardless of exit codes, since nothing in the pod is using GPU
+  anymore. Unlike `Running`, `Succeeded`/`Failed` are true terminal
+  states with no further transitions, so `Phase` is safe to use here.
+- **All init containers exited `ExitCode: 0`, pod not yet terminal:**
+  app containers have started or are starting → shrink to
+  app-containers-only usage.
+- **Any init container exited non-zero, pod not yet terminal:** pod may still restart (depending on restartPolicy). It still holds its allocated GPU devices, so usage is not shrunk at this point. The pod will either restart and eventually succeed, or be terminated permanently (phase → Failed), which will then trigger a shrink.
 
 ```
-new_usage[uuid] = sum of app-container usage values on uuid only
-                  (the same per-container fields — e.g. Usedmem — that
-                  AddUsage/getNodesUsage already collapse; not raw
-                  requests)
-delta[uuid]     = new_usage[uuid] - old_usage[uuid]
+for each uuid:
+if pod.Status.Phase in (Succeeded, Failed):
+    new_usage[uuid] = 0   
+else if all init containers terminated with ExitCode == 0:
+    new_usage[uuid] = sum of app-container usage values on uuid only
+                      (the same per-container fields — e.g. Usedmem —
+                      that AddUsage/getNodesUsage already collapse;
+                      not raw requests)
+else :
+   // init containers still running, or some exited non-zero, pod not terminal.
+  // No shrink: keep current effective usage unchanged.
+        continue   
+
+delta[uuid] = new_usage[uuid] - old_usage[uuid]
 apply delta[uuid] to QuotaManager and PodManager
 ```
 
@@ -222,6 +244,15 @@ started.
 
 Only ever runs **after** `pod.Status` confirms completion.
 
-**Idempotency:** `PodManager` stores a boolean `initContainersShrunk` flag
-per pod. The shrink applies only while `false`; once applied it flips to
-`true` and is never re-applied.
+**Idempotency:** `PodManager` stores a `PodShrinkState` per pod —
+`NotShrunk`, `AppOnly`, or `Zero` — replacing a single boolean, since the
+three outcomes above mean a pod can legitimately shrink twice (once to
+`AppOnly`, later to `Zero`), not just once.
+
+Allowed transitions:
+- `NotShrunk → AppOnly`: when all init containers exit `0` and the pod is
+  not yet terminal.
+- `NotShrunk → Zero` or `AppOnly → Zero`: when the pod reaches a terminal
+  phase(Succeeded or Failed).
+
+  (Note: the case “any init container exits non‑zero” is removed; it will naturally end up in a terminal phase later if the pod does not restart, so no separate branch is needed.)
