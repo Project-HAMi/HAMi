@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read  # for actions/checkout to fetch code
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: docker.io
   IMAGE_REPO: ${{ secrets.IMAGE_REPO || 'projecthami/hami' }}

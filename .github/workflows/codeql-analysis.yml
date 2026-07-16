@@ -17,6 +17,10 @@ on:
   schedule:
     - cron: "0 4 * * 6"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   security-events: write
   # required to fetch internal or private CodeQL packs
