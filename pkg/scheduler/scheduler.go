@@ -537,8 +537,8 @@ func numaBindingRequested(task *corev1.Pod) bool {
 	if !ok {
 		return false
 	}
-	enforce, err := strconv.ParseBool(v)
-	return err == nil && enforce
+	enforce, _ := strconv.ParseBool(v)
+	return enforce
 }
 
 func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
