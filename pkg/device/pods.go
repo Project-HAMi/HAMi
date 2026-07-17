@@ -30,7 +30,6 @@ type PodInfo struct {
 	*corev1.Pod
 	NodeID  string
 	Devices PodDevices
-	CtrIDs  []string
 }
 
 // PodUseDeviceStat counts pod use device info.
@@ -176,7 +175,6 @@ func (p *PodInfo) DeepCopy() *PodInfo {
 		Pod:     p.Pod.DeepCopy(),
 		NodeID:  p.NodeID,
 		Devices: p.Devices.DeepCopy(),
-		CtrIDs:  append([]string(nil), p.CtrIDs...),
 	}
 }
 

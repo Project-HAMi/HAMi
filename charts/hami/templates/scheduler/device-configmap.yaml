@@ -26,6 +26,7 @@ data:
       deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}
       deviceCoreScaling: {{ .Values.devicePlugin.deviceCoreScaling }}
+      enableNumaTopology: {{ .Values.devicePlugin.enableNumaTopology | default false }}
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"

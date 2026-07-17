@@ -50,6 +50,11 @@ const (
 	HAMiComponentLabel = "app.kubernetes.io/component"
 	// HAMiComponentScheduler the label value for hami-scheduler.
 	HAMiComponentScheduler = "hami-scheduler"
+
+	// PodGroupLabel is the label used by scheduler-plugins Coscheduling to mark
+	// a pod as a member of a PodGroup. See
+	// https://github.com/kubernetes-sigs/scheduler-plugins/blob/master/apis/scheduling/v1alpha1/types.go
+	PodGroupLabel = "scheduling.x-k8s.io/pod-group"
 )
 
 var (

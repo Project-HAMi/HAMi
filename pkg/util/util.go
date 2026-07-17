@@ -280,3 +280,11 @@ func IsPodTerminating(pod *corev1.Pod) bool {
 func AllContainersCreated(pod *corev1.Pod) bool {
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }
+
+// Coscheduling PodGroup, based on the presence of the PodGroupLabel.
+func IsPodGroupMember(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	return pod.Labels[PodGroupLabel] != ""
+}
