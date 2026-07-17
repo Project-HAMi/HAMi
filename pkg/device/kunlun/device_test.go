@@ -17,6 +17,7 @@ limitations under the License.
 package kunlun
 
 import (
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -24,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
@@ -46,8 +48,9 @@ func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
 	mutexPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		Annotations: map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
 	}}
-	fit, _, _ = dev.Fit(devices, req, mutexPod, nodeInfo, allocated)
+	fit, _, reason := dev.Fit(devices, req, mutexPod, nodeInfo, allocated)
 	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.ExclusiveDeviceAllocateConflict), reason)
 }
 
 func Test_graphSelect(t *testing.T) {
