@@ -1,4 +1,4 @@
-{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.externalConfigName) (not .Values.dra.enabled) -}}
+{{- if and .Values.devicePlugin.enabled (not .Values.devicePlugin.nodeConfiguration.externalConfigName) -}}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -10,6 +10,4 @@ metadata:
 data:
   config.json: |
 {{- .Values.devicePlugin.nodeConfiguration.config | nindent 4 }}
-  ld.so.preload: |
-    {{ .Values.devicePlugin.libPath }}/libvgpu.so
 {{- end }}

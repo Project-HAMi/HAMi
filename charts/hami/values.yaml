@@ -342,6 +342,10 @@ devicePlugin:
   deviceSplitCount: 10
   deviceMemoryScaling: 1
   deviceCoreScaling: 1
+  # Advertise the physical GPU's NUMA node on each vGPU replica so kubelet's
+  # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
+  # admission behavior when topologyManagerPolicy is single-numa-node.
+  enableNumaTopology: false
   # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
@@ -359,6 +363,7 @@ devicePlugin:
             "devicememoryscaling": 1,
             "devicesplitcount": 10,
             "preconfigureddevicememory": 0,
+            "enablenumatopology": false,
             "migstrategy": "none",
             "filterdevices": {
               "uuid": [],
@@ -442,24 +447,6 @@ mockDevicePlugin:
     ##   - myRegistryKeySecretName
     ##
     pullSecrets: []
-# If this option is enabled, the DRA will be installed and the scheduler extender will not be installed.
-dra:
-  enabled: false
-
-# Configuration for the hami-dra subchart, which includes DRA drivers.
-# This is part of config for DRA, please refer to the DRA documentation for more details.
-hami-dra:
-  monitor:
-    enabled: true
-  drivers:
-    nvidia:
-      enabled: true
-      # If you are using gpu driver on host, you need to set this to false
-      containerDriver: true
-      image:
-        repository: ghcr.io/project-hami/k8s-dra-driver
-        tag: "main"
-
 devices:
   amd:
     customresources:

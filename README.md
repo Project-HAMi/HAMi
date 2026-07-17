@@ -22,7 +22,7 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 HAMi stands for **Heterogeneous AI Computing Virtualization Middleware**. Formerly known as `k8s-vGPU-scheduler`, HAMi helps platform teams share expensive GPUs and other AI accelerators across Kubernetes workloads, isolate device memory and compute, and schedule pods with device-aware policies without changing application code.
 
-HAMi is a [CNCF Sandbox](https://www.cncf.io/sandbox-projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
+HAMi is a [CNCF Incubating](https://www.cncf.io/projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
 
 ![CNCF logo](imgs/cncf-logo.png)
 

@@ -1,4 +1,4 @@
-{{- if and .Values.scheduler.kubeScheduler.enabled (not .Values.dra.enabled) -}}
+{{- if .Values.scheduler.kubeScheduler.enabled -}}
 {{- $k8sMinor := regexReplaceAll "[^0-9]" .Capabilities.KubeVersion.Minor "" | int -}}
 apiVersion: v1
 kind: ConfigMap

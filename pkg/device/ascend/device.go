@@ -63,10 +63,7 @@ type RuntimeInfo struct {
 	Core   int32  `json:"core,omitempty"`
 }
 
-var (
-	enableAscend bool
-	configFile   string
-)
+var enableAscend bool
 
 func (dev *Devices) trimMemory(m int64) (int64, string) {
 	for i := range dev.config.Templates {
@@ -131,7 +128,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	reqNum := count.Value()
-	if dev.config.CommonWord == Ascend910CType {
+	if dev.config.CommonWord == Ascend910CType && dev.config.SuperPod {
 		if reqNum == 1 {
 			// Since the minimum allocation unit is one physical module (2 NPUs), round up the limits and requests to 2.
 			klog.InfoS("Adjusted Ascend910C device request from 1 to 2 (minimum allocation unit)", "pod", klog.KObj(p))
@@ -152,24 +149,15 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	vnpuMode := p.Annotations[VNPUModeAnnotation]
 	isHAMiCore := (vnpuMode == VNPUModeHamiCore)
 
-	if isHAMiCore {
-		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
-
-		if ctr.Lifecycle == nil {
-			ctr.Lifecycle = &corev1.Lifecycle{}
+	// -core only applies to hami-core (soft split); on hard split the template
+	// fixes compute, so reject it here.
+	if !isHAMiCore && dev.config.ResourceCoreName != "" {
+		coreQ, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceCoreName)]
+		if !ok {
+			coreQ, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceCoreName)]
 		}
-
-		// Inject PostStart hook to start the limiter process
-		if ctr.Lifecycle.PostStart == nil {
-			ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
-				Exec: &corev1.ExecAction{
-					Command: []string{
-						"bash",
-						"-c",
-						"export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
-					},
-				},
-			}
+		if ok && coreQ.Value() > 0 {
+			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
 		}
 	}
 
@@ -187,7 +175,7 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
-			return true, errors.New("vNPU nor supported for multiple devices")
+			return true, errors.New("vNPU not supported for multiple devices")
 		}
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
@@ -460,14 +448,16 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		totalMemPerCard = devices[0].Totalmem
 	}
 
+	if isHAMiCore && !nodeSupportHamiCore {
+		reason[common.ModeNotFit]++
+		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
+		return false, nil, common.GenReason(reason, len(devices))
+	}
+
 	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
-		if !nodeSupportHamiCore && isHAMiCore {
+		if nodeSupportHamiCore && !isHAMiCore {
 			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: Node does not support hami-core mode", "node", nodeInfo.Node.Name, "pod", pod.Name)
-			return false, nil, common.GenReason(reason, len(devices))
-		} else if nodeSupportHamiCore && !isHAMiCore {
-			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: Reserved for hami-core but pod is legacy vNPU", "node", nodeInfo.Node.Name, "pod", pod.Name)
+			klog.V(4).InfoS("Node filtered: node reserved for hami-core but pod is legacy vNPU", "pod", klog.KObj(pod))
 			return false, nil, common.GenReason(reason, len(devices))
 		}
 	}

@@ -192,17 +192,25 @@ func (ds Devices) GetUUIDs() []string {
 }
 
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
-func (ds Devices) GetPluginDevices(count uint) []*kubeletdevicepluginv1beta1.Device {
+func (ds Devices) GetPluginDevices(count uint, numaTopology bool) []*kubeletdevicepluginv1beta1.Device {
 	var res []*kubeletdevicepluginv1beta1.Device
+
+	if len(ds) == 0 {
+		return res
+	}
 
 	if !strings.Contains(ds.GetIDs()[0], "MIG") {
 		for _, dev := range ds {
+			topology := dev.Topology
+			if !numaTopology {
+				topology = nil
+			}
 			for i := uint(0); i < count; i++ {
 				id := fmt.Sprintf("%v-%v", dev.ID, i)
 				res = append(res, &kubeletdevicepluginv1beta1.Device{
 					ID:       id,
 					Health:   dev.Health,
-					Topology: nil,
+					Topology: topology,
 				})
 			}
 		}

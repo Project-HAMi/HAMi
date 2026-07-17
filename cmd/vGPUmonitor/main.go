@@ -72,8 +72,6 @@ func start() error {
 		return fmt.Errorf("failed to create container lister: %v", err)
 	}
 
-	cgroupDriver = 0 // Explicitly initialize
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
