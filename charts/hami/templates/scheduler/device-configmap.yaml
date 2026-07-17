@@ -22,6 +22,9 @@ data:
       defaultCores: 0
       defaultGPUNum: 1
       preConfiguredDeviceMemory: {{ .Values.devicePlugin.preConfiguredDeviceMemory | default 0 }}
+      {{- if .Values.devicePlugin.preConfiguredDeviceType }}
+      preConfiguredDeviceType: "{{ .Values.devicePlugin.preConfiguredDeviceType }}"
+      {{- end }}
       memoryFactor: 1
       deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}

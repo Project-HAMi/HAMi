@@ -127,6 +127,10 @@ type NodeDefaultConfig struct {
 	DeviceMemoryScaling       *float64 `yaml:"deviceMemoryScaling" json:"devicememoryscaling"`
 	DeviceCoreScaling         *float64 `yaml:"deviceCoreScaling" json:"devicecorescaling"`
 	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
+	// PreConfiguredDeviceType is the device type reported for CDI-discovered
+	// GPUs that cannot be enumerated via NVML (e.g. the GB10 iGPU). Defaults to
+	// "NVIDIA-GB10" when unset.
+	PreConfiguredDeviceType *string `yaml:"preConfiguredDeviceType" json:"preconfigureddevicetype"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
 	// EnableNUMATopology advertises the physical GPU's NUMA node on each vGPU

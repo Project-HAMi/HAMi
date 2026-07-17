@@ -42,6 +42,7 @@ import (
 	"k8s.io/klog/v2"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -61,6 +62,11 @@ type options struct {
 	deviceListStrategies spec.DeviceListStrategies
 
 	imexChannels imex.Channels
+
+	// resolvedStrategy holds the device discovery strategy resolved from the
+	// configured strategy and the detected platform (see resolveStrategy). It is
+	// populated by getResourceManagers and consumed when constructing plugins.
+	resolvedStrategy string
 }
 
 // New a new set of plugins with the supplied options.
@@ -109,6 +115,7 @@ func New(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, de
 // include full GPUs or MIG devices.
 func (o *options) getResourceManagers() ([]rm.ResourceManager, error) {
 	strategy := o.resolveStrategy(*o.config.Flags.DeviceDiscoveryStrategy)
+	o.resolvedStrategy = strategy
 	switch strategy {
 	case "nvml":
 		ret := o.nvmllib.Init()
@@ -131,6 +138,12 @@ func (o *options) getResourceManagers() ([]rm.ResourceManager, error) {
 		return rm.NewNVMLResourceManagers(o.infolib, o.nvmllib, o.devicelib, o.config.Config)
 	case "tegra":
 		return rm.NewTegraResourceManagers(o.config.Config)
+	case "cdi":
+		// CDI-only accelerators (e.g. the GB10 Grace-Blackwell iGPU) are not
+		// enumerable via NVML. Discover them from the externally-managed CDI
+		// specs present on the node instead.
+		klog.Info("Discovering devices from CDI specs (NVML enumeration unavailable)")
+		return rm.NewCDIResourceManagers(o.config.Config)
 	default:
 		klog.Errorf("Incompatible strategy detected %v", strategy)
 		klog.Error("If this is a GPU node, did you configure the NVIDIA Container Toolkit?")
@@ -156,5 +169,16 @@ func (o *options) resolveStrategy(strategy string) string {
 	case info.PlatformTegra:
 		return "tegra"
 	}
+
+	// No NVML/Tegra platform was detected. If a CDI device-list strategy is in
+	// use and CDI specs describing GPU devices are present on the node, discover
+	// devices from those specs. This supports CDI-only accelerators such as the
+	// GB10 (Grace-Blackwell iGPU), which are exposed exclusively through CDI and
+	// cannot be enumerated via NVML.
+	if o.deviceListStrategies.AnyCDIEnabled() && rm.HasCDISpecs(rm.CDISpecDirs()) {
+		klog.Info("No NVML/Tegra platform detected; falling back to CDI device discovery")
+		return "cdi"
+	}
+
 	return strategy
 }

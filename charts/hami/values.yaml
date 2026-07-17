@@ -350,6 +350,9 @@ devicePlugin:
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
   preConfiguredDeviceMemory: 0
+  # Device type reported for GPUs discovered via CDI that cannot be enumerated by NVML (e.g., NVIDIA GB10).
+  # Only used with deviceDiscoveryStrategy=cdi. Empty uses the built-in default ("NVIDIA-GB10").
+  preConfiguredDeviceType: ""
   # Node configuration for device plugin, Priority: externalConfigName > config > default config
   nodeConfiguration:
     # If you want to use a custom config.json, you can set the content here.
@@ -384,6 +387,12 @@ devicePlugin:
   disablecorelimit: "false"
   passDeviceSpecsEnabled: false
   deviceListStrategy: "envvar"
+  # Strategy used by the NVIDIA device plugin to discover devices:
+  # "" / "auto" (default) auto-detects the platform; "nvml", "tegra", or "cdi".
+  # Use "cdi" (together with deviceListStrategy: "cdi-annotations,cdi-cri") for
+  # CDI-only accelerators such as the GB10 (Grace-Blackwell iGPU), which are not
+  # enumerable via NVML and are described by an on-node CDI spec instead.
+  deviceDiscoveryStrategy: ""
   nvidiaHookPath: null
   nvidiaDriverRoot: null
   gdrcopyEnabled: null

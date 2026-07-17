@@ -86,7 +86,16 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 	return true, node, nil
 }
 
+// cdiDefaultDeviceType is the device type reported for CDI-discovered GPUs when
+// preConfiguredDeviceType is not set. It is used for CDI-only accelerators such
+// as the GB10 (Grace-Blackwell iGPU).
+const cdiDefaultDeviceType = "NVIDIA-GB10"
+
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
+	if plugin.cdiDiscovery {
+		return plugin.getCDIAPIDevices()
+	}
+
 	devs := plugin.Devices()
 	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
@@ -188,6 +197,60 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	return &res
 }
 
+// getCDIAPIDevices builds the registration info for GPUs discovered from
+// externally-managed CDI specs (e.g. the GB10 iGPU). NVML is unavailable in
+// this mode, so device memory and type are taken from configuration
+// (preConfiguredDeviceMemory / preConfiguredDeviceType) instead of being
+// queried from the driver.
+func (plugin *NvidiaDevicePlugin) getCDIAPIDevices() *[]*device.DeviceInfo {
+	devs := plugin.Devices()
+	res := make([]*device.DeviceInfo, 0, len(devs))
+
+	if plugin.schedulerConfig.PreConfiguredDeviceMemory == nil || *plugin.schedulerConfig.PreConfiguredDeviceMemory <= 0 {
+		klog.Error("CDI device discovery requires 'preConfiguredDeviceMemory' (in MB) to be set in the nvidia config; " +
+			"CDI-only accelerators cannot report memory via NVML. No devices registered.")
+		return &res
+	}
+
+	registeredmem := int32(*plugin.schedulerConfig.PreConfiguredDeviceMemory)
+	if *plugin.schedulerConfig.DeviceMemoryScaling != 1 {
+		registeredmem = int32(float64(registeredmem) * *plugin.schedulerConfig.DeviceMemoryScaling)
+		klog.V(3).Infof("CDI device: MemoryScaling=%v, registeredmem=%vMB", *plugin.schedulerConfig.DeviceMemoryScaling, registeredmem)
+	}
+
+	model := cdiDefaultDeviceType
+	if plugin.schedulerConfig.PreConfiguredDeviceType != nil && *plugin.schedulerConfig.PreConfiguredDeviceType != "" {
+		model = *plugin.schedulerConfig.PreConfiguredDeviceType
+	}
+	if !strings.HasPrefix(model, "NVIDIA") {
+		model = fmt.Sprintf("NVIDIA-%s", model)
+	}
+
+	devcore := int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
+
+	for _, d := range devs {
+		uuid := d.ID
+		idx, err := strconv.Atoi(d.Index)
+		if err != nil {
+			klog.ErrorS(err, "invalid CDI device index; skipping device", "index", d.Index, "id", uuid)
+			continue
+		}
+		res = append(res, &device.DeviceInfo{
+			ID:      uuid,
+			Index:   uint(idx),
+			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
+			Devmem:  registeredmem,
+			Devcore: devcore,
+			Type:    model,
+			Numa:    0,
+			Mode:    plugin.operatingMode,
+			Health:  true,
+		})
+		klog.V(3).Infof("Registered CDI device id=%v, index=%v, memory=%vMB, type=%v", uuid, idx, registeredmem, model)
+	}
+	return &res
+}
+
 // RegisterInAnnotation scans devices and patches node annotations.
 // Returns (changed, error) where changed indicates whether the annotation was actually updated.
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
@@ -211,7 +274,11 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	plugin.deviceCache = encodeddevices
 
 	var data []byte
-	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
+	// Topology scoring computes pairwise P2P/NVLink scores via NVML. Skip it in
+	// CDI mode: NVML is unavailable (nvml.Init would fail and block registration),
+	// and pairwise topology is meaningless for a CDI-only accelerator such as the
+	// single GB10 iGPU.
+	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" && !plugin.cdiDiscovery {
 		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")

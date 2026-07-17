@@ -49,6 +49,7 @@ import (
 	cdiparser "tags.cncf.io/container-device-interface/pkg/parser"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 )
 
@@ -101,8 +102,12 @@ func New(infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interf
 	}
 	hasNVML, _ := infolib.HasNvml()
 	if !hasNVML {
-		klog.Warning("No valid resources detected, creating a null CDI handler")
-		return &null{}, nil
+		// NVML is unavailable but a CDI device-list strategy is requested. This
+		// is the case for CDI-only accelerators such as the GB10 (Grace-Blackwell
+		// iGPU), whose device is described by an externally-managed CDI spec on
+		// the node. Return a handler that can reference those specs for injection.
+		klog.Warning("NVML not detected; using externally-managed CDI specs for device injection")
+		return newExternalHandler(c.vendor), nil
 	}
 
 	if c.logger == nil {
