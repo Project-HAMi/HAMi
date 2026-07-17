@@ -16,7 +16,7 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 # HAMi
 
-**Kubernetes GPU sharing and heterogeneous accelerator scheduling for AI infrastructure.**
+**Kubernetes GPU sharing and hardware-agnostic scheduling for any AI workload.**
 
 HAMi (Heterogeneous AI Computing Virtualization Middleware) lets you share GPUs across Kubernetes workloads with memory and compute isolation, without changing application code. Formerly k8s-vGPU-scheduler.
 
