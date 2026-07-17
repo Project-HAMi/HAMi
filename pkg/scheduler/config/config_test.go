@@ -259,14 +259,6 @@ func createHygonConfig() hygon.HygonConfig {
 	}
 }
 
-func createIluvatarConfig() iluvatar.IluvatarConfig {
-	return iluvatar.IluvatarConfig{
-		ResourceCountName:  "iluvatar.ai/vgpu",
-		ResourceMemoryName: "iluvatar.ai/vcuda-memory",
-		ResourceCoreName:   "iluvatar.ai/vcuda-core",
-	}
-}
-
 func createMthreadsConfig() mthreads.MthreadsConfig {
 	return mthreads.MthreadsConfig{
 		ResourceCountName:  "mthreads.com/vgpu",

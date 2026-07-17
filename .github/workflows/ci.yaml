@@ -11,6 +11,10 @@ on:
 permissions:
   contents: read  # for actions/checkout to fetch code
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   REGISTRY: docker.io
   IMAGE_REPO: ${{ secrets.IMAGE_REPO || 'projecthami/hami' }}
@@ -28,7 +32,7 @@ jobs:
       - name: checkout code
         uses: actions/checkout@v7
       - name: install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - name: verify license
@@ -97,7 +101,7 @@ jobs:
           basePath: # optional, default is .
           submodulePath: libvgpu
       - name: Install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
       - run: make tidy

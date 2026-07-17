@@ -63,10 +63,7 @@ type RuntimeInfo struct {
 	Core   int32  `json:"core,omitempty"`
 }
 
-var (
-	enableAscend bool
-	configFile   string
-)
+var enableAscend bool
 
 func (dev *Devices) trimMemory(m int64) (int64, string) {
 	for i := range dev.config.Templates {
@@ -161,27 +158,6 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		}
 		if ok && coreQ.Value() > 0 {
 			return false, fmt.Errorf("%s is only supported in hami-core (soft split) mode", dev.config.ResourceCoreName)
-		}
-	}
-
-	if isHAMiCore {
-		klog.V(3).Infof("Ascend core resource detected, injecting postStart lifecycle for container %s", ctr.Name)
-
-		if ctr.Lifecycle == nil {
-			ctr.Lifecycle = &corev1.Lifecycle{}
-		}
-
-		// Inject PostStart hook to start the limiter process
-		if ctr.Lifecycle.PostStart == nil {
-			ctr.Lifecycle.PostStart = &corev1.LifecycleHandler{
-				Exec: &corev1.ExecAction{
-					Command: []string{
-						"bash",
-						"-c",
-						"export RUST_LOG=info\n/hami-vnpu-core/limiter > /tmp/limiter_manager.log 2>&1 &",
-					},
-				},
-			}
 		}
 	}
 
