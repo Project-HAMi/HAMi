@@ -448,10 +448,11 @@ func (s *Scheduler) updateSchedulerLabel() {
 	schedulerSelector := labels.Set(map[string]string{util.HAMiComponentLabel: util.HAMiComponentScheduler}).AsSelector()
 	schedulerPods, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).List(schedulerSelector)
 	if err != nil {
-		klog.Fatalf("Failed to list hami scheduler pods from lister: namespace %s selector %s",
-			os.Getenv("POD_NAMESPACE"),
-			schedulerSelector.String(),
+		klog.ErrorS(err, "Failed to list hami scheduler pods from lister",
+			"namespace", os.Getenv("POD_NAMESPACE"),
+			"selector", schedulerSelector.String(),
 		)
+		return
 	}
 
 	for idx := range schedulerPods {
@@ -465,9 +466,9 @@ func (s *Scheduler) updateSchedulerLabel() {
 					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueLeader},
 				)
 				if err != nil {
-					klog.Fatalf("Failed to patch the leader label to hami scheduler pod: namespace %s pod %s",
-						pod.Namespace,
-						pod.Name,
+					klog.ErrorS(err, "Failed to patch the leader label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
 					)
 				} else {
 					klog.V(4).InfoS("Successfully patched leader label to hami scheduler pod",
@@ -743,6 +744,50 @@ func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
 	}
 }
 
+func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
+	for _, val := range device.GetDevices() {
+		if err := val.LockNode(node, pod); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
+	for _, val := range device.GetDevices() {
+		if err := val.ReleaseNodeLock(node, pod); err != nil {
+			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
+		}
+	}
+}
+
+func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
+	if !util.IsPodGroupMember(pod) || config.NodeLockRetryTimeout <= 0 {
+		return s.lockAllDevices(node, pod)
+	}
+
+	deadline := time.Now().Add(config.NodeLockRetryTimeout)
+	for {
+		err := s.lockAllDevices(node, pod)
+		if err == nil {
+			return nil
+		}
+		s.releaseAllDevices(node, pod)
+		if !nodelockutil.IsNodeLockContention(err) {
+			return err
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
+				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
+		}
+		select {
+		case <-s.stopCh:
+			return fmt.Errorf("scheduler shutting down while waiting for node lock: %w", nodelockutil.ErrNodeLockContention)
+		case <-time.After(100 * time.Millisecond):
+		}
+	}
+}
+
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
@@ -781,12 +826,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 
-	for _, val := range device.GetDevices() {
-		err = val.LockNode(node, current)
-		if err != nil {
-			klog.ErrorS(err, "Failed to lock node", "node", args.Node, "device", val)
-			goto ReleaseNodeLocks
-		}
+	if err = s.acquireNodeLocks(node, current); err != nil {
+		klog.ErrorS(err, "Failed to lock node", "node", args.Node, "pod", klog.KObj(current))
+		goto ReleaseNodeLocks
 	}
 
 	err = util.PatchPodAnnotations(current, tmppatch)
@@ -807,9 +849,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 ReleaseNodeLocks:
 	klog.InfoS("Release node locks", "node", args.Node)
-	for _, val := range device.GetDevices() {
-		val.ReleaseNodeLock(node, current)
-	}
+	s.releaseAllDevices(node, current)
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
 	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
