@@ -16,21 +16,30 @@ English version | [中文版](README_cn.md) | [日本語版](README_ja.md)
 
 # HAMi
 
-**Kubernetes GPU virtualization and heterogeneous accelerator scheduling for AI infrastructure.**
+**Kubernetes GPU sharing and heterogeneous accelerator scheduling for AI infrastructure.**
+
+HAMi (Heterogeneous AI Computing Virtualization Middleware) lets you share GPUs across Kubernetes workloads with memory and compute isolation, without changing application code. Formerly k8s-vGPU-scheduler.
+
+[Docs](https://project-hami.io/tutorials) | [Quick Start](#quick-start) | [Discord](https://discord.gg/Amhy7XmbNq) | [Issues](https://github.com/Project-HAMi/HAMi/issues) | [Contributing](CONTRIBUTING.md)
 
 ![HAMi Architecture](imgs/hami-architecture.png)
-
-HAMi stands for **Heterogeneous AI Computing Virtualization Middleware**. Formerly known as `k8s-vGPU-scheduler`, HAMi helps platform teams share expensive GPUs and other AI accelerators across Kubernetes workloads, isolate device memory and compute, and schedule pods with device-aware policies without changing application code.
 
 HAMi is a [CNCF Incubating](https://www.cncf.io/projects/) and [CNCF Landscape](https://landscape.cncf.io/?item=orchestration-management--scheduling-orchestration--hami) project. It is also listed in the [CNAI Landscape](https://landscape.cncf.io/?group=cnai&item=cnai--general-orchestration--hami).
 
 ![CNCF logo](imgs/cncf-logo.png)
 
-## Why HAMi?
+## The Problem
 
-AI infrastructure teams often run into the same Kubernetes accelerator problems: whole GPUs are allocated to small jobs, teams compete for scarce devices, different accelerator vendors expose different operational models, and schedulers lack enough device context to place workloads efficiently.
+Running GPU workloads on Kubernetes creates resource contention:
 
-HAMi provides a Kubernetes-native layer for:
+- **Single workload per GPU**: A 40GB GPU running a 2GB workload uses 5% of capacity
+- **No fair allocation**: First-come-first-served; no quota or priority mechanism
+- **Vendor fragmentation**: NVIDIA, Ascend, Cambricon each require different integration code
+- **Scheduler blindness**: Standard Kubernetes scheduler can't optimize for GPU topology or memory fragmentation
+
+## What HAMi Does
+
+HAMi solves this by enabling:
 
 - **Device sharing**: allocate a fraction of a physical accelerator by memory, core, or device count.
 - **Resource isolation**: enforce per-workload accelerator memory and compute limits where the device backend supports it.
@@ -49,37 +58,39 @@ HAMi provides a Kubernetes-native layer for:
 
 ## How It Works
 
-HAMi is composed of a mutating webhook, scheduler extender, device plugins, and device-specific in-container virtualization components.
-
+HAMi intercepts pod creation and GPU allocation through these stages:
 ```text
 Pod submission
-  -> HAMi mutating webhook
-  -> HAMi scheduler filter / score / bind
-  -> device allocation written to pod annotations
-  -> device plugin Allocate()
-  -> container runtime environment
-  -> HAMi monitor and metrics
+  -> Mutating webhook (inject device request)
+  -> Scheduler (select GPU and node)
+  -> Device plugin (allocate GPU memory/cores)
+  -> Container runtime (inject HAMi driver)
+  -> HAMi core (enforce isolation)
+  -> Workload (sees isolated GPU)
 ```
 
 ## Device Virtualization
 
-HAMi lets workloads request only the accelerator resources they need. For example, the following pod asks for one physical NVIDIA GPU with 3 GiB of GPU memory:
-
+Request a fraction of a GPU by memory or compute:
 ```yaml
 resources:
   limits:
     nvidia.com/gpu: 1
-    nvidia.com/gpumem: 3000
+    nvidia.com/gpumem: 3000  # 3GB of 40GB
 ```
 
-The workload sees the allocated device resources inside the container, while HAMi coordinates scheduling, allocation, and isolation.
+Inside the container, CUDA sees exactly 3GB - not 40GB. HAMi enforces this at the driver level.
 
-![Before and After Using HAMi](imgs/hami-gpu-sharing-example.png)
+**Memory isolation**: Hard limit. A pod requesting 3GB cannot exceed 3GB, even if memory is available.
 
-> Notes:
->
-> 1. After installing HAMi, the value of `nvidia.com/gpu` registered on the node defaults to the number of vGPUs.
-> 2. When requesting resources in a pod, `nvidia.com/gpu` refers to the number of physical GPUs required by the current pod.
+**No code changes**: Existing PyTorch, TensorFlow, CUDA code works as-is.
+
+![HAMi Example](imgs/hami-gpu-sharing-example.png)
+
+Notes:
+
+- After installing HAMi, the value of `nvidia.com/gpu` registered on the node defaults to the number of vGPUs.
+- When requesting resources in a pod, `nvidia.com/gpu` refers to the number of physical GPUs required by the current pod.
 
 ## Supported Devices
 
@@ -104,34 +115,45 @@ For the NVIDIA device plugin path, prepare:
 ### Install With Helm
 
 Label GPU nodes so HAMi can manage them:
-
 ```bash
 kubectl label nodes <node-name> gpu=on
 ```
-
 Add the HAMi Helm repository:
-
 ```bash
 helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm repo update
 ```
-
 Install HAMi:
-
 ```bash
 helm install hami hami-charts/hami -n kube-system
 ```
-
 Verify that the scheduler and device plugin are running:
-
 ```bash
-kubectl get pods -n kube-system
+kubectl get pods -n kube-system | grep hami
+# Output should show:
+# hami-device-plugin-xxxx    Running
+# hami-scheduler-xxxx        Running
 ```
 
-When `hami-device-plugin` and `hami-scheduler` are both `Running`, submit an example workload:
+### Run Your First Shared Workload
 
+When the pods are `Running`, submit an example workload:
 ```bash
 kubectl apply -f examples/nvidia/default_use.yaml
+```
+Verify the workload is running and check GPU allocation:
+```bash
+kubectl get pods
+kubectl describe pod gpu-pod
+# Output should show:
+#   nvidia.com/gpu: 1
+#   nvidia.com/gpumem: 3000
+```
+
+Check what the workload sees inside the container:
+```bash
+kubectl exec gpu-pod -- nvidia-smi
+# Output shows only 3GB of GPU memory (not the full 40GB)
 ```
 
 For the complete installation guide and configuration options, see the [HAMi documentation](https://project-hami.io/docs/get-started/deploy-with-helm/).
