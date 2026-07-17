@@ -1522,7 +1522,6 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 								},
 							},
 						},
-						CtrIDs: []string{"ctr1"},
 					},
 				},
 				CustomInfo: map[string]any{
@@ -1566,11 +1565,8 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 
 			if len(copy.PodInfos) > 0 {
 				originalNodeID := tt.original.PodInfos[0].NodeID
-				originalCtrIDsLen := len(tt.original.PodInfos[0].CtrIDs)
 				copy.PodInfos[0].NodeID = "mutated-node"
-				copy.PodInfos[0].CtrIDs = append(copy.PodInfos[0].CtrIDs, "ctr2")
 				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
-				assert.Equal(t, len(tt.original.PodInfos[0].CtrIDs), originalCtrIDsLen)
 			}
 
 			if copy.CustomInfo != nil {

@@ -20,9 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
-	"sort"
-	"strings"
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
@@ -31,7 +28,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
-var cgroupDriver int
 var errTemporaryClosed = errors.New("temporary closed")
 
 //type hostGPUPid struct {
@@ -40,55 +36,6 @@ var errTemporaryClosed = errors.New("temporary closed")
 //}
 
 type UtilizationPerDevice []int
-
-func setcGgroupDriver() int {
-	// 1 for cgroupfs 2 for systemd
-	kubeletconfig, err := os.ReadFile("/hostvar/lib/kubelet/config.yaml")
-	if err != nil {
-		return 0
-	}
-	content := string(kubeletconfig)
-	pos := strings.LastIndex(content, "cgroupDriver:")
-	if pos < 0 {
-		return 0
-	}
-	if strings.Contains(content, "systemd") {
-		return 2
-	}
-	if strings.Contains(content, "cgroupfs") {
-		return 1
-	}
-	return 0
-}
-
-func getUsedGPUPid() ([]uint, nvml.Return) {
-	tmp := []nvml.ProcessInfo{}
-	count, err := nvml.DeviceGetCount()
-	if err != nvml.SUCCESS {
-		return []uint{}, err
-	}
-	for i := range count {
-		device, err := nvml.DeviceGetHandleByIndex(i)
-		if err != nvml.SUCCESS {
-			return []uint{}, err
-		}
-		ids, err := device.GetComputeRunningProcesses()
-		if err != nvml.SUCCESS {
-			return []uint{}, err
-		}
-		tmp = append(tmp, ids...)
-	}
-	result := make([]uint, 0)
-	m := make(map[uint]bool)
-	for _, v := range tmp {
-		if _, ok := m[uint(v.Pid)]; !ok {
-			result = append(result, uint(v.Pid))
-			m[uint(v.Pid)] = true
-		}
-	}
-	sort.Slice(tmp, func(i, j int) bool { return tmp[i].Pid > tmp[j].Pid })
-	return result, nvml.SUCCESS
-}
 
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
