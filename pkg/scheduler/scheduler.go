@@ -448,10 +448,11 @@ func (s *Scheduler) updateSchedulerLabel() {
 	schedulerSelector := labels.Set(map[string]string{util.HAMiComponentLabel: util.HAMiComponentScheduler}).AsSelector()
 	schedulerPods, err := s.podLister.Pods(os.Getenv("POD_NAMESPACE")).List(schedulerSelector)
 	if err != nil {
-		klog.Fatalf("Failed to list hami scheduler pods from lister: namespace %s selector %s",
-			os.Getenv("POD_NAMESPACE"),
-			schedulerSelector.String(),
+		klog.ErrorS(err, "Failed to list hami scheduler pods from lister",
+			"namespace", os.Getenv("POD_NAMESPACE"),
+			"selector", schedulerSelector.String(),
 		)
+		return
 	}
 
 	for idx := range schedulerPods {
@@ -465,9 +466,9 @@ func (s *Scheduler) updateSchedulerLabel() {
 					map[string]string{util.HAMiRoleLabel: util.HAMiRoleLabelValueLeader},
 				)
 				if err != nil {
-					klog.Fatalf("Failed to patch the leader label to hami scheduler pod: namespace %s pod %s",
-						pod.Namespace,
-						pod.Name,
+					klog.ErrorS(err, "Failed to patch the leader label to hami scheduler pod",
+						"namespace", pod.Namespace,
+						"pod", pod.Name,
 					)
 				} else {
 					klog.V(4).InfoS("Successfully patched leader label to hami scheduler pod",
