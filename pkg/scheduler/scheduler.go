@@ -830,7 +830,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.InfoS("Release node locks", "node", args.Node)
 		s.releaseAllDevices(node, current)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, e)
-		return &extenderv1.ExtenderBindingResult{Error: e.Error()}, nil
+		errStr := ""
+		if e != nil {
+			errStr = e.Error()
+		}
+		return &extenderv1.ExtenderBindingResult{Error: errStr}, nil
 	}
 
 	if err = s.acquireNodeLocks(node, current); err != nil {
