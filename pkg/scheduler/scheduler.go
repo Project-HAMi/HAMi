@@ -826,32 +826,31 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 
+	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
+		klog.InfoS("Release node locks", "node", args.Node)
+		s.releaseAllDevices(node, current)
+		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, e)
+		return &extenderv1.ExtenderBindingResult{Error: e.Error()}, nil
+	}
+
 	if err = s.acquireNodeLocks(node, current); err != nil {
 		klog.ErrorS(err, "Failed to lock node", "node", args.Node, "pod", klog.KObj(current))
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
-	err = util.PatchPodAnnotations(current, tmppatch)
-	if err != nil {
+	if err = util.PatchPodAnnotations(current, tmppatch); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
-	err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{})
-	if err != nil {
+	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
-
-ReleaseNodeLocks:
-	klog.InfoS("Release node locks", "node", args.Node)
-	s.releaseAllDevices(node, current)
-	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
-	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
