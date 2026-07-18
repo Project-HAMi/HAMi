@@ -293,7 +293,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
 
 	migApplied := false
-	if plugin.operatingMode == "mig" {
+	if plugin.operatingMode == "mig" && !plugin.cdiDiscovery {
 		deviceSupportMig := true
 		for _, name := range deviceNames {
 			supported := false
