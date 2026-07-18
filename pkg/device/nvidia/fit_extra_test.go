@@ -69,8 +69,10 @@ func TestFit_ResourceQuotaNotFitReason(t *testing.T) {
 		MemoryFactor:                 1,
 	}
 	nv := InitNvidiaDevice(config)
+	prevDevicesMap := device.DevicesMap
 	device.DevicesMap = make(map[string]device.Devices)
 	device.DevicesMap[NvidiaGPUDevice] = nv
+	t.Cleanup(func() { device.DevicesMap = prevDevicesMap })
 
 	const ns = "fit-quota-ns"
 	rq := &corev1.ResourceQuota{

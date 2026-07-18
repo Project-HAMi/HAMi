@@ -44,11 +44,11 @@ func makeBenchmarkDevices(n int) []*device.DeviceUsage {
 	return devices
 }
 
-// registerBenchmarkDevice installs nv into the global DevicesMap so that the
-// fitQuota path takes its real branch (rather than the early-return when the
-// device is unregistered). This makes benchmark numbers reflect production.
-func registerBenchmarkDevice(nv *NvidiaGPUDevices) {
+func registerBenchmarkDevice(b *testing.B, nv *NvidiaGPUDevices) {
+	b.Helper()
+	prev := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{NvidiaGPUDevice: nv}
+	b.Cleanup(func() { device.DevicesMap = prev })
 }
 
 func BenchmarkFit_SingleCardFromEight(b *testing.B) {
@@ -57,13 +57,15 @@ func BenchmarkFit_SingleCardFromEight(b *testing.B) {
 		ResourceMemoryName: "nvidia.com/gpumem",
 		ResourceCoreName:   "nvidia.com/gpucores",
 	})
-	registerBenchmarkDevice(nv)
+	registerBenchmarkDevice(b, nv)
 	devices := makeBenchmarkDevices(8)
 	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 1024, Coresreq: 10, Type: NvidiaGPUDevice}
 	pod := &corev1.Pod{}
+	nodeInfo := &device.NodeInfo{}
+	allocated := &device.PodDevices{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		_, _, _ = nv.Fit(devices, req, pod, nodeInfo, allocated)
 	}
 }
 
@@ -73,13 +75,15 @@ func BenchmarkFit_FourCardsFromEight(b *testing.B) {
 		ResourceMemoryName: "nvidia.com/gpumem",
 		ResourceCoreName:   "nvidia.com/gpucores",
 	})
-	registerBenchmarkDevice(nv)
+	registerBenchmarkDevice(b, nv)
 	devices := makeBenchmarkDevices(8)
 	req := device.ContainerDeviceRequest{Nums: 4, Memreq: 1024, Coresreq: 10, Type: NvidiaGPUDevice}
 	pod := &corev1.Pod{}
+	nodeInfo := &device.NodeInfo{}
+	allocated := &device.PodDevices{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		_, _, _ = nv.Fit(devices, req, pod, nodeInfo, allocated)
 	}
 }
 
@@ -89,7 +93,7 @@ func BenchmarkFit_AllCardsFail(b *testing.B) {
 		ResourceMemoryName: "nvidia.com/gpumem",
 		ResourceCoreName:   "nvidia.com/gpucores",
 	})
-	registerBenchmarkDevice(nv)
+	registerBenchmarkDevice(b, nv)
 	devices := makeBenchmarkDevices(8)
 	for _, d := range devices {
 		d.Totalmem = 100
@@ -97,9 +101,11 @@ func BenchmarkFit_AllCardsFail(b *testing.B) {
 	}
 	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 1024, Coresreq: 10, Type: NvidiaGPUDevice}
 	pod := &corev1.Pod{}
+	nodeInfo := &device.NodeInfo{}
+	allocated := &device.PodDevices{}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		_, _, _ = nv.Fit(devices, req, pod, nodeInfo, allocated)
 	}
 }
 
@@ -109,7 +115,7 @@ func BenchmarkRunCardChecks_AllPass(b *testing.B) {
 		ResourceMemoryName: "nvidia.com/gpumem",
 		ResourceCoreName:   "nvidia.com/gpucores",
 	})
-	registerBenchmarkDevice(nv)
+	registerBenchmarkDevice(b, nv)
 	dev := &device.DeviceUsage{
 		ID:        "dev-0",
 		Health:    true,

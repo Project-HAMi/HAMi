@@ -239,8 +239,9 @@ func TestCheckCardQuota_NoConstraint(t *testing.T) {
 		ResourceCoreName:             "nvidia.com/gpucores",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 	})
+	prevDevicesMap := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{NvidiaGPUDevice: nv}
-	t.Cleanup(func() { device.DevicesMap = nil })
+	t.Cleanup(func() { device.DevicesMap = prevDevicesMap })
 
 	dev := &device.DeviceUsage{ID: "dev-0", Health: true, Count: 10, Used: 0, Totalmem: 8192, Totalcore: 100}
 	req := device.ContainerDeviceRequest{Type: NvidiaGPUDevice, Memreq: 100, Coresreq: 10}
@@ -258,8 +259,9 @@ func TestCheckCardQuota_Exceeded(t *testing.T) {
 		ResourceCoreName:             "nvidia.com/gpucores",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 	})
+	prevDevicesMap := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{NvidiaGPUDevice: nv}
-	t.Cleanup(func() { device.DevicesMap = nil })
+	t.Cleanup(func() { device.DevicesMap = prevDevicesMap })
 
 	rq := &corev1.ResourceQuota{
 		TypeMeta:   metav1.TypeMeta{APIVersion: "v1", Kind: "ResourceQuota"},
