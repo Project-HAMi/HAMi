@@ -17,7 +17,6 @@ limitations under the License.
 package amd
 
 import (
-	"flag"
 	"fmt"
 	"slices"
 	"strings"
@@ -64,9 +63,6 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 
 func (dev *AMDDevices) CommonWord() string {
 	return AMDCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
