@@ -139,78 +139,42 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			expectedLess: true,
 		},
 		{
-			name:   "Binpack: score primary, lower score sorts first across NUMA",
+			name:   "Binpack: NUMA primary, higher NUMA sorts first regardless of Score",
 			policy: "binpack",
 			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
-				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 5},
+				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 99},
 			},
 			expectedLess: true,
 		},
 		{
-			name:   "Binpack: score primary, higher score sorts last even on lower NUMA",
+			name:   "Binpack: same NUMA falls back to lower Score first",
 			policy: "binpack",
 			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &device.DeviceUsage{Numa: 1, Used: 20}, Score: 20},
-			},
-			expectedLess: true,
-		},
-		{
-			name:   "Binpack: NUMA tiebreaker when scores equal",
-			policy: "binpack",
-			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
-				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
-			},
-			expectedLess: true,
-		},
-		{
-			name:   "Binpack: score primary over NUMA, high-NUMA high-score sorts last",
-			policy: "binpack",
-			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 1}, Score: 20},
 				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
 			},
-			expectedLess: false,
+			expectedLess: true,
 		},
 		{
-			name:   "Spread: score primary, higher score sorts first",
+			name:   "Spread: NUMA primary, lower NUMA sorts first regardless of Score",
 			policy: "spread",
 			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 0, Used: 10}, Score: 10},
-				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 5},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 99},
 			},
-			expectedLess: false,
+			expectedLess: true,
 		},
 		{
-			name:   "Spread: score primary, lower score sorts last across NUMA",
+			name:   "Spread: same NUMA falls back to higher Score first",
 			policy: "spread",
 			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 1, Used: 10}, Score: 10},
-				{Device: &device.DeviceUsage{Numa: 0, Used: 20}, Score: 20},
-			},
-			expectedLess: false,
-		},
-		{
-			name:   "Spread: score primary over NUMA, high-NUMA high-score sorts first",
-			policy: "spread",
-			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 1}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
 				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
 			},
 			expectedLess: true,
 		},
-		{
-			name:   "Spread: NUMA tiebreaker when scores equal",
-			policy: "spread",
-			deviceLists: []*DeviceListsScore{
-				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
-				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
-			},
-			expectedLess: true,
-		},
-		// NumaBind=true: NUMA is primary, Score orders within a NUMA node.
+		// NumaBind is now a no-op (default already groups by NUMA); kept for compatibility.
 		{
 			name:     "Binpack+NumaBind: NUMA primary, higher NUMA sorts first regardless of Score",
 			policy:   "binpack",
