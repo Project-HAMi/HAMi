@@ -262,6 +262,26 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			},
 			expectedLess: false,
 		},
+		{
+			name:       "Binpack NumaIgnore: NUMA tiebreaker when scores equal",
+			policy:     "binpack",
+			numaIgnore: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
+		{
+			name:       "Spread NumaIgnore: NUMA tiebreaker when scores equal",
+			policy:     "spread",
+			numaIgnore: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
 	}
 
 	for _, tt := range tests {

@@ -63,12 +63,18 @@ func (l DeviceUsageList) Less(i, j int) bool {
 		return ni < nj
 	}
 
-	// numa-ignore: pure Score ordering, no NUMA involved at all (#1806).
+	// numa-ignore: Score is primary, NUMA only breaks ties for stable ordering (#1806).
 	if l.NumaIgnore {
 		if binpack {
-			return si < sj
+			if si != sj {
+				return si < sj
+			}
+			return ni < nj
 		}
-		return si > sj
+		if si != sj {
+			return si > sj
+		}
+		return ni < nj
 	}
 
 	// default: NUMA groups first, Score orders devices within a NUMA node.
