@@ -335,7 +335,9 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 		klog.Error("marshal failed", err.Error())
 	}
 	klog.Infoln("Applying data=", string(data))
-	os.WriteFile("/tmp/migconfig.yaml", data, os.ModePerm)
+	if err := os.WriteFile("/tmp/migconfig.yaml", data, 0o600); err != nil {
+		klog.Errorf("failed to write /tmp/migconfig.yaml: %v", err)
+	}
 	cmd := exec.Command("nvidia-mig-parted", "apply", "-f", "/tmp/migconfig.yaml")
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
