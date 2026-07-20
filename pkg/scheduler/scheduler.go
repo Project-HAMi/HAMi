@@ -42,6 +42,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -527,6 +528,19 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &snapshot
 }
 
+// numaBindingRequested reports whether the pod requests numa-bind affinity.
+func numaBindingRequested(task *corev1.Pod) bool {
+	if task == nil {
+		return false
+	}
+	v, ok := task.Annotations[nvidia.NumaBind]
+	if !ok {
+		return false
+	}
+	enforce, err := strconv.ParseBool(v)
+	return err == nil && enforce
+}
+
 func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 	userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
 	nodeUsage := &NodeUsage{
@@ -534,6 +548,7 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 		NodeInfo: node,
 		Devices: policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
+			NumaBind:    numaBindingRequested(task),
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		},
 	}
