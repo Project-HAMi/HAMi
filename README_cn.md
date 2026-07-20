@@ -6,6 +6,7 @@
 [![build status](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml/badge.svg)](https://github.com/Project-HAMi/HAMi/actions/workflows/ci.yaml)
 [![Releases](https://img.shields.io/github/v/release/Project-HAMi/HAMi)](https://github.com/Project-HAMi/HAMi/releases/latest)
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/9416/badge)](https://www.bestpractices.dev/en/projects/9416)
+[![OpenSSF Scorecard](https://api.scorecard.dev/projects/github.com/Project-HAMi/HAMi/badge)](https://scorecard.dev/viewer/?uri=github.com/Project-HAMi/HAMi)
 [![Go Report Card](https://goreportcard.com/badge/github.com/Project-HAMi/HAMi)](https://goreportcard.com/report/github.com/Project-HAMi/HAMi)
 [![codecov](https://codecov.io/gh/Project-HAMi/HAMi/branch/master/graph/badge.svg?token=ROM8CMPXZ6)](https://codecov.io/gh/Project-HAMi/HAMi)
 [![FOSSA Status](https://app.fossa.com/api/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi.svg?type=shield)](https://app.fossa.com/projects/git%2Bgithub.com%2FProject-HAMi%2FHAMi?ref=badge_shield)
@@ -191,8 +192,8 @@ HAMi 社区欢迎用户、贡献者、硬件厂商和构建 Kubernetes AI 基础
 - Slack：[CNCF Slack #hami-dev](https://cloud-native.slack.com/archives/C07T10BU4R2)
 - 邮件列表：[hami-project](https://groups.google.com/forum/#!forum/hami-project)
 - [会议记录和议程](https://docs.google.com/document/d/1YC6hco03_oXbF9IOUPJ29VWEddmITIKIfSmBX8JtGBw/edit#heading=h.g61sgp7w0d0c)
-- 中文社区周会：每周五 16:00 UTC+8 — [会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
-- 英文社区双周会：隔周三 16:00 UTC+8 — [会议链接](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
+- 中文社区周会：每周五 16:00 UTC+8，[会议链接](https://meeting.tencent.com/dm/Ntiwq1BICD1P)
+- 英文社区双周会：隔周三 16:00 UTC+8，[会议链接](https://zoom-lfx.platform.linuxfoundation.org/meeting/95994137931?password=55b961b5-3e8e-4040-8657-0f2d26511f1d)
 
 ## 演讲和参考资料
 
