@@ -3,6 +3,8 @@
 ## Problem Summary
 
 When a pod has both init containers and app containers requesting GPU resources, HAMi allocates the resources simultaneously/parallelly. But Kubernetes runs the init container sequentially to completion before any app container starts, so init and app containers never execute at the same time.
+
+Note : This design covers init and app containers only. Sidecar containers are out of scope here and will be handled in a separate PR.
   
 
 ## The Problem in HAMi Today
@@ -70,6 +72,7 @@ So the correct formula for a pod's GPU footprint at any instant is:
 ```
 effective = max( sum(app container requests), max(single init container request) )
 ```
+**Assumption:**  The resources requested by the init container will always be the same as one of the app containers.
 
 ## Proposal
 
@@ -227,9 +230,13 @@ else if all init containers terminated with ExitCode == 0:
                       that AddUsage/getNodesUsage already collapse;
                       not raw requests)
 else :
-   // init containers still running, or some exited non-zero, pod not terminal.
-  // No shrink: keep current effective usage unchanged.
-        continue   
+   // No shrink. Init containers are still running, or one failed and the pod hasn't ended yet.
+   //
+   // Gap: if an earlier init container already succeeded, we still hold its memory until the whole pod ends — it's not released early.
+   //
+   // TODO(future): release memory as each init container finishes, not just at the end. Track which init container index last succeeded
+   // (they run in order), and only count what's left after that.
+        continue
 
 delta[uuid] = new_usage[uuid] - old_usage[uuid]
 apply delta[uuid] to QuotaManager and PodManager
@@ -244,15 +251,16 @@ started.
 
 Only ever runs **after** `pod.Status` confirms completion.
 
-**Idempotency:** `PodManager` stores a `PodShrinkState` per pod —
-`NotShrunk`, `AppOnly`, or `Zero` — replacing a single boolean, since the
-three outcomes above mean a pod can legitimately shrink twice (once to
-`AppOnly`, later to `Zero`), not just once.
+**Idempotency:** `PodManager` stores one boolean per pod,
+`initContainerResourceReleased` (default `false`), guarding only the
+init-container shrink step:
 
-Allowed transitions:
-- `NotShrunk → AppOnly`: when all init containers exit `0` and the pod is
-  not yet terminal.
-- `NotShrunk → Zero` or `AppOnly → Zero`: when the pod reaches a terminal
-  phase(Succeeded or Failed).
+if all initContainers terminated with ExitCode == 0 and !initContainerResourceReleased:
+    shrink usage to app-containers-only
+    initContainerResourceReleased = true
 
-  (Note: the case “any init container exits non‑zero” is removed; it will naturally end up in a terminal phase later if the pod does not restart, so no separate branch is needed.)
+The terminal-phase release is not persisted as a separate state — it's
+recomputed on every reconcile directly from `pod.Status.Phase`:
+
+    if pod.Status.Phase in (Succeeded, Failed):
+        usage = 0
