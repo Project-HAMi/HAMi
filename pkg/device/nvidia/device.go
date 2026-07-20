@@ -750,7 +750,9 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reasons := make(map[string]int)
-	needTopology := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyTopology.String()
+	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
+	needTopology := gpuPolicy == util.GPUSchedulerPolicyTopology.String()
+	isMutex := gpuPolicy == util.GPUSchedulerPolicyMutex.String()
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -784,11 +786,13 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			nv:          nv,
 			memreq:      computeMemreq(k, dev),
 			deviceIndex: i,
+			isMutex:     isMutex,
 		}
 		if reason := runCardChecks(dev, ctx); reason != "" {
 			reasons[reason]++
 			continue
 		}
+
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			if !needTopology {

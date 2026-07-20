@@ -17,13 +17,41 @@ limitations under the License.
 package kunlun
 
 import (
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
+
+func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
+	dev := &KunlunVDevices{}
+	// 8 shareable VXPU devices, each already used but memory-matching, so
+	// FitVXPU would accept them for sharing.
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{Index: uint(i), Used: 1, Usedmem: 24576, Totalmem: 98304}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 24576}
+	nodeInfo := &device.NodeInfo{}
+	allocated := &device.PodDevices{}
+
+	// Default policy shares a used device.
+	fit, _, _ := dev.Fit(devices, req, &corev1.Pod{}, nodeInfo, allocated)
+	assert.Equal(t, fit, true)
+
+	// Mutex policy has no idle device to use, so it must be rejected.
+	mutexPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
+	}}
+	fit, _, reason := dev.Fit(devices, req, mutexPod, nodeInfo, allocated)
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.ExclusiveDeviceAllocateConflict), reason)
+}
 
 func Test_graphSelect(t *testing.T) {
 	tests := []struct {

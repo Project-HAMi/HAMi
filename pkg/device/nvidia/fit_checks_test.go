@@ -155,6 +155,34 @@ func TestCheckCardTimeSlicing(t *testing.T) {
 	}
 }
 
+func TestCheckCardMutex(t *testing.T) {
+	tests := []struct {
+		name     string
+		isMutex  bool
+		used     int32
+		wantPass bool
+	}{
+		{"non-mutex policy ignores used count", false, 5, true},
+		{"non-mutex policy with zero used", false, 0, true},
+		{"mutex policy with zero used passes", true, 0, true},
+		{"mutex policy with one used fails", true, 1, false},
+		{"mutex policy with many used fails", true, 99, false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			dev := &device.DeviceUsage{ID: "dev-0", Used: tc.used, Count: 10, Health: true}
+			ctx := newCheckCtx(device.ContainerDeviceRequest{Type: NvidiaGPUDevice}, &corev1.Pod{})
+			ctx.isMutex = tc.isMutex
+			reason := checkCardMutex(dev, ctx)
+			if tc.wantPass {
+				assert.Equal(t, reason, "")
+			} else {
+				assert.Equal(t, reason, common.ExclusiveDeviceAllocateConflict)
+			}
+		})
+	}
+}
+
 func TestNormalizeCoresreq(t *testing.T) {
 	tests := []struct {
 		name       string

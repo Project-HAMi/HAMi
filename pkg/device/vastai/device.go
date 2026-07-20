@@ -231,7 +231,22 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	dieMode := isDieMode(devices)
+	// Under mutex a physical card (AIC) is exclusive: in die mode a card is made
+	// of several dies, so if any die on a card is in use none of its sibling dies
+	// may be allocated. Precompute the set of occupied AICs up front.
+	var occupiedAIC map[string]bool
+	if isMutex && dieMode {
+		occupiedAIC = make(map[string]bool)
+		for _, d := range devices {
+			if d.Used > 0 {
+				if aic, ok := aicID(d.CustomInfo); ok {
+					occupiedAIC[aic] = true
+				}
+			}
+		}
+	}
 	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
@@ -251,6 +266,20 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
 			continue
+		}
+		if isMutex {
+			conflict := dev.Used > 0
+			if !conflict && dieMode {
+				// reject an idle die that sits on a physically occupied card.
+				if aic, ok := aicID(dev.CustomInfo); ok && occupiedAIC[aic] {
+					conflict = true
+				}
+			}
+			if conflict {
+				reason[common.ExclusiveDeviceAllocateConflict]++
+				klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+				continue
+			}
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
@@ -338,6 +367,19 @@ func (dev *VastaiDevices) computeBestCombination(reqNum int, containerDevices de
 		}
 	}
 	return result
+}
+
+// aicID returns the physical card (AIC) identifier carried in a die's CustomInfo.
+func aicID(info map[string]any) (string, bool) {
+	if info == nil {
+		return "", false
+	}
+	if v, ok := info["AIC"]; ok {
+		if id, ok := v.(string); ok {
+			return id, true
+		}
+	}
+	return "", false
 }
 
 func isDieMode(devices []*device.DeviceUsage) bool {

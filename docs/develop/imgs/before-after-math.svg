@@ -1,0 +1,21 @@
+<svg viewBox="0 0 900 440" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="440" fill="#DFF3FE" rx="16"/>
+  <text x="450" y="40" font-family="Verdana, Arial, sans-serif" font-size="21" font-weight="bold" fill="#0B4F6C" text-anchor="middle">Two Ways To Add Up a Pod's GPU Need</text>
+
+  <line x1="40" y1="178" x2="860" y2="178" stroke="#DC2626" stroke-width="2" stroke-dasharray="8,6"/>
+  <text x="860" y="173" font-family="Verdana, Arial, sans-serif" font-size="13" fill="#DC2626" text-anchor="end">24Gi limit</text>
+
+  <text x="220" y="90" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="bold" fill="#B91C1C" text-anchor="middle">Today: Add Them Up</text>
+  <rect x="140" y="290" width="160" height="80" fill="#34D399" stroke="#047857" stroke-width="2"/>
+  <text x="220" y="335" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#013D2C" text-anchor="middle">app: 10Gi</text>
+  <rect x="140" y="130" width="160" height="160" fill="#FBBF24" stroke="#B45309" stroke-width="2"/>
+  <text x="220" y="215" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#5A3800" text-anchor="middle">init: 20Gi</text>
+  <text x="220" y="110" font-family="Verdana, Arial, sans-serif" font-size="15" font-weight="bold" fill="#B91C1C" text-anchor="middle">= 30Gi — over the limit!</text>
+
+  <text x="680" y="90" font-family="Verdana, Arial, sans-serif" font-size="17" font-weight="bold" fill="#047857" text-anchor="middle">After the Fix: Take the Bigger One</text>
+  <rect x="600" y="210" width="160" height="160" fill="#FBBF24" stroke="#B45309" stroke-width="2"/>
+  <text x="680" y="295" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#5A3800" text-anchor="middle">bigger one: 20Gi</text>
+  <text x="680" y="190" font-family="Verdana, Arial, sans-serif" font-size="15" font-weight="bold" fill="#047857" text-anchor="middle">= 20Gi — fits, 4Gi to spare</text>
+
+  <text x="450" y="410" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#0B4F6C" text-anchor="middle">Since init and app never run together, we should never add their numbers — just take whichever is bigger.</text>
+</svg>

@@ -34,6 +34,7 @@ type cardCheckCtx struct {
 	nv          *NvidiaGPUDevices
 	memreq      int32
 	deviceIndex int
+	isMutex     bool
 }
 
 type cardCheck func(dev *device.DeviceUsage, ctx *cardCheckCtx) string
@@ -41,6 +42,7 @@ type cardCheck func(dev *device.DeviceUsage, ctx *cardCheckCtx) string
 var cardCheckPipeline = []cardCheck{
 	checkCardUUID,
 	checkCardTimeSlicing,
+	checkCardMutex,
 	checkCardQuota,
 	checkCardMemory,
 	checkCardCore,
@@ -95,6 +97,14 @@ func checkCardTimeSlicing(dev *device.DeviceUsage, ctx *cardCheckCtx) string {
 	if dev.Count <= dev.Used {
 		klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(ctx.pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
 		return common.CardTimeSlicingExhausted
+	}
+	return ""
+}
+
+func checkCardMutex(dev *device.DeviceUsage, ctx *cardCheckCtx) string {
+	if ctx.isMutex && dev.Used > 0 {
+		klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(ctx.pod), "device", dev.ID, "device index", ctx.deviceIndex, "used", dev.Used)
+		return common.ExclusiveDeviceAllocateConflict
 	}
 	return ""
 }
