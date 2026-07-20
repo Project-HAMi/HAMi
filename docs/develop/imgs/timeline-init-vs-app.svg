@@ -1,0 +1,28 @@
+<svg viewBox="0 0 900 320" xmlns="http://www.w3.org/2000/svg">
+  <rect width="900" height="320" fill="#DFF3FE" rx="16"/>
+  <text x="450" y="42" font-family="Verdana, Arial, sans-serif" font-size="21" font-weight="bold" fill="#0B4F6C" text-anchor="middle">Init and App Containers Never Run at the Same Time</text>
+
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#0B4F6C"/>
+    </marker>
+  </defs>
+
+  <line x1="60" y1="230" x2="840" y2="230" stroke="#0B4F6C" stroke-width="3" marker-end="url(#arrow)"/>
+  <text x="845" y="235" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#0B4F6C">Time</text>
+
+  <rect x="80" y="100" width="330" height="100" rx="14" fill="#FBBF24" stroke="#B45309" stroke-width="2"/>
+  <text x="245" y="135" font-family="Verdana, Arial, sans-serif" font-size="16" font-weight="bold" fill="#5A3800" text-anchor="middle">Init Container</text>
+  <text x="245" y="158" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#5A3800" text-anchor="middle">convert-weights</text>
+  <text x="245" y="180" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#5A3800" text-anchor="middle">using 20Gi</text>
+
+  <rect x="450" y="100" width="330" height="100" rx="14" fill="#34D399" stroke="#047857" stroke-width="2"/>
+  <text x="615" y="135" font-family="Verdana, Arial, sans-serif" font-size="16" font-weight="bold" fill="#013D2C" text-anchor="middle">App Container</text>
+  <text x="615" y="158" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#013D2C" text-anchor="middle">server</text>
+  <text x="615" y="180" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#013D2C" text-anchor="middle">using 10Gi</text>
+
+  <text x="430" y="158" font-family="Verdana, Arial, sans-serif" font-size="22" fill="#0B4F6C" text-anchor="middle">→</text>
+
+  <text x="450" y="270" font-family="Verdana, Arial, sans-serif" font-size="15" fill="#0B4F6C" text-anchor="middle">Only one box is ever running. They never overlap.</text>
+  <text x="450" y="295" font-family="Verdana, Arial, sans-serif" font-size="15" font-weight="bold" fill="#0B4F6C" text-anchor="middle">So the pod never really needs more than 20Gi at once.</text>
+</svg>

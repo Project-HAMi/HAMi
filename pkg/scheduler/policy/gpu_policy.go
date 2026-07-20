@@ -32,7 +32,11 @@ type DeviceListsScore struct {
 type DeviceUsageList struct {
 	DeviceLists []*DeviceListsScore
 	Policy      string
-	NumaIgnore  bool
+	// NumaBind groups devices by NUMA so Fit can accumulate a same-NUMA run.
+	// When false, Score is the primary key and NUMA only breaks ties (#1806).
+	NumaBind bool
+	// NumaIgnore sorts purely by Score, without even a NUMA tiebreaker.
+	NumaIgnore bool
 }
 
 func (l DeviceUsageList) Len() int {
@@ -44,17 +48,54 @@ func (l DeviceUsageList) Swap(i, j int) {
 }
 
 func (l DeviceUsageList) Less(i, j int) bool {
-	di, dj := l.DeviceLists[i], l.DeviceLists[j]
-	if !l.NumaIgnore && di.Device.Numa != dj.Device.Numa {
-		if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
-			return di.Device.Numa > dj.Device.Numa
+	si, sj := l.DeviceLists[i].Score, l.DeviceLists[j].Score
+	ni, nj := l.DeviceLists[i].Device.Numa, l.DeviceLists[j].Device.Numa
+	binpack := l.Policy == util.GPUSchedulerPolicyBinpack.String()
+
+	// mutex: busy GPUs first, idle GPUs at tail so Fit picks idle ones.
+	if l.Policy == util.GPUSchedulerPolicyMutex.String() {
+		ui, uj := l.DeviceLists[i].Device.Used, l.DeviceLists[j].Device.Used
+		if ui != uj {
+			return ui > uj
 		}
-		return di.Device.Numa < dj.Device.Numa
+		return ni < nj
 	}
-	if l.Policy == util.GPUSchedulerPolicyBinpack.String() {
-		return di.Score < dj.Score
+
+	// numa-bind: keep NUMA groups contiguous for Fit's same-NUMA accumulation.
+	if l.NumaBind {
+		if binpack {
+			if ni == nj {
+				return si < sj
+			}
+			return ni > nj
+		}
+		// default policy is spread
+		if ni == nj {
+			return si > sj
+		}
+		return ni < nj
 	}
-	return di.Score > dj.Score
+
+	// numa-ignore: pure Score ordering, no NUMA tiebreaker at all.
+	if l.NumaIgnore {
+		if binpack {
+			return si < sj
+		}
+		return si > sj
+	}
+
+	// score primary, NUMA tiebreaker (#1806).
+	if binpack {
+		if si != sj {
+			return si < sj
+		}
+		return ni < nj
+	}
+	// default policy is spread
+	if si != sj {
+		return si > sj
+	}
+	return ni < nj
 }
 
 func (l DeviceUsageList) DeepCopy() DeviceUsageList {
@@ -68,6 +109,7 @@ func (l DeviceUsageList) DeepCopy() DeviceUsageList {
 	return DeviceUsageList{
 		DeviceLists: deviceLists,
 		Policy:      l.Policy,
+		NumaBind:    l.NumaBind,
 		NumaIgnore:  l.NumaIgnore,
 	}
 }

@@ -125,6 +125,8 @@ Please see [Contributing](#contributing) below for the workflow.
 
 When you are willing to take on an issue, simply reply to the issue and a maintainer will assign it to you.
 
+Roadmap issues (e.g., the yearly roadmap tracking issue) list many items in one checklist instead of one task per issue, so an item may already be claimed by a comment even if the issue itself has no assignee. Before starting design or implementation work on a roadmap item, comment on the tracking issue to claim it and wait for maintainer confirmation.
+
 ### File an Issue
 
 While we encourage everyone to contribute code, we also appreciate when someone reports an issue.
