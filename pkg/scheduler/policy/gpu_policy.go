@@ -50,6 +50,15 @@ func (l DeviceUsageList) Less(i, j int) bool {
 	ni, nj := l.DeviceLists[i].Device.Numa, l.DeviceLists[j].Device.Numa
 	binpack := l.Policy == util.GPUSchedulerPolicyBinpack.String()
 
+	// mutex: busy GPUs first, idle GPUs at tail so Fit picks idle ones.
+	if l.Policy == util.GPUSchedulerPolicyMutex.String() {
+		ui, uj := l.DeviceLists[i].Device.Used, l.DeviceLists[j].Device.Used
+		if ui != uj {
+			return ui > uj
+		}
+		return ni < nj
+	}
+
 	// numa-bind: keep NUMA groups contiguous for Fit's same-NUMA accumulation.
 	if l.NumaBind {
 		if binpack {
