@@ -156,7 +156,12 @@ func start() error {
 	}
 
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		if err := http.ListenAndServe(config.HTTPBind, router); err != nil {
+		server := &http.Server{
+			Addr:              config.HTTPBind,
+			Handler:           router,
+			ReadHeaderTimeout: 15 * time.Second,
+		}
+		if err := server.ListenAndServe(); err != nil {
 			return fmt.Errorf("listen and Serve error, %v", err)
 		}
 	} else {
@@ -179,9 +184,10 @@ func start() error {
 		addr := config.HTTPBind
 		handler := router
 		server := &http.Server{
-			Addr:      addr,
-			Handler:   handler,
-			TLSConfig: tlsCfg,
+			Addr:              addr,
+			Handler:           handler,
+			TLSConfig:         tlsCfg,
+			ReadHeaderTimeout: 15 * time.Second,
 		}
 		klog.InfoS("Starting HTTPS server", "address", addr)
 		if err := server.ListenAndServeTLS("", ""); err != nil {

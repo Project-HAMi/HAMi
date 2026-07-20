@@ -21,6 +21,7 @@ import (
 	"log"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -397,6 +398,12 @@ func initMetrics(bindAddress string, legacyMetrics bool) {
 
 	NewClusterManager("vGPU", reg, legacyMetrics)
 
-	http.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	log.Fatal(http.ListenAndServe(bindAddress, nil))
+	mux := http.NewServeMux()
+	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
+	server := &http.Server{
+		Addr:              bindAddress,
+		Handler:           mux,
+		ReadHeaderTimeout: 15 * time.Second,
+	}
+	log.Fatal(server.ListenAndServe())
 }
