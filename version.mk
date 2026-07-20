@@ -1,6 +1,6 @@
 GO=go
 GO111MODULE=on
-CMDS=scheduler vGPUmonitor
+CMDS=scheduler vGPUmonitor mcp-server
 DEVICES=nvidia
 OUTPUT_DIR=bin
 TARGET_PLATFORMS=linux/amd64

@@ -56,11 +56,20 @@ $(CMDS):
 $(DEVICES):
 	$(GO) build -ldflags '$(GO_BUILD_LDFLAGS)' -o ${OUTPUT_DIR}/$@-device-plugin ./cmd/device-plugin/$@
 
+mcp-server:
+	$(GO) build -ldflags '$(GO_BUILD_LDFLAGS)' -o ${OUTPUT_DIR}/mcp-server ./cmd/mcp-server
+
+docker-mcp:
+	docker build \
+	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
+	--build-arg VERSION=${VERSION} \
+	. -f=docker/Dockerfile.mcp -t ${IMG_NAME}-mcp:${IMG_TAG}
+
 clean:
 	$(GO) clean -r -x ./cmd/...
 	-rm -rf $(OUTPUT_DIR)
 
-.PHONY: all build docker clean test $(CMDS)
+.PHONY: all build docker clean test $(CMDS) mcp-server
 
 test:
 	mkdir -p ./_output/coverage/

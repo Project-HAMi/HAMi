@@ -1,0 +1,52 @@
+{{- if .Values.mcpServer.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "hami-vgpu.mcp-server" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: "hami-mcp-server"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: "hami-mcp-server"
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/component: "hami-mcp-server"
+        {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "hami-vgpu.mcp-server" . }}
+      containers:
+        - name: mcp-server
+          image: "{{ .Values.mcpServer.image.registry }}/{{ .Values.mcpServer.image.repository }}:{{ .Values.mcpServer.image.tag | default .Values.global.imageTag }}"
+          imagePullPolicy: {{ .Values.mcpServer.image.pullPolicy }}
+          command:
+            - /k8s-vgpu/bin/mcp-server
+          args:
+            - --listen-addr=:9395
+            - --prometheus-url={{ .Values.mcpServer.prometheusUrl }}
+            - --log-level={{ .Values.mcpServer.logLevel }}
+            - --metrics-enabled=true
+          ports:
+            - name: http
+              containerPort: 9395
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.mcpServer.resources | nindent 12 }}
+{{- end }}
