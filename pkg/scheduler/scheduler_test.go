@@ -654,6 +654,26 @@ func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
 }
 
+func TestNumaBindingRequested(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{"nil pod", nil, false},
+		{"no annotations", &corev1.Pod{}, false},
+		{"annotation absent", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, false},
+		{"true", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.NumaBind: "true"}}}, true},
+		{"false", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.NumaBind: "false"}}}, false},
+		{"invalid", &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{nvidia.NumaBind: "not-a-bool"}}}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, numaBindingRequested(tt.pod))
+		})
+	}
+}
+
 func TestSchedulerOnDelNodeCleansLockFromTombstone(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
