@@ -161,6 +161,9 @@ func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 	}
 	dev2BusID := PciInfo(dev2PciInfo).BusID()
 
+	// A GPU with both direct and NVSwitch links is not expected on current
+	// NVIDIA hardware; if it ever occurs, the NVSwitch links would be
+	// silently ignored here.
 	direct := nvlinkCountToType(countMatchingLinks(pciInfos, dev2BusID))
 	if direct != P2PLinkUnknown {
 		return direct, nil
@@ -237,7 +240,13 @@ func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool, err error
 			continue
 		}
 		deviceType, ret := dev.GetNvLinkRemoteDeviceType(i)
-		if errors.Is(ret, nvml.SUCCESS) && deviceType == nvml.NVLINK_DEVICE_TYPE_SWITCH {
+		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+			continue
+		}
+		if !errors.Is(ret, nvml.SUCCESS) {
+			return 0, false, fmt.Errorf("failed to get nvlink remote device type: %v", ret)
+		}
+		if deviceType == nvml.NVLINK_DEVICE_TYPE_SWITCH {
 			count++
 		}
 	}
@@ -246,8 +255,8 @@ func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool, err error
 
 // nvlinkCountToType converts a count to the corresponding P2PLinkType.
 func nvlinkCountToType(n int) P2PLinkType {
-	// ponytail: linear scan, array would be cleaner but it's 18 items.
-	types := []P2PLinkType{
+	// Covers up to 18 NVLinks per GPU (current max: H100/B200).
+	types := [...]P2PLinkType{
 		P2PLinkUnknown,
 		SingleNVLINKLink, TwoNVLINKLinks, ThreeNVLINKLinks,
 		FourNVLINKLinks, FiveNVLINKLinks, SixNVLINKLinks,
