@@ -893,17 +893,15 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"reason", "request does not contain full nodes",
 		"nodeNamesLen", nodeNamesLen(args.NodeNames))
 	var pi *device.PodInfo
-	removed := false
 	if p, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
-		removed = true
 		pi = p
 		s.quotaManager.RmUsage(args.Pod, p.Devices)
 	}
 	restorePod := func() {
-		if removed {
+		if pi != nil {
 			s.quotaManager.AddUsage(args.Pod, pi.Devices)
 			s.podManager.AddPod(args.Pod, pi.NodeID, pi.Devices)
-			removed = false
+			pi = nil
 		}
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
@@ -966,7 +964,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		if added {
 			s.quotaManager.RmUsage(args.Pod, m.Devices)
 		}
-		if removed {
+		if pi != nil {
 			restorePod()
 		} else {
 			// Pod was not in podManager before (first scheduling attempt),
