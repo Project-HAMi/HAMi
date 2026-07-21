@@ -801,3 +801,23 @@ func TestWriteMigConfig(t *testing.T) {
 		t.Errorf("expected write to fail for missing directory")
 	}
 }
+
+func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("file permissions do not block root")
+	}
+	orig := migConfigPath
+	defer func() { migConfigPath = orig }()
+
+	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
+	if err := os.WriteFile(migConfigPath, []byte("stale"), 0o400); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Read-only file makes the write fail; the stale file must be removed so
+	// nvidia-mig-parted cannot pick it up afterwards.
+	writeMigConfig([]byte("fresh"))
+	if _, err := os.Stat(migConfigPath); !os.IsNotExist(err) {
+		t.Errorf("expected stale config to be removed, stat err: %v", err)
+	}
+}

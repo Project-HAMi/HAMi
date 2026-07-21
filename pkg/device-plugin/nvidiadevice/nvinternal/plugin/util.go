@@ -328,10 +328,16 @@ func (nv *NvidiaDevicePlugin) EnableOtherNVMLOperation() {
 var migConfigPath = "/tmp/migconfig.yaml"
 
 // writeMigConfig persists the rendered MIG config with owner-only permissions.
+// On write failure any previous file is removed, so a later
+// nvidia-mig-parted apply fails on a missing file instead of silently
+// applying a stale config.
 func writeMigConfig(data []byte) {
 	if err := os.WriteFile(migConfigPath, data, 0o600); err != nil {
 		klog.Errorf("failed to write %s: %v", migConfigPath, err)
+		_ = os.Remove(migConfigPath)
+		return
 	}
+	klog.V(4).InfoS("wrote MIG config", "path", migConfigPath, "bytes", len(data))
 }
 
 func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
