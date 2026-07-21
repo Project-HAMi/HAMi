@@ -34,13 +34,13 @@ jobs:
       HAMI_VERSION: ${{ inputs.ref }}
     steps:
       - name: checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Acquire shared e2e runner lock
         run: bash hack/e2e-runner-lock.sh acquire
 
       - name: install Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
 
@@ -50,14 +50,14 @@ jobs:
 
       - name: download hami helm
         if: inputs.type == 'pullrequest'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: chart_package_artifact
           path: charts/
 
       - name: download hami image
         if: inputs.type == 'pullrequest'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
           name: hami-image
           path: ./image
