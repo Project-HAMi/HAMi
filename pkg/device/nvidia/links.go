@@ -169,11 +169,16 @@ func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 	// NVSwitch: remote PCI is the switch, not the peer GPU.
 	// Both GPUs must connect through NVSwitch; the link count is the
 	// minimum active count across the pair.
-	links1, viaSwitch1 := countNvSwitchLinks(dev1)
-	links2, viaSwitch2 := countNvSwitchLinks(dev2)
+	links1, viaSwitch1, err := countNvSwitchLinks(dev1)
+	if err != nil {
+		return P2PLinkUnknown, fmt.Errorf("failed to check nvswitch links for dev1: %v", err)
+	}
+	links2, viaSwitch2, err := countNvSwitchLinks(dev2)
+	if err != nil {
+		return P2PLinkUnknown, fmt.Errorf("failed to check nvswitch links for dev2: %v", err)
+	}
 	if viaSwitch1 && viaSwitch2 {
-		n := min(links1, links2)
-		return nvlinkCountToType(n), nil
+		return nvlinkCountToType(min(links1, links2)), nil
 	}
 
 	return P2PLinkUnknown, nil
@@ -219,10 +224,16 @@ func countMatchingLinks(pciInfos []PciInfo, busID string) int {
 
 // countNvSwitchLinks returns the count of enabled NVLinks whose remote is
 // an NVSwitch, and whether the device has any such links at all.
-func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool) {
+func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool, err error) {
 	for i := range nvml.NVLINK_MAX_LINKS {
 		state, ret := dev.GetNvLinkState(i)
-		if !errors.Is(ret, nvml.SUCCESS) || state != nvml.FEATURE_ENABLED {
+		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+			continue
+		}
+		if !errors.Is(ret, nvml.SUCCESS) {
+			return 0, false, fmt.Errorf("failed to get nvlink state: %v", ret)
+		}
+		if state != nvml.FEATURE_ENABLED {
 			continue
 		}
 		deviceType, ret := dev.GetNvLinkRemoteDeviceType(i)
@@ -230,7 +241,7 @@ func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool) {
 			count++
 		}
 	}
-	return count, count > 0
+	return count, count > 0, nil
 }
 
 // nvlinkCountToType converts a count to the corresponding P2PLinkType.
