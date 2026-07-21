@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.26.2-bookworm
+ARG GOLANG_IMAGE=golang:1.26.5-bookworm
 ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
 
 FROM $GOLANG_IMAGE AS gobuild

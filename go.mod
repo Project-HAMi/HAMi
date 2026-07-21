@@ -1,6 +1,6 @@
 module github.com/Project-HAMi/HAMi
 
-go 1.26.2
+go 1.26.5
 
 require (
 	github.com/NVIDIA/go-gpuallocator v0.6.0
