@@ -97,7 +97,7 @@ For the NVIDIA device plugin path, prepare:
 - `nvidia-docker` version > 2.0
 - NVIDIA configured as the default runtime for containerd, Docker, or CRI-O
 - Kubernetes >= 1.23
-- glibc >= 2.17 and < 2.30
+- glibc >= 2.17
 - Linux kernel >= 3.10
 - Helm > 3.0
 

@@ -97,7 +97,7 @@ HAMi 支持多种异构加速器后端，包括 GPU、NPU、DCU、MLU、GCU、XP
 - `nvidia-docker` 版本 > 2.0
 - NVIDIA 配置为 containerd、Docker 或 CRI-O 的默认运行时
 - Kubernetes >= 1.23
-- glibc >= 2.17 且 < 2.30
+- glibc >= 2.17
 - Linux 内核 >= 3.10
 - Helm > 3.0
 
