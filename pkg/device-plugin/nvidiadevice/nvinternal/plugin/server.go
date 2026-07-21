@@ -313,9 +313,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 			} else {
 				outStr := stdout.Bytes()
 				yaml.Unmarshal(outStr, &plugin.migCurrent)
-				if err := os.WriteFile("/tmp/migconfig.yaml", outStr, 0o600); err != nil {
-					klog.Errorf("failed to write /tmp/migconfig.yaml: %v", err)
-				}
+				writeMigConfig(outStr)
 
 				HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
 				if err != nil {

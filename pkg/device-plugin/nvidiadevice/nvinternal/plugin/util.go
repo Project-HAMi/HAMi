@@ -323,6 +323,17 @@ func (nv *NvidiaDevicePlugin) EnableOtherNVMLOperation() {
 	nv.disableWatchAndRegister <- false
 }
 
+// migConfigPath is where nvidia-mig-parted reads the rendered MIG config.
+// Variable rather than const so tests can redirect the write.
+var migConfigPath = "/tmp/migconfig.yaml"
+
+// writeMigConfig persists the rendered MIG config with owner-only permissions.
+func writeMigConfig(data []byte) {
+	if err := os.WriteFile(migConfigPath, data, 0o600); err != nil {
+		klog.Errorf("failed to write %s: %v", migConfigPath, err)
+	}
+}
+
 func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 	nv.applyMutex.Lock()
 	nv.DisableOtherNVMLOperation()
@@ -335,10 +346,8 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 		klog.Error("marshal failed", err.Error())
 	}
 	klog.Infoln("Applying data=", string(data))
-	if err := os.WriteFile("/tmp/migconfig.yaml", data, 0o600); err != nil {
-		klog.Errorf("failed to write /tmp/migconfig.yaml: %v", err)
-	}
-	cmd := exec.Command("nvidia-mig-parted", "apply", "-f", "/tmp/migconfig.yaml")
+	writeMigConfig(data)
+	cmd := exec.Command("nvidia-mig-parted", "apply", "-f", migConfigPath)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout = &stdout
 	cmd.Stderr = &stderr
