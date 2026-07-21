@@ -1762,7 +1762,6 @@ func Test_Filter_PodLeakOnFailure(t *testing.T) {
 	_, ok := s.podManager.GetPod(podA)
 	assert.Equal(t, true, ok, "podA should be found in podManager after failed Filter")
 }
-}
 
 // Test_Filter_PodLeakOnPatchFailure verifies that when Filter succeeds
 // in finding a node but fails to patch annotations, the pod is properly

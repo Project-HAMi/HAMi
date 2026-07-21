@@ -880,7 +880,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
-if args.Nodes != nil {
+	if args.Nodes != nil {
 		klog.V(2).InfoS("Choosing simulation filter path",
 			"pod", klog.KObj(args.Pod),
 			"reason", "request contains full nodes",
@@ -905,7 +905,6 @@ if args.Nodes != nil {
 			s.podManager.AddPod(args.Pod, pi.NodeID, pi.Devices)
 			removed = false
 		}
-	}
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
