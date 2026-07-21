@@ -17,7 +17,6 @@ limitations under the License.
 package awsneuron
 
 import (
-	"flag"
 	"fmt"
 	"slices"
 	"strconv"
@@ -75,9 +74,6 @@ func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
 
 func (dev *AWSNeuronDevices) CommonWord() string {
 	return AWSNeuronCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
