@@ -160,6 +160,7 @@ func start() error {
 			Addr:              config.HTTPBind,
 			Handler:           router,
 			ReadHeaderTimeout: 15 * time.Second,
+			ReadTimeout:       60 * time.Second,
 		}
 		if err := server.ListenAndServe(); err != nil {
 			return fmt.Errorf("listen and Serve error, %v", err)
@@ -188,6 +189,7 @@ func start() error {
 			Handler:           handler,
 			TLSConfig:         tlsCfg,
 			ReadHeaderTimeout: 15 * time.Second,
+			ReadTimeout:       60 * time.Second,
 		}
 		klog.InfoS("Starting HTTPS server", "address", addr)
 		if err := server.ListenAndServeTLS("", ""); err != nil {

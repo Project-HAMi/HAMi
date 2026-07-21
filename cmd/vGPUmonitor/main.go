@@ -155,7 +155,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
-	server := &http.Server{Addr: metricsBindAddress, Handler: mux, ReadHeaderTimeout: 15 * time.Second}
+	server := &http.Server{Addr: metricsBindAddress, Handler: mux, ReadHeaderTimeout: 15 * time.Second, ReadTimeout: 60 * time.Second}
 
 	// Starting the HTTP server in a goroutine
 	go func() {
