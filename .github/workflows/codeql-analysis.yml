@@ -44,6 +44,8 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Checkout submodule
         uses: Mushus/checkout-submodule@f6a7fddc9798c8f8728b252594243ced3b56e550 # v1.0.1
         with:
