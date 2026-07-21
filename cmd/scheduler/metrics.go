@@ -404,6 +404,7 @@ func initMetrics(bindAddress string, legacyMetrics bool) {
 		Addr:              bindAddress,
 		Handler:           mux,
 		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       60 * time.Second,
 	}
 	log.Fatal(server.ListenAndServe())
 }
