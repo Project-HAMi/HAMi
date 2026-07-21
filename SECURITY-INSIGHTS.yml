@@ -1,0 +1,131 @@
+header:
+  schema-version: 2.0.0
+  last-updated: '2026-07-20'
+  last-reviewed: '2026-07-20'
+  url: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY-INSIGHTS.yml
+  comment: |
+    Security metadata for the HAMi project, following the OpenSSF
+    Security Insights specification.
+
+project:
+  name: HAMi
+  homepage: https://project-hami.io
+  documentation:
+    code-of-conduct: https://github.com/Project-HAMi/HAMi/blob/master/CODE_OF_CONDUCT.md
+  administrators:
+    - name: Li Mengxuan
+      affiliation: dynamia.ai
+      email: archlitchi@gmail.com
+      primary: true
+    - name: Xiao Zhang
+      affiliation: dynamia.ai
+      email: xiaozhang0210@hotmail.com
+      primary: false
+  repositories:
+    - name: HAMi
+      url: https://github.com/Project-HAMi/HAMi
+      comment: |
+        Main repository, heterogeneous AI computing virtualization
+        middleware for Kubernetes.
+    - name: HAMi-core
+      url: https://github.com/Project-HAMi/HAMi-core
+      comment: |
+        In-container GPU resource controller (libvgpu), compiled into
+        HAMi release images via a git submodule.
+    - name: HAMi-WebUI
+      url: https://github.com/Project-HAMi/HAMi-WebUI
+      comment: |
+        Web dashboard for HAMi resource monitoring.
+    - name: ascend-device-plugin
+      url: https://github.com/Project-HAMi/ascend-device-plugin
+      comment: |
+        Device plugin for Huawei Ascend NPUs, deployed with HAMi.
+    - name: volcano-vgpu-device-plugin
+      url: https://github.com/Project-HAMi/volcano-vgpu-device-plugin
+      comment: |
+        vGPU device plugin variant for the Volcano scheduler.
+    - name: website
+      url: https://github.com/Project-HAMi/website
+      comment: |
+        Source for the project documentation site at project-hami.io.
+  vulnerability-reporting:
+    reports-accepted: true
+    bug-bounty-available: false
+    contact:
+      name: HAMi maintainers
+      primary: true
+    security-policy: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY.md
+    comment: |
+      Report vulnerabilities privately via GitHub Security Advisories:
+      https://github.com/Project-HAMi/HAMi/security/advisories/new
+      See SECURITY.md for the full policy, scope, and response process.
+
+repository:
+  url: https://github.com/Project-HAMi/HAMi
+  status: active
+  accepts-change-request: true
+  accepts-automated-change-request: true
+  bug-fixes-only: false
+  no-third-party-packages: false
+  core-team:
+    - name: Li Mengxuan
+      affiliation: dynamia.ai
+      email: archlitchi@gmail.com
+      primary: true
+    - name: Xiao Zhang
+      affiliation: dynamia.ai
+      email: xiaozhang0210@hotmail.com
+      primary: false
+    - name: Wang Leibo
+      affiliation: Nvidia
+      email: wang.platform@gmail.com
+      primary: false
+    - name: Yin Yu
+      affiliation: Independent Developer
+      email: nimbus-nimo@proton.me
+      primary: false
+    - name: Shouren Yang
+      affiliation: 4Paradigm
+      email: yangshouren@gmail.com
+      primary: false
+  documentation:
+    contributing-guide: https://github.com/Project-HAMi/HAMi/blob/master/CONTRIBUTING.md
+    dependency-management-policy: https://github.com/Project-HAMi/HAMi/blob/master/DEPENDENCY.md
+    security-policy: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY.md
+    governance: https://github.com/Project-HAMi/community/blob/main/community-membership.md
+  license:
+    url: https://github.com/Project-HAMi/HAMi/blob/master/LICENSE
+    expression: Apache-2.0
+  security:
+    assessments:
+      self:
+        comment: |
+          Dependencies are monitored with Dependabot and scanned in CI
+          (CodeQL, image scanning, FOSSA license and dependency checks).
+          Go toolchain and module updates are applied promptly when
+          vulnerabilities are published.
+    tools:
+      - name: Dependabot
+        type: SCA
+        version: latest
+        rulesets:
+          - built-in
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          Automated dependency update PRs for Go modules and GitHub Actions.
+      - name: CodeQL
+        type: SAST
+        version: latest
+        rulesets:
+          - built-in
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          Static analysis on pull requests via GitHub Actions.
