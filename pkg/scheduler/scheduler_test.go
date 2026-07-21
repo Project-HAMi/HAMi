@@ -128,6 +128,231 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
 }
 
+func Test_getNodesUsage_StaleMigIndexDoesNotPanic(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "mig",
+				Health:  true,
+				MIGTemplate: []device.Geometry{
+					{{Name: "1g.5gb", Memory: 5, Count: 1}},
+				},
+			}},
+		},
+	})
+	// tmpIdx=99 is far past len(MIGTemplate)==1: a stale/corrupt annotation
+	// must not panic PlatternMIG or the UsageList index write.
+	podDevces := device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			[]device.ContainerDevice{
+				{
+					Idx:       0,
+					UUID:      "GPU0[99-0]",
+					Usedmem:   100,
+					Usedcores: 10,
+				},
+			},
+		},
+	}
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "1111",
+			Name:      "test1",
+			Namespace: "default",
+		},
+	}, "node1", podDevces)
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := (*cachenodeMap)["node1"]
+	assert.Assert(t, ok)
+	assert.Equal(t, int32(1), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, 0, len(v.Devices.DeviceLists[0].Device.MigUsage.UsageList))
+}
+
+func Test_getNodesUsage_UnparsableMigUUIDDoesNotPanic(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "mig",
+				Health:  true,
+				MIGTemplate: []device.Geometry{
+					{{Name: "1g.5gb", Memory: 5, Count: 1}},
+				},
+			}},
+		},
+	})
+	// "abc" fails strconv.Atoi inside ExtractMigTemplatesFromUUID: exercises
+	// the parse-error branch, distinct from the out-of-range branch above.
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "test1", Namespace: "default"},
+	}, "node1", device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			[]device.ContainerDevice{{Idx: 0, UUID: "GPU0[abc-0]", Usedmem: 100, Usedcores: 10}},
+		},
+	})
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := (*cachenodeMap)["node1"]
+	assert.Assert(t, ok)
+	assert.Equal(t, int32(1), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, 0, len(v.Devices.DeviceLists[0].Device.MigUsage.UsageList))
+}
+
+func Test_getNodesUsage_OutOfRangeMigInstanceSkipped(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "mig",
+				Health:  true,
+				MIGTemplate: []device.Geometry{
+					{{Name: "1g.5gb", Memory: 5, Count: 1}},
+				},
+			}},
+		},
+	})
+	// Template index 0 is valid and populates a 1-entry UsageList, but the
+	// instance position "5" is past its end: exercises the instance bounds
+	// check separately from the template bounds check above.
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "test1", Namespace: "default"},
+	}, "node1", device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			[]device.ContainerDevice{{Idx: 0, UUID: "GPU0[0-5]", Usedmem: 100, Usedcores: 10}},
+		},
+	})
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := (*cachenodeMap)["node1"]
+	assert.Assert(t, ok)
+	assert.Equal(t, int32(1), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, 1, len(v.Devices.DeviceLists[0].Device.MigUsage.UsageList))
+	assert.Assert(t, !v.Devices.DeviceLists[0].Device.MigUsage.UsageList[0].InUse)
+}
+
+func Test_getNodesUsage_MismatchedMigIndexSkipped(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node1",
+			},
+		},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "mig",
+				Health:  true,
+				MIGTemplate: []device.Geometry{
+					{{Name: "1g.5gb", Memory: 5, Count: 1}},
+					{{Name: "2g.10gb", Memory: 10, Count: 1}},
+				},
+			}},
+		},
+	})
+	// Two pods on the same device disagree on which geometry (template index)
+	// is active. Whichever is processed first wins; the other must be
+	// skipped rather than writing its Instance into the wrong UsageList.
+	podMap := device.NewPodManager()
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "test1", Namespace: "default"},
+	}, "node1", device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			[]device.ContainerDevice{{Idx: 0, UUID: "GPU0[0-0]", Usedmem: 100, Usedcores: 10}},
+		},
+	})
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "test2", Namespace: "default"},
+	}, "node1", device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			[]device.ContainerDevice{{Idx: 0, UUID: "GPU0[1-0]", Usedmem: 100, Usedcores: 10}},
+		},
+	})
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	v, ok := (*cachenodeMap)["node1"]
+	assert.Assert(t, ok)
+	dev := v.Devices.DeviceLists[0].Device
+	assert.Equal(t, int32(2), dev.Used)
+	assert.Equal(t, 1, len(dev.MigUsage.UsageList))
+	assert.Assert(t, dev.MigUsage.UsageList[0].InUse)
+}
+
 // test case matrix
 /**
 | pod name     | node name|  pod status | annotations                 |             result                  |

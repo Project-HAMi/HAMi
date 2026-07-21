@@ -661,11 +661,26 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 									d.Device.Health = false
 									continue
 								}
-								tmpIdx, Instance, _ := device.ExtractMigTemplatesFromUUID(udevice.UUID)
+								tmpIdx, instanceIdx, err := device.ExtractMigTemplatesFromUUID(udevice.UUID)
+								if err != nil {
+									klog.Errorf("failed to extract mig templates from uuid %s: %v", udevice.UUID, err)
+									continue
+								}
+								if tmpIdx < 0 || tmpIdx >= len(d.Device.MigTemplate) {
+									klog.Errorf("invalid mig template index %d in uuid %s (templates length: %d)", tmpIdx, udevice.UUID, len(d.Device.MigTemplate))
+									continue
+								}
 								if len(d.Device.MigUsage.UsageList) == 0 {
 									device.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
+								} else if tmpIdx != int(d.Device.MigUsage.Index) {
+									klog.Errorf("mig template index mismatch in uuid %s: expected %d, got %d", udevice.UUID, d.Device.MigUsage.Index, tmpIdx)
+									continue
 								}
-								d.Device.MigUsage.UsageList[Instance].InUse = true
+								if instanceIdx < 0 || instanceIdx >= len(d.Device.MigUsage.UsageList) {
+									klog.Errorf("invalid mig instance in uuid %s", udevice.UUID)
+									continue
+								}
+								d.Device.MigUsage.UsageList[instanceIdx].InUse = true
 								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
 							}
 						}
