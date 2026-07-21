@@ -131,7 +131,9 @@ func Test_nvlinkCountToType(t *testing.T) {
 
 // mockPciInfo creates a PciInfo whose BusID() method returns busID.
 func mockPciInfo(busIDStr string) PciInfo {
-	var raw [32]uint8
-	copy(raw[:], busIDStr)
+	var raw [32]int8
+	for i, c := range busIDStr {
+		raw[i] = int8(c)
+	}
 	return PciInfo{BusId: raw}
 }
