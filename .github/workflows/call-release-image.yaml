@@ -105,6 +105,7 @@ jobs:
             images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
+        id: build
         uses: docker/build-push-action@v7.3.0
         with:
             context: .
@@ -118,5 +119,13 @@ jobs:
               DEST_DIR=/usr/local
             tags: ${{ steps.meta1.outputs.tags }}
             push: true
+            provenance: mode=max
+            sbom: true
             github-token: ${{ env.REGISTER_PASSWORD }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign hami image
+        run: cosign sign --yes "${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}@${{ steps.build.outputs.digest }}"
 
