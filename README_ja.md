@@ -97,7 +97,7 @@ NVIDIA デバイスプラグインを使用する場合：
 - `nvidia-docker` バージョン > 2.0
 - NVIDIA が containerd、Docker、または CRI-O のデフォルトランタイムとして設定されていること
 - Kubernetes >= 1.23
-- glibc >= 2.17 および < 2.30
+- glibc >= 2.17
 - Linux カーネル >= 3.10
 - Helm > 3.0
 
