@@ -1835,6 +1835,103 @@ func Test_Filter_PodLeakOnPatchFailure(t *testing.T) {
 	assert.DeepEqual(t, dev[nvidia.NvidiaGPUDevice], pi.Devices[nvidia.NvidiaGPUDevice])
 }
 
+// Test_Filter_MultipleFailedAttemptsNoAccumulation verifies that repeated
+// Filter failures do not accumulate stale allocation records in podManager.
+// This addresses the concern that restoring the old record on each failure
+// could leave GPU/quota resources reserved indefinitely.
+func Test_Filter_MultipleFailedAttemptsNoAccumulation(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName: "hami.io/gpu", ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName: "hami.io/gpucores", DefaultGPUNum: 1,
+		},
+	}))
+	s := NewScheduler()
+
+	// Node with 2 GPUs, both fully occupied by podA + podB
+	s.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {
+				{ID: "device1", Index: 0, Count: 10, Devmem: 8000, Devcore: 100, Health: true, Type: nvidia.NvidiaGPUDevice},
+				{ID: "device2", Index: 1, Count: 10, Devmem: 8000, Devcore: 100, Health: true, Type: nvidia.NvidiaGPUDevice},
+			},
+		},
+	})
+
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-multi-a", Name: "pod-a", Namespace: "ns"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c", Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI)},
+			},
+		}}},
+	}
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "uid-multi-b", Name: "pod-b", Namespace: "ns"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c", Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{"hami.io/gpu": *resource.NewQuantity(1, resource.BinarySI)},
+			},
+		}}},
+	}
+
+	devA := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			{{Idx: 0, UUID: "device1", Usedmem: 1000, Usedcores: 10}},
+		},
+	}
+	devB := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			{{Idx: 1, UUID: "device2", Usedmem: 1000, Usedcores: 10}},
+		},
+	}
+
+	s.podManager.AddPod(podA, "node1", devA)
+	s.podManager.AddPod(podB, "node1", devB)
+
+	// Set up fake client so PatchPodAnnotations returns error (pod not in tracker)
+	// instead of panicking on nil client.
+	fakeClient := fake.NewSimpleClientset()
+	client.KubeClient = fakeClient
+	s.kubeClient = fakeClient
+
+	// Record initial state
+	initialPodCount := len(s.podManager.ListPodsInfo())
+	require.Equal(t, 2, initialPodCount)
+
+	// Simulate 3 consecutive failed Filter calls for podA.
+	// Each call does TakeAndDeletePod → finds a node → PatchPodAnnotations fails → restorePod.
+	for i := 0; i < 3; i++ {
+		_, err := s.Filter(extenderv1.ExtenderArgs{Pod: podA, NodeNames: &[]string{"node1"}})
+		require.Error(t, err, "Filter should fail (patch error) on iteration %d", i)
+
+		// After each failed Filter, podManager should still have exactly 2 pods
+		// (no accumulation of stale records)
+		pods := s.podManager.ListPodsInfo()
+		assert.Equal(t, 2, len(pods),
+			"podManager should have exactly 2 pods after failed Filter iteration %d, got %d", i, len(pods))
+
+		// podA should still be in the cache with its original allocation
+		pi, ok := s.podManager.GetPod(podA)
+		assert.Equal(t, true, ok, "podA should be in podManager after iteration %d", i)
+		assert.Equal(t, "node1", pi.NodeID, "podA nodeID should be restored on iteration %d", i)
+	}
+
+	// After 3 failed attempts, podA's allocation is still consistent
+	finalPods := s.podManager.ListPodsInfo()
+	assert.Equal(t, 2, len(finalPods),
+		"podManager should still have exactly 2 pods after 3 failed attempts")
+
+	// Verify quota is not leaked — both GPUs should still be marked as used
+	pi, ok := s.podManager.GetPod(podA)
+	assert.Equal(t, true, ok)
+	assert.Equal(t, "node1", pi.NodeID)
+	assert.Equal(t, 1, len(pi.Devices[nvidia.NvidiaGPUDevice]),
+		"podA should still have 1 device group after multiple failed attempts")
+}
+
 func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
