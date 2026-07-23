@@ -169,6 +169,13 @@ func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 		return direct, nil
 	}
 
+	// No enabled NVLinks on dev1 — skip NVSwitch detection.
+	// Remove if GetNvLinkRemotePciInfo and GetNvLinkRemoteDeviceType
+	// ever diverge in NOT_SUPPORTED behavior.
+	if len(pciInfos) == 0 {
+		return P2PLinkUnknown, nil
+	}
+
 	// NVSwitch: remote PCI is the switch, not the peer GPU.
 	// Both GPUs must connect through NVSwitch; the link count is the
 	// minimum active count across the pair.
