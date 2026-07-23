@@ -112,6 +112,12 @@ type NvidiaDevicePlugin struct {
 	migCurrent    nvidia.MigPartedSpec
 	deviceCache   string
 
+	// cdiDiscovery indicates that devices were discovered from externally-managed
+	// CDI specs rather than via NVML. In this mode the plugin must not call into
+	// NVML (it is unavailable) — this is the case for CDI-only accelerators such
+	// as the GB10 (Grace-Blackwell iGPU).
+	cdiDiscovery bool
+
 	imexChannels imex.Channels
 
 	server *grpc.Server
@@ -199,6 +205,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		operatingMode:              mode,
 		migCurrent:                 nvidia.MigPartedSpec{},
 		deviceCache:                "",
+		cdiDiscovery:               o.resolvedStrategy == "cdi",
 
 		// These will be reinitialized every
 		// time the plugin server is restarted.
@@ -249,14 +256,24 @@ func (plugin *NvidiaDevicePlugin) buildFallbackMigConfig(deviceNumbers int) {
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
 
-	deviceNumbers, err := GetDeviceNums()
-	if err != nil {
-		return err
-	}
+	var deviceNumbers int
+	var deviceNames []string
+	var err error
+	if plugin.cdiDiscovery {
+		// NVML is unavailable for CDI-only accelerators (e.g. GB10). Derive the
+		// device count from the CDI-discovered resource manager and skip
+		// NVML-based enumeration and MIG handling entirely.
+		deviceNumbers = len(plugin.Devices())
+	} else {
+		deviceNumbers, err = GetDeviceNums()
+		if err != nil {
+			return err
+		}
 
-	deviceNames, err := GetDeviceNames()
-	if err != nil {
-		return err
+		deviceNames, err = GetDeviceNames()
+		if err != nil {
+			return err
+		}
 	}
 
 	err = plugin.Serve()
@@ -276,7 +293,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
 
 	migApplied := false
-	if plugin.operatingMode == "mig" {
+	if plugin.operatingMode == "mig" && !plugin.cdiDiscovery {
 		deviceSupportMig := true
 		for _, name := range deviceNames {
 			supported := false

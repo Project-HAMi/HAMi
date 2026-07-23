@@ -175,7 +175,7 @@ func main() {
 		&cli.StringFlag{
 			Name:    "device-discovery-strategy",
 			Value:   "auto",
-			Usage:   "the strategy to use to discover devices: 'auto', 'nvml', or 'tegra'",
+			Usage:   "the strategy to use to discover devices: 'auto', 'nvml', 'tegra', or 'cdi'",
 			EnvVars: []string{"DEVICE_DISCOVERY_STRATEGY"},
 		},
 		&cli.IntSliceFlag{
@@ -209,9 +209,16 @@ func validateFlags(infolib nvinfo.Interface, config *spec.Config) error {
 		return fmt.Errorf("invalid --device-list-strategy option: %v", err)
 	}
 
+	// CDI device-list strategies normally require NVML to generate the CDI spec.
+	// The exception is the "cdi" discovery strategy (or "auto", which falls back
+	// to CDI discovery), where devices are described by externally-managed CDI
+	// specs on the node — this is how CDI-only accelerators such as the GB10
+	// (Grace-Blackwell iGPU) are supported without NVML.
 	hasNvml, _ := infolib.HasNvml()
-	if deviceListStrategies.AnyCDIEnabled() && !hasNvml {
-		return fmt.Errorf("CDI --device-list-strategy options are only supported on NVML-based systems")
+	discoveryStrategy := *config.Flags.DeviceDiscoveryStrategy
+	cdiDiscovery := discoveryStrategy == "cdi" || discoveryStrategy == "auto"
+	if deviceListStrategies.AnyCDIEnabled() && !hasNvml && !cdiDiscovery {
+		return fmt.Errorf("CDI --device-list-strategy options are only supported on NVML-based systems or with --device-discovery-strategy=cdi")
 	}
 
 	if *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyUUID && *config.Flags.Plugin.DeviceIDStrategy != spec.DeviceIDStrategyIndex {
@@ -231,6 +238,7 @@ func validateFlags(infolib nvinfo.Interface, config *spec.Config) error {
 	case "auto":
 	case "nvml":
 	case "tegra":
+	case "cdi":
 	default:
 		return fmt.Errorf("invalid --device-discovery-strategy option %v", *config.Flags.DeviceDiscoveryStrategy)
 	}

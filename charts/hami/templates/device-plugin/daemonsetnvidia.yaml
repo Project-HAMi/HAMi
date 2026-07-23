@@ -92,6 +92,10 @@ spec:
               value: all
             - name: DEVICE_LIST_STRATEGY
               value: {{ .Values.devicePlugin.deviceListStrategy }}
+            {{- if .Values.devicePlugin.deviceDiscoveryStrategy }}
+            - name: DEVICE_DISCOVERY_STRATEGY
+              value: {{ .Values.devicePlugin.deviceDiscoveryStrategy }}
+            {{- end }}
             - name: HOOK_PATH
               value: {{ .Values.global.gpuHookPath }}
             {{- if typeIs "bool" .Values.devicePlugin.passDeviceSpecsEnabled }}

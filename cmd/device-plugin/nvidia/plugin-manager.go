@@ -54,7 +54,7 @@ func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interf
 		cdi.WithTargetDevRoot(*config.Flags.NvidiaDevRoot),
 		cdi.WithNvidiaCTKPath(*config.Flags.Plugin.NvidiaCTKPath),
 		cdi.WithDeviceIDStrategy(*config.Flags.Plugin.DeviceIDStrategy),
-		cdi.WithVendor("k8s.device-plugin.nvidia.com"),
+		cdi.WithVendor(cdi.DefaultVendor),
 		cdi.WithGdrcopyEnabled(*config.Flags.GDRCopyEnabled),
 		cdi.WithGdsEnabled(*config.Flags.GDSEnabled),
 		cdi.WithMofedEnabled(*config.Flags.MOFEDEnabled),
