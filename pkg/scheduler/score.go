@@ -144,10 +144,27 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 				}
 			}
 
+			// Init containers run sequentially to completion before any app
+			// container starts, so an init container never uses GPU at the same
+			// instant as an app container (or another init container). The correct
+			// per-device footprint is max(sum(app requests), max(init request)),
+			// which fits the node iff the app containers fit cumulatively AND each
+			// init container fits independently. resourceReqs is ordered init-first
+			// (see device.Resourcereqs), so entries with index < numInit are init
+			// containers. App containers accumulate on the real node copy as before;
+			// each init container is checked against a fresh copy of the node's
+			// entry state so its usage never piles onto the app containers'.
+			numInit := len(task.Spec.InitContainers)
+			var pristine *NodeUsage
+			if numInit > 0 {
+				pristine = node.DeepCopy()
+			}
+
 			// Assume the node is a fit by default. This handles pods with no device
 			// requests, which should be schedulable on any node.
 			ctrfit := true
 			deviceType := ""
+			appDevices := make(device.PodDevices)
 			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
@@ -160,8 +177,26 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
 					continue
 				}
+				// Init containers fit independently against a fresh copy of the
+				// node's entry state; app containers accumulate on the real node.
+				fitNode := node
+				fitDevices := &appDevices
+				if ctrid < numInit {
+					fitNode = pristine.DeepCopy()
+					tmpDevices := make(device.PodDevices)
+					fitDevices = &tmpDevices
+				}
+				beforeLens := make(map[string]int, len(*fitDevices))
+				for devType, podSingleDevice := range *fitDevices {
+					beforeLens[devType] = len(podSingleDevice)
+				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
+				fit, reason := fitInDevices(fitNode, n, task, nodeInfo, fitDevices)
+				if fit {
+					for devType, podSingleDevice := range *fitDevices {
+						score.Devices[devType] = append(score.Devices[devType], podSingleDevice[beforeLens[devType]:]...)
+					}
+				}
 				// found certain deviceType, fill missing empty allocation for containers before this
 				for idx := range score.Devices {
 					deviceType = idx

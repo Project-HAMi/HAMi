@@ -2658,6 +2658,82 @@ func Test_calcScore(t *testing.T) {
 	}
 }
 
+func TestCalcScoreInitContainerDoesNotPolluteAppAllocatedContext(t *testing.T) {
+	qm := device.NewQuotaManager()
+	qm.Quotas["default"] = &device.DeviceQuota{
+		"hami.io/gpumem": &device.Quota{Used: 0, Limit: 24},
+	}
+	t.Cleanup(func() {
+		delete(qm.Quotas, "default")
+	})
+
+	nodes := &map[string]*NodeUsage{
+		"node1": {
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			NodeInfo: &device.NodeInfo{
+				ID:   "node1",
+				Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+			},
+			Devices: policy.DeviceUsageList{
+				Policy: util.GPUSchedulerPolicySpread.String(),
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "uuid1",
+							Index:     0,
+							Used:      0,
+							Count:     10,
+							Usedmem:   0,
+							Totalmem:  24,
+							Totalcore: 100,
+							Usedcores: 0,
+							Numa:      0,
+							Type:      nvidia.NvidiaGPUDevice,
+							Health:    true,
+						},
+					},
+				},
+			},
+		},
+	}
+	resourceReqs := device.PodDeviceRequests{
+		{
+			"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
+				Nums:   1,
+				Type:   nvidia.NvidiaGPUDevice,
+				Memreq: 20,
+			},
+		},
+		{
+			"hami.io/vgpu-devices-to-allocate": device.ContainerDeviceRequest{
+				Nums:   1,
+				Type:   nvidia.NvidiaGPUDevice,
+				Memreq: 10,
+			},
+		},
+	}
+	task := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-init-app-quota", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "app"}},
+		},
+	}
+
+	got, err := NewScheduler().calcScore(nodes, resourceReqs, task, map[string]string{})
+	assert.NilError(t, err)
+	if len(got.NodeList) != 1 {
+		t.Fatalf("node should fit init(20)+app(10) under 24Gi effective quota; got %d nodes", len(got.NodeList))
+	}
+	devs := got.NodeList[0].Devices[nvidia.NvidiaGPUDevice]
+	if len(devs) != 2 {
+		t.Fatalf("expected full init+app annotation devices, got %#v", devs)
+	}
+	if devs[0][0].Usedmem != 20 || devs[1][0].Usedmem != 10 {
+		t.Fatalf("unexpected per-container devices: %#v", devs)
+	}
+}
+
 func Test_fitInCertainDevice(t *testing.T) {
 	tests := []struct {
 		name string
