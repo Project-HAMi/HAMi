@@ -1,7 +1,7 @@
 header:
   schema-version: 2.0.0
-  last-updated: '2026-07-20'
-  last-reviewed: '2026-07-20'
+  last-updated: '2026-07-22'
+  last-reviewed: '2026-07-22'
   url: https://github.com/Project-HAMi/HAMi/blob/master/SECURITY-INSIGHTS.yml
   comment: |
     Security metadata for the HAMi project, following the OpenSSF
@@ -129,3 +129,17 @@ repository:
         results: {}
         comment: |
           Static analysis on pull requests via GitHub Actions.
+      - name: GitHub secret scanning
+        type: secret-scanning
+        version: latest
+        rulesets:
+          - built-in
+        integration:
+          adhoc: false
+          ci: true
+          release: false
+        results: {}
+        comment: |
+          GitHub native secret scanning with push protection, enabled
+          on the repository to detect supported secret patterns and
+          block them from being pushed.
