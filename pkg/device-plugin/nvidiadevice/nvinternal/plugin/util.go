@@ -25,6 +25,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -346,6 +347,162 @@ func (nv *NvidiaDevicePlugin) ApplyMigTemplate() {
 	}
 	outStr := stdout.String()
 	klog.Infoln("Mig apply", outStr)
+
+	// nvidia-mig-parted can report success while creating zero MIG instances on
+	// some newer cards (e.g. RTX PRO 6000 Blackwell Server Edition), where its
+	// NVML-based create path is a silent no-op. Verify the instances actually
+	// exist and fall back to the nvidia-smi CLI for any GPU that is short.
+	nv.ensureMigInstancesViaSmi()
+}
+
+// ensureMigInstancesViaSmi verifies that the MIG instances requested in
+// nv.migCurrent actually exist and, for any GPU that is short, recreates the
+// geometry with the nvidia-smi CLI. It is a no-op on hardware where
+// nvidia-mig-parted already carved the instances correctly, so it is safe for
+// all MIG-capable cards.
+func (nv *NvidiaDevicePlugin) ensureMigInstancesViaSmi() {
+	current, ok := nv.migCurrent.MigConfigs["current"]
+	if !ok {
+		return
+	}
+
+	out, err := exec.Command("nvidia-smi", "-L").CombinedOutput()
+	if err != nil {
+		klog.Errorf("failed to list GPUs with nvidia-smi -L, skipping MIG fallback: %v, output: %s", err, string(out))
+		return
+	}
+	counts := migInstanceCountsFromSmi(string(out))
+
+	for _, migSpec := range current {
+		if !migSpec.MigEnabled {
+			continue
+		}
+		expected := 0
+		for _, c := range migSpec.MigDevices {
+			expected += int(c)
+		}
+		if expected == 0 {
+			continue
+		}
+		for _, dev := range migSpec.Devices {
+			gpuIndex := int(dev)
+			if counts[gpuIndex] >= expected {
+				continue
+			}
+			klog.Warningf("GPU %d has %d MIG instance(s) but %d were requested; nvidia-mig-parted did not create them, falling back to nvidia-smi", gpuIndex, counts[gpuIndex], expected)
+			if err := createMigDevicesViaSmi(gpuIndex, migSpec.MigDevices); err != nil {
+				klog.Errorf("nvidia-smi MIG fallback failed for GPU %d: %v", gpuIndex, err)
+				continue
+			}
+			klog.Infof("nvidia-smi MIG fallback created geometry on GPU %d: %v", gpuIndex, migSpec.MigDevices)
+		}
+	}
+}
+
+// migInstanceCountsFromSmi parses `nvidia-smi -L` output and returns the number
+// of already-created MIG devices per physical GPU index. GPUs with no MIG
+// devices are still recorded with a count of zero.
+func migInstanceCountsFromSmi(output string) map[int]int {
+	counts := make(map[int]int)
+	currentGPU := -1
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "GPU ") {
+			// e.g. "GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition (UUID: GPU-...)"
+			idxStr := strings.TrimSpace(strings.SplitN(strings.TrimPrefix(trimmed, "GPU "), ":", 2)[0])
+			if idx, err := strconv.Atoi(idxStr); err == nil {
+				currentGPU = idx
+				if _, seen := counts[currentGPU]; !seen {
+					counts[currentGPU] = 0
+				}
+			}
+			continue
+		}
+		if strings.HasPrefix(trimmed, "MIG ") && currentGPU >= 0 {
+			counts[currentGPU]++
+		}
+	}
+	return counts
+}
+
+// createMigDevicesViaSmi resets and recreates the desired MIG geometry on a
+// single physical GPU using the nvidia-smi CLI. It is the fallback for GPUs
+// where nvidia-mig-parted reports success but the NVML create path produces no
+// MIG instances.
+func createMigDevicesViaSmi(gpuIndex int, migDevices map[string]int32) error {
+	gpu := strconv.Itoa(gpuIndex)
+
+	cgi := buildCreateGpuInstancesArg(migDevices)
+	if cgi == "" {
+		return fmt.Errorf("no MIG devices requested for GPU %d", gpuIndex)
+	}
+
+	// Best-effort: ensure MIG mode is enabled (a no-op if already enabled).
+	runNvidiaSmi("-i", gpu, "-mig", "1")
+
+	// Destroy any pre-existing compute/GPU instances so the geometry is clean.
+	// Compute instances must be destroyed before their parent GPU instances.
+	// These fail harmlessly when nothing exists yet, so errors are only logged.
+	runNvidiaSmi("mig", "-i", gpu, "-dci")
+	runNvidiaSmi("mig", "-i", gpu, "-dgi")
+
+	// -C also creates the matching compute instance for each GPU instance.
+	if out, err := runNvidiaSmi("mig", "-i", gpu, "-cgi", cgi, "-C"); err != nil {
+		return fmt.Errorf("nvidia-smi mig create failed on GPU %d (cgi=%s): %v, output: %s", gpuIndex, cgi, err, out)
+	}
+	return nil
+}
+
+// buildCreateGpuInstancesArg expands a MigDevices map (profile name -> count)
+// into a comma-separated argument for `nvidia-smi mig -cgi`, ordering larger
+// GPU-instance slices first so placement succeeds for mixed geometries.
+func buildCreateGpuInstancesArg(migDevices map[string]int32) string {
+	type profile struct {
+		name   string
+		slices int
+	}
+	var profiles []profile
+	for name, count := range migDevices {
+		for i := int32(0); i < count; i++ {
+			profiles = append(profiles, profile{name: name, slices: migProfileSlices(name)})
+		}
+	}
+	sort.SliceStable(profiles, func(i, j int) bool {
+		if profiles[i].slices != profiles[j].slices {
+			return profiles[i].slices > profiles[j].slices
+		}
+		return profiles[i].name < profiles[j].name
+	})
+	names := make([]string, 0, len(profiles))
+	for _, p := range profiles {
+		names = append(names, p.name)
+	}
+	return strings.Join(names, ",")
+}
+
+// migProfileSlices returns the leading GPU-instance slice count of a MIG
+// profile name (e.g. "2g.10gb" -> 2). It returns 1 when the name cannot be
+// parsed so the profile is still created, just placed last.
+func migProfileSlices(name string) int {
+	idx := strings.Index(name, "g")
+	if idx <= 0 {
+		return 1
+	}
+	if n, err := strconv.Atoi(name[:idx]); err == nil && n > 0 {
+		return n
+	}
+	return 1
+}
+
+// runNvidiaSmi runs nvidia-smi with the given args and returns its combined
+// output. Failures are logged at a high verbosity because some calls (instance
+// teardown) are expected to fail when there is nothing to tear down.
+func runNvidiaSmi(args ...string) (string, error) {
+	out, err := exec.Command("nvidia-smi", args...).CombinedOutput()
+	if err != nil {
+		klog.V(4).Infof("nvidia-smi %s: %v, output: %s", strings.Join(args, " "), err, string(out))
+	}
+	return string(out), err
 }
 
 func (nv *NvidiaDevicePlugin) GenerateMigTemplate(devtype string, devindex int, val device.ContainerDevice) (int, bool) {

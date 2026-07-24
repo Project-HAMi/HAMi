@@ -60,6 +60,14 @@ func TestGenerateMigTemplate(t *testing.T) {
 					{device.MigTemplate{Name: "7g.80gb", Core: 100, Memory: 81920, Count: 1}},
 				},
 			},
+			{
+				Models: []string{"RTX PRO 6000 Blackwell Server Edition"},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.24gb", Core: 25, Memory: 24576, Count: 4}},
+					{device.MigTemplate{Name: "2g.48gb", Core: 50, Memory: 49152, Count: 2}},
+					{device.MigTemplate{Name: "4g.96gb", Core: 100, Memory: 98304, Count: 1}},
+				},
+			},
 		},
 	}
 
@@ -134,6 +142,23 @@ func TestGenerateMigTemplate(t *testing.T) {
 				"1g.5gb": 7,
 			},
 		},
+		{
+			// The full NVML model string must match the shorter configured
+			// model via substring matching (RTX PRO 6000 Blackwell Server Edition).
+			name:      "rtx pro 6000 blackwell 1g.24gb template",
+			model:     "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+			deviceIdx: 0,
+			containerDev: device.ContainerDevice{
+				Idx:     0,
+				UUID:    "ccccdddd[0-3]",
+				Usedmem: 20000,
+			},
+			expectedPos:   3,
+			expectedReset: true,
+			expectedMig: map[string]int32{
+				"1g.24gb": 4,
+			},
+		},
 	}
 
 	for _, tc := range testCases {
@@ -159,6 +184,81 @@ func TestGenerateMigTemplate(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMigInstanceCountsFromSmi(t *testing.T) {
+	output := `GPU 0: NVIDIA RTX PRO 6000 Blackwell Server Edition (UUID: GPU-aaaa)
+  MIG 1g.24gb     Device  0: (UUID: MIG-1111)
+  MIG 1g.24gb     Device  1: (UUID: MIG-2222)
+  MIG 1g.24gb     Device  2: (UUID: MIG-3333)
+  MIG 1g.24gb     Device  3: (UUID: MIG-4444)
+GPU 1: NVIDIA RTX PRO 6000 Blackwell Server Edition (UUID: GPU-bbbb)
+GPU 2: NVIDIA A100-SXM4-40GB (UUID: GPU-cccc)
+  MIG 2g.10gb     Device  0: (UUID: MIG-5555)`
+
+	counts := migInstanceCountsFromSmi(output)
+	expected := map[int]int{0: 4, 1: 0, 2: 1}
+	for gpu, want := range expected {
+		if counts[gpu] != want {
+			t.Errorf("GPU %d: expected %d MIG devices, got %d", gpu, want, counts[gpu])
+		}
+	}
+	if len(counts) != len(expected) {
+		t.Errorf("expected %d GPUs, got %d: %v", len(expected), len(counts), counts)
+	}
+}
+
+func TestBuildCreateGpuInstancesArg(t *testing.T) {
+	testCases := []struct {
+		name       string
+		migDevices map[string]int32
+		want       string
+	}{
+		{
+			name:       "homogeneous rtx pro 6000",
+			migDevices: map[string]int32{"1g.24gb": 4},
+			want:       "1g.24gb,1g.24gb,1g.24gb,1g.24gb",
+		},
+		{
+			name:       "mixed places larger slices first",
+			migDevices: map[string]int32{"1g.5gb": 1, "2g.10gb": 3},
+			want:       "2g.10gb,2g.10gb,2g.10gb,1g.5gb",
+		},
+		{
+			name:       "empty",
+			migDevices: map[string]int32{},
+			want:       "",
+		},
+		{
+			name:       "zero count skipped",
+			migDevices: map[string]int32{"1g.24gb": 0},
+			want:       "",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := buildCreateGpuInstancesArg(tc.migDevices); got != tc.want {
+				t.Errorf("expected %q, got %q", tc.want, got)
+			}
+		})
+	}
+}
+
+func TestMigProfileSlices(t *testing.T) {
+	testCases := map[string]int{
+		"1g.24gb": 1,
+		"2g.48gb": 2,
+		"4g.96gb": 4,
+		"7g.40gb": 7,
+		"garbage": 1,
+		"g.10gb":  1,
+		"0g.10gb": 1,
+	}
+	for name, want := range testCases {
+		if got := migProfileSlices(name); got != want {
+			t.Errorf("migProfileSlices(%q): expected %d, got %d", name, want, got)
+		}
 	}
 }
 
