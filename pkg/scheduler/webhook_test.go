@@ -412,6 +412,80 @@ func TestFitResourceQuota(t *testing.T) {
 			},
 			fit: true,
 		},
+		{
+			// Design Case 1: an init container that could never fit is caught.
+			// effective mem = max(app 100, init 1500) = 1500; 1000 used + 1500 > 2000.
+			name: "init container exceeds quota",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					InitContainers: []corev1.Container{
+						{
+							Name: "init1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("1500"),
+								},
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name: "container1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("100"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: false,
+		},
+		{
+			// init(500) + app(600): naive sum 1100 -> 1000+1100=2100 > 2000 would
+			// wrongly deny; effective max(600, 500) = 600 -> 1000+600=1600 <= 2000 fits.
+			name: "init container within quota via max formula",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					InitContainers: []corev1.Container{
+						{
+							Name: "init1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("500"),
+								},
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name: "container1",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"nvidia.com/gpu":    resource.MustParse("1"),
+									"nvidia.com/gpumem": resource.MustParse("600"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: true,
+		},
 	}
 
 	for _, tc := range testCases {

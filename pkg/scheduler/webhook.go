@@ -69,22 +69,39 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
-	for idx, ctr := range pod.Spec.Containers {
-		c := &pod.Spec.Containers[idx]
-		if ctr.SecurityContext != nil {
-			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
-				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
-				continue
-			}
+	// Init containers can request GPU resources too, so they must go through
+	// MutateAdmission alongside app containers to have their device annotations
+	// applied. See docs/develop/initContainer-design.md.
+	mutate := func(c *corev1.Container) (bool, error) {
+		if c.SecurityContext != nil && c.SecurityContext.Privileged != nil && *c.SecurityContext.Privileged {
+			klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
+			return false, nil
 		}
+		found := false
 		for _, val := range device.GetDevices() {
-			found, err := val.MutateAdmission(c, pod)
+			f, err := val.MutateAdmission(c, pod)
 			if err != nil {
-				klog.Errorf("validating pod failed:%s", err.Error())
-				return admission.Errored(http.StatusInternalServerError, err)
+				return false, err
 			}
-			hasResource = hasResource || found
+			found = found || f
 		}
+		return found, nil
+	}
+	for idx := range pod.Spec.InitContainers {
+		found, err := mutate(&pod.Spec.InitContainers[idx])
+		if err != nil {
+			klog.Errorf("validating pod failed:%s", err.Error())
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		hasResource = hasResource || found
+	}
+	for idx := range pod.Spec.Containers {
+		found, err := mutate(&pod.Spec.Containers[idx])
+		if err != nil {
+			klog.Errorf("validating pod failed:%s", err.Error())
+			return admission.Errored(http.StatusInternalServerError, err)
+		}
+		hasResource = hasResource || found
 	}
 
 	if !hasResource {
@@ -133,17 +150,38 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			}
 			return 0, false
 		}
-		for _, ctr := range pod.Spec.Containers {
-			req, ok := getRequest(&ctr, resourceName)
-			if ok {
-				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					memoryReq += memReq * req
-				}
-				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					coresReq += coreReq * req
-				}
+		// containerReq returns this container's total memory and cores request
+		// (per-GPU value multiplied by the requested GPU count).
+		containerReq := func(ctr *corev1.Container) (mem int64, cores int64) {
+			req, ok := getRequest(ctr, resourceName)
+			if !ok {
+				return 0, 0
 			}
+			if memReq, ok := getRequest(ctr, memResourceName); ok {
+				mem = memReq * req
+			}
+			if coreReq, ok := getRequest(ctr, coreResourceName); ok {
+				cores = coreReq * req
+			}
+			return mem, cores
 		}
+		// Init containers run sequentially to completion before app containers
+		// start, so a pod's real GPU footprint at any instant is
+		// max(sum(app requests), max(single init request)) per resource. See
+		// docs/develop/initContainer-design.md.
+		var initMemReq, initCoresReq int64
+		for i := range pod.Spec.InitContainers {
+			mem, cores := containerReq(&pod.Spec.InitContainers[i])
+			initMemReq = max(initMemReq, mem)
+			initCoresReq = max(initCoresReq, cores)
+		}
+		for i := range pod.Spec.Containers {
+			mem, cores := containerReq(&pod.Spec.Containers[i])
+			memoryReq += mem
+			coresReq += cores
+		}
+		memoryReq = max(memoryReq, initMemReq)
+		coresReq = max(coresReq, initCoresReq)
 		if memoryFactor > 1 {
 			oriMemReq := memoryReq
 			memoryReq = memoryReq * int64(memoryFactor)

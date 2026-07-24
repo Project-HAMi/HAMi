@@ -162,8 +162,22 @@ func (s *Scheduler) onAddPod(obj any) {
 		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
-	if s.podManager.AddPod(pod, nodeID, podDev) {
-		s.quotaManager.AddUsage(pod, podDev)
+	// Record the effective footprint max(sum(app), max(init)) rather than the raw
+	// per-container sum, so quota and node-capacity accounting are not inflated by
+	// init containers that never run concurrently with app containers.
+	collapsed := device.CollapseInitContainerUsage(pod, podDev)
+	if s.podManager.AddPod(pod, nodeID, collapsed) {
+		s.quotaManager.AddUsage(pod, collapsed)
+	}
+	// Once the pod's init containers are confirmed finished (all terminated with
+	// exit code 0, pod not yet terminal), shrink recorded usage to app-only. The
+	// shrink is one-time and guarded inside ShrinkToAppOnly.
+	if device.InitContainersAllSucceeded(pod) {
+		appOnly := device.AppContainersOnly(pod, podDev)
+		if old, didShrink := s.podManager.ShrinkToAppOnly(pod, appOnly); didShrink {
+			s.quotaManager.RmUsage(pod, old)
+			s.quotaManager.AddUsage(pod, appOnly)
+		}
 	}
 }
 
@@ -967,16 +981,21 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
+	// Annotations keep the full per-container device list (the device plugin
+	// needs it), but recorded usage is the effective collapsed view:
+	// per device UUID, max(sum(app), max(init)). See
+	// docs/develop/initContainer-design.md.
+	collapsed := device.CollapseInitContainerUsage(args.Pod, m.Devices)
+	added := s.podManager.AddPod(args.Pod, m.NodeID, collapsed)
 	if added {
-		s.quotaManager.AddUsage(args.Pod, m.Devices)
+		s.quotaManager.AddUsage(args.Pod, collapsed)
 	}
 
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		if added {
-			s.quotaManager.RmUsage(args.Pod, m.Devices)
+			s.quotaManager.RmUsage(args.Pod, collapsed)
 		}
 		s.podManager.DelPod(args.Pod)
 		return nil, err

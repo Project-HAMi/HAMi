@@ -30,6 +30,11 @@ type PodInfo struct {
 	*corev1.Pod
 	NodeID  string
 	Devices PodDevices
+	// InitContainerResourceReleased guards the one-time shrink of recorded
+	// usage from max(sum(app), max(init)) down to app-containers-only, once
+	// the pod's init containers are confirmed finished. Default false. See
+	// docs/develop/initContainer-design.md.
+	InitContainerResourceReleased bool
 }
 
 // PodUseDeviceStat counts pod use device info.
@@ -69,14 +74,47 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		m.pods[pod.UID].Devices = devices
-		klog.V(5).InfoS("Pod devices updated",
-			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"devices", devices,
-		)
+		// Once init-container usage has been released (shrunk to app-only), the
+		// annotation-derived collapsed value would be larger again, so do not let
+		// a routine update clobber the shrunk value. The shrink is applied only by
+		// ShrinkToAppOnly.
+		if !m.pods[pod.UID].InitContainerResourceReleased {
+			m.pods[pod.UID].Devices = devices
+			klog.V(5).InfoS("Pod devices updated",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+				"devices", devices,
+			)
+		}
 	}
 
 	return !exists
+}
+
+// ShrinkToAppOnly performs the one-time shrink of a pod's recorded device usage
+// from max(sum(app), max(init)) down to app-containers-only, once its init
+// containers are confirmed finished. It is idempotent: the first call swaps the
+// stored Devices to appOnly, sets InitContainerResourceReleased, and returns the
+// previously-stored devices (old), the new devices, and true. Subsequent calls
+// (or calls for an unknown pod) return didShrink=false and touch nothing. The
+// caller applies the quota delta as RmUsage(old)+AddUsage(new) so add and remove
+// always operate on the same stored value.
+func (m *PodManager) ShrinkToAppOnly(pod *corev1.Pod, appOnly PodDevices) (old PodDevices, didShrink bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, ok := m.pods[pod.UID]
+	if !ok || pi.InitContainerResourceReleased {
+		return nil, false
+	}
+	old = pi.Devices
+	pi.Devices = appOnly
+	pi.InitContainerResourceReleased = true
+	klog.InfoS("Init container usage released, shrinking recorded usage to app-only",
+		"pod", klog.KRef(pod.Namespace, pod.Name),
+		"old", old,
+		"new", appOnly,
+	)
+	return old, true
 }
 
 func (m *PodManager) UpdatePod(pod *corev1.Pod) {
@@ -172,9 +210,10 @@ func (p *PodInfo) DeepCopy() *PodInfo {
 		return nil
 	}
 	return &PodInfo{
-		Pod:     p.Pod.DeepCopy(),
-		NodeID:  p.NodeID,
-		Devices: p.Devices.DeepCopy(),
+		Pod:                           p.Pod.DeepCopy(),
+		NodeID:                        p.NodeID,
+		Devices:                       p.Devices.DeepCopy(),
+		InitContainerResourceReleased: p.InitContainerResourceReleased,
 	}
 }
 
