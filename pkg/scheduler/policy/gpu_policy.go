@@ -32,9 +32,13 @@ type DeviceListsScore struct {
 type DeviceUsageList struct {
 	DeviceLists []*DeviceListsScore
 	Policy      string
-	// NumaBind groups devices by NUMA so Fit can accumulate a same-NUMA run.
-	// When false, Score is the primary key and NUMA only breaks ties (#1806).
+	// NumaBind is kept for backward compatibility with the nvidia.com/numa-bind
+	// annotation; NUMA grouping is now the default (see NumaIgnore) so this no
+	// longer changes Less's behavior.
 	NumaBind bool
+	// NumaIgnore sorts purely by Score, ignoring NUMA locality. Set via the
+	// hami.io/topology-aware-scoring: "false" annotation (#1806).
+	NumaIgnore bool
 }
 
 func (l DeviceUsageList) Len() int {
@@ -59,30 +63,29 @@ func (l DeviceUsageList) Less(i, j int) bool {
 		return ni < nj
 	}
 
-	// numa-bind: keep NUMA groups contiguous for Fit's same-NUMA accumulation.
-	if l.NumaBind {
+	// numa-ignore: Score is primary, NUMA only breaks ties for stable ordering (#1806).
+	if l.NumaIgnore {
 		if binpack {
-			if ni == nj {
+			if si != sj {
 				return si < sj
 			}
-			return ni > nj
+			return ni < nj
 		}
-		// default policy is spread
-		if ni == nj {
+		if si != sj {
 			return si > sj
 		}
 		return ni < nj
 	}
 
-	// score primary, NUMA tiebreaker (#1806).
+	// default: NUMA groups first, Score orders devices within a NUMA node.
 	if binpack {
-		if si != sj {
+		if ni == nj {
 			return si < sj
 		}
-		return ni < nj
+		return ni > nj
 	}
 	// default policy is spread
-	if si != sj {
+	if ni == nj {
 		return si > sj
 	}
 	return ni < nj
@@ -100,6 +103,7 @@ func (l DeviceUsageList) DeepCopy() DeviceUsageList {
 		DeviceLists: deviceLists,
 		Policy:      l.Policy,
 		NumaBind:    l.NumaBind,
+		NumaIgnore:  l.NumaIgnore,
 	}
 }
 
