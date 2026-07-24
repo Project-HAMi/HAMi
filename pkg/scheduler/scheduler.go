@@ -925,11 +925,21 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"pod", klog.KObj(args.Pod),
 		"reason", "request does not contain full nodes",
 		"nodeNamesLen", nodeNamesLen(args.NodeNames))
-	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
-		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+	var pi *device.PodInfo
+	if p, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
+		pi = p
+		s.quotaManager.RmUsage(args.Pod, p.Devices)
+	}
+	restorePod := func() {
+		if pi != nil {
+			s.quotaManager.AddUsage(args.Pod, pi.Devices)
+			s.podManager.AddPod(args.Pod, pi.NodeID, pi.Devices)
+			pi = nil
+		}
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
+		restorePod()
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
@@ -939,11 +949,18 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
+		restorePod()
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
+		// Only restore the pod when there were candidate nodes to schedule on.
+		// If NodeNames was empty (no candidates), this is a stale entry that
+		// should be cleaned up.
+		if args.NodeNames != nil && len(*args.NodeNames) > 0 {
+			restorePod()
+		}
 		klog.V(4).InfoS("No available nodes meet the required scores",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
@@ -975,10 +992,19 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		// Revert the tentative AddPod/AddUsage for the new device
+		// assignment before restorePod re-adds the original one.
 		if added {
 			s.quotaManager.RmUsage(args.Pod, m.Devices)
 		}
-		s.podManager.DelPod(args.Pod)
+		if pi != nil {
+			restorePod()
+		} else {
+			// Pod was not in podManager before (first scheduling attempt),
+			// just clean up the tentative AddPod so it doesn't orphan
+			// an entry in the manager.
+			s.podManager.DelPod(args.Pod)
+		}
 		return nil, err
 	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
