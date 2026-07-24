@@ -51,7 +51,6 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
 	//devmap := make(map[string]device.ContainerDevices)
-	devs := device.ContainerDevices{}
 	total, totalCore, totalMem := int32(0), int32(0), int32(0)
 	free, freeCore, freeMem := int32(0), int32(0), int32(0)
 	sums := 0
@@ -93,11 +92,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 					klog.V(5).Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
-			devs = append(devs, tmpDevs[k.Type]...)
 		} else {
 			return false, reason
 		}
-		(*devinput)[k.Type] = append((*devinput)[k.Type], devs)
+		(*devinput)[k.Type] = append((*devinput)[k.Type], tmpDevs[k.Type])
 	}
 	return true, ""
 }
