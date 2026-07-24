@@ -1,4 +1,4 @@
-name: Call Release webiste
+name: Call Release website
 
 on:
   workflow_call:
