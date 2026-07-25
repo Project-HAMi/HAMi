@@ -29,6 +29,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -899,6 +900,25 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	restorePod := func() {
 		if pi != nil {
+			// Guard: if the pod was deleted from the cluster before the
+			// scheduler could restore it (e.g. a parallel delete watch
+			// processed before this restorePod runs), skip the restore.
+			// Re-adding a stale record would leak a pod entry that could
+			// permanently reserve GPU capacity.
+			// Uses podLister (informer-backed) instead of kubeClient.Get so
+			// that tests without an informer fall through to the normal
+			// restore path (nil lister = no-op guard).
+			if s.podLister != nil {
+				if _, err := s.podLister.Pods(args.Pod.Namespace).Get(args.Pod.Name); err != nil {
+					if apierrors.IsNotFound(err) {
+						klog.V(5).InfoS("restorePod: pod no longer exists, skipping restore",
+							"pod", klog.KObj(args.Pod))
+						s.podManager.DelPod(args.Pod)
+						pi = nil
+						return
+					}
+				}
+			}
 			s.quotaManager.AddUsage(args.Pod, pi.Devices)
 			s.podManager.AddPod(args.Pod, pi.NodeID, pi.Devices)
 			pi = nil

@@ -1788,12 +1788,6 @@ func Test_Filter_PodLeakOnPatchFailure(t *testing.T) {
 		},
 	})
 
-	// Set up empty fake client so PatchPodAnnotations has a non-nil client
-	// but fails because no pod exists in the tracker.
-	fakeClient := fake.NewSimpleClientset()
-	client.KubeClient = fakeClient
-	s.kubeClient = fakeClient
-
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       types.UID("test-patch-fail-uid"),
@@ -1806,6 +1800,13 @@ func Test_Filter_PodLeakOnPatchFailure(t *testing.T) {
 			},
 		}}},
 	}
+
+	// Set up fake client so PatchPodAnnotations fails (pod not in tracker).
+	// restorePod's podLister guard is a no-op (nil lister in tests),
+	// so the normal restore path runs, repairing the pod+quota state.
+	fakeClient := fake.NewSimpleClientset()
+	client.KubeClient = fakeClient
+	s.kubeClient = fakeClient
 
 	dev := device.PodDevices{
 		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
@@ -1891,8 +1892,9 @@ func Test_Filter_MultipleFailedAttemptsNoAccumulation(t *testing.T) {
 	s.podManager.AddPod(podA, "node1", devA)
 	s.podManager.AddPod(podB, "node1", devB)
 
-	// Set up fake client so PatchPodAnnotations returns error (pod not in tracker)
-	// instead of panicking on nil client.
+	// Set up fake client so PatchPodAnnotations fails (pod not in tracker).
+	// restorePod's podLister guard is a no-op (nil lister in tests),
+	// so the normal restore path runs, repairing pod+quota each iteration.
 	fakeClient := fake.NewSimpleClientset()
 	client.KubeClient = fakeClient
 	s.kubeClient = fakeClient
