@@ -2130,7 +2130,7 @@ func Test_Filter_MultipleFailedAttemptsNoAccumulation(t *testing.T) {
 
 	// Simulate 3 consecutive failed Filter calls for podA.
 	// Each call does TakeAndDeletePod → finds a node → PatchPodAnnotations fails → restorePod.
-	for i := 0; i < 3; i++ {
+	for i := range 3 {
 		_, err := s.Filter(extenderv1.ExtenderArgs{Pod: podA, NodeNames: &[]string{"node1"}})
 		require.Error(t, err, "Filter should fail (patch error) on iteration %d", i)
 
