@@ -176,6 +176,11 @@ scheduler:
       # - default
       # - kube-system
       # - istio-system
+    # manageNamespaceSelector controls whether the chart renders and manages the webhook's
+    # namespaceSelector field. Keep it true on standard Kubernetes clusters.
+    # Set it to false on managed platforms (e.g. AKS) where the platform mutates and owns
+    # the namespaceSelector field, to avoid server-side apply ownership conflicts.
+    manageNamespaceSelector: true
     # namespaceSelector controls which namespaces the webhook will be applied to.
     # The default matchExpressions exclude namespaces with label "hami.io/webhook: ignore".
     # You can add additional matchLabels or matchExpressions to further filter namespaces.

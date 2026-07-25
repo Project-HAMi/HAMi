@@ -526,6 +526,31 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{},
 			wantReason: "1/1 CardTimeSlicingExhausted",
 		},
+		{
+			name: "mutex policy rejects used device",
+			devices: []*device.DeviceUsage{
+				{
+					ID:         "dev-0",
+					Index:      0,
+					Used:       1,
+					Count:      2,
+					Totalcore:  3,
+					Numa:       0,
+					Type:       AMDDevice,
+					Health:     true,
+					CustomInfo: map[string]any{},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums: 1,
+				Type: AMDDevice,
+			},
+			annos:      map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
 	}
 
 	for _, test := range tests {

@@ -2660,6 +2660,34 @@ func TestFit_NumaSwitching(t *testing.T) {
 	assert.Equal(t, result[NvidiaGPUDevice][1].UUID, "dev-0")
 }
 
+func TestFit_MutexPolicy(t *testing.T) {
+	nv := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+	devices := []*device.DeviceUsage{
+		{ID: "used", Index: 0, Used: 1, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "idle", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyMutex.String()},
+	}}
+
+	// mutex skips the used device and allocates only the idle one.
+	one := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, result, _ := nv.Fit(devices, one, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "idle")
+
+	// mutex cannot satisfy 2 cards when only one device is idle.
+	two := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, _, _ = nv.Fit(devices, two, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
 func TestFit_TopologyExactMatch(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",

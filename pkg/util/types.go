@@ -76,6 +76,8 @@ const (
 	GPUSchedulerPolicySpread SchedulerPolicyName = "spread"
 	// GPUSchedulerPolicyTopology is GPU use topology scheduler.
 	GPUSchedulerPolicyTopology SchedulerPolicyName = "topology-aware"
+	// GPUSchedulerPolicyMutex is GPU use mutex scheduler, only idle GPUs are allocated.
+	GPUSchedulerPolicyMutex SchedulerPolicyName = "mutex"
 )
 
 const (

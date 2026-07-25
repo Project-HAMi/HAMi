@@ -1,0 +1,48 @@
+<svg viewBox="0 0 1100 300" xmlns="http://www.w3.org/2000/svg">
+  <rect width="1100" height="300" fill="#DFF3FE" rx="16"/>
+  <text x="550" y="35" font-family="Verdana, Arial, sans-serif" font-size="20" font-weight="bold" fill="#0B4F6C" text-anchor="middle">The Journey of One Pod</text>
+
+  <defs>
+    <marker id="arrow2" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L0,6 L9,3 z" fill="#0B4F6C"/>
+    </marker>
+  </defs>
+  <g stroke="#0B4F6C" stroke-width="3" fill="none" marker-end="url(#arrow2)">
+    <line x1="180" y1="170" x2="200" y2="170"/>
+    <line x1="360" y1="170" x2="380" y2="170"/>
+    <line x1="540" y1="170" x2="560" y2="170"/>
+    <line x1="720" y1="170" x2="740" y2="170"/>
+    <line x1="900" y1="170" x2="920" y2="170"/>
+  </g>
+
+  <rect x="20" y="110" width="160" height="120" rx="12" fill="#E5E7EB" stroke="#6B7280" stroke-width="2"/>
+  <text x="100" y="150" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#374151" text-anchor="middle">1. Pod</text>
+  <text x="100" y="168" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#374151" text-anchor="middle">Created</text>
+
+  <rect x="200" y="110" width="160" height="120" rx="12" fill="#93C5FD" stroke="#1D4ED8" stroke-width="2"/>
+  <text x="280" y="145" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#1E3A8A" text-anchor="middle">2. Scheduled</text>
+  <text x="280" y="165" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#1E3A8A" text-anchor="middle">Reserves 20Gi</text>
+  <text x="280" y="182" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#1E3A8A" text-anchor="middle">(the bigger one)</text>
+
+  <rect x="380" y="110" width="160" height="120" rx="12" fill="#FBBF24" stroke="#B45309" stroke-width="2"/>
+  <text x="460" y="145" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#5A3800" text-anchor="middle">3. Init Running</text>
+  <text x="460" y="165" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#5A3800" text-anchor="middle">Really using</text>
+  <text x="460" y="182" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#5A3800" text-anchor="middle">20Gi</text>
+
+  <rect x="560" y="110" width="160" height="120" rx="12" fill="#C4B5FD" stroke="#6D28D9" stroke-width="2"/>
+  <text x="640" y="140" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#4C1D95" text-anchor="middle">4. Init Finishes</text>
+  <text x="640" y="160" font-family="Verdana, Arial, sans-serif" font-size="18" fill="#4C1D95" text-anchor="middle">✓</text>
+  <text x="640" y="182" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#4C1D95" text-anchor="middle">Reservation shrinks</text>
+
+  <rect x="740" y="110" width="160" height="120" rx="12" fill="#34D399" stroke="#047857" stroke-width="2"/>
+  <text x="820" y="140" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#013D2C" text-anchor="middle">5. App Running</text>
+  <text x="820" y="158" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#013D2C" text-anchor="middle">Alone</text>
+  <text x="820" y="178" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#013D2C" text-anchor="middle">Really using 10Gi</text>
+
+  <rect x="920" y="110" width="160" height="120" rx="12" fill="#E5E7EB" stroke="#6B7280" stroke-width="2"/>
+  <text x="1000" y="145" font-family="Verdana, Arial, sans-serif" font-size="13" font-weight="bold" fill="#374151" text-anchor="middle">6. Pod Deleted</text>
+  <text x="1000" y="165" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#374151" text-anchor="middle">Reservation</text>
+  <text x="1000" y="182" font-family="Verdana, Arial, sans-serif" font-size="12" fill="#374151" text-anchor="middle">back to 0Gi</text>
+
+  <text x="550" y="270" font-family="Verdana, Arial, sans-serif" font-size="14" fill="#0B4F6C" text-anchor="middle">The reservation always matches what's really happening — never more, never less than what's safe.</text>
+</svg>

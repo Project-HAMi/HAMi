@@ -43,6 +43,7 @@ import (
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -528,6 +529,19 @@ func (s *Scheduler) InspectAllNodesUsage() *map[string]*NodeUsage {
 	return &snapshot
 }
 
+// numaBindingRequested reports whether the pod requests numa-bind affinity.
+func numaBindingRequested(task *corev1.Pod) bool {
+	if task == nil {
+		return false
+	}
+	v, ok := task.Annotations[nvidia.NumaBind]
+	if !ok {
+		return false
+	}
+	enforce, err := strconv.ParseBool(v)
+	return err == nil && enforce
+}
+
 func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 	userGPUPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, task)
 	nodeUsage := &NodeUsage{
@@ -535,6 +549,7 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 		NodeInfo: node,
 		Devices: policy.DeviceUsageList{
 			Policy:      userGPUPolicy,
+			NumaBind:    numaBindingRequested(task),
 			DeviceLists: make([]*policy.DeviceListsScore, 0),
 		},
 	}
@@ -647,11 +662,26 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 									d.Device.Health = false
 									continue
 								}
-								tmpIdx, Instance, _ := device.ExtractMigTemplatesFromUUID(udevice.UUID)
+								tmpIdx, instanceIdx, err := device.ExtractMigTemplatesFromUUID(udevice.UUID)
+								if err != nil {
+									klog.Errorf("failed to extract mig templates from uuid %s: %v", udevice.UUID, err)
+									continue
+								}
+								if tmpIdx < 0 || tmpIdx >= len(d.Device.MigTemplate) {
+									klog.Errorf("invalid mig template index %d in uuid %s (templates length: %d)", tmpIdx, udevice.UUID, len(d.Device.MigTemplate))
+									continue
+								}
 								if len(d.Device.MigUsage.UsageList) == 0 {
 									device.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
+								} else if tmpIdx != int(d.Device.MigUsage.Index) {
+									klog.Errorf("mig template index mismatch in uuid %s: expected %d, got %d", udevice.UUID, d.Device.MigUsage.Index, tmpIdx)
+									continue
 								}
-								d.Device.MigUsage.UsageList[Instance].InUse = true
+								if instanceIdx < 0 || instanceIdx >= len(d.Device.MigUsage.UsageList) {
+									klog.Errorf("invalid mig instance in uuid %s", udevice.UUID)
+									continue
+								}
+								d.Device.MigUsage.UsageList[instanceIdx].InUse = true
 								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
 							}
 						}
@@ -827,32 +857,35 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 
+	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
+		klog.InfoS("Release node locks", "node", args.Node)
+		s.releaseAllDevices(node, current)
+		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, e)
+		errStr := ""
+		if e != nil {
+			errStr = e.Error()
+		}
+		return &extenderv1.ExtenderBindingResult{Error: errStr}, nil
+	}
+
 	if err = s.acquireNodeLocks(node, current); err != nil {
 		klog.ErrorS(err, "Failed to lock node", "node", args.Node, "pod", klog.KObj(current))
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
-	err = util.PatchPodAnnotations(current, tmppatch)
-	if err != nil {
+	if err = util.PatchPodAnnotations(current, tmppatch); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
-	err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{})
-	if err != nil {
+	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-		goto ReleaseNodeLocks
+		return fail(err)
 	}
 
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
-
-ReleaseNodeLocks:
-	klog.InfoS("Release node locks", "node", args.Node)
-	s.releaseAllDevices(node, current)
-	s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, err)
-	return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {

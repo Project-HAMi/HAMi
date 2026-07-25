@@ -23,6 +23,7 @@ webhooks:
     failurePolicy: {{ .Values.scheduler.admissionWebhook.failurePolicy }}
     matchPolicy: Equivalent
     name: vgpu.hami.io
+    {{- if or (not (hasKey .Values.scheduler.admissionWebhook "manageNamespaceSelector")) .Values.scheduler.admissionWebhook.manageNamespaceSelector }}
     namespaceSelector:
       {{- if .Values.scheduler.admissionWebhook.namespaceSelector.matchLabels }}
       matchLabels:
@@ -42,6 +43,7 @@ webhooks:
       {{- if .Values.scheduler.admissionWebhook.namespaceSelector.matchExpressions }}
       {{- toYaml .Values.scheduler.admissionWebhook.namespaceSelector.matchExpressions | nindent 6 }}
       {{- end }}
+    {{- end }}
     objectSelector:
       {{- if .Values.scheduler.admissionWebhook.objectSelector.matchLabels }}
       matchLabels:

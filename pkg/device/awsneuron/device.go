@@ -17,7 +17,6 @@ limitations under the License.
 package awsneuron
 
 import (
-	"flag"
 	"fmt"
 	"slices"
 	"strconv"
@@ -75,9 +74,6 @@ func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
 
 func (dev *AWSNeuronDevices) CommonWord() string {
 	return AWSNeuronCommonWord
-}
-
-func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
@@ -369,6 +365,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	if k.Nums > 1 {
 		alloc := graphSelect(devices, int(request.Nums))
 		if len(alloc) == 0 {
@@ -423,6 +420,11 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 

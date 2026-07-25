@@ -2,6 +2,8 @@ name: Trivy Scan
 on:
   schedule:
     - cron: "0 0 * * *"
+permissions:
+  contents: read
 jobs:
   trivy-scan:
     permissions:
@@ -29,7 +31,7 @@ jobs:
       - name: Get branch name
         uses: nelonoel/branch-name@v1.0.1
       - name: Docker Login
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@v4.5.0
         with:
           username: ${{ secrets.DOCKERHUB_TOKEN }}
           password: ${{ secrets.DOCKERHUB_PASSWD }}

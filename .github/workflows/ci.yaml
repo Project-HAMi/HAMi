@@ -170,7 +170,7 @@ jobs:
           labels: ${{ needs.get_info.outputs.version }}
           build-args: |
             VERSION=${{ needs.get_info.outputs.version }}
-            GOLANG_IMAGE=golang:1.26.2-bookworm
+            GOLANG_IMAGE=golang:1.26.5-bookworm
             NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
             DEST_DIR=/usr/local
           tags: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}:${{ needs.get_info.outputs.version }}
