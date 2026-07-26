@@ -36,8 +36,8 @@ func Test_MutateAdmission(t *testing.T) {
 			ctr *corev1.Container
 			p   *corev1.Pod
 		}
-		want bool
-		err  error
+		want    bool
+		wantErr bool
 	}{
 		{
 			name: "set to resources limit",
@@ -160,7 +160,34 @@ func Test_MutateAdmission(t *testing.T) {
 					},
 				},
 			},
-			want: true,
+			want:    true,
+			wantErr: true,
+		},
+		{
+			name: "count set to zero is rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"mthreads.com/vgpu":        *resource.NewQuantity(0, resource.DecimalSI),
+							"mthreads.com/sgpu-memory": *resource.NewQuantity(2, resource.DecimalSI),
+							"mthreads.com/sgpu-core":   *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"mthreads.com/request-gpu-num": "test123",
+						},
+					},
+				},
+			},
+			want:    false,
+			wantErr: true,
 		},
 	}
 	for _, test := range tests {
@@ -172,8 +199,9 @@ func Test_MutateAdmission(t *testing.T) {
 			}
 			InitMthreadsDevice(config)
 			dev := MthreadsDevices{}
-			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
+			result, err := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
+			assert.Equal(t, err != nil, test.wantErr)
 		})
 	}
 }
@@ -389,6 +417,36 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: int32(100),
 				Coresreq:         int32(0),
 			},
+		},
+		{
+			// A zero device count alongside a memory/core request must not panic
+			// with a divide-by-zero; it should be treated as no request.
+			name: "count set to zero with memory and cores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("0"),
+						"mthreads.com/sgpu-memory": resource.MustParse("1000"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// A negative device count must be treated as no request as well, and
+			// must not reach the division below.
+			name: "count set to negative with memory and cores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("-1"),
+						"mthreads.com/sgpu-memory": resource.MustParse("1000"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {

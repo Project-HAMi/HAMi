@@ -90,6 +90,9 @@ func ParseConfig(fs *flag.FlagSet) {
 func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCount)]
 	if ok {
+		if count.Value() <= 0 {
+			return false, fmt.Errorf("%s must be greater than 0", MthreadsResourceCount)
+		}
 		if count.Value() > 1 {
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*int64(coresPerMthreadsGPU), resource.DecimalSI)
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
@@ -197,6 +200,11 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			klog.InfoS("Detected mthreads device request",
 				"container", ctr.Name,
 				"deviceCount", n)
+			if n <= 0 {
+				// A zero or negative device count is not a valid request; return an
+				// empty request to avoid the divide-by-zero in the Memreq/Coresreq below.
+				return device.ContainerDeviceRequest{}
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mthreadsResourceMem]
 			if !ok {
