@@ -111,6 +111,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.admissionWebhook.customURL.host` | Custom URL host | `127.0.0.1` |
 | `scheduler.admissionWebhook.customURL.port` | Custom URL port | `31998` |
 | `scheduler.admissionWebhook.customURL.path` | Custom URL path | `/webhook` |
+| `scheduler.admissionWebhook.manageNamespaceSelector` | Whether the chart renders and manages the webhook namespaceSelector field | `true` |
 | `scheduler.admissionWebhook.reinvocationPolicy` | Reinvocation policy | `Never` |
 | `scheduler.admissionWebhook.failurePolicy` | Failure policy | `Ignore` |
 

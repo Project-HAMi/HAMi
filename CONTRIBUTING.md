@@ -7,6 +7,7 @@ Welcome to HAMi!
   - [Code of Conduct](#code-of-conduct)
   - [Community Expectations](#community-expectations)
   - [AI Assistance Notice](#ai-assistance-notice)
+  - [Contribution Gates](#contribution-gates)
 - [Getting started](#getting-started)
 - [Your First Contribution](#your-first-contribution)
   - [Find something to work on](#find-something-to-work-on)
@@ -71,6 +72,22 @@ significant rework to be acceptable.
 
 Please be respectful to maintainers and disclose AI assistance.
 
+## Contribution Gates
+
+The following rules are enforced on all contributions.
+
+**1. Author-understanding gate.** If a maintainer asks how a change works and the author cannot explain it, the PR is closed. Repeated cases may result in interaction limits.
+
+**2. Hardware validation.** Changes affecting device allocation or in-container isolation must be validated on real GPU hardware before submitting. Record in the PR what was tested, the device type, and the driver version. Changes scoped to the scheduler extender may use mock or unit testing instead.
+
+**3. Scope and commit messages.** Large AI-generated PRs are not accepted. For AI-assisted contributions, anything beyond a small fix must start as an issue and be split into reviewable commits. Write your own commit messages; AI-generated commit messages are not accepted.
+
+**4. Review replies.** The reply you post must be written by you and must address the specific point raised. Verbatim or canned AI replies, or replies that do not engage the comment, lead to the PR being closed.
+
+**5. Commit trailer hygiene.** Do not list AI as a co-author. No `assisted-by`, `co-developed-by`, or similar trailers. Disclosure belongs in the PR description only.
+
+**6. AI-generated comments.** Do not post AI-generated comments in review threads. Remove any filler or redundant AI-generated text before posting. Exceptions apply only when the underlying technical assessment is entirely your own and AI is used solely to assist with language translation or formatting, provided you have fully verified and edited the output.
+
 # Getting started
 
 - Fork the repository on GitHub
@@ -107,6 +124,8 @@ Please see [Contributing](#contributing) below for the workflow.
 #### Work on an issue
 
 When you are willing to take on an issue, simply reply to the issue and a maintainer will assign it to you.
+
+Roadmap issues (e.g., the yearly roadmap tracking issue) list many items in one checklist instead of one task per issue, so an item may already be claimed by a comment even if the issue itself has no assignee. Before starting design or implementation work on a roadmap item, comment on the tracking issue to claim it and wait for maintainer confirmation.
 
 ### File an Issue
 

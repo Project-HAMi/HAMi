@@ -18,8 +18,11 @@ update-versions:
 	echo "FULL_BUILD_VERSION=$(FULL_BUILD_VERSION)"
 	@# Update chart versions to point to the current version.
 	@# Note: Only update the main chart version and appVersion (before dependencies section), not dependencies
+	@# SemVer forbids leading zeros in numeric pre-release IDs, so CI tags like
+	@# 2.9.0-0749842 (git short SHA) are rejected by helm. Prefix a purely numeric
+	@# suffix with 'g' (git-describe style) to keep the identifier alphanumeric.
 	hami_version="$(VERSION)";		\
-	chart_version=`echo $(VERSION) | tr -d 'v'`; \
+	chart_version=`echo $(VERSION) | sed 's/^[vV]//' | sed -E 's/^([0-9]+\.[0-9]+\.[0-9]+)-([0-9]+)$$/\1-g\2/'`; \
 	CHART_VERSION="$$chart_version" perl -i -pe 'BEGIN { $$skip = 0; } if (/^dependencies:/) { $$skip = 1; } if (!$$skip && /^version: /) { s/"*$(VERSION_REGEX)"*/$$ENV{CHART_VERSION}/; }' $(CHART_FILE);		\
 	CHART_VERSION="$$chart_version" perl -i -pe 'BEGIN { $$skip = 0; } if (/^dependencies:/) { $$skip = 1; } if (!$$skip && /^appVersion: /) { s/"*$(VERSION_REGEX)"*/"$$ENV{CHART_VERSION}"/; }' $(CHART_FILE);	\
 	HAMI_VERSION="$$hami_version" perl -i -pe 's/imageTag: "*$(VERSION_REGEX)"*/imageTag: "$$ENV{HAMI_VERSION}"/g' $(VALUES_FILE)

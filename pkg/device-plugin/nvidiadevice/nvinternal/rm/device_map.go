@@ -250,7 +250,7 @@ func (d DeviceMap) isEmpty() bool {
 	return true
 }
 
-// getIDsOfDevicesToReplicate returns a list of dervice IDs that we want to replicate.
+// getIDsOfDevicesToReplicate returns a list of device IDs that we want to replicate.
 func (d DeviceMap) getIDsOfDevicesToReplicate(r *spec.ReplicatedResource) ([]string, error) {
 	devices, exists := d[r.Name]
 	if !exists {

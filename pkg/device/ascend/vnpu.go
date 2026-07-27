@@ -37,6 +37,7 @@ type VNPUConfig struct {
 	RuntimeClassName   string     `yaml:"runtimeClassName"`
 	OverwriteEnv       bool       `yaml:"overwriteEnv"`
 	Templates          []Template `yaml:"templates"`
+	SuperPod           bool       `yaml:"superPod"`
 }
 
 // VNPUs holds the global Ascend VNPU configuration, including a flag to enable

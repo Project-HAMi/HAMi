@@ -230,10 +230,28 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
-	alloc := graghSelect(devices, request, FitVXPU)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	fitFn := FitFn(FitVXPU)
+	if isMutex {
+		// mutex: only idle devices are eligible, no sharing onto a used device.
+		fitFn = func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
+			return d.Used == 0 && FitVXPU(d, r)
+		}
+	}
+	alloc := graghSelect(devices, request, fitFn)
 	if len(alloc) == 0 {
-		reason[common.NumaNotFit]++
-		klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+		if isMutex {
+			for _, dev := range devices {
+				if dev.Used > 0 && FitVXPU(dev, request) {
+					reason[common.ExclusiveDeviceAllocateConflict]++
+					klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "used", dev.Used)
+				}
+			}
+		}
+		if len(reason) == 0 {
+			reason[common.NumaNotFit]++
+			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums)
+		}
 		return false, tmpDevs, common.GenReason(reason, len(reason))
 	}
 	for _, dev := range alloc {

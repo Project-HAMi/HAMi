@@ -750,92 +750,6 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Deleted state",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			// Inside the 60-second deletedCooldown window — keep the conservative
-			// path; the scheduler should not yet re-add the node to its cache.
-			// The far-future timestamp (year 2128) ensures the cooldown has not
-			// elapsed regardless of when the test runs.
-			name: "Deleted state within cooldown",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2128-12-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			// Stale Deleted_ — the recovery path is taken but util.GetNode
-			// fails outside a real cluster, so the function falls back to
-			// (true, false). Behaviour matches the existing "Unknown state"
-			// case which exercises the same util.GetNode failure path.
-			name: "Deleted state stale",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_2024-01-02 00:00:00",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
-			// Unparsable timestamp must keep the conservative (true, false)
-			// path — never recover from a malformed value.
-			name: "Deleted state with unparsable timestamp",
-			args: struct {
-				devType           string
-				resourceCountName string
-				n                 corev1.Node
-			}{
-				devType: "huawei.com/Ascend910",
-				n: corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["huawei.com/Ascend910"]: "Deleted_not-a-timestamp",
-						},
-					},
-				},
-			},
-			want1: true,
-			want2: false,
-		},
-		{
 			name: "Unknown state",
 			args: struct {
 				devType           string
@@ -1454,12 +1368,101 @@ func TestCheckUUID(t *testing.T) {
 			id:   "abc",
 			want: true,
 		},
+		{
+			name: "empty GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "whitespace-only GPUUseUUID annotation should not filter out any device",
+			annos: map[string]string{
+				GPUUseUUID: "   ",
+			},
+			id:   "abc",
+			want: true,
+		},
+		{
+			name: "empty GPUNoUseUUID annotation should not exclude any device",
+			annos: map[string]string{
+				GPUNoUseUUID: "",
+			},
+			id:   "abc",
+			want: true,
+		},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			got := CheckUUID(test.annos, test.id, GPUUseUUID, GPUNoUseUUID, "NVIDIA")
 			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
+func TestCheckType(t *testing.T) {
+	useKey := "example.com/use-gputype"
+	noUseKey := "example.com/nouse-gputype"
+	tests := []struct {
+		name     string
+		annos    map[string]string
+		cardType string
+		want     bool
+	}{
+		{
+			name:     "no annotation is no constraint",
+			annos:    map[string]string{},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use list matches by substring",
+			annos:    map[string]string{useKey: "A100,V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use list does not match",
+			annos:    map[string]string{useKey: "V100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+		{
+			name:     "nouse list matches excludes the device",
+			annos:    map[string]string{noUseKey: "A100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+		{
+			name:     "nouse list does not match keeps the device",
+			annos:    map[string]string{noUseKey: "V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "empty use value is no constraint",
+			annos:    map[string]string{useKey: ""},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "whitespace-only nouse value excludes nothing",
+			annos:    map[string]string{noUseKey: "   "},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use satisfied and nouse matches still excludes",
+			annos:    map[string]string{useKey: "A100", noUseKey: "A100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			assert.Equal(t, test.want, CheckType(test.annos, test.cardType, useKey, noUseKey))
 		})
 	}
 }
@@ -1519,7 +1522,6 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 								},
 							},
 						},
-						CtrIDs: []string{"ctr1"},
 					},
 				},
 				CustomInfo: map[string]any{
@@ -1563,11 +1565,8 @@ func TestDeviceUsageDeepCopy(t *testing.T) {
 
 			if len(copy.PodInfos) > 0 {
 				originalNodeID := tt.original.PodInfos[0].NodeID
-				originalCtrIDsLen := len(tt.original.PodInfos[0].CtrIDs)
 				copy.PodInfos[0].NodeID = "mutated-node"
-				copy.PodInfos[0].CtrIDs = append(copy.PodInfos[0].CtrIDs, "ctr2")
 				assert.Equal(t, tt.original.PodInfos[0].NodeID, originalNodeID)
-				assert.Equal(t, len(tt.original.PodInfos[0].CtrIDs), originalCtrIDsLen)
 			}
 
 			if copy.CustomInfo != nil {

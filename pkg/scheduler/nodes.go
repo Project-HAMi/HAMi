@@ -28,17 +28,32 @@ import (
 )
 
 type NodeUsage struct {
-	Node    *corev1.Node
-	Devices policy.DeviceUsageList
+	Node     *corev1.Node
+	NodeInfo *device.NodeInfo
+	Devices  policy.DeviceUsageList
 }
 
 func (n *NodeUsage) DeepCopy() *NodeUsage {
 	if n == nil {
 		return nil
 	}
+	var nodeInfoCopy *device.NodeInfo
+	if n.NodeInfo != nil {
+		nodeInfoCopy = &device.NodeInfo{
+			ID:      n.NodeInfo.ID,
+			Devices: make(map[string][]device.DeviceInfo, len(n.NodeInfo.Devices)),
+		}
+		if n.NodeInfo.Node != nil {
+			nodeInfoCopy.Node = n.NodeInfo.Node.DeepCopy()
+		}
+		for vendor, devices := range n.NodeInfo.Devices {
+			nodeInfoCopy.Devices[vendor] = device.DeepCopyDeviceInfos(devices)
+		}
+	}
 	return &NodeUsage{
-		Node:    n.Node.DeepCopy(),
-		Devices: n.Devices.DeepCopy(),
+		Node:     n.Node.DeepCopy(),
+		NodeInfo: nodeInfoCopy,
+		Devices:  n.Devices.DeepCopy(),
 	}
 }
 
@@ -119,8 +134,7 @@ func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {
 			Devices: make(map[string][]device.DeviceInfo),
 		}
 		for k, v := range nodeInfo.Devices {
-			nodeInfoCopy.Devices[k] = make([]device.DeviceInfo, len(v))
-			copy(nodeInfoCopy.Devices[k], v)
+			nodeInfoCopy.Devices[k] = device.DeepCopyDeviceInfos(v)
 		}
 		nodesCopy[nodeID] = nodeInfoCopy
 	}

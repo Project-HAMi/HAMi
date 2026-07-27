@@ -191,6 +191,45 @@ func Test_checkDCUtype(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "empty use type annotation is no constraint",
+			args: struct {
+				annos    map[string]string
+				cardtype string
+			}{
+				annos: map[string]string{
+					"hygon.com/use-dcutype": "",
+				},
+				cardtype: "dcu",
+			},
+			want: true,
+		},
+		{
+			name: "empty nouse type annotation excludes nothing",
+			args: struct {
+				annos    map[string]string
+				cardtype string
+			}{
+				annos: map[string]string{
+					"hygon.com/nouse-dcutype": "",
+				},
+				cardtype: "dcu",
+			},
+			want: true,
+		},
+		{
+			name: "whitespace-only nouse type annotation excludes nothing",
+			args: struct {
+				annos    map[string]string
+				cardtype string
+			}{
+				annos: map[string]string{
+					"hygon.com/nouse-dcutype": "   ",
+				},
+				cardtype: "dcu",
+			},
+			want: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -317,24 +356,6 @@ func Test_CheckHealth(t *testing.T) {
 				},
 			},
 			want1: false,
-			want2: false,
-		},
-		{
-			name: "Deleted state",
-			args: struct {
-				devType string
-				n       *corev1.Node
-			}{
-				devType: "hygon.com/dcu",
-				n: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							util.HandshakeAnnos["hygon.com/dcu"]: "Deleted",
-						},
-					},
-				},
-			},
-			want1: true,
 			want2: false,
 		},
 		{
@@ -1080,6 +1101,36 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    1,
 			wantDevIDs: []string{"dev-0"},
 			wantReason: "",
+		},
+		{
+			name: "mutex policy rejects used device",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      1,
+					Count:     2,
+					Usedmem:   0,
+					Totalmem:  128,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      HygonDCUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             HygonDCUDevice,
+			},
+			annos:      map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
 	}
 

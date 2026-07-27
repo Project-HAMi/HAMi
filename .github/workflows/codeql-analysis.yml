@@ -17,6 +17,10 @@ on:
   schedule:
     - cron: "0 4 * * 6"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 permissions:
   security-events: write
   # required to fetch internal or private CodeQL packs
@@ -47,7 +51,7 @@ jobs:
           submodulePath: libvgpu
       - if: matrix.language == 'go'
         name: Set go version
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 

@@ -18,6 +18,7 @@ package nodelock
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"strings"
@@ -39,6 +40,14 @@ const (
 	NodeLockKey = "hami.io/mutex.lock"
 	NodeLockSep = ","
 )
+
+// ErrNodeLockContention indicates the node lock is currently held by another
+// valid pod. Callers may retry this error when the caller is a PodGroup member.
+var ErrNodeLockContention = errors.New("node lock contention")
+
+func IsNodeLockContention(err error) bool {
+	return errors.Is(err, ErrNodeLockContention)
+}
 
 var (
 	// nodeLocks manages per-node locks for fine-grained concurrency control.
@@ -175,7 +184,8 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	if !ok {
 		return nil
 	}
-	if !skipNodeLockOwnerCheck && !strings.HasSuffix(lockStr, fmt.Sprintf("%s%s", NodeLockSep, GeneratePodNamespaceName(pod, NodeLockSep))) {
+	// Keep backward compatibility with the legacy format, which is simply a timestamp
+	if !skipNodeLockOwnerCheck && strings.Contains(lockStr, NodeLockSep) && !strings.HasSuffix(lockStr, NodeLockSep+GeneratePodNamespaceName(pod, NodeLockSep)) {
 		klog.InfoS("NodeLock is not set by this pod", NodeLockKey, lockStr, "podName", pod.Name, "podNamespace", pod.Namespace)
 		return nil
 	}
@@ -245,7 +255,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return SetNodeLock(nodeName, lockname, pods)
 	}
 
-	return fmt.Errorf("node %s has been locked within %v", nodeName, NodeLockTimeout)
+	return fmt.Errorf("node %s has been locked within %v: %w", nodeName, NodeLockTimeout, ErrNodeLockContention)
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {

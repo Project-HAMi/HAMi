@@ -28,6 +28,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	corev1 "k8s.io/api/core/v1"
@@ -286,9 +287,16 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 
 func (dev *CambriconDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[CambriconMLUDevice]
-	if ok {
+	if ok && len(devlist) > 0 {
 		(*annoinput)[DsmluResourceAssigned] = "false"
-		(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", devlist[0][0].Idx, devlist[0][0].Usedcores, devlist[0][0].Usedmem/256)
+		for _, ctrdevs := range devlist {
+			// Leading containers that request no MLU are padded with empty entries; use the first one that holds a device.
+			if len(ctrdevs) > 0 {
+				d := ctrdevs[0]
+				(*annoinput)[DsmluProfile] = fmt.Sprintf("%d_%d_%d", d.Idx, d.Usedcores, d.Usedmem/256)
+				break
+			}
+		}
 		deviceStr := device.EncodePodSingleDevice(devlist)
 		(*annoinput)[device.InRequestDevices[CambriconMLUDevice]] = deviceStr
 		(*annoinput)[device.SupportDevices[CambriconMLUDevice]] = deviceStr
@@ -318,6 +326,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -347,6 +356,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		if k.Coresreq > 100 {

@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-HAMi (Heterogeneous AI Computing Virtualization Middleware) is a CNCF sandbox project that provides device virtualization for heterogeneous AI accelerators (GPU, NPU, DCU, etc.) in Kubernetes. It enables device sharing, memory/core isolation, and topology-aware scheduling across multiple hardware vendors.
+HAMi (Heterogeneous AI Computing Virtualization Middleware) is a CNCF incubating project that provides device virtualization for heterogeneous AI accelerators (GPU, NPU, DCU, etc.) in Kubernetes. It enables device sharing, memory/core isolation, and topology-aware scheduling across multiple hardware vendors.
 
 ## Build Commands
 

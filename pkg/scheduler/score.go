@@ -238,6 +238,10 @@ func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitC
 }
 
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
+}
+
+func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {

@@ -10,6 +10,13 @@ on:
     paths:
       - "charts/**"
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
 jobs:
   e2e:
     runs-on: self-hosted

@@ -25,6 +25,13 @@ When reporting a security issue, please include:
 - Any potential attack scenarios or security impact.
 - Suggested mitigations or fixes, if available.
 
+## Is It In Scope?
+
+HAMi's in-container enforcement (HAMi-core/libvgpu and vendor libraries) limits GPU memory and compute for cooperative multi-tenant sharing on a trusted cluster. It is not a hard security boundary against a workload with enough privilege to bypass its own hook, for example by unsetting `LD_PRELOAD`, using a static binary, or `ptrace`.
+
+- A report that a workload can exceed its own quota, without affecting another tenant, is not a new vulnerability by itself.
+- A report that lets a workload reach another tenant's data, device, or namespace it was not granted is in scope, please report it through the process above.
+
 ## Response Process
 
 We follow a structured process to handle security reports:

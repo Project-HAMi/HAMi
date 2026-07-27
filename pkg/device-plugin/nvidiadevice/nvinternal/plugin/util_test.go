@@ -17,6 +17,8 @@
 package plugin
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/net/context"
@@ -58,6 +60,14 @@ func TestGenerateMigTemplate(t *testing.T) {
 					{device.MigTemplate{Name: "1g.10gb", Core: 14, Memory: 10240, Count: 1}, device.MigTemplate{Name: "2g.20gb", Core: 28, Memory: 20480, Count: 3}},
 					{device.MigTemplate{Name: "3g.40gb", Core: 42, Memory: 40960, Count: 2}},
 					{device.MigTemplate{Name: "7g.80gb", Core: 100, Memory: 81920, Count: 1}},
+				},
+			},
+			{
+				Models: []string{"RTX PRO 6000 Blackwell Server Edition"},
+				Geometries: []device.Geometry{
+					{device.MigTemplate{Name: "1g.24gb", Core: 25, Memory: 24576, Count: 4}},
+					{device.MigTemplate{Name: "2g.48gb", Core: 50, Memory: 49152, Count: 2}},
+					{device.MigTemplate{Name: "4g.96gb", Core: 100, Memory: 98304, Count: 1}},
 				},
 			},
 		},
@@ -132,6 +142,23 @@ func TestGenerateMigTemplate(t *testing.T) {
 			expectedReset: false,
 			expectedMig: map[string]int32{
 				"1g.5gb": 7,
+			},
+		},
+		{
+			// The full NVML model string must match the shorter configured
+			// model via substring matching (RTX PRO 6000 Blackwell Server Edition).
+			name:      "rtx pro 6000 blackwell 1g.24gb template",
+			model:     "NVIDIA RTX PRO 6000 Blackwell Server Edition",
+			deviceIdx: 0,
+			containerDev: device.ContainerDevice{
+				Idx:     0,
+				UUID:    "ccccdddd[0-3]",
+				Usedmem: 20000,
+			},
+			expectedPos:   3,
+			expectedReset: true,
+			expectedMig: map[string]int32{
+				"1g.24gb": 4,
 			},
 		},
 	}
@@ -767,5 +794,55 @@ func TestCheckCDISpec(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWriteMigConfig(t *testing.T) {
+	orig := migConfigPath
+	defer func() { migConfigPath = orig }()
+
+	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
+	writeMigConfig([]byte("version: v1"))
+
+	info, err := os.Stat(migConfigPath)
+	if err != nil {
+		t.Fatalf("expected config file to exist: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected permissions 0600, got %o", perm)
+	}
+	data, err := os.ReadFile(migConfigPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if string(data) != "version: v1" {
+		t.Errorf("unexpected content: %q", string(data))
+	}
+
+	// Write into a missing directory must not panic; the error is only logged.
+	migConfigPath = filepath.Join(t.TempDir(), "missing", "migconfig.yaml")
+	writeMigConfig([]byte("x"))
+	if _, err := os.Stat(migConfigPath); err == nil {
+		t.Errorf("expected write to fail for missing directory")
+	}
+}
+
+func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("file permissions do not block root")
+	}
+	orig := migConfigPath
+	defer func() { migConfigPath = orig }()
+
+	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
+	if err := os.WriteFile(migConfigPath, []byte("stale"), 0o400); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Read-only file makes the write fail; the stale file must be removed so
+	// nvidia-mig-parted cannot pick it up afterwards.
+	writeMigConfig([]byte("fresh"))
+	if _, err := os.Stat(migConfigPath); !os.IsNotExist(err) {
+		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }

@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.26.2-bookworm
+ARG GOLANG_IMAGE=golang:1.26.5-bookworm
 ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
 
 FROM $GOLANG_IMAGE AS gobuild
@@ -8,7 +8,7 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.3
 
 FROM $NVIDIA_IMAGE AS nvbuild
 RUN dnf install -y cmake git && dnf clean all

@@ -96,35 +96,7 @@ func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
-	if inuse, ok := annos[DCUInUse]; ok {
-		if !strings.Contains(inuse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(inuse)) {
-				return true
-			}
-		} else {
-			for val := range strings.SplitSeq(inuse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	if nouse, ok := annos[DCUNoUse]; ok {
-		if !strings.Contains(nouse, ",") {
-			if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(nouse)) {
-				return false
-			}
-		} else {
-			for val := range strings.SplitSeq(nouse, ",") {
-				if strings.Contains(strings.ToUpper(cardtype), strings.ToUpper(val)) {
-					return false
-				}
-			}
-		}
-		return true
-	}
-	return true
+	return device.CheckType(annos, cardtype, DCUInUse, DCUNoUse)
 }
 
 func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -280,6 +252,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -309,6 +282,11 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		if k.Coresreq > 100 {

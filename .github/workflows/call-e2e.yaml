@@ -13,6 +13,9 @@ on:
         type: string
         default: pullrequest
 
+permissions:
+  contents: read
+
 jobs:
   e2e-test:
     strategy:
@@ -37,7 +40,7 @@ jobs:
         run: bash hack/e2e-runner-lock.sh acquire
 
       - name: install Go
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version-file: go.mod
 

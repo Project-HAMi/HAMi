@@ -29,6 +29,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
@@ -384,6 +385,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	profile, profileMatch := enf.selectProfileByRequest(devices, k)
 	if !profileMatch {
 		reason[common.ModeNotFit]++
@@ -422,6 +424,11 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		if dev.Totalmem-dev.Usedmem < profileMemoryMiB {

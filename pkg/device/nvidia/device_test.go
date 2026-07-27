@@ -1632,41 +1632,11 @@ func TestCheckHealth(t *testing.T) {
 		current             int64
 		reported            int64
 		handshakeAnnotation string
+		cachedRegisterAnno  string
+		registerAnno        string
 		wantHealthy         bool
 		wantNeedReset       bool
 	}{
-		{
-			name:                "current=0 reported=0: no devices registered yet",
-			current:             0,
-			reported:            0,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current=0 reported>0: devices disappeared",
-			current:             0,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         false,
-			wantNeedReset:       false,
-		},
-		{
-			name:                "current>0 reported differs: count changed",
-			current:             4,
-			reported:            2,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       true,
-		},
-		{
-			name:                "current>0 reported same: stable",
-			current:             4,
-			reported:            4,
-			handshakeAnnotation: "Deleted_",
-			wantHealthy:         true,
-			wantNeedReset:       false,
-		},
 		{
 			name:                "Kernel 6.17 Bug: current=0 reported=0 but handshake pending",
 			current:             0,
@@ -1682,6 +1652,46 @@ func TestCheckHealth(t *testing.T) {
 			handshakeAnnotation: "Requesting_" + pastTime,
 			wantHealthy:         false,
 			wantNeedReset:       false,
+		},
+		{
+			name:                "current>0 reported same: changed register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: false, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: true,
+		},
+		{
+			name:                "current>0 reported same: unchanged register annotation keeps cache",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			wantHealthy:   true,
+			wantNeedReset: false,
+		},
+		{
+			name:                "current>0 reported same: deleted register annotation requests refresh",
+			current:             4,
+			reported:            4,
+			handshakeAnnotation: "Requesting_" + pastTime,
+			cachedRegisterAnno: device.MarshalNodeDevices([]*device.DeviceInfo{
+				{ID: "GPU-0", Count: 10, Devmem: 8192, Devcore: 100, Type: "NVIDIA-A100", Health: true, Mode: "hami-core"},
+			}),
+			registerAnno:  "",
+			wantHealthy:   true,
+			wantNeedReset: true,
 		},
 	}
 
@@ -1703,9 +1713,15 @@ func TestCheckHealth(t *testing.T) {
 				},
 				Status: corev1.NodeStatus{Allocatable: allocatable},
 			}
+			if tt.registerAnno != "" {
+				node.Annotations[RegisterAnnos] = tt.registerAnno
+			}
 
 			if tt.reported > 0 {
 				dev.ReportedGPUNum["test-node"] = tt.reported
+			}
+			if tt.cachedRegisterAnno != "" {
+				dev.ReportedRegisterAnnos["test-node"] = tt.cachedRegisterAnno
 			}
 
 			healthy, needReset := dev.CheckHealth("NVIDIA", node)
@@ -2165,8 +2181,8 @@ func TestNodeCleanUp(t *testing.T) {
 
 	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
 	assert.NilError(t, err)
-	anno := updated.Annotations[HandshakeAnnos]
-	assert.Assert(t, strings.HasPrefix(anno, "Deleted_"), "expected annotation to start with 'Deleted_', got %q", anno)
+	_, exists := updated.Annotations[HandshakeAnnos]
+	assert.Assert(t, !exists, "expected annotation to be removed, but it still exists")
 }
 
 func TestLockNode(t *testing.T) {
@@ -2370,6 +2386,16 @@ func TestCheckGPUtype_NoUse(t *testing.T) {
 	}
 	assert.Equal(t, checkGPUtype(annos, "NVIDIA-A100"), false)
 	assert.Equal(t, checkGPUtype(annos, "NVIDIA-V100"), true)
+}
+
+func TestCheckGPUtype_EmptyAnnotation(t *testing.T) {
+	// An empty use/nouse type annotation means "no constraint": strings.Contains
+	// treats "" as a substring of every card type, so without a guard an empty
+	// nouse-gputype would wrongly exclude every device.
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUInUse: "   "}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: ""}, "NVIDIA-A100"), true)
+	assert.Equal(t, checkGPUtype(map[string]string{GPUNoUse: "   "}, "NVIDIA-A100"), true)
 }
 
 func TestCheckType_AllocateMode(t *testing.T) {
@@ -2632,6 +2658,34 @@ func TestFit_NumaSwitching(t *testing.T) {
 	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
 	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-1")
 	assert.Equal(t, result[NvidiaGPUDevice][1].UUID, "dev-0")
+}
+
+func TestFit_MutexPolicy(t *testing.T) {
+	nv := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+	devices := []*device.DeviceUsage{
+		{ID: "used", Index: 0, Used: 1, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "idle", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyMutex.String()},
+	}}
+
+	// mutex skips the used device and allocates only the idle one.
+	one := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, result, _ := nv.Fit(devices, one, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+	assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "idle")
+
+	// mutex cannot satisfy 2 cards when only one device is idle.
+	two := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, _, _ = nv.Fit(devices, two, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
 }
 
 func TestFit_TopologyExactMatch(t *testing.T) {

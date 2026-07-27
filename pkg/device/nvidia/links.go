@@ -149,6 +149,7 @@ func GetP2PLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 
 // GetNVLink gets the number of NVLinks between the specified devices.
 func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
+	// Direct GPU <-> GPU: match remote PCI bus IDs.
 	pciInfos, err := getAllNvLinkRemotePciInfo(dev1)
 	if err != nil {
 		return P2PLinkUnknown, fmt.Errorf("failed to get nvlink remote pci info: %v", err)
@@ -160,53 +161,37 @@ func GetNVLink(dev1 device.Device, dev2 device.Device) (P2PLinkType, error) {
 	}
 	dev2BusID := PciInfo(dev2PciInfo).BusID()
 
-	nvlink := P2PLinkUnknown
-	for _, pciInfo := range pciInfos {
-		if pciInfo.BusID() != dev2BusID {
-			continue
-		}
-		switch nvlink {
-		case P2PLinkUnknown:
-			nvlink = SingleNVLINKLink
-		case SingleNVLINKLink:
-			nvlink = TwoNVLINKLinks
-		case TwoNVLINKLinks:
-			nvlink = ThreeNVLINKLinks
-		case ThreeNVLINKLinks:
-			nvlink = FourNVLINKLinks
-		case FourNVLINKLinks:
-			nvlink = FiveNVLINKLinks
-		case FiveNVLINKLinks:
-			nvlink = SixNVLINKLinks
-		case SixNVLINKLinks:
-			nvlink = SevenNVLINKLinks
-		case SevenNVLINKLinks:
-			nvlink = EightNVLINKLinks
-		case EightNVLINKLinks:
-			nvlink = NineNVLINKLinks
-		case NineNVLINKLinks:
-			nvlink = TenNVLINKLinks
-		case TenNVLINKLinks:
-			nvlink = ElevenNVLINKLinks
-		case ElevenNVLINKLinks:
-			nvlink = TwelveNVLINKLinks
-		case TwelveNVLINKLinks:
-			nvlink = ThirteenNVLINKLinks
-		case ThirteenNVLINKLinks:
-			nvlink = FourteenNVLINKLinks
-		case FourteenNVLINKLinks:
-			nvlink = FifteenNVLINKLinks
-		case FifteenNVLINKLinks:
-			nvlink = SixteenNVLINKLinks
-		case SixteenNVLINKLinks:
-			nvlink = SeventeenNVLINKLinks
-		case SeventeenNVLINKLinks:
-			nvlink = EighteenNVLINKLinks
-		}
+	// A GPU with both direct and NVSwitch links is not expected on current
+	// NVIDIA hardware; if it ever occurs, the NVSwitch links would be
+	// silently ignored here.
+	direct := nvlinkCountToType(countMatchingLinks(pciInfos, dev2BusID))
+	if direct != P2PLinkUnknown {
+		return direct, nil
 	}
-	// TODO(klueska): Handle NVSwitch semantics
 
-	return nvlink, nil
+	// No enabled NVLinks on dev1 — skip NVSwitch detection.
+	// Remove if GetNvLinkRemotePciInfo and GetNvLinkRemoteDeviceType
+	// ever diverge in NOT_SUPPORTED behavior.
+	if len(pciInfos) == 0 {
+		return P2PLinkUnknown, nil
+	}
+
+	// NVSwitch: remote PCI is the switch, not the peer GPU.
+	// Both GPUs must connect through NVSwitch; the link count is the
+	// minimum active count across the pair.
+	links1, viaSwitch1, err := countNvSwitchLinks(dev1)
+	if err != nil {
+		return P2PLinkUnknown, fmt.Errorf("failed to check nvswitch links for dev1: %v", err)
+	}
+	links2, viaSwitch2, err := countNvSwitchLinks(dev2)
+	if err != nil {
+		return P2PLinkUnknown, fmt.Errorf("failed to check nvswitch links for dev2: %v", err)
+	}
+	if viaSwitch1 && viaSwitch2 {
+		return nvlinkCountToType(min(links1, links2)), nil
+	}
+
+	return P2PLinkUnknown, nil
 }
 
 // getAllNvLinkRemotePciInfo returns the PCI info for all devices attached to the specified device by an NVLink.
@@ -234,6 +219,63 @@ func getAllNvLinkRemotePciInfo(dev device.Device) ([]PciInfo, error) {
 	}
 
 	return pciInfos, nil
+}
+
+// countMatchingLinks counts how many remote PCI entries match busID.
+func countMatchingLinks(pciInfos []PciInfo, busID string) int {
+	n := 0
+	for _, pci := range pciInfos {
+		if pci.BusID() == busID {
+			n++
+		}
+	}
+	return n
+}
+
+// countNvSwitchLinks returns the count of enabled NVLinks whose remote is
+// an NVSwitch, and whether the device has any such links at all.
+func countNvSwitchLinks(dev device.Device) (count int, viaSwitch bool, err error) {
+	for i := range nvml.NVLINK_MAX_LINKS {
+		state, ret := dev.GetNvLinkState(i)
+		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+			continue
+		}
+		if !errors.Is(ret, nvml.SUCCESS) {
+			return 0, false, fmt.Errorf("failed to get nvlink state: %v", ret)
+		}
+		if state != nvml.FEATURE_ENABLED {
+			continue
+		}
+		deviceType, ret := dev.GetNvLinkRemoteDeviceType(i)
+		if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) || errors.Is(ret, nvml.ERROR_INVALID_ARGUMENT) {
+			continue
+		}
+		if !errors.Is(ret, nvml.SUCCESS) {
+			return 0, false, fmt.Errorf("failed to get nvlink remote device type: %v", ret)
+		}
+		if deviceType == nvml.NVLINK_DEVICE_TYPE_SWITCH {
+			count++
+		}
+	}
+	return count, count > 0, nil
+}
+
+// nvlinkCountToType converts a count to the corresponding P2PLinkType.
+func nvlinkCountToType(n int) P2PLinkType {
+	// Covers up to 18 NVLinks per GPU (current max: H100/B200).
+	types := [...]P2PLinkType{
+		P2PLinkUnknown,
+		SingleNVLINKLink, TwoNVLINKLinks, ThreeNVLINKLinks,
+		FourNVLINKLinks, FiveNVLINKLinks, SixNVLINKLinks,
+		SevenNVLINKLinks, EightNVLINKLinks, NineNVLINKLinks,
+		TenNVLINKLinks, ElevenNVLINKLinks, TwelveNVLINKLinks,
+		ThirteenNVLINKLinks, FourteenNVLINKLinks, FifteenNVLINKLinks,
+		SixteenNVLINKLinks, SeventeenNVLINKLinks, EighteenNVLINKLinks,
+	}
+	if n < 1 || n >= len(types) {
+		return P2PLinkUnknown
+	}
+	return types[n]
 }
 
 // PciInfo is a type alias to nvml.PciInfo to allow for functions to be defined on the type.

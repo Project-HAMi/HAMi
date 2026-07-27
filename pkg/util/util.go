@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"strings"
-	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -226,14 +225,38 @@ func InitKlogFlags() *flag.FlagSet {
 }
 
 func MarkAnnotationsToDelete(devType string, nn string) error {
-	tmppat := make(map[string]string)
-	tmppat[devType] = "Deleted_" + time.Now().Format(time.DateTime)
 	n, err := GetNode(nn)
 	if err != nil {
 		klog.Errorln("get node failed", err.Error())
 		return err
 	}
-	return PatchNodeAnnotations(n, tmppat)
+	return RemoveNodeAnnotation(n, devType)
+}
+
+func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
+	annos := make(map[string]any, len(annotationKeys))
+	for _, key := range annotationKeys {
+		annos[key] = nil
+	}
+	patch := map[string]any{
+		"metadata": map[string]any{
+			"annotations": annos,
+		},
+	}
+	bytes, err := json.Marshal(patch)
+	if err != nil {
+		return err
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+	_, err = c.CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
+	if err != nil {
+		klog.Infoln("remove annotation failed for node", node.Name, "annotationKeys", annotationKeys)
+	}
+	return err
 }
 
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
@@ -256,4 +279,12 @@ func IsPodTerminating(pod *corev1.Pod) bool {
 
 func AllContainersCreated(pod *corev1.Pod) bool {
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
+}
+
+// Coscheduling PodGroup, based on the presence of the PodGroupLabel.
+func IsPodGroupMember(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
+	return pod.Labels[PodGroupLabel] != ""
 }

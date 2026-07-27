@@ -79,7 +79,7 @@ jobs:
           make lint_dockerfile
 
       - name: Docker Login
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@v4.5.1
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
@@ -105,6 +105,7 @@ jobs:
             images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO }}
 
       - name: Build & Pushing hami image
+        id: build
         uses: docker/build-push-action@v7.3.0
         with:
             context: .
@@ -113,10 +114,20 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.26.2-bookworm
+              GOLANG_IMAGE=golang:1.26.5-bookworm
               HAMICORE_IMAGE=${{ steps.meta.outputs.tags }}
               DEST_DIR=/usr/local
             tags: ${{ steps.meta1.outputs.tags }}
             push: true
+            provenance: mode=max
+            sbom: true
             github-token: ${{ env.REGISTER_PASSWORD }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign hami image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${REGISTRY}/${IMAGE_REPO}@${DIGEST}"
 

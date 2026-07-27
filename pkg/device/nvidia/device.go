@@ -20,7 +20,6 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -130,6 +129,10 @@ type NodeDefaultConfig struct {
 	PreConfiguredDeviceMemory *int64   `yaml:"preConfiguredDeviceMemory" json:"preconfigureddevicememory"`
 	// LogLevel is LIBCUDA_LOG_LEVEL value
 	LogLevel *LibCudaLogLevel `yaml:"libCudaLogLevel" json:"libcudaloglevel"`
+	// EnableNUMATopology advertises the physical GPU's NUMA node on each vGPU
+	// replica so kubelet's TopologyManager can align CPU and GPU NUMA nodes.
+	// Defaults to false to preserve existing admission behavior.
+	EnableNUMATopology *bool `yaml:"enableNumaTopology" json:"enablenumatopology"`
 }
 
 type FilterDevice struct {
@@ -159,9 +162,10 @@ type DeviceConfig struct {
 }
 
 type NvidiaGPUDevices struct {
-	config         NvidiaConfig
-	ReportedGPUNum map[string]int64 // key: nodeName, value: reported GPU count
-	mu             sync.Mutex       // protects concurrent access to ReportedGPUNum
+	config                NvidiaConfig
+	ReportedGPUNum        map[string]int64  // key: nodeName, value: reported GPU count
+	ReportedRegisterAnnos map[string]string // key: nodeName, value: last observed register annotation
+	mu                    sync.Mutex        // protects concurrent access to reported node state
 }
 
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
@@ -174,8 +178,9 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	}
 	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
-		config:         nvconfig,
-		ReportedGPUNum: make(map[string]int64),
+		config:                nvconfig,
+		ReportedGPUNum:        make(map[string]int64),
+		ReportedRegisterAnnos: make(map[string]string),
 	}
 }
 
@@ -233,18 +238,27 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 	klog.V(3).InfoS("checking device health for node", "nodeName", n.Name, "deviceType", devType, "currentDevices", current, "reportedDevices", reported)
 
 	handshakeHealthy, handshakeChanged := device.CheckHealth(devType, dev.config.ResourceCountName, n)
+	registerAnno := n.Annotations[RegisterAnnos]
+	reportedRegisterAnno := dev.ReportedRegisterAnnos[n.Name]
 
 	if current == 0 {
 		if reported == 0 {
 			return handshakeHealthy, handshakeChanged
 		}
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return false, handshakeChanged
 	}
 
 	if reported != current {
 		dev.ReportedGPUNum[n.Name] = current
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
 		return true, true
+	}
+
+	if reportedRegisterAnno != registerAnno {
+		dev.ReportedRegisterAnnos[n.Name] = registerAnno
+		return handshakeHealthy, true
 	}
 
 	return handshakeHealthy, handshakeChanged
@@ -474,24 +488,7 @@ func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
 }
 
 func checkGPUtype(annos map[string]string, cardtype string) bool {
-	cardtype = strings.ToUpper(cardtype)
-	if inuse, ok := annos[GPUInUse]; ok {
-		useTypes := strings.Split(inuse, ",")
-		if !slices.ContainsFunc(useTypes, func(useType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(useType))
-		}) {
-			return false
-		}
-	}
-	if unuse, ok := annos[GPUNoUse]; ok {
-		unuseTypes := strings.Split(unuse, ",")
-		if slices.ContainsFunc(unuseTypes, func(unuseType string) bool {
-			return strings.Contains(cardtype, strings.ToUpper(unuseType))
-		}) {
-			return false
-		}
-	}
-	return true
+	return device.CheckType(annos, cardtype, GPUInUse, GPUNoUse)
 }
 
 func assertNuma(annos map[string]string) bool {
@@ -754,7 +751,9 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	needTopology := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyTopology.String()
+	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
+	needTopology := gpuPolicy == util.GPUSchedulerPolicyTopology.String()
+	isMutex := gpuPolicy == util.GPUSchedulerPolicyMutex.String()
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -788,6 +787,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		if dev.Count <= dev.Used {
 			reason[common.CardTimeSlicingExhausted]++
 			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
+			continue
+		}
+		if isMutex && dev.Used > 0 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
 		if k.Coresreq > 100 {
