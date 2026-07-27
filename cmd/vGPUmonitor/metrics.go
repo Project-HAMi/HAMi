@@ -140,6 +140,11 @@ var (
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
+	ctrOOMKillsDesc = prometheus.NewDesc(
+		"hami_container_oom_kill_status",
+		"0 or 1 gauge indicating if the container's last termination was an OOM kill",
+		[]string{"namespace", "pod", "container"}, nil,
+	)
 	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_buffer_bytes",
 		"Container device memory buffer size in bytes",
@@ -157,6 +162,7 @@ var (
 	legacyCtrDeviceUtilizationdesc *prometheus.Desc
 	legacyCtrDeviceLastKernelDesc  *prometheus.Desc
 	legacyCtrDeviceMigInfo         *prometheus.Desc
+	legacyCtrOOMKillsDesc          *prometheus.Desc
 )
 
 func initLegacyDescriptors() {
@@ -195,6 +201,11 @@ func initLegacyDescriptors() {
 		"Container device last kernel description",
 		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
+	legacyCtrOOMKillsDesc = prometheus.NewDesc(
+		"Container_oom_kill_status",
+		"0 or 1 gauge indicating if the container's last termination was an OOM kill",
+		[]string{"podnamespace", "podname", "ctrname"}, nil,
+	)
 	legacyCtrDeviceMigInfo = prometheus.NewDesc(
 		"MigInfo",
 		"Mig device information for container",
@@ -224,6 +235,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
+	ch <- ctrOOMKillsDesc
 
 	if cc.ClusterManager.LegacyMetrics {
 		ch <- legacyHostGPUdesc
@@ -234,6 +246,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 		ch <- legacyCtrDeviceUtilizationdesc
 		ch <- legacyCtrDeviceLastKernelDesc
 		ch <- legacyCtrDeviceMigInfo
+		ch <- legacyCtrOOMKillsDesc
 	}
 }
 
@@ -549,6 +562,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			return err
 		}
 
+
 		if lastKernelTime > 0 {
 			lastSec := max(nowSec-lastKernelTime, 0)
 			if err := sendMetric(ch, ctrDeviceLastKernelDesc, prometheus.GaugeValue, float64(lastSec), labels...); err != nil {
@@ -558,6 +572,24 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			sendLegacyMetric(ch, legacyCtrDeviceLastKernelDesc, prometheus.GaugeValue, float64(lastSec), labels...)
 		}
 	}
+
+	// Collect OOM kill status for the container
+	var oomKills float64 = 0
+	for _, status := range pod.Status.ContainerStatuses {
+		if status.Name == ctr.Name {
+			if status.LastTerminationState.Terminated != nil && status.LastTerminationState.Terminated.Reason == "OOMKilled" {
+				oomKills = 1
+			}
+			break
+		}
+	}
+
+	labelsOOM := []string{pod.Namespace, pod.Name, ctr.Name}
+	if err := sendMetric(ch, ctrOOMKillsDesc, prometheus.GaugeValue, oomKills, labelsOOM...); err != nil {
+		klog.Errorf("Failed to send oom kills metric: %v", err)
+		return err
+	}
+	sendLegacyMetric(ch, legacyCtrOOMKillsDesc, prometheus.GaugeValue, oomKills, labelsOOM...)
 
 	klog.V(5).Infof("Successfully collected metrics for Pod %s/%s, Container %s", pod.Namespace, pod.Name, ctr.Name)
 	return nil
