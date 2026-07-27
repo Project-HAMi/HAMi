@@ -230,6 +230,23 @@ data:
               core: 100
               memory: 184320
               count: 1
+      - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
+        allowedGeometries:
+          -
+            - name: 1g.24gb
+              core: 25
+              memory: 24576
+              count: 4
+          -
+            - name: 2g.48gb
+              core: 50
+              memory: 49152
+              count: 2
+          -
+            - name: 4g.96gb
+              core: 100
+              memory: 98304
+              count: 1
     cambricon:
       resourceCountName: {{ .Values.mluResourceName }}
       resourceMemoryName: {{ .Values.mluResourceMem }}
