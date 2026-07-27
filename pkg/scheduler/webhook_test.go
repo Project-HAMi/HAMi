@@ -645,7 +645,13 @@ func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
 
 func TestPrivilegedContainerDenied(t *testing.T) {
 	prevSchedulerName := config.SchedulerName
-	t.Cleanup(func() { config.SchedulerName = prevSchedulerName })
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
 
 	config.SchedulerName = "hami-scheduler"
 	sConfig := &config.Config{
@@ -702,6 +708,49 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 								Limits: corev1.ResourceList{
 									"hami.io/gpu": resource.MustParse("1"),
 								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "privileged init container with gpu workload",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "init-privileged-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{
+							Name: "privileged-init",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
+							},
+						},
+					},
+					Containers: []corev1.Container{
+						{
+							Name: "gpu-workload",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"hami.io/gpu": resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "privileged pod with different scheduler",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "other-scheduler-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					SchedulerName: "other-scheduler",
+					Containers: []corev1.Container{
+						{
+							Name: "privileged",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
 							},
 						},
 					},

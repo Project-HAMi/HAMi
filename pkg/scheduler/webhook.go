@@ -62,6 +62,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
 		return admission.Denied("pod has no containers")
 	}
+	if name, privileged := privilegedContainerName(pod); privileged {
+		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, name)
+		return admission.Denied(fmt.Sprintf("container %s is privileged", name))
+	}
 	if pod.Spec.SchedulerName != "" &&
 		(pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler) &&
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
@@ -70,14 +74,8 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	hasResource := false
-	for idx, ctr := range pod.Spec.Containers {
+	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
-		if ctr.SecurityContext != nil {
-			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
-				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
-				return admission.Denied(fmt.Sprintf("container %s is privileged", c.Name))
-			}
-		}
 		for _, val := range device.GetDevices() {
 			found, err := val.MutateAdmission(c, pod)
 			if err != nil {
@@ -107,6 +105,26 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Errored(http.StatusInternalServerError, err)
 	}
 	return admission.PatchResponseFromRaw(req.Object.Raw, marshaledPod)
+}
+
+func privilegedContainerName(pod *corev1.Pod) (string, bool) {
+	for _, ctr := range pod.Spec.InitContainers {
+		if isPrivilegedContainer(&ctr) {
+			return ctr.Name, true
+		}
+	}
+	for _, ctr := range pod.Spec.Containers {
+		if isPrivilegedContainer(&ctr) {
+			return ctr.Name, true
+		}
+	}
+	return "", false
+}
+
+func isPrivilegedContainer(ctr *corev1.Container) bool {
+	return ctr.SecurityContext != nil &&
+		ctr.SecurityContext.Privileged != nil &&
+		*ctr.SecurityContext.Privileged
 }
 
 func fitResourceQuota(pod *corev1.Pod) bool {
