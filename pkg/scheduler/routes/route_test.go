@@ -278,8 +278,16 @@ func TestPredicateRoute_FilterSuccess(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
+
 	if result.Error != "" {
 		t.Errorf("expected no error from Filter, got %q", result.Error)
+	}
+
+	if result.NodeNames == nil {
+		t.Fatal("expected NodeNames to be non-nil in successful filter result")
+	}
+	if !reflect.DeepEqual(*result.NodeNames, nodeNames) {
+		t.Errorf("expected NodeNames %v, got %v", nodeNames, *result.NodeNames)
 	}
 }
 
