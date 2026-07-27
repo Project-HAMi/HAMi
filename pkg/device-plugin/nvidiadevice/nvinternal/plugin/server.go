@@ -52,6 +52,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/imdario/mergo"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/util/yaml"
 	"k8s.io/klog/v2"
@@ -833,21 +834,28 @@ func (plugin *NvidiaDevicePlugin) PreStartContainer(context.Context, *kubeletdev
 	return &kubeletdevicepluginv1beta1.PreStartContainerResponse{}, nil
 }
 
-// dial establishes the gRPC communication with the registered device plugin.
 func (plugin *NvidiaDevicePlugin) dial(unixSocketPath string, timeout time.Duration) (*grpc.ClientConn, error) {
-	ctx, cancel := context.WithTimeout(plugin.ctx, timeout)
-	defer cancel()
-	//nolint:staticcheck  // TODO: Switch to grpc.NewClient
-	c, err := grpc.DialContext(ctx, unixSocketPath,
+	c, err := grpc.NewClient("unix://"+unixSocketPath,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		//nolint:staticcheck  // TODO: WithBlock is deprecated.
-		grpc.WithBlock(),
-		grpc.WithContextDialer(func(ctx context.Context, addr string) (net.Conn, error) {
-			return (&net.Dialer{}).DialContext(ctx, "unix", addr)
-		}),
 	)
 	if err != nil {
 		return nil, err
+	}
+
+	ctx, cancel := context.WithTimeout(plugin.ctx, timeout)
+	defer cancel()
+
+	// Wait for the connection to be ready (replaces the deprecated grpc.WithBlock())
+	c.Connect() // Trigger connection attempt
+	for {
+		state := c.GetState()
+		if state == connectivity.Ready {
+			break
+		}
+		if !c.WaitForStateChange(ctx, state) {
+			c.Close()
+			return nil, fmt.Errorf("timeout waiting for connection to %s", unixSocketPath)
+		}
 	}
 
 	return c, nil
