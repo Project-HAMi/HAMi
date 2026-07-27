@@ -642,3 +642,108 @@ func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
 		t.Fatalf("Expected schedulerName patch to %q, got patches: %+v", config.SchedulerName, resp.Patches)
 	}
 }
+
+func TestPrivilegedContainerDenied(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	t.Cleanup(func() { config.SchedulerName = prevSchedulerName })
+
+	config.SchedulerName = "hami-scheduler"
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	privileged := true
+	testCases := []struct {
+		name string
+		pod  *corev1.Pod
+	}{
+		{
+			name: "privileged container only",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "privileged-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "privileged",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name: "privileged sidecar with gpu workload",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "mixed-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{
+						{
+							Name: "privileged-sidecar",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: &privileged,
+							},
+						},
+						{
+							Name: "gpu-workload",
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"hami.io/gpu": resource.MustParse("1"),
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			podBytes, err := runtime.Encode(codec, tc.pod)
+			if err != nil {
+				t.Fatalf("Error encoding pod: %v", err)
+			}
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID:       "test-uid",
+					Namespace: tc.pod.Namespace,
+					Name:      tc.pod.Name,
+					Object: runtime.RawExtension{
+						Raw: podBytes,
+					},
+				},
+			}
+
+			resp := wh.Handle(context.Background(), req)
+			if resp.Allowed {
+				t.Fatalf("Expected denied response for privileged pod, but got allowed with %d patches", len(resp.Patches))
+			}
+			if resp.Result == nil || resp.Result.Message == "" {
+				t.Fatalf("Expected denial message, got: %+v", resp.Result)
+			}
+		})
+	}
+}

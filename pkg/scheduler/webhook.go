@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 
 	corev1 "k8s.io/api/core/v1"
@@ -74,7 +75,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
 				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
-				continue
+				return admission.Denied(fmt.Sprintf("container %s is privileged", c.Name))
 			}
 		}
 		for _, val := range device.GetDevices() {
