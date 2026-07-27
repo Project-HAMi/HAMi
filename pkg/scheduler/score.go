@@ -32,7 +32,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// containerResourceSummary holds both the GPU count and total memory for a group of containers, so we can compare them on both dimensions.
+// containerResourceSummary holds both the GPU count and total memory for a group of containers.
 type containerResourceSummary struct {
 	nums     int
 	memreq   int32
