@@ -62,10 +62,6 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission as pod has no containers", pod.Namespace, pod.Name, pod.UID)
 		return admission.Denied("pod has no containers")
 	}
-	if name, privileged := privilegedContainerName(pod); privileged {
-		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, name)
-		return admission.Denied(fmt.Sprintf("container %s is privileged", name))
-	}
 	if pod.Spec.SchedulerName != "" &&
 		(pod.Spec.SchedulerName != corev1.DefaultSchedulerName || !config.ForceOverwriteDefaultScheduler) &&
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
@@ -73,6 +69,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
+	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
@@ -84,6 +81,10 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 			}
 			hasResource = hasResource || found
 		}
+	}
+	if hasPrivileged && hasResource {
+		klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, privilegedName)
+		return admission.Denied(fmt.Sprintf("container %s is privileged", privilegedName))
 	}
 
 	if !hasResource {

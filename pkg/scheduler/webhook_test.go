@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -671,11 +672,12 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 
 	privileged := true
 	testCases := []struct {
-		name string
-		pod  *corev1.Pod
+		name    string
+		pod     *corev1.Pod
+		allowed bool
 	}{
 		{
-			name: "privileged container only",
+			name: "privileged container only without gpu",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "privileged-pod", Namespace: "default"},
 				Spec: corev1.PodSpec{
@@ -689,6 +691,7 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 					},
 				},
 			},
+			allowed: true,
 		},
 		{
 			name: "privileged sidecar with gpu workload",
@@ -713,6 +716,7 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 					},
 				},
 			},
+			allowed: false,
 		},
 		{
 			name: "privileged init container with gpu workload",
@@ -739,6 +743,7 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 					},
 				},
 			},
+			allowed: false,
 		},
 		{
 			name: "privileged pod with different scheduler",
@@ -756,6 +761,7 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 					},
 				},
 			},
+			allowed: true,
 		},
 	}
 
@@ -787,11 +793,20 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 			}
 
 			resp := wh.Handle(context.Background(), req)
+			if tc.allowed {
+				if !resp.Allowed {
+					t.Fatalf("Expected allowed response, but got denied: %+v", resp.Result)
+				}
+				return
+			}
 			if resp.Allowed {
 				t.Fatalf("Expected denied response for privileged pod, but got allowed with %d patches", len(resp.Patches))
 			}
-			if resp.Result == nil || resp.Result.Message == "" {
-				t.Fatalf("Expected denial message, got: %+v", resp.Result)
+			if len(resp.Patches) != 0 {
+				t.Fatalf("Expected no patches for privileged pod, got %d", len(resp.Patches))
+			}
+			if resp.Result == nil || !strings.Contains(resp.Result.Message, "is privileged") {
+				t.Fatalf("Expected privilege denial message, got: %+v", resp.Result)
 			}
 		})
 	}
