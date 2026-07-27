@@ -74,7 +74,7 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		if ctr.SecurityContext != nil {
 			if ctr.SecurityContext.Privileged != nil && *ctr.SecurityContext.Privileged {
 				klog.Warningf(template+" - Denying admission as container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
-				continue
+				return admission.Denied("privileged containers are not allowed")
 			}
 		}
 		for _, val := range device.GetDevices() {
