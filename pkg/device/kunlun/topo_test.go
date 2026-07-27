@@ -57,6 +57,32 @@ func req(nums int32) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{Nums: nums}
 }
 
+// sortedCopy returns a sorted copy of ints without mutating the input.
+func sortedCopy(in []int) []int {
+	out := append([]int{}, in...)
+	sort.Ints(out)
+	return out
+}
+
+// onlyFree returns a usedMask that leaves exactly the devices in keep
+// free (Used < Count) and marks every other device (0-7) as used.
+// This lets a test force interconnect/graghSelect down a specific
+// selection path instead of leaving all 8 devices free, where a
+// broken/empty implementation could otherwise slip through unnoticed.
+func onlyFree(keep []int) []int {
+	keepSet := map[int]bool{}
+	for _, idx := range keep {
+		keepSet[idx] = true
+	}
+	var usedMask []int
+	for i := 0; i < 8; i++ {
+		if !keepSet[i] {
+			usedMask = append(usedMask, i)
+		}
+	}
+	return usedMask
+}
+
 func TestParseUsage(t *testing.T) {
 	devices := newDevices(1, 3, 5) // 1,3,5 are used -> unavailable
 	got := parseUsage(devices, req(1), fitAvailable)
@@ -271,29 +297,84 @@ func TestGraghSelect_FourFromLeftWing(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------
+// interconnect
+//
+// NOTE: these tests previously only checked len(got) (and, for count=4,
+// treated an empty result as an acceptable outcome). With all 8 devices
+// free, "have" has length 8, not 4/5/6, so a real implementation may
+// legitimately bail out of the count==4 path early and return nil --
+// meaning TestInterconnect_FourDevices was passing even when interconnect
+// never actually exercised its selection logic. Separately, none of these
+// tests confirmed *which* devices were chosen, so a naive/broken
+// implementation (e.g. plain devicepick instead of consulting
+// parseInterconnection/parseInterconnection2) would pass just as well.
+//
+// The tests below constrain availability so exactly the right number of
+// devices are free, and assert against the real candidate table instead
+// of just length/no-duplicates.
+// ---------------------------------------------------------------------
+
 func TestInterconnect_TwoDevices(t *testing.T) {
-	devices := newDevices() // all 8 available
-	got := interconnect(devices, req(2), fitAvailable)
-	if len(got) != 0 && len(got) != 2 {
-		t.Fatalf("interconnect(count=2) returned unexpected length %v", got)
+	pairs := parseInterconnection()
+	if len(pairs) == 0 {
+		t.Fatal("parseInterconnection() returned no pairs to test against")
 	}
-	if len(got) == 2 && got[0] == got[1] {
-		t.Errorf("interconnect(count=2) returned duplicate indices %v", got)
+	target := pairs[0]
+
+	// Only the target pair is left free; every other device is marked
+	// used so the count==2 path is actually forced to choose this pair.
+	devices := newDevices(onlyFree(target)...)
+
+	got := interconnect(devices, req(2), fitAvailable)
+	if !reflect.DeepEqual(sortedCopy(got), sortedCopy(target)) {
+		t.Errorf("interconnect(count=2) = %v, want %v (only this pair available)", got, target)
+	}
+}
+
+func TestInterconnect_TwoDevices_ChoosesAmongMultipleCandidates(t *testing.T) {
+	pairs := parseInterconnection()
+	if len(pairs) < 2 {
+		t.Skip("need at least 2 candidate pairs in parseInterconnection() for this test")
+	}
+
+	devices := newDevices() // all 8 free -> more than one valid pair available
+	got := interconnect(devices, req(2), fitAvailable)
+	if len(got) != 2 {
+		t.Fatalf("interconnect(count=2) = %v, want length 2", got)
+	}
+	if got[0] == got[1] {
+		t.Fatalf("interconnect(count=2) returned duplicate indices %v", got)
+	}
+
+	sortedGot := sortedCopy(got)
+	found := false
+	for _, pair := range pairs {
+		if reflect.DeepEqual(sortedGot, sortedCopy(pair)) {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("interconnect(count=2) = %v, not a recognized interconnected pair from parseInterconnection()", got)
 	}
 }
 
 func TestInterconnect_FourDevices(t *testing.T) {
-	devices := newDevices() // all 8 available
-	got := interconnect(devices, req(4), fitAvailable)
-	if len(got) != 0 && len(got) != 4 {
-		t.Fatalf("interconnect(count=4) returned unexpected length %v", got)
+	groups := parseInterconnection2()
+	if len(groups) == 0 {
+		t.Fatal("parseInterconnection2() returned no groups to test against")
 	}
-	seen := map[int]bool{}
-	for _, idx := range got {
-		if seen[idx] {
-			t.Errorf("interconnect(count=4) returned duplicate index %d in %v", idx, got)
-		}
-		seen[idx] = true
+	target := groups[0]
+
+	// Only the target group is left free, so the count==4 path is forced
+	// down a real selection instead of possibly short-circuiting to nil
+	// (which happened with all 8 devices free, since len(have) was 8).
+	devices := newDevices(onlyFree(target)...)
+
+	got := interconnect(devices, req(4), fitAvailable)
+	if !reflect.DeepEqual(sortedCopy(got), sortedCopy(target)) {
+		t.Errorf("interconnect(count=4) = %v, want %v (only this group available)", got, target)
 	}
 }
 
