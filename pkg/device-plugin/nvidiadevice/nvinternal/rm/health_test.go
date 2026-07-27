@@ -225,10 +225,7 @@ func TestGetHealthCheckXids(t *testing.T) {
 
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
-			t.Setenv(envDisableHealthChecks, tc.disabled)
-			t.Setenv(envEnableHealthChecks, tc.enabled)
-
-			xids := getHealthCheckXids()
+			xids := getHealthCheckXids(tc.disabled, tc.enabled)
 			require.EqualValues(t, tc.expectedContents, xids)
 			require.Equal(t, tc.expectedAllDisabled, xids.IsAllDisabled())
 

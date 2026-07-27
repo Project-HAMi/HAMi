@@ -58,7 +58,7 @@ const (
 
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
 func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devices, unhealthy chan<- *Device, disableNVML <-chan bool) error {
-	xids := getHealthCheckXids()
+	xids := getHealthCheckXids(r.disableHealthChecks, r.enableHealthChecks)
 	if xids.IsAllDisabled() {
 		return nil
 	}
@@ -228,23 +228,18 @@ func (h disabledXIDs) IsDisabled(xid uint64) bool {
 }
 
 // getHealthCheckXids returns the XIDs that are considered fatal.
-// Here we combine the following (in order of precedence):
-// * A list of explicitly disabled XIDs (including all XIDs)
-// * A list of hardcoded disabled XIDs
-// * A list of explicitly enabled XIDs (including all XIDs)
-//
-// Note that if an XID is explicitly enabled, this takes precedence over it
-// having been disabled either explicitly or implicitly.
-func getHealthCheckXids() disabledXIDs {
+// Healthchecks can be disabled by specifying an explicit list of XIDs to ignore.
+// This list is defined by the DP_DISABLE_HEALTHCHECKS and DP_ENABLE_HEALTHCHECKS configuration options.
+// If DP_DISABLE_HEALTHCHECKS="all", all healthchecks are disabled.
+// An XID that is present in the "enabled" list will override the "disabled" list.
+// The list of ignored XIDs returned contains the predefined list of application errors
+// in addition to the specified list, minus the XIDs from the "enabled" list.
+func getHealthCheckXids(disableHealthChecks, enableHealthChecks string) disabledXIDs {
 	disabled := newHealthCheckXIDs(
-		// TODO: We should not read the envvar here directly, but instead
-		// "upgrade" this to a top-level config option.
-		strings.Split(strings.ToLower(os.Getenv(envDisableHealthChecks)), ",")...,
+		strings.Split(strings.ToLower(disableHealthChecks), ",")...,
 	)
 	enabled := newHealthCheckXIDs(
-		// TODO: We should not read the envvar here directly, but instead
-		// "upgrade" this to a top-level config option.
-		strings.Split(strings.ToLower(os.Getenv(envEnableHealthChecks)), ",")...,
+		strings.Split(strings.ToLower(enableHealthChecks), ",")...,
 	)
 
 	// Add the list of hardcoded disabled (ignored) XIDs:

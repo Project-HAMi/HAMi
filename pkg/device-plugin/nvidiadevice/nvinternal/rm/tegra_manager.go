@@ -44,8 +44,8 @@ type tegraResourceManager struct {
 
 var _ ResourceManager = (*tegraResourceManager)(nil)
 
-// NewTegraResourceManagers returns a set of ResourceManagers for tegra resources
-func NewTegraResourceManagers(config *spec.Config) ([]ResourceManager, error) {
+// NewTegraResourceManagers returns a set of ResourceManagers, one for each Tegra resource in 'config'.
+func NewTegraResourceManagers(config *spec.Config, disableHealthChecks, enableHealthChecks string) ([]ResourceManager, error) {
 	deviceMap, err := buildTegraDeviceMap(config)
 	if err != nil {
 		return nil, fmt.Errorf("error building Tegra device map: %v", err)
@@ -63,9 +63,11 @@ func NewTegraResourceManagers(config *spec.Config) ([]ResourceManager, error) {
 		}
 		r := &tegraResourceManager{
 			resourceManager: resourceManager{
-				config:   config,
-				resource: resourceName,
-				devices:  devices,
+				config:              config,
+				resource:            resourceName,
+				devices:             devices,
+				disableHealthChecks: disableHealthChecks,
+				enableHealthChecks:  enableHealthChecks,
 			},
 		}
 		if len(devices) != 0 {

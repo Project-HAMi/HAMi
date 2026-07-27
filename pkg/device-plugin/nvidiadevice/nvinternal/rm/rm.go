@@ -47,9 +47,11 @@ import (
 
 // resourceManager forms the base type for specific resource manager implementations
 type resourceManager struct {
-	config   *spec.Config
-	resource spec.ResourceName
-	devices  Devices
+	config              *spec.Config
+	resource            spec.ResourceName
+	devices             Devices
+	disableHealthChecks string
+	enableHealthChecks  string
 }
 
 // ResourceManager provides an interface for listing a set of Devices and checking health on them

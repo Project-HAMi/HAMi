@@ -26,9 +26,11 @@ import (
 // example DP_DISABLE_HEALTHCHECKS=all). CheckHealth must not dereference that
 // nil error.
 func TestCheckHealthNilErrorDoesNotPanic(t *testing.T) {
-	t.Setenv(envDisableHealthChecks, "all")
-
-	r := &nvmlResourceManager{}
+	r := &nvmlResourceManager{
+		resourceManager: resourceManager{
+			disableHealthChecks: "all",
+		},
+	}
 	stop := make(chan interface{})
 	unhealthy := make(chan *Device, 1)
 	disableNVML := make(chan bool, 1)

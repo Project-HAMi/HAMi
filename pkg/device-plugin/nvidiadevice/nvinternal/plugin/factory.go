@@ -35,6 +35,7 @@ package plugin
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
@@ -128,9 +129,14 @@ func (o *options) getResourceManagers() ([]rm.ResourceManager, error) {
 			_ = o.nvmllib.Shutdown()
 		}()
 
-		return rm.NewNVMLResourceManagers(o.infolib, o.nvmllib, o.devicelib, o.config.Config)
+		disableHealthChecks := os.Getenv("DP_DISABLE_HEALTHCHECKS")
+		enableHealthChecks := os.Getenv("DP_ENABLE_HEALTHCHECKS")
+
+		return rm.NewNVMLResourceManagers(o.infolib, o.nvmllib, o.devicelib, o.config.Config, disableHealthChecks, enableHealthChecks)
 	case "tegra":
-		return rm.NewTegraResourceManagers(o.config.Config)
+		disableHealthChecks := os.Getenv("DP_DISABLE_HEALTHCHECKS")
+		enableHealthChecks := os.Getenv("DP_ENABLE_HEALTHCHECKS")
+		return rm.NewTegraResourceManagers(o.config.Config, disableHealthChecks, enableHealthChecks)
 	default:
 		klog.Errorf("Incompatible strategy detected %v", strategy)
 		klog.Error("If this is a GPU node, did you configure the NVIDIA Container Toolkit?")
