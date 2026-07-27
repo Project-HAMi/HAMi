@@ -17,6 +17,8 @@
 package plugin
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"golang.org/x/net/context"
@@ -767,5 +769,55 @@ func TestCheckCDISpec(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestWriteMigConfig(t *testing.T) {
+	orig := migConfigPath
+	defer func() { migConfigPath = orig }()
+
+	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
+	writeMigConfig([]byte("version: v1"))
+
+	info, err := os.Stat(migConfigPath)
+	if err != nil {
+		t.Fatalf("expected config file to exist: %v", err)
+	}
+	if perm := info.Mode().Perm(); perm != 0o600 {
+		t.Errorf("expected permissions 0600, got %o", perm)
+	}
+	data, err := os.ReadFile(migConfigPath)
+	if err != nil {
+		t.Fatalf("read failed: %v", err)
+	}
+	if string(data) != "version: v1" {
+		t.Errorf("unexpected content: %q", string(data))
+	}
+
+	// Write into a missing directory must not panic; the error is only logged.
+	migConfigPath = filepath.Join(t.TempDir(), "missing", "migconfig.yaml")
+	writeMigConfig([]byte("x"))
+	if _, err := os.Stat(migConfigPath); err == nil {
+		t.Errorf("expected write to fail for missing directory")
+	}
+}
+
+func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("file permissions do not block root")
+	}
+	orig := migConfigPath
+	defer func() { migConfigPath = orig }()
+
+	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
+	if err := os.WriteFile(migConfigPath, []byte("stale"), 0o400); err != nil {
+		t.Fatalf("setup failed: %v", err)
+	}
+
+	// Read-only file makes the write fail; the stale file must be removed so
+	// nvidia-mig-parted cannot pick it up afterwards.
+	writeMigConfig([]byte("fresh"))
+	if _, err := os.Stat(migConfigPath); !os.IsNotExist(err) {
+		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }
