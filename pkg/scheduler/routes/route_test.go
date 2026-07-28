@@ -71,10 +71,6 @@ func (fakePodNamespaceLister) Get(name string) (*corev1.Pod, error) {
 	return nil, fmt.Errorf("pod %q not found", name)
 }
 
-// ---------------------------------------------------------------------------
-// Existing tests (unchanged)
-// ---------------------------------------------------------------------------
-
 func TestMaxRequestSize(t *testing.T) {
 	hugePayload := strings.Repeat(" ", maxRequestSize+100)
 
