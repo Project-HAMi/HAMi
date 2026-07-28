@@ -17,6 +17,8 @@ limitations under the License.
 package device
 
 import (
+	"sort"
+
 	corev1 "k8s.io/api/core/v1"
 )
 
@@ -92,7 +94,9 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 				Usedcores: effCores,
 			})
 		}
-
+		sort.Slice(containerDevs, func(i, j int) bool {
+			return containerDevs[i].UUID < containerDevs[j].UUID
+		})
 		collapsedSingle[0] = containerDevs
 		collapsed[devType] = collapsedSingle
 	}
@@ -131,6 +135,9 @@ func AppContainersOnlyDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 				Usedcores: s.cores,
 			})
 		}
+		sort.Slice(containerDevs, func(i, j int) bool {
+			return containerDevs[i].UUID < containerDevs[j].UUID
+		})
 		collapsedSingle[0] = containerDevs
 		collapsed[devType] = collapsedSingle
 	}

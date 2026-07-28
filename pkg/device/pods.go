@@ -148,7 +148,8 @@ func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	}
 	return pi, ok
 }
-func (m *PodManager) ShrinkUsage(pod *corev1.Pod, newDevices PodDevices) (oldDevices PodDevices, ok bool) {
+
+func (m *PodManager) UpdatePodDevice(pod *corev1.Pod, newDevices PodDevices) (oldDevices PodDevices, ok bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 

@@ -117,29 +117,29 @@ func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
 	}
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	if q.Quotas[pod.Namespace] == nil {
-		q.Quotas[pod.Namespace] = &DeviceQuota{}
-	}
-	dp, ok := q.Quotas[pod.Namespace]
-	if !ok {
-		return
-	}
-	for idx, val := range usage {
-		_, ok := (*dp)[idx]
-		if !ok {
-			(*dp)[idx] = &Quota{
-				Used:  0,
-				Limit: 0,
-			}
-		}
-		(*dp)[idx].Used += val
-	}
+	q.addUsageLocked(pod.Namespace, usage)
 	if klog.V(4).Enabled() {
 		for _, val := range q.Quotas {
 			for idx, val1 := range *val {
 				klog.V(4).Infoln("add usage val=", idx, ":", val1)
 			}
 		}
+	}
+}
+
+func (q *QuotaManager) addUsageLocked(namespace string, usage map[string]int64) {
+	if q.Quotas[namespace] == nil {
+		q.Quotas[namespace] = &DeviceQuota{}
+	}
+	dp := q.Quotas[namespace]
+	for idx, val := range usage {
+		if _, ok := (*dp)[idx]; !ok {
+			(*dp)[idx] = &Quota{
+				Used:  0,
+				Limit: 0,
+			}
+		}
+		(*dp)[idx].Used += val
 	}
 }
 
@@ -150,7 +150,18 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 	}
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	dp, ok := q.Quotas[pod.Namespace]
+	q.rmUsageLocked(pod.Namespace, usage)
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
+		}
+	}
+}
+
+func (q *QuotaManager) rmUsageLocked(namespace string, usage map[string]int64) {
+	dp, ok := q.Quotas[namespace]
 	if !ok {
 		return
 	}
@@ -163,13 +174,17 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 			}
 		}
 	}
-	if klog.V(4).Enabled() {
-		for _, val := range q.Quotas {
-			for idx, val1 := range *val {
-				klog.V(4).Infoln("after val=", idx, ":", val1)
-			}
-		}
+}
+func (q *QuotaManager) ReplaceUsage(pod *corev1.Pod, oldDevices, newDevices PodDevices) {
+	oldUsage := countPodDevices(oldDevices)
+	newUsage := countPodDevices(newDevices)
+	if len(oldUsage) == 0 && len(newUsage) == 0 {
+		return
 	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.rmUsageLocked(pod.Namespace, oldUsage)
+	q.addUsageLocked(pod.Namespace, newUsage)
 }
 
 func IsManagedQuota(quotaName string) bool {

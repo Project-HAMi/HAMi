@@ -133,18 +133,6 @@ func (s *Scheduler) doNodeNotify() {
 	}
 }
 
-func allInitContainersSucceeded(pod *corev1.Pod) bool {
-	if len(pod.Status.InitContainerStatuses) == 0 {
-		return false
-	}
-	for _, s := range pod.Status.InitContainerStatuses {
-		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
-			return false
-		}
-	}
-	return true
-}
-
 func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
@@ -213,7 +201,7 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	s.podManager.UpdatePod(newPod)
 
-	if !pi.InitContainerResourceReleased && allInitContainersSucceeded(newPod) {
+	if !pi.InitContainerResourceReleased && util.AllInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
 			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
@@ -222,10 +210,9 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
 
-		oldDevices, ok := s.podManager.ShrinkUsage(newPod, appOnlyDevices)
+		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, appOnlyDevices)
 		if ok {
-			s.quotaManager.RmUsage(newPod, oldDevices)
-			s.quotaManager.AddUsage(newPod, appOnlyDevices)
+			s.quotaManager.ReplaceUsage(newPod, oldDevices, appOnlyDevices)
 			klog.InfoS("Init containers completed, shrunk usage",
 				"pod", klog.KObj(newPod),
 				"oldUsage", oldDevices,

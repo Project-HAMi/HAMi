@@ -158,6 +158,17 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	}
 	return err
 }
+func AllInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return false
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	type patchMetadata struct {
