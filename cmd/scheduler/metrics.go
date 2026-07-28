@@ -20,7 +20,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -355,25 +354,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							float64(ctrdevval.Usedcores),
 							val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 					}
-					var totaldev int32
-					found := false
-					for _, ni := range *nu {
-						for _, nodedev := range ni.Devices.DeviceLists {
-							if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
-								totaldev = nodedev.Device.Totalmem
-								found = true
-								break
-							}
-						}
-						if found {
-							break
-						}
-					}
-					klog.V(4).InfoS("Total memory for device",
-						"deviceUUID", ctrdevval.UUID,
-						"totalMemory", totaldev,
-						"nodeID", val.NodeID,
-					)
 				}
 			}
 		}
