@@ -462,6 +462,34 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 	})
 })
 
+var _ = ginkgo.Describe("isHolderOf hostname prefix boundary", func() {
+	var lm *leaderManager
+
+	ginkgo.BeforeEach(func() {
+		lm = NewLeaderManager("dev", "kube-system", "hami-scheduler", LeaderCallbacks{})
+	})
+
+	ginkgo.It("should not match when another hostname extends the local prefix", func() {
+		otherHolder := "dev-server_" + string(uuid.NewUUID())
+		lease := &coordinationv1.Lease{
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &otherHolder,
+			},
+		}
+		g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
+	})
+
+	ginkgo.It("should match the local hostname holder identity", func() {
+		localHolder := generateHolderIdentity("dev")
+		lease := &coordinationv1.Lease{
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &localHolder,
+			},
+		}
+		g.Expect(lm.isHolderOf(lease)).Should(g.BeTrue())
+	})
+})
+
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
 	var lm LeaderManager
 	var elected bool
