@@ -142,8 +142,8 @@ func TestSchedulerMetricDescriptors(t *testing.T) {
 	for desc := range ch {
 		foundDescriptors++
 		descStr := desc.String()
-		// Ensure standard descriptors contain node_name
-		if strings.Contains(descStr, "fqName: \"hami_") {
+		// Ensure standard GPU descriptors (excluding namespace-scoped quota metrics) contain node_name
+		if strings.Contains(descStr, "fqName: \"hami_") && !strings.Contains(descStr, "hami_resource_quota_used") {
 			if !strings.Contains(descStr, "node_name") {
 				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
 			}
@@ -172,7 +172,7 @@ func TestSchedulerMetricDescriptorsLegacyMode(t *testing.T) {
 	for desc := range ch {
 		foundDescriptors++
 		descStr := desc.String()
-		if strings.Contains(descStr, "fqName: \"hami_") {
+		if strings.Contains(descStr, "fqName: \"hami_") && !strings.Contains(descStr, "hami_resource_quota_used") {
 			if !strings.Contains(descStr, "node_name") {
 				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
 			}
