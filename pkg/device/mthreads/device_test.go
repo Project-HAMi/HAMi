@@ -190,6 +190,33 @@ func Test_MutateAdmission(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			// A negative count must be rejected by the <= 0 guard as well.
+			name: "count set to negative is rejected",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"mthreads.com/vgpu":        *resource.NewQuantity(-1, resource.DecimalSI),
+							"mthreads.com/sgpu-memory": *resource.NewQuantity(2, resource.DecimalSI),
+							"mthreads.com/sgpu-core":   *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							"mthreads.com/request-gpu-num": "test123",
+						},
+					},
+				},
+			},
+			want:    false,
+			wantErr: true,
+		},
+		{
 			// A request-only non-positive count must be rejected too: admission
 			// mirrors GenerateResourceRequests, which reads Requests when Limits is
 			// absent, so the count cannot slip through unvalidated.
