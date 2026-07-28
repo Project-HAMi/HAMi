@@ -58,3 +58,49 @@ func TestCheckFunctionsHighPriority(t *testing.T) {
 		t.Error("CheckBlocking: expected false")
 	}
 }
+
+// multiStubInfo mocks a container that uses several devices, so the check
+// functions can be exercised over more than one UUID.
+type multiStubInfo struct {
+	priority int
+	uuids    []string
+}
+
+func (s *multiStubInfo) DeviceMax() int                     { return len(s.uuids) }
+func (s *multiStubInfo) DeviceNum() int                     { return len(s.uuids) }
+func (s *multiStubInfo) DeviceUUID(i int) string            { return s.uuids[i] }
+func (s *multiStubInfo) DeviceMemoryContextSize(int) uint64 { return 0 }
+func (s *multiStubInfo) DeviceMemoryModuleSize(int) uint64  { return 0 }
+func (s *multiStubInfo) DeviceMemoryBufferSize(int) uint64  { return 0 }
+func (s *multiStubInfo) DeviceMemoryOffset(int) uint64      { return 0 }
+func (s *multiStubInfo) DeviceMemoryTotal(int) uint64       { return 0 }
+func (s *multiStubInfo) DeviceSmUtil(int) uint64            { return 0 }
+func (s *multiStubInfo) SetDeviceSmLimit(uint64)            {}
+func (s *multiStubInfo) IsValidUUID(int) bool               { return true }
+func (s *multiStubInfo) DeviceMemoryLimit(int) uint64       { return 0 }
+func (s *multiStubInfo) SetDeviceMemoryLimit(uint64)        {}
+func (s *multiStubInfo) LastKernelTime() int64              { return 0 }
+func (s *multiStubInfo) GetPriority() int                   { return s.priority }
+func (s *multiStubInfo) GetRecentKernel() int32             { return 1 }
+func (s *multiStubInfo) SetRecentKernel(int32)              {}
+func (s *multiStubInfo) GetUtilizationSwitch() int32        { return 0 }
+func (s *multiStubInfo) SetUtilizationSwitch(int32)         {}
+
+// TestCheckBlocking_MultiDeviceContention verifies that CheckBlocking inspects
+// every device the container uses, not just the first one that appears in the
+// switch map. Here the first device (gpu-0) has no contention while a second
+// device (gpu-1) does; CheckBlocking must still report blocking.
+func TestCheckBlocking_MultiDeviceContention(t *testing.T) {
+	c := &nvidia.ContainerUsage{Info: &multiStubInfo{priority: 1, uuids: []string{"gpu-0", "gpu-1"}}}
+	sw := map[string]UtilizationPerDevice{
+		"gpu-0": {0, 0},
+		"gpu-1": {1, 0},
+	}
+	if !CheckBlocking(sw, 1, c) {
+		t.Error("CheckBlocking: expected true (gpu-1 has contention), got false")
+	}
+	// Sanity: the sibling CheckPriority already scans all devices and agrees.
+	if !CheckPriority(sw, 1, c) {
+		t.Error("CheckPriority: expected true (gpu-1 has contention), got false")
+	}
+}
