@@ -44,15 +44,17 @@ If hami.io/node-handshake annotations remains in "Requesting_xxxx" and {schedule
 HAMi scheduler needs to patch schedule decisions into pod annotations, in the format of the following:
 
 ```
-hami.io/{device-type}-devices-to-allocate:{ctr1 request}:{ctr2 request}:...{Last ctr request}:
+hami.io/vgpu-devices-to-allocate: {ctr1 request};{ctr2 request};...{Last ctr request};
 hami.io/vgpu-node: {schedule decision node}
 hami.io/vgpu-time: {timestamp}
 ```
 
-each container request is in the following format:
+`hami.io/vgpu-devices-to-allocate` is the key used for NVIDIA GPUs. Other device types use `hami.io/{device-type}-devices-to-allocate`, for example `hami.io/mthreads-vgpu-devices-to-allocate` or `hami.io/cambricon-mlu-devices-to-allocate`.
+
+each container request lists that container's devices. Every device is four comma-separated fields terminated by `:`, and every container is terminated by `;`:
 
 ```
-{device UUID},{device type keyword},{device memory request}:{device core request}
+{device UUID},{device type keyword},{device memory request},{device core request}:
 ```
 
 for example:
@@ -60,7 +62,7 @@ for example:
 A pod with 2 containers, first container requests 1 GPU with 3G device Memory, second container requests 1 GPU with 5G device Memory, then the patched annotations will be like the
 
 ```
-hami.io/devices-to-allocate: GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,5000,0: 
+hami.io/vgpu-devices-to-allocate: GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:;GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,5000,0:;
 hami.io/vgpu-node: node67-4v100
 hami.io/vgpu-time: 1705054796
 ```
