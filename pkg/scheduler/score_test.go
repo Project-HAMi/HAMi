@@ -3571,3 +3571,91 @@ func Test_Nvidia_GPU_Topology(t *testing.T) {
 		})
 	}
 }
+
+// fitMockDevice is a minimal device.Devices implementation whose Fit always
+// succeeds and returns a single device of its own type. Used to exercise
+// fitInDevices with more than one device type in a single container.
+type fitMockDevice struct {
+	typeName string
+	uuid     string
+}
+
+func (m *fitMockDevice) CommonWord() string { return m.typeName }
+func (m *fitMockDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (m *fitMockDevice) CheckHealth(_ string, _ *corev1.Node) (bool, bool) { return true, true }
+func (m *fitMockDevice) NodeCleanUp(_ string) error                        { return nil }
+func (m *fitMockDevice) GetResourceNames() device.ResourceNames            { return device.ResourceNames{} }
+func (m *fitMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+	return nil, nil
+}
+func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
+func (m *fitMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
+	return device.ContainerDeviceRequest{}
+}
+func (m *fitMockDevice) PatchAnnotations(_ *corev1.Pod, _ *map[string]string, _ device.PodDevices) map[string]string {
+	return nil
+}
+func (m *fitMockDevice) ScoreNode(_ *corev1.Node, _ device.PodSingleDevice, _ []*device.DeviceUsage, _ string) float32 {
+	return 0
+}
+func (m *fitMockDevice) AddResourceUsage(_ *corev1.Pod, _ *device.DeviceUsage, _ *device.ContainerDevice) error {
+	return nil
+}
+func (m *fitMockDevice) Fit(_ []*device.DeviceUsage, _ device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return true, map[string]device.ContainerDevices{
+		m.typeName: {{UUID: m.uuid, Type: m.typeName}},
+	}, ""
+}
+
+// Test_fitInDevices_MultiTypePartition guards against cross-device-type
+// pollution: when one container requests two device types, each type's entry
+// in the output PodDevices must contain only its own device.
+func Test_fitInDevices_MultiTypePartition(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+	device.DevicesMap = map[string]device.Devices{
+		"mockA": &fitMockDevice{typeName: "mockA", uuid: "uuid-a"},
+		"mockB": &fitMockDevice{typeName: "mockB", uuid: "uuid-b"},
+	}
+
+	node := NodeUsage{
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+		Devices: policy.DeviceUsageList{
+			DeviceLists: []*policy.DeviceListsScore{
+				{Device: &device.DeviceUsage{
+					ID: "uuid-a", Type: "mockA",
+					Count: 4, Used: 0, Totalcore: 100, Usedcores: 0, Totalmem: 8192, Usedmem: 0, Health: true,
+				}},
+				{Device: &device.DeviceUsage{
+					ID: "uuid-b", Type: "mockB",
+					Count: 4, Used: 0, Totalcore: 100, Usedcores: 0, Totalmem: 8192, Usedmem: 0, Health: true,
+				}},
+			},
+		},
+	}
+	requests := device.ContainerDeviceRequests{
+		"mockA": {Nums: 1, Type: "mockA", Memreq: 1024, MemPercentagereq: 101, Coresreq: 1},
+		"mockB": {Nums: 1, Type: "mockB", Memreq: 1024, MemPercentagereq: 101, Coresreq: 1},
+	}
+	devinput := &device.PodDevices{}
+
+	viewStatus(node)
+	fit, reason := fitInDevices(&node, requests, &corev1.Pod{}, nil, devinput)
+
+	assert.Equal(t, fit, true)
+	assert.Equal(t, reason, "")
+
+	// One container was processed, so each type has exactly one container entry.
+	assert.Equal(t, len((*devinput)["mockA"]), 1)
+	assert.Equal(t, len((*devinput)["mockB"]), 1)
+
+	// Each type's entry must contain ONLY its own device (the bug leaks the
+	// first-processed type's device into the second-processed type's entry).
+	assert.Equal(t, len((*devinput)["mockA"][0]), 1)
+	assert.Equal(t, (*devinput)["mockA"][0][0].UUID, "uuid-a")
+	assert.Equal(t, len((*devinput)["mockB"][0]), 1)
+	assert.Equal(t, (*devinput)["mockB"][0][0].UUID, "uuid-b")
+}
