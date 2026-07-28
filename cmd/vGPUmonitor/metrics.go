@@ -88,62 +88,62 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node_name", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_utilization_ratio",
 		"GPU core utilization ratio (0-100)",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node_name", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
 		"vGPU device memory usage in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrvGPUlimitdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_limit_bytes",
 		"vGPU device memory limit in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceMemorydesc = prometheus.NewDesc(
 		"hami_container_device_memory_bytes",
 		`Container device memory usage in bytes`,
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceUtilizationdesc = prometheus.NewDesc(
 		"hami_container_device_utilization_ratio",
 		"Container device SM utilization ratio",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceLastKernelDesc = prometheus.NewDesc(
 		"hami_container_last_kernel_elapsed_seconds",
 		"Seconds since last kernel execution in container",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
 		"hami_mig_device_info",
 		"MIG device information for container",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
 	)
 	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_context_bytes",
 		"Container device memory context size in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrDeviceMemoryModuleDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_module_bytes",
 		"Container device memory module size in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 
 	ctrDeviceMemoryBufferDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_buffer_bytes",
 		"Container device memory buffer size in bytes",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+		[]string{"node_name", "namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
 )
 
@@ -163,42 +163,42 @@ func initLegacyDescriptors() {
 	legacyHostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodename", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyHostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodename", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyCtrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
 		"vGPU device usage",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	legacyCtrvGPUlimitdesc = prometheus.NewDesc(
 		"vGPU_device_memory_limit_in_bytes",
 		"vGPU device limit",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	legacyCtrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
 		"Container device memory description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "context", "module", "data", "offset"}, nil,
 	)
 	legacyCtrDeviceUtilizationdesc = prometheus.NewDesc(
 		"Device_utilization_desc_of_container",
 		"Container device utilization description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	legacyCtrDeviceLastKernelDesc = prometheus.NewDesc(
 		"Device_last_kernel_of_container",
 		"Container device last kernel description",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid"}, nil,
 	)
 	legacyCtrDeviceMigInfo = prometheus.NewDesc(
 		"MigInfo",
 		"Mig device information for container",
-		[]string{"podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
+		[]string{"nodename", "podnamespace", "podname", "ctrname", "vdeviceid", "deviceuuid", "instanceid"}, nil,
 	)
 }
 
@@ -360,7 +360,16 @@ func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.M
 	return nil
 }
 
+func getNodeName() string {
+	return os.Getenv(util.NodeNameEnvName)
+}
+
 func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	nodeName := getNodeName()
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	memory, ret := hdev.GetMemoryInfo()
 	if ret == nvml.ERROR_NOT_SUPPORTED {
 		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
@@ -386,17 +395,22 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		hostGPUdesc,
 		prometheus.GaugeValue,
 		float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
 }
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	nodeName := getNodeName()
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	util, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
@@ -418,18 +432,18 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		hostGPUUtilizationdesc,
 		prometheus.GaugeValue,
 		float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
 }
 
 func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheus.Metric) error {
-	nodeName := os.Getenv(util.NodeNameEnvName)
+	nodeName := getNodeName()
 	if nodeName == "" {
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
@@ -466,7 +480,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 			for _, c := range podContainers {
 				if c.ContainerName == ctr.Name {
 					klog.V(5).Infof("Processing Container %s in Pod %s/%s", ctr.Name, pod.Namespace, pod.Name)
-					if err := cc.collectContainerMetrics(ch, pod, ctr, c, nowSec); err != nil {
+					if err := cc.collectContainerMetrics(ch, nodeName, pod, ctr, c, nowSec); err != nil {
 						klog.Errorf("Failed to collect metrics for container %s in Pod %s/%s: %v", ctr.Name, pod.Namespace, pod.Name, err)
 					}
 					break // Exit the inner loop after finding the matching container
@@ -479,7 +493,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, pod *corev1.Pod, ctr corev1.Container, c *nvidia.ContainerUsage, nowSec int64) error {
+func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, nodeName string, pod *corev1.Pod, ctr corev1.Container, c *nvidia.ContainerUsage, nowSec int64) error {
 	// Validate inputs
 	if c == nil || c.Info == nil {
 		klog.Errorf("Container or ContainerInfo is nil for Pod %s/%s, Container %s", pod.Namespace, pod.Name, ctr.Name)
@@ -508,7 +522,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		smUtil := c.Info.DeviceSmUtil(i)
 		lastKernelTime := c.Info.LastKernelTime()
 
-		labels := []string{pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid}
+		labels := []string{nodeName, pod.Namespace, pod.Name, ctr.Name, fmt.Sprint(i), uuid}
 
 		if err := sendMetric(ch, ctrvGPUdesc, prometheus.GaugeValue, float64(memoryTotal), labels...); err != nil {
 			klog.Errorf("Failed to send memoryTotal metric: %v", err)
@@ -564,7 +578,7 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 }
 
 func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- prometheus.Metric) error {
-	nodeName := os.Getenv(util.NodeNameEnvName)
+	nodeName := getNodeName()
 	if nodeName == "" {
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
@@ -598,7 +612,7 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 							klog.Errorf("Failed to get mig InstanceId for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							continue
 						}
-						labels := []string{pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
+						labels := []string{nodeName, pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
 						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
 							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
 							return err
