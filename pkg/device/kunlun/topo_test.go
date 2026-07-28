@@ -1,5 +1,5 @@
 /*
-Copyright 2026 The HAMi Authors.
+Copyright 2025 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,15 +32,16 @@ func newDevices(usedMask ...int) []*device.DeviceUsage {
 		used[u] = true
 	}
 	devices := make([]*device.DeviceUsage, 0, 8)
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		u := int32(0)
 		if used[i] {
 			u = 1
 		}
 		devices = append(devices, &device.DeviceUsage{
-			Index: uint(i),
-			Used:  u,
-			Count: 1,
+			Index:  uint(i),
+			Used:   u,
+			Count:  1,
+			Health: true,
 		})
 	}
 	return devices
@@ -75,7 +76,7 @@ func onlyFree(keep []int) []int {
 		keepSet[idx] = true
 	}
 	var usedMask []int
-	for i := 0; i < 8; i++ {
+	for i := range 8 {
 		if !keepSet[i] {
 			usedMask = append(usedMask, i)
 		}
@@ -273,13 +274,13 @@ func TestGraghSelect_EightNotFullyAvailable(t *testing.T) {
 }
 
 func TestGraghSelect_SingleDevice(t *testing.T) {
-	devices := newDevices() // none used, both wings fully free
+	// Both wings fully free -> leftwing==4 is matched first, so devicepick
+	// starts at index 0 and the result is deterministically [0].
+	devices := newDevices()
 	got := graghSelect(devices, req(1), fitAvailable)
-	if len(got) != 1 {
-		t.Fatalf("graghSelect(count=1) = %v, want a single-element result", got)
-	}
-	if got[0] < 0 || got[0] > 7 {
-		t.Errorf("graghSelect(count=1) returned out-of-range index %v", got)
+	want := []int{0}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("graghSelect(count=1) = %v, want %v", got, want)
 	}
 }
 
@@ -292,24 +293,6 @@ func TestGraghSelect_FourFromLeftWing(t *testing.T) {
 		t.Errorf("graghSelect(count=4) = %v, want %v", got, want)
 	}
 }
-
-// ---------------------------------------------------------------------
-// interconnect
-//
-// NOTE: these tests previously only checked len(got) (and, for count=4,
-// treated an empty result as an acceptable outcome). With all 8 devices
-// free, "have" has length 8, not 4/5/6, so a real implementation may
-// legitimately bail out of the count==4 path early and return nil --
-// meaning TestInterconnect_FourDevices was passing even when interconnect
-// never actually exercised its selection logic. Separately, none of these
-// tests confirmed *which* devices were chosen, so a naive/broken
-// implementation (e.g. plain devicepick instead of consulting
-// parseInterconnection/parseInterconnection2) would pass just as well.
-//
-// The tests below constrain availability so exactly the right number of
-// devices are free, and assert against the real candidate table instead
-// of just length/no-duplicates.
-// ---------------------------------------------------------------------
 
 func TestInterconnect_TwoDevices(t *testing.T) {
 	pairs := parseInterconnection()
@@ -390,6 +373,10 @@ func TestParseInterconnection_Structure(t *testing.T) {
 	for _, pair := range got {
 		if len(pair) != 2 {
 			t.Errorf("parseInterconnection() entry %v does not have exactly 2 elements", pair)
+			continue
+		}
+		if pair[0] == pair[1] {
+			t.Errorf("parseInterconnection() entry %v contains duplicate indices", pair)
 		}
 	}
 }
