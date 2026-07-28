@@ -448,6 +448,22 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			// A count that overflows int32 must be rejected: it stays positive as
+			// an int64 (so a bare n <= 0 guard misses it) but int32(1<<32) == 0,
+			// which would divide-by-zero in the Memreq/Coresreq below.
+			name: "count overflowing int32 with memory and cores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("4294967296"),
+						"mthreads.com/sgpu-memory": resource.MustParse("1000"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

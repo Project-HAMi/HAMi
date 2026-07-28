@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -200,9 +201,11 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			klog.InfoS("Detected mthreads device request",
 				"container", ctr.Name,
 				"deviceCount", n)
-			if n <= 0 {
-				// A zero or negative device count is not a valid request; return an
-				// empty request to avoid the divide-by-zero in the Memreq/Coresreq below.
+			if n <= 0 || n > math.MaxInt32 {
+				// A non-positive count is invalid. A count above math.MaxInt32 is
+				// rejected too: the Memreq/Coresreq below divide by int32(n), and a
+				// value such as 1<<32 truncates to 0 (or wraps negative), which would
+				// panic the scheduler's Filter handler with a divide-by-zero.
 				return device.ContainerDeviceRequest{}
 			}
 			memnum := 0
