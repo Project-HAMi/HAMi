@@ -16,7 +16,10 @@ limitations under the License.
 
 package v0
 
-import "unsafe"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 const maxDevices = 16
 
@@ -132,7 +135,7 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 func (s Spec) SetDeviceSmLimit(l uint64) {
 	idx := uint64(0)
 	for idx < s.sr.num {
-		s.sr.smLimit[idx] = l
+		atomic.StoreUint64(&s.sr.smLimit[idx], l)
 		idx += 1
 	}
 }
@@ -146,13 +149,13 @@ func (s Spec) DeviceUUID(idx int) string {
 }
 
 func (s Spec) DeviceMemoryLimit(idx int) uint64 {
-	return s.sr.limit[idx]
+	return atomic.LoadUint64(&s.sr.limit[idx])
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
 	idx := uint64(0)
 	for idx < s.sr.num {
-		s.sr.limit[idx] = l
+		atomic.StoreUint64(&s.sr.limit[idx], l)
 		idx += 1
 	}
 }
