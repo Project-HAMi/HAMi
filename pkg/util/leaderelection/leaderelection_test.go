@@ -451,7 +451,7 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 					Namespace: namespace,
 				},
 				Spec: coordinationv1.LeaseSpec{
-					HolderIdentity:       func() *string { s := hostname; return &s }(),
+					HolderIdentity:       func() *string { s := generateHolderIdentity(hostname); return &s }(),
 					LeaseDurationSeconds: nil, // nil duration
 				},
 			}
@@ -487,6 +487,16 @@ var _ = ginkgo.Describe("isHolderOf hostname prefix boundary", func() {
 			},
 		}
 		g.Expect(lm.isHolderOf(lease)).Should(g.BeTrue())
+	})
+
+	ginkgo.It("should not match a bare hostname without uuid suffix", func() {
+		bareHolder := "dev"
+		lease := &coordinationv1.Lease{
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &bareHolder,
+			},
+		}
+		g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
 	})
 })
 
