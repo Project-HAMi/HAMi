@@ -37,7 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
-func setUnexportedField(target interface{}, fieldName string, value interface{}) {
+func setUnexportedField(target any, fieldName string, value any) {
 	rv := reflect.ValueOf(target).Elem()
 	field := rv.FieldByName(fieldName)
 	if !field.IsValid() {
