@@ -91,6 +91,7 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RUN_TAG }}
+          persist-credentials: false
         # if branch exists, the action will no fail, and it output created=false
       - name: release Y branch
         uses: peterjgrainger/action-create-branch@4b81ce657e255acd677cc6c55c9c763654be3aef # v4.0.0

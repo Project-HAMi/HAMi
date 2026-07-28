@@ -32,6 +32,7 @@ jobs:
       with:
         fetch-depth: 0
         ref: master
+        persist-credentials: false
 
     - name: Create release notes markdown
       run: |
