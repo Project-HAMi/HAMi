@@ -133,6 +133,18 @@ func (s *Scheduler) doNodeNotify() {
 	}
 }
 
+func allInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return false
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (s *Scheduler) onAddPod(obj any) {
 	pod, ok := obj.(*corev1.Pod)
 	if !ok {
@@ -155,19 +167,72 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
-	podDev, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+
+	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
 
-	if s.podManager.AddPod(pod, nodeID, podDev) {
-		s.quotaManager.AddUsage(pod, podDev)
+	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
+
+	if s.podManager.AddPod(pod, nodeID, effectiveDevices) {
+		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj any) {
-	s.onAddPod(newObj)
+func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
+	newPod, ok := newObj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+
+	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
+
+	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+		return
+	}
+
+	if util.IsPodInTerminatedState(newPod) {
+		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
+			s.quotaManager.RmUsage(newPod, pi.Devices)
+		}
+		return
+	}
+
+	if util.IsPodTerminating(newPod) {
+		s.podManager.UpdatePod(newPod)
+		return
+	}
+
+	pi, exists := s.podManager.GetPod(newPod)
+	if !exists {
+		s.onAddPod(newPod)
+		return
+	}
+
+	s.podManager.UpdatePod(newPod)
+
+	if !pi.InitContainerResourceReleased && allInitContainersSucceeded(newPod) {
+		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
+		if err != nil {
+			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
+			return
+		}
+
+		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
+
+		oldDevices, ok := s.podManager.ShrinkUsage(newPod, appOnlyDevices)
+		if ok {
+			s.quotaManager.RmUsage(newPod, oldDevices)
+			s.quotaManager.AddUsage(newPod, appOnlyDevices)
+			klog.InfoS("Init containers completed, shrunk usage",
+				"pod", klog.KObj(newPod),
+				"oldUsage", oldDevices,
+				"newUsage", appOnlyDevices,
+			)
+		}
+	}
 }
 
 func (s *Scheduler) onDelPod(obj any) {
@@ -914,6 +979,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 			Error:       "",
 		}, nil
 	}
+	if args.Nodes != nil {
+		return s.filterSimulation(args, resourceReqs)
+	}
 
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
@@ -955,20 +1023,24 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
-	if added {
-		s.quotaManager.AddUsage(args.Pod, m.Devices)
+	rawDevices := m.Devices
+	effectiveDevices := device.CollapseInitContainerUsage(args.Pod, rawDevices)
+	if args.Nodes == nil {
+		added := s.podManager.AddPod(args.Pod, m.NodeID, effectiveDevices)
+		if added {
+			s.quotaManager.AddUsage(args.Pod, effectiveDevices) // use collapsed
+		}
+		err = util.PatchPodAnnotations(args.Pod, annotations)
+		if err != nil {
+			s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+			if added {
+				s.quotaManager.RmUsage(args.Pod, effectiveDevices)
+			}
+			s.podManager.DelPod(args.Pod)
+			return nil, err
+		}
 	}
 
-	err = util.PatchPodAnnotations(args.Pod, annotations)
-	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		if added {
-			s.quotaManager.RmUsage(args.Pod, m.Devices)
-		}
-		s.podManager.DelPod(args.Pod)
-		return nil, err
-	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}

@@ -1960,7 +1960,7 @@ func TestFilterTemplateNodesMissingRegisterAnnotation(t *testing.T) {
 	require.Equal(t, "node unregistered", res.FailedNodes["template-node-cold-zero"])
 }
 
-func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
+func Test_SchedulerTerminatingPodRetainsCache(t *testing.T) {
 	s := NewScheduler()
 
 	podDevces := device.PodDevices{
@@ -2006,6 +2006,155 @@ func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 
 	_, ok = s.podManager.GetPod(terminatedPod)
 	assert.Equal(t, false, ok, "Pod should be removed from cache after reaching a terminal phase (Succeeded/Failed)")
+}
+func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
+	s := NewScheduler()
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	informer := informerFactory.Core().V1().Pods().Informer()
+	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc:    s.onAddPod,
+		UpdateFunc: s.onUpdatePod,
+		DeleteFunc: s.onDelPod,
+	})
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+	s.addAllEventHandlers()
+
+	// Setup a pod with one init container (20Gi mem, 10 cores) and one app container (10Gi mem, 5 cores).
+	// Effective = max(20,10)=20Gi mem, max(10,5)=10 cores.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "shrink-uid",
+			Name:      "test-shrink",
+			Namespace: "default",
+			Annotations: map[string]string{
+				util.AssignedNodeAnnotations: "node1",
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{
+				Name:  "init",
+				Image: "busybox",
+			}},
+			Containers: []corev1.Container{{
+				Name:  "app",
+				Image: "app",
+			}},
+		},
+		Status: corev1.PodStatus{
+			Phase: corev1.PodRunning,
+		},
+	}
+
+	rawDevices := device.PodDevices{
+		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+			// Init container (index 0)
+			{{
+				Idx: 0, UUID: "GPU0", Usedmem: 20000, Usedcores: 10,
+			}},
+			// App container (index 1)
+			{{
+				Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5,
+			}},
+		},
+	}
+	encoded := device.EncodePodDevices(device.SupportDevices, rawDevices)
+	maps.Copy(pod.Annotations, encoded)
+
+	s.onAddPod(pod)
+
+	pi, ok := s.podManager.GetPod(pod)
+	require.True(t, ok)
+	require.Len(t, pi.Devices[nvidia.NvidiaGPUDevice], 1)
+	require.Len(t, pi.Devices[nvidia.NvidiaGPUDevice][0], 1)
+	assert.Equal(t, int32(20000), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
+	assert.Equal(t, int32(10), pi.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
+
+	updatedPod := pod.DeepCopy()
+	updatedPod.Status.InitContainerStatuses = []corev1.ContainerStatus{
+		{
+			Name: "init",
+			State: corev1.ContainerState{
+				Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+			},
+		},
+	}
+
+	s.onUpdatePod(pod, updatedPod)
+
+	piAfter, ok := s.podManager.GetPod(updatedPod)
+	require.True(t, ok)
+	assert.Assert(t, piAfter.InitContainerResourceReleased)
+	assert.Equal(t, int32(10000), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedmem)
+	assert.Equal(t, int32(5), piAfter.Devices[nvidia.NvidiaGPUDevice][0][0].Usedcores)
+
+	quotas := s.quotaManager.GetResourceQuota()
+	require.Contains(t, quotas, "default")
+	memQuota := (*quotas["default"])["hami.io/gpumem"]
+	coresQuota := (*quotas["default"])["hami.io/gpucores"]
+	require.NotNil(t, memQuota)
+	require.NotNil(t, coresQuota)
+	assert.Equal(t, int64(10000), memQuota.Used)
+	assert.Equal(t, int64(5), coresQuota.Used)
+}
+
+func Test_getNodesUsage_WithInitContainers(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID: "GPU0", Index: 0, Count: 10, Devmem: 102400, Devcore: 100,
+				Numa: 1, Mode: "hami", Health: true,
+			}},
+		},
+	})
+	podMap := device.NewPodManager()
+	// Create a pod with init container (mem 20000, cores 10) and app (mem 10000, cores 5)
+	// Collapsed usage = peak (20000,10)
+	collapsed := device.CollapseInitContainerUsage(
+		&corev1.Pod{
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Name: "init"}},
+				Containers:     []corev1.Container{{Name: "app"}},
+			},
+		},
+		device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+				{{Idx: 0, UUID: "GPU0", Usedmem: 20000, Usedcores: 10}},
+				{{Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5}},
+			},
+		},
+	)
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "initpod", Name: "initpod", Namespace: "default"},
+	}, "node1", collapsed)
+
+	s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	require.NoError(t, err)
+	v := (*cachenodeMap)["node1"]
+	assert.Equal(t, int32(1), v.Devices.DeviceLists[0].Device.Used)
+	assert.Equal(t, int32(20000), v.Devices.DeviceLists[0].Device.Usedmem) // peak, not sum
+	assert.Equal(t, int32(10), v.Devices.DeviceLists[0].Device.Usedcores)
 }
 
 func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {

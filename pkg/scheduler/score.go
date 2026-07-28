@@ -32,13 +32,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-// containerResourceSummary holds both the GPU count and total memory for a group of containers.
-type containerResourceSummary struct {
-	nums     int
-	memreq   int32
-	coresreq int32
-}
-
 func viewStatus(usage NodeUsage) {
 	klog.V(5).Info("devices status")
 	for _, val := range usage.Devices.DeviceLists {
@@ -204,39 +197,6 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
-// podInitContainerMaxRequest returns a map of max requirements per device type.
-func podInitContainerMaxRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) map[string]containerResourceSummary {
-	maxReqs := make(map[string]containerResourceSummary)
-	for i := range numInitContainers {
-		if i >= len(resourceReqs) {
-			break
-		}
-		for devType, req := range resourceReqs[i] {
-			existing := maxReqs[devType]
-			existing.nums = max(existing.nums, int(req.Nums))
-			existing.memreq = max(existing.memreq, req.Memreq)
-			existing.coresreq = max(existing.coresreq, req.Coresreq)
-			maxReqs[devType] = existing
-		}
-	}
-	return maxReqs
-}
-
-// podAppContainerTotalRequest returns the sum of device requests per device type.
-func podAppContainerTotalRequest(resourceReqs device.PodDeviceRequests, numInitContainers int) map[string]containerResourceSummary {
-	totals := make(map[string]containerResourceSummary)
-	for i := numInitContainers; i < len(resourceReqs); i++ {
-		for devType, req := range resourceReqs[i] {
-			current := totals[devType]
-			current.nums += int(req.Nums)
-			current.memreq += req.Memreq
-			current.coresreq += req.Coresreq
-			totals[devType] = current
-		}
-	}
-	return totals
-}
-
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
 }
@@ -267,14 +227,18 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 			defer wg.Done()
 
 			viewStatus(*node)
-			nodeInfo, err := s.GetNode(nodeID)
-			if err != nil {
-				klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
-				failedNodesMutex.Lock()
-				failedNodes[nodeID] = fmt.Sprintf("failed to fetch node info: %v", err)
-				failedNodesMutex.Unlock()
-				errCh <- err
-				return
+			nodeInfo := node.NodeInfo
+			if nodeInfo == nil {
+				var err error
+				nodeInfo, err = s.GetNode(nodeID)
+				if err != nil {
+					klog.ErrorS(err, "Failed to get node", "nodeID", nodeID)
+					failedNodesMutex.Lock()
+					failedNodes[nodeID] = fmt.Sprintf("failed to fetch node info: %v", err)
+					failedNodesMutex.Unlock()
+					errCh <- err
+					return
+				}
 			}
 
 			baseTypes := nodeDeviceBaseTypes(node.Devices)
