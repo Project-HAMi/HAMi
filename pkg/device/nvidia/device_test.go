@@ -2783,3 +2783,86 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 	assert.Assert(t, uuids["dev-0"])
 	assert.Assert(t, uuids["dev-2"])
 }
+
+func TestFit_TopologyBestCombinationZeroScores(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 0, "dev-2": 0}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 0, "dev-2": 0}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 0, "dev-1": 0}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+}
+
+func TestFit_TopologyNegativeScores(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": -5, "dev-2": -3}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": -5, "dev-2": -1}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": -3, "dev-1": -1}}},
+			},
+		},
+	}
+
+	// Test single-GPU request (exercises computeWorstSingleCard)
+	t.Run("SingleGPU", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+			},
+		}
+		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+		assert.Equal(t, fit, true)
+		assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+	})
+
+	// Test multi-GPU request (exercises computeBestCombination)
+	t.Run("MultiGPU", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+			},
+		}
+		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+		assert.Equal(t, fit, true)
+		assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+	})
+}
