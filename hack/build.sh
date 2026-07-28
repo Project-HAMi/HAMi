@@ -34,9 +34,24 @@ function go_build() {
 }
 
 function docker_build() {
+    local git_restored=false
+    if [ -f .git ]; then
+        local real_gitdir=$(git rev-parse --git-common-dir)
+        mv .git .git.bak
+        mkdir -p .git/modules
+        cp -r "${real_gitdir}/modules/libvgpu" .git/modules/libvgpu
+        trap 'if [ "$git_restored" = false ]; then rm -rf .git; mv .git.bak .git; git_restored=true; fi' EXIT
+    fi
+
     docker build --build-arg VERSION="${VERSION}" --build-arg GOLANG_IMAGE=${GOLANG_IMAGE} --build-arg NVIDIA_IMAGE=${NVIDIA_IMAGE} --build-arg DEST_DIR=${DEST_DIR} -t "${IMAGE}:${VERSION}" -f docker/Dockerfile .
     docker tag "${IMAGE}:${VERSION}" "${IMAGE}:${SHORT_VERSION}"
     docker tag "${IMAGE}:${VERSION}" "${IMAGE}:${LATEST_VERSION}"
+
+    if [ -f .git.bak ]; then
+        rm -rf .git
+        mv .git.bak .git
+        git_restored=true
+    fi
 }
 
 function docker_push() {

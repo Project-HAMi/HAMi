@@ -21,6 +21,13 @@ GO_BUILD_LDFLAGS=\
 all: build
 
 docker:
+	@if [ -f .git ]; then \
+		echo "Detected git worktree, preparing .git/modules/libvgpu"; \
+		REAL_GITDIR=$$(git rev-parse --git-common-dir); \
+		mv .git .git.bak; \
+		mkdir -p .git/modules; \
+		cp -r $$REAL_GITDIR/modules/libvgpu .git/modules/libvgpu; \
+	fi
 	docker build \
 	--platform ${TARGET_PLATFORMS} \
 	--build-arg GOLANG_IMAGE=${GOLANG_IMAGE} \
@@ -28,9 +35,17 @@ docker:
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
-	. -f=docker/Dockerfile -t ${IMG_NAME}:${IMG_TAG}
+	. -f=docker/Dockerfile -t ${IMG_NAME}:${IMG_TAG} || (if [ -f .git.bak ]; then rm -rf .git; mv .git.bak .git; fi; exit 1)
+	@if [ -f .git.bak ]; then rm -rf .git; mv .git.bak .git; fi
 
 dockerwithlib:
+	@if [ -f .git ]; then \
+		echo "Detected git worktree, preparing .git/modules/libvgpu"; \
+		REAL_GITDIR=$$(git rev-parse --git-common-dir); \
+		mv .git .git.bak; \
+		mkdir -p .git/modules; \
+		cp -r $$REAL_GITDIR/modules/libvgpu .git/modules/libvgpu; \
+	fi
 	docker build \
 	--no-cache \
 	--platform ${TARGET_PLATFORMS} \
@@ -39,7 +54,8 @@ dockerwithlib:
 	--build-arg DEST_DIR=${DEST_DIR} \
 	--build-arg VERSION=${VERSION} \
 	--build-arg GOPROXY=https://goproxy.cn,direct \
-	. -f=docker/Dockerfile.withlib -t ${IMG_NAME}:${IMG_TAG}
+	. -f=docker/Dockerfile.withlib -t ${IMG_NAME}:${IMG_TAG} || (if [ -f .git.bak ]; then rm -rf .git; mv .git.bak .git; fi; exit 1)
+	@if [ -f .git.bak ]; then rm -rf .git; mv .git.bak .git; fi
 
 tidy:
 	$(GO) mod tidy
