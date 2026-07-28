@@ -264,6 +264,55 @@ func Test_PatchAnnotations(t *testing.T) {
 				device.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,3:;",
 				AWSNeuronAssignedIndex:                 "0,1",
 				AWSNeuronAssignedNode:                  "",
+				AWSNeuronResourceType:                  "aws.amazon.com/neuroncore",
+			},
+		},
+		{
+			name: "init container neuron device",
+			args: struct {
+				annoinput *map[string]string
+				pod       corev1.Pod
+				pd        device.PodDevices
+			}{
+				annoinput: &map[string]string{},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						InitContainers: []corev1.Container{
+							{
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"aws.amazon.com/neuron": resource.MustParse("1"),
+									},
+								},
+							},
+						},
+						Containers: []corev1.Container{
+							{},
+						},
+					},
+				},
+				pd: device.PodDevices{
+					AWSNeuronDevice: device.PodSingleDevice{
+						device.ContainerDevices{
+							{
+								Idx:       0,
+								UUID:      "test1",
+								Type:      AWSNeuronDevice,
+								Usedmem:   int32(0),
+								Usedcores: int32(3),
+								CustomInfo: map[string]any{
+									AWSUsageInfo: 3,
+								},
+							},
+						},
+						device.ContainerDevices{},
+					},
+				},
+			},
+			want: map[string]string{
+				device.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,3:;",
+				AWSNeuronAssignedIndex:                 "0",
+				AWSNeuronAssignedNode:                  "",
 			},
 		},
 	}
@@ -279,6 +328,7 @@ func Test_PatchAnnotations(t *testing.T) {
 			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
 			assert.Equal(t, result[AWSNeuronAssignedIndex], test.want[AWSNeuronAssignedIndex])
 			assert.Equal(t, result[AWSNeuronAssignedNode], test.want[AWSNeuronAssignedNode])
+			assert.Equal(t, result[AWSNeuronResourceType], test.want[AWSNeuronResourceType])
 		})
 	}
 }
