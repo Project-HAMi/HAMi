@@ -1,5 +1,9 @@
 /*
+<<<<<<< HEAD
 Copyright 2026 The HAMi Authors.
+=======
+Copyright 2024 The HAMi Authors.
+>>>>>>> 793c056 (fix(metrics): update scheduler metric descriptors label key from node to node_name)
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+<<<<<<< HEAD
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -116,5 +121,66 @@ nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"
 		"nodeGPUMemoryPercentage",
 	); err != nil {
 		t.Fatalf("unexpected collecting result:\n%s", err)
+=======
+	"github.com/prometheus/client_golang/prometheus"
+)
+
+func TestSchedulerMetricDescriptors(t *testing.T) {
+	cm := &ClusterManager{
+		Zone:          "test-zone",
+		LegacyMetrics: false,
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager: cm,
+	}
+
+	ch := make(chan *prometheus.Desc, 50)
+	collector.Describe(ch)
+	close(ch)
+
+	foundDescriptors := 0
+	for desc := range ch {
+		foundDescriptors++
+		descStr := desc.String()
+		// Ensure standard descriptors contain node_name
+		if strings.Contains(descStr, "fqName: \"hami_") {
+			if !strings.Contains(descStr, "node_name") {
+				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
+			}
+		}
+	}
+
+	if foundDescriptors == 0 {
+		t.Error("expected at least 1 descriptor from scheduler collector")
+	}
+}
+
+func TestSchedulerMetricDescriptorsLegacyMode(t *testing.T) {
+	cm := &ClusterManager{
+		Zone:          "test-zone",
+		LegacyMetrics: true,
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager: cm,
+	}
+
+	ch := make(chan *prometheus.Desc, 50)
+	collector.Describe(ch)
+	close(ch)
+
+	foundDescriptors := 0
+	for desc := range ch {
+		foundDescriptors++
+		descStr := desc.String()
+		if strings.Contains(descStr, "fqName: \"hami_") {
+			if !strings.Contains(descStr, "node_name") {
+				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
+			}
+		}
+	}
+
+	if foundDescriptors == 0 {
+		t.Error("expected at least 1 descriptor from scheduler collector in legacy mode")
+>>>>>>> 793c056 (fix(metrics): update scheduler metric descriptors label key from node to node_name)
 	}
 }

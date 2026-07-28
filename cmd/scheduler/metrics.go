@@ -77,42 +77,46 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"hami_gpu_memory_limit_bytes",
 		"Device memory limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodevGPUCoreLimitDesc := prometheus.NewDesc(
 		"hami_gpu_core_limit_ratio",
 		"Device core limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"hami_gpu_memory_allocated_bytes",
 		"Device memory allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"hami_gpu_shared_count",
 		"Number of containers sharing this GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
 		"hami_gpu_core_allocated_ratio",
 		"Device core allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"hami_node_gpu_overview",
 		"GPU overview on a certain node",
+<<<<<<< HEAD
 		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
+=======
+		[]string{"node_name", "device_uuid", "device_index", "device_cores", "shared_containers", "device_memory_limit", "device_type"}, nil,
+>>>>>>> 793c056 (fix(metrics): update scheduler metric descriptors label key from node to node_name)
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"node", "device_uuid", "device_index"}, nil,
+		[]string{"node_name", "device_uuid", "device_index"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
 		"hami_node_gpu_mig_instance_info",
 		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
-		[]string{"node", "device_uuid", "device_index", "mig_name"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "mig_name"}, nil,
 	)
 
 	// Legacy metric descriptors (only created when legacy mode is enabled)
@@ -187,7 +191,15 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 	}
 
+<<<<<<< HEAD
 	nu := cc.metricsProvider.InspectAllNodesUsage()
+=======
+	if sher == nil {
+		return
+	}
+
+	nu := sher.InspectAllNodesUsage()
+>>>>>>> 793c056 (fix(metrics): update scheduler metric descriptors label key from node to node_name)
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
@@ -313,12 +325,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"hami_vgpu_memory_allocated_bytes",
 		"vGPU memory allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		[]string{"namespace", "node_name", "pod", "container_index", "device_uuid"}, nil,
 	)
 	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
 		"hami_vgpu_core_allocated_ratio",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		[]string{"namespace", "node_name", "pod", "container_index", "device_uuid"}, nil,
 	)
 	quotaUsedDesc := prometheus.NewDesc(
 		"hami_resource_quota_used",
