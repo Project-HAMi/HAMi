@@ -70,7 +70,15 @@ function util::install_helm {
     return 0
   fi
   echo "Installing Helm..."
-  curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+  local get_helm_ref="8eb65528be9bcf8c40096d386c6eef901537f56f"
+  local get_helm_sha256="38b65f882d9cae3891755bdb03becc6a01ae6f9cb24826c191f219ddfee70a5d"
+  local helm_version="v3.8.1"
+  local get_helm_script
+  get_helm_script=$(mktemp)
+  trap 'rm -f "${get_helm_script}"' EXIT
+  curl -sSfL "https://raw.githubusercontent.com/helm/helm/${get_helm_ref}/scripts/get-helm-3" -o "${get_helm_script}"
+  echo "${get_helm_sha256}  ${get_helm_script}" | sha256sum -c -
+  bash "${get_helm_script}" --version "${helm_version}"
 }
 
 # Execute a command and capture output.

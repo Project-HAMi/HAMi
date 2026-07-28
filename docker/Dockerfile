@@ -1,5 +1,5 @@
-ARG GOLANG_IMAGE=golang:1.26.5-bookworm
-ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
+ARG GOLANG_IMAGE=golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+ARG NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
 
 FROM $GOLANG_IMAGE AS gobuild
 ARG GOPROXY
@@ -8,7 +8,7 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.3
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
 
 FROM $NVIDIA_IMAGE AS nvbuild
 RUN dnf install -y cmake git && dnf clean all
@@ -19,7 +19,7 @@ WORKDIR /libvgpu
 RUN rm -rf /libvgpu/build
 RUN bash ./build.sh
 
-FROM nvidia/cuda:13.3.0-base-ubuntu22.04
+FROM nvidia/cuda:13.3.0-base-ubuntu22.04@sha256:e08868e73d2045f1cbe0c39222441d670f8245d6d98e0434bcc9453c7cdb6a31
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \

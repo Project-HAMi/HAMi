@@ -43,7 +43,7 @@ jobs:
       # generate release notes for the new release branch
     - name: Generate pre release notes
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
@@ -88,12 +88,12 @@ jobs:
               exit 1
           fi
       - name: Checkout
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           ref: ${{ env.RUN_TAG }}
         # if branch exists, the action will no fail, and it output created=false
       - name: release Y branch
-        uses: peterjgrainger/action-create-branch@v4.0.0
+        uses: peterjgrainger/action-create-branch@4b81ce657e255acd677cc6c55c9c763654be3aef # v4.0.0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
