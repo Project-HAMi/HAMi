@@ -71,6 +71,17 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		for _, val := range device.GetDevices() {
@@ -152,6 +163,17 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 				}
 			}
 			return 0, false
+		}
+		for _, ctr := range pod.Spec.InitContainers {
+			req, ok := getRequest(&ctr, resourceName)
+			if ok {
+				if memReq, ok := getRequest(&ctr, memResourceName); ok {
+					memoryReq += memReq * req
+				}
+				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
+					coresReq += coreReq * req
+				}
+			}
 		}
 		for _, ctr := range pod.Spec.Containers {
 			req, ok := getRequest(&ctr, resourceName)

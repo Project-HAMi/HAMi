@@ -811,3 +811,104 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 		})
 	}
 }
+
+func TestInitContainerOnlyGPUAdmission(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+	})
+
+	config.SchedulerName = "hami-scheduler"
+	config.ForceOverwriteDefaultScheduler = false
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	// Pod with GPU resource in init container only
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "init-gpu-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name:  "gpu-init",
+					Image: "cuda-init",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hami.io/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name:  "cpu-app",
+					Image: "busybox",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU: resource.MustParse("1"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("Error encoding pod: %v", err)
+	}
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "init-gpu-uid",
+			Namespace: "default",
+			Name:      "init-gpu-pod",
+			Object: runtime.RawExtension{
+				Raw: podBytes,
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	resp := wh.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Fatalf("Expected init GPU pod to be allowed, but got denied: %+v", resp.Result)
+	}
+
+	// Verify that schedulerName was patched to hami-scheduler for init container GPU request
+	found := false
+	for _, patch := range resp.Patches {
+		if patch.Path == "/spec/schedulerName" && patch.Value == config.SchedulerName {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Expected schedulerName patch to %q for init container GPU request, got patches: %+v", config.SchedulerName, resp.Patches)
+	}
+}
