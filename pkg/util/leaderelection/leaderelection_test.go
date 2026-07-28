@@ -462,6 +462,43 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 	})
 })
 
+var _ = ginkgo.Describe("isHolderOf hostname segment matching", func() {
+	// Helper: build a lease whose HolderIdentity is set to the given raw string.
+	makeLeaseWithIdentity := func(identity string) *coordinationv1.Lease {
+		return &coordinationv1.Lease{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "hami-scheduler",
+				Namespace: "kube-system",
+			},
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &identity,
+			},
+		}
+	}
+
+	ginkgo.DescribeTable("exact hostname segment comparison",
+		func(hostname, holderIdentity string, expected bool) {
+			lm := NewLeaderManager(hostname, "kube-system", "hami-scheduler", LeaderCallbacks{})
+			lease := makeLeaseWithIdentity(holderIdentity)
+			result := lm.isHolderOf(lease)
+			g.Expect(result).Should(g.Equal(expected),
+				"hostname=%q holderIdentity=%q", hostname, holderIdentity)
+		},
+		// true cases: the first segment before "_" matches the hostname exactly
+		ginkgo.Entry("dev matches dev_<uuid>", "dev", "dev_550e8400-e29b-41d4-a716-446655440000", true),
+		ginkgo.Entry("worker matches worker_<uuid>", "worker", "worker_550e8400-e29b-41d4-a716-446655440000", true),
+
+		// false cases: hostname is a prefix of the holder's hostname segment but not equal
+		ginkgo.Entry("dev does not match dev-server_<uuid>", "dev", "dev-server_550e8400-e29b-41d4-a716-446655440000", false),
+		ginkgo.Entry("worker does not match worker2_<uuid>", "worker", "worker2_550e8400-e29b-41d4-a716-446655440000", false),
+
+		// additional edge cases
+		ginkgo.Entry("empty hostname does not match non-empty segment", "", "dev_550e8400-e29b-41d4-a716-446655440000", false),
+		ginkgo.Entry("identity with no underscore treated as hostname only, matches when equal", "dev", "dev", true),
+		ginkgo.Entry("identity with no underscore does not match different hostname", "dev", "dev-server", false),
+	)
+})
+
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
 	var lm LeaderManager
 	var elected bool

@@ -163,10 +163,13 @@ func (m *leaderManager) onDelete(obj any) {
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
 	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
+	// We split on "_" and compare only the first segment to avoid false positives
+	// when one hostname is a prefix of another (e.g. "dev" vs "dev-server").
 	if lease == nil || lease.Spec.HolderIdentity == nil {
 		return false
 	}
-	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
+	parts := strings.SplitN(*lease.Spec.HolderIdentity, "_", 2)
+	return parts[0] == m.hostname
 }
 
 func (m *leaderManager) isLeaseValid(now time.Time) bool {
