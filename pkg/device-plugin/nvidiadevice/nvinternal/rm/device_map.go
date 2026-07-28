@@ -41,6 +41,7 @@ import (
 	"k8s.io/klog/v2"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 type deviceMapBuilder struct {
@@ -340,10 +341,20 @@ func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, 
 		for _, id := range ids {
 			for i := 0; i < r.Replicas; i++ {
 				annotatedID := string(NewAnnotatedID(id, i))
-				replicatedDevice := *(oDevices[r.Name][id])
-				replicatedDevice.ID = annotatedID
-				replicatedDevice.Replicas = r.Replicas
-				devices.insert(name, &replicatedDevice)
+				orig := oDevices[r.Name][id]
+				replicatedDevice := &Device{
+					Device: kubeletdevicepluginv1beta1.Device{
+						ID:       annotatedID,
+						Health:   orig.Health,
+						Topology: orig.Topology,
+					},
+					Paths:             orig.Paths,
+					Index:             orig.Index,
+					TotalMemory:       orig.TotalMemory,
+					ComputeCapability: orig.ComputeCapability,
+					Replicas:          r.Replicas,
+				}
+				devices.insert(name, replicatedDevice)
 			}
 		}
 	}
