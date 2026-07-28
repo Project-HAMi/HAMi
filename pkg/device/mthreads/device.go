@@ -90,6 +90,11 @@ func ParseConfig(fs *flag.FlagSet) {
 
 func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCount)]
+	if !ok {
+		// Mirror GenerateResourceRequests, which also honours Requests; otherwise a
+		// request-only count would skip this validation and be consumed unchecked.
+		count, ok = ctr.Resources.Requests[corev1.ResourceName(MthreadsResourceCount)]
+	}
 	if ok {
 		if count.Value() <= 0 {
 			return false, fmt.Errorf("%s must be greater than 0", MthreadsResourceCount)
