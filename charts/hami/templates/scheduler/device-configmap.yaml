@@ -24,13 +24,18 @@ data:
       preConfiguredDeviceMemory: {{ .Values.devicePlugin.preConfiguredDeviceMemory | default 0 }}
       # memoryFactor controls the granularity of GPU memory requests.
       # The device plugin advertises ceil(totalMemMiB / memoryFactor) virtual
-      # entries per GPU.  If that count exceeds ~60 000 (the kubelet gRPC 4 MB
-      # message limit), kubelet rejects the ListAndWatch response and
-      # vgpu-memory shows 0 or a stale value.
-      # Formula: memoryFactor >= ceil(totalMemMiB * gpuCount / 60000)
-      # Examples:  A100 80 GB × 1 GPU → factor >= 2
-      #            A800 80 GB × 8 GPU → factor >= 11
-      # See docs/gpu-memory-factor.md for the full sizing table.
+      # entries per GPU. If total entries across all GPUs exceeds ~60 000
+      # (the kubelet gRPC 4 MB message limit), kubelet rejects the
+      # ListAndWatch response and vgpu-memory shows 0 or a stale value.
+      #
+      # Minimum safe value:
+      #   memoryFactor >= ceil(totalMemMiB / floor(60000 / gpuCount))
+      #
+      # Examples:
+      #   A100/A800 80 GB × 1 GPU  → factor >= 2
+      #   A100/A800 80 GB × 8 GPUs → factor >= 11
+      #
+      # See docs/gpu-memory-factor.md for the full sizing table and formula.
       memoryFactor: 1
       deviceSplitCount: {{ .Values.devicePlugin.deviceSplitCount }}
       deviceMemoryScaling: {{ .Values.devicePlugin.deviceMemoryScaling }}

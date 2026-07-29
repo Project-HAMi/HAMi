@@ -457,14 +457,16 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 	devices := plugin.apiDevices()
 	klog.Infof("ListAndWatch: sending initial device list with %d entries for resource '%s'", len(devices), plugin.rm.Resource())
 	if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: devices}); err != nil {
-		// A gRPC "ResourceExhausted" status here almost always means the
-		// response exceeded the kubelet ~4 MB message limit.  This happens
-		// when (totalMemMiB / memoryFactor * gpuCount) > ~60 000 entries.
-		// Returning the error lets kubelet reconnect and surfaces the problem
-		// in logs instead of silently leaving vgpu-memory at 0 or a stale value.
+		// A gRPC ResourceExhausted error here almost always means the response
+		// exceeded the kubelet ~4 MB message limit.  This happens when:
+		//   ceil(totalMemMiB / memoryFactor) × gpuCount > 60 000
+		// Increase memoryFactor to at least:
+		//   ceil(totalMemMiB / floor(60000 / gpuCount))
+		// GetPluginDevices logs the exact minFactor value for this node.
 		klog.Errorf("ListAndWatch: failed to send initial device list (%d entries) for resource '%s': %v. "+
 			"If the error is 'ResourceExhausted' or 'grpc: received message larger than max', "+
-			"increase memoryFactor so that (totalMemMiB / memoryFactor * gpuCount) <= 60000.",
+			"increase memoryFactor to at least ceil(totalMemMiB / floor(60000 / gpuCount)); "+
+			"see the preceding GetPluginDevices warning for the exact value.",
 			len(devices), plugin.rm.Resource(), err)
 		return err
 	}
@@ -481,7 +483,8 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			klog.V(4).Infof("ListAndWatch: sending updated device list with %d entries for resource '%s'", len(updated), plugin.rm.Resource())
 			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: updated}); err != nil {
 				klog.Errorf("ListAndWatch: failed to send updated device list (%d entries) for resource '%s': %v. "+
-					"If the error is 'ResourceExhausted', increase memoryFactor.",
+					"If the error is 'ResourceExhausted', increase memoryFactor; "+
+					"see docs/gpu-memory-factor.md for the sizing formula.",
 					len(updated), plugin.rm.Resource(), err)
 				return err
 			}

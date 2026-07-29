@@ -204,7 +204,8 @@ func (ds Devices) GetPluginDevices(count uint, numaTopology bool) []*kubeletdevi
 		return res
 	}
 
-	if !strings.Contains(ds.GetIDs()[0], "MIG") {
+	isMIG := strings.Contains(ds.GetIDs()[0], "MIG")
+	if !isMIG {
 		for _, dev := range ds {
 			topology := dev.Topology
 			if !numaTopology {
@@ -226,14 +227,40 @@ func (ds Devices) GetPluginDevices(count uint, numaTopology bool) []*kubeletdevi
 	}
 
 	total := len(res)
-	klog.V(4).Infof("GetPluginDevices: generated %d ListAndWatch entries (gpuCount=%d, splitCount=%d)", total, len(ds), count)
-	if total > kubeletListAndWatchMaxEntries {
+	gpuCount := len(ds)
+	klog.V(4).Infof("GetPluginDevices: generated %d ListAndWatch entries (gpuCount=%d, splitCount=%d)", total, gpuCount, count)
+
+	// Runtime validation: warn when entry count exceeds the kubelet gRPC limit.
+	// Only applies to non-MIG devices whose entry count scales with splitCount.
+	if !isMIG && total > kubeletListAndWatchMaxEntries {
+		// Compute per-GPU memory in MiB from actual device data (TotalMemory is bytes).
+		var maxMemBytes uint64
+		for _, dev := range ds {
+			if dev.TotalMemory > maxMemBytes {
+				maxMemBytes = dev.TotalMemory
+			}
+		}
+		totalMemMiB := int64(maxMemBytes >> 20) // bytes → MiB
+
+		// Minimum safe factor: ceil(totalMemMiB / floor(60000 / gpuCount))
+		// Derived from: ceil(totalMemMiB / factor) × gpuCount ≤ 60000
+		var minFactor int64
+		if totalMemMiB > 0 && gpuCount > 0 {
+			entriesPerGPULimit := int64(kubeletListAndWatchMaxEntries) / int64(gpuCount)
+			if entriesPerGPULimit < 1 {
+				entriesPerGPULimit = 1
+			}
+			minFactor = (totalMemMiB + entriesPerGPULimit - 1) / entriesPerGPULimit
+		}
+
 		klog.Warningf(
 			"GetPluginDevices: entry count %d exceeds the kubelet gRPC message limit of ~%d entries (~4 MB). "+
 				"kubelet will reject the ListAndWatch response and vgpu-memory will show 0 or a stale value. "+
-				"Increase memoryFactor so that (totalMemMiB / memoryFactor * gpuCount) <= %d. "+
-				"Current values: gpuCount=%d, splitCount=%d.",
-			total, kubeletListAndWatchMaxEntries, kubeletListAndWatchMaxEntries, len(ds), count,
+				"gpuCount=%d, splitCount=%d, maxGPUMemMiB=%d. "+
+				"Minimum safe memoryFactor = ceil(%d / floor(%d / %d)) = %d.",
+			total, kubeletListAndWatchMaxEntries,
+			gpuCount, count, totalMemMiB,
+			totalMemMiB, kubeletListAndWatchMaxEntries, gpuCount, minFactor,
 		)
 	}
 

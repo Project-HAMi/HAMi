@@ -2788,25 +2788,21 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 // identifies configurations that would exceed the kubelet gRPC 4 MB message
 // limit (~60 000 entries) and does not warn for safe configurations.
 //
-// The function only logs warnings — it does not return errors — so we verify
-// indirectly by confirming:
-//   - safe configurations complete without panic
-//   - dangerous configurations complete without panic (warn-only, not fatal)
-//   - zero/negative inputs are handled gracefully
+// Runtime check:  ceil(totalMemMiB / factor) × gpuCount > 60 000
+// Min safe factor: ceil(totalMemMiB / floor(60000 / gpuCount))
+//
+// The function only logs warnings so we verify indirectly: confirm no panic,
+// and independently verify the estimated entry count against expectOverMax.
 func TestValidateMemoryFactor(t *testing.T) {
 	tests := []struct {
-		name         string
-		factor       int32
-		totalMemMiB  int64
-		gpuCount     int
-		// expectOverMax: true when we expect a warning to be emitted.
-		// Because the function only logs, we cannot capture it in a unit test
-		// without injecting a logger; we instead verify the estimated entry
-		// count ourselves and confirm the function does not panic.
+		name          string
+		factor        int32
+		totalMemMiB   int64
+		gpuCount      int
 		expectOverMax bool
 	}{
 		{
-			// A800 80 GiB, factor=1: 81920 entries per GPU → over limit.
+			// A800 80 GiB, factor=1: ceil(81920/1)×1 = 81920 → over limit.
 			name:          "A800 factor=1 single GPU — over limit",
 			factor:        1,
 			totalMemMiB:   81_920,
@@ -2814,7 +2810,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: true,
 		},
 		{
-			// A800 80 GiB, factor=2: 40960 entries per GPU → under limit.
+			// A800 80 GiB, factor=2: ceil(81920/2)×1 = 40960 → under limit.
 			name:          "A800 factor=2 single GPU — under limit",
 			factor:        2,
 			totalMemMiB:   81_920,
@@ -2822,7 +2818,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: false,
 		},
 		{
-			// A800 80 GiB, factor=2, 8 GPUs: 40960 × 8 = 327680 → over limit.
+			// A800 80 GiB, factor=2, 8 GPUs: ceil(81920/2)×8 = 327680 → over limit.
 			name:          "A800 factor=2 eight GPUs — over limit",
 			factor:        2,
 			totalMemMiB:   81_920,
@@ -2830,7 +2826,15 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: true,
 		},
 		{
-			// Small GPU 8 GiB, factor=1, 1 GPU: 8192 entries → well under limit.
+			// A800 80 GiB, factor=11, 8 GPUs: ceil(81920/11)×8 = 7448×8 = 59584 → under limit.
+			name:          "A800 factor=11 eight GPUs — under limit",
+			factor:        11,
+			totalMemMiB:   81_920,
+			gpuCount:      8,
+			expectOverMax: false,
+		},
+		{
+			// 8 GiB GPU, factor=1, 1 GPU: 8192 entries → well under limit.
 			name:          "8 GiB GPU factor=1 single GPU — under limit",
 			factor:        1,
 			totalMemMiB:   8_192,
@@ -2838,8 +2842,8 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: false,
 		},
 		{
-			// Exactly at the boundary: totalMemMiB=60000, factor=1, 1 GPU.
-			name:          "exactly at limit boundary — under limit",
+			// Exactly at the boundary: totalMemMiB=60000, factor=1, 1 GPU → not over.
+			name:          "exactly at limit boundary — at limit, not over",
 			factor:        1,
 			totalMemMiB:   60_000,
 			gpuCount:      1,
@@ -2854,7 +2858,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: true,
 		},
 		{
-			// Zero totalMemMiB → skip validation (not enough info).
+			// Zero totalMemMiB → skip (not enough info).
 			name:          "zero totalMemMiB — skip",
 			factor:        1,
 			totalMemMiB:   0,
@@ -2862,7 +2866,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: false,
 		},
 		{
-			// Zero gpuCount → skip validation.
+			// Zero gpuCount → skip.
 			name:          "zero gpuCount — skip",
 			factor:        1,
 			totalMemMiB:   81_920,
@@ -2870,15 +2874,15 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: false,
 		},
 		{
-			// Negative factor → warn about invalid value, no panic.
+			// Negative factor → warns and returns early, no panic.
 			name:          "negative factor — warns and returns early",
 			factor:        -1,
 			totalMemMiB:   81_920,
 			gpuCount:      1,
-			expectOverMax: false, // early-return before entry count calculation
+			expectOverMax: false,
 		},
 		{
-			// Zero factor → same as negative: warn and return early.
+			// Zero factor → same early-return path.
 			name:          "zero factor — warns and returns early",
 			factor:        0,
 			totalMemMiB:   81_920,
@@ -2886,7 +2890,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 			expectOverMax: false,
 		},
 		{
-			// Large factor: entries = ceil(81920 / 1000) * 1 = 83 → safe.
+			// Large factor: ceil(81920/1000)×1 = 83 → safe.
 			name:          "large factor — very few entries, safe",
 			factor:        1000,
 			totalMemMiB:   81_920,
@@ -2897,7 +2901,7 @@ func TestValidateMemoryFactor(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// ValidateMemoryFactor must not panic under any input.
+			// Must not panic under any input.
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
@@ -2907,8 +2911,8 @@ func TestValidateMemoryFactor(t *testing.T) {
 				ValidateMemoryFactor(tt.factor, tt.totalMemMiB, tt.gpuCount)
 			}()
 
-			// Verify our own estimate matches what the function would compute so
-			// the test stays in sync with the implementation.
+			// Independently verify the runtime check formula so the test stays in
+			// sync with the implementation.
 			if tt.factor > 0 && tt.totalMemMiB > 0 && tt.gpuCount > 0 {
 				entriesPerGPU := (tt.totalMemMiB + int64(tt.factor) - 1) / int64(tt.factor)
 				estimated := entriesPerGPU * int64(tt.gpuCount)
@@ -2920,8 +2924,84 @@ func TestValidateMemoryFactor(t *testing.T) {
 	}
 }
 
+// TestValidateMemoryFactor_MinFactor verifies that the minimum safe
+// memoryFactor formula produces the correct result for representative GPUs.
+//
+// Formula: minFactor = ceil(totalMemMiB / floor(60000 / gpuCount))
+func TestValidateMemoryFactor_MinFactor(t *testing.T) {
+	const limit = kubeletListAndWatchMaxEntries
+
+	tests := []struct {
+		name          string
+		totalMemMiB   int64
+		gpuCount      int
+		wantMinFactor int64
+	}{
+		{
+			// A800 80 GiB, 1 GPU:
+			// floor(60000/1)=60000; ceil(81920/60000)=ceil(1.365)=2
+			name:          "A800 80 GiB × 1 GPU",
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			wantMinFactor: 2,
+		},
+		{
+			// A800 80 GiB, 8 GPUs:
+			// floor(60000/8)=7500; ceil(81920/7500)=ceil(10.923)=11
+			name:          "A800 80 GiB × 8 GPUs",
+			totalMemMiB:   81_920,
+			gpuCount:      8,
+			wantMinFactor: 11,
+		},
+		{
+			// H200 141 GiB, 8 GPUs:
+			// floor(60000/8)=7500; ceil(144384/7500)=ceil(19.25)=20
+			name:          "H200 141 GiB × 8 GPUs",
+			totalMemMiB:   144_384,
+			gpuCount:      8,
+			wantMinFactor: 20,
+		},
+		{
+			// T4 16 GiB, 8 GPUs:
+			// floor(60000/8)=7500; ceil(16384/7500)=ceil(2.18)=3
+			name:          "T4 16 GiB × 8 GPUs",
+			totalMemMiB:   16_384,
+			gpuCount:      8,
+			wantMinFactor: 3,
+		},
+		{
+			// A100 40 GiB, 1 GPU:
+			// floor(60000/1)=60000; ceil(40960/60000)=ceil(0.682)=1
+			name:          "A100 40 GiB × 1 GPU — factor 1 is safe",
+			totalMemMiB:   40_960,
+			gpuCount:      1,
+			wantMinFactor: 1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			entriesPerGPULimit := int64(limit) / int64(tt.gpuCount)
+			if entriesPerGPULimit < 1 {
+				entriesPerGPULimit = 1
+			}
+			minFactor := (tt.totalMemMiB + entriesPerGPULimit - 1) / entriesPerGPULimit
+			assert.Equal(t, tt.wantMinFactor, minFactor,
+				"minFactor mismatch for %s: got %d, want %d", tt.name, minFactor, tt.wantMinFactor)
+
+			// Confirm minFactor is actually safe: ceil(totalMemMiB/minFactor)×gpuCount ≤ limit.
+			entriesPerGPU := (tt.totalMemMiB + minFactor - 1) / minFactor
+			totalEntries := entriesPerGPU * int64(tt.gpuCount)
+			assert.Assert(t, totalEntries <= int64(limit),
+				"minFactor=%d still produces %d entries > %d for %s",
+				minFactor, totalEntries, limit, tt.name)
+		})
+	}
+}
+
 // TestInitNvidiaDevice_NonPositiveMemoryFactor confirms that a zero or negative
-// memoryFactor is silently corrected to 1 inside InitNvidiaDevice.
+// memoryFactor is corrected to 1 inside InitNvidiaDevice, and that no startup
+// call to ValidateMemoryFactor with zero inputs occurs (the removed no-op).
 func TestInitNvidiaDevice_NonPositiveMemoryFactor(t *testing.T) {
 	tests := []struct {
 		name           string
