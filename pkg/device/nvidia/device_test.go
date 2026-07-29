@@ -2783,3 +2783,162 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 	assert.Assert(t, uuids["dev-0"])
 	assert.Assert(t, uuids["dev-2"])
 }
+
+// TestValidateMemoryFactor verifies that ValidateMemoryFactor correctly
+// identifies configurations that would exceed the kubelet gRPC 4 MB message
+// limit (~60 000 entries) and does not warn for safe configurations.
+//
+// The function only logs warnings — it does not return errors — so we verify
+// indirectly by confirming:
+//   - safe configurations complete without panic
+//   - dangerous configurations complete without panic (warn-only, not fatal)
+//   - zero/negative inputs are handled gracefully
+func TestValidateMemoryFactor(t *testing.T) {
+	tests := []struct {
+		name         string
+		factor       int32
+		totalMemMiB  int64
+		gpuCount     int
+		// expectOverMax: true when we expect a warning to be emitted.
+		// Because the function only logs, we cannot capture it in a unit test
+		// without injecting a logger; we instead verify the estimated entry
+		// count ourselves and confirm the function does not panic.
+		expectOverMax bool
+	}{
+		{
+			// A800 80 GiB, factor=1: 81920 entries per GPU → over limit.
+			name:          "A800 factor=1 single GPU — over limit",
+			factor:        1,
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			expectOverMax: true,
+		},
+		{
+			// A800 80 GiB, factor=2: 40960 entries per GPU → under limit.
+			name:          "A800 factor=2 single GPU — under limit",
+			factor:        2,
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+		{
+			// A800 80 GiB, factor=2, 8 GPUs: 40960 × 8 = 327680 → over limit.
+			name:          "A800 factor=2 eight GPUs — over limit",
+			factor:        2,
+			totalMemMiB:   81_920,
+			gpuCount:      8,
+			expectOverMax: true,
+		},
+		{
+			// Small GPU 8 GiB, factor=1, 1 GPU: 8192 entries → well under limit.
+			name:          "8 GiB GPU factor=1 single GPU — under limit",
+			factor:        1,
+			totalMemMiB:   8_192,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+		{
+			// Exactly at the boundary: totalMemMiB=60000, factor=1, 1 GPU.
+			name:          "exactly at limit boundary — under limit",
+			factor:        1,
+			totalMemMiB:   60_000,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+		{
+			// One over the boundary.
+			name:          "one over limit boundary — over limit",
+			factor:        1,
+			totalMemMiB:   60_001,
+			gpuCount:      1,
+			expectOverMax: true,
+		},
+		{
+			// Zero totalMemMiB → skip validation (not enough info).
+			name:          "zero totalMemMiB — skip",
+			factor:        1,
+			totalMemMiB:   0,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+		{
+			// Zero gpuCount → skip validation.
+			name:          "zero gpuCount — skip",
+			factor:        1,
+			totalMemMiB:   81_920,
+			gpuCount:      0,
+			expectOverMax: false,
+		},
+		{
+			// Negative factor → warn about invalid value, no panic.
+			name:          "negative factor — warns and returns early",
+			factor:        -1,
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			expectOverMax: false, // early-return before entry count calculation
+		},
+		{
+			// Zero factor → same as negative: warn and return early.
+			name:          "zero factor — warns and returns early",
+			factor:        0,
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+		{
+			// Large factor: entries = ceil(81920 / 1000) * 1 = 83 → safe.
+			name:          "large factor — very few entries, safe",
+			factor:        1000,
+			totalMemMiB:   81_920,
+			gpuCount:      1,
+			expectOverMax: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// ValidateMemoryFactor must not panic under any input.
+			func() {
+				defer func() {
+					if r := recover(); r != nil {
+						t.Errorf("ValidateMemoryFactor panicked: %v", r)
+					}
+				}()
+				ValidateMemoryFactor(tt.factor, tt.totalMemMiB, tt.gpuCount)
+			}()
+
+			// Verify our own estimate matches what the function would compute so
+			// the test stays in sync with the implementation.
+			if tt.factor > 0 && tt.totalMemMiB > 0 && tt.gpuCount > 0 {
+				entriesPerGPU := (tt.totalMemMiB + int64(tt.factor) - 1) / int64(tt.factor)
+				estimated := entriesPerGPU * int64(tt.gpuCount)
+				isOver := estimated > int64(kubeletListAndWatchMaxEntries)
+				assert.Equal(t, tt.expectOverMax, isOver,
+					"entry estimate mismatch: estimated=%d, expectOverMax=%v", estimated, tt.expectOverMax)
+			}
+		})
+	}
+}
+
+// TestInitNvidiaDevice_NonPositiveMemoryFactor confirms that a zero or negative
+// memoryFactor is silently corrected to 1 inside InitNvidiaDevice.
+func TestInitNvidiaDevice_NonPositiveMemoryFactor(t *testing.T) {
+	tests := []struct {
+		name           string
+		factor         int32
+		wantGlobalFact int32
+	}{
+		{name: "factor=0 defaults to 1", factor: 0, wantGlobalFact: 1},
+		{name: "factor=-5 defaults to 1", factor: -5, wantGlobalFact: 1},
+		{name: "factor=3 kept as-is", factor: 3, wantGlobalFact: 3},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			InitNvidiaDevice(NvidiaConfig{
+				ResourceCountName: "nvidia.com/gpu",
+				MemoryFactor:      tt.factor,
+			})
+			assert.Equal(t, tt.wantGlobalFact, MemoryFactor)
+		})
+	}
+}

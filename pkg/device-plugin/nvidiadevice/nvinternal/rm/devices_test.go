@@ -17,6 +17,7 @@ limitations under the License.
 package rm
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -114,5 +115,106 @@ func TestGetPluginDevicesTopology(t *testing.T) {
 			}
 			require.Equal(t, tc.expectedIDs, ids)
 		})
+	}
+}
+
+// makeGPUs builds a Devices map with n non-MIG entries, each with the given
+// health status.  The IDs are "GPU-uuid-<i>" so they do NOT contain "MIG".
+func makeGPUs(n int, health string) Devices {
+	ds := make(Devices, n)
+	for i := 0; i < n; i++ {
+		id := fmt.Sprintf("GPU-uuid-%d", i)
+		ds[id] = &Device{
+			Device: kubeletdevicepluginv1beta1.Device{
+				ID:     id,
+				Health: health,
+			},
+		}
+	}
+	return ds
+}
+
+func TestGetPluginDevices_EntryCountLogging(t *testing.T) {
+	// kubeletListAndWatchMaxEntries = 60 000.
+	// Each non-MIG GPU generates `count` entries.
+	// With 1 GPU and splitCount=60001 we exceed the limit.
+	// With 1 GPU and splitCount=60000 we are exactly at the limit (still OK).
+
+	tests := []struct {
+		name          string
+		gpuCount      int
+		splitCount    uint
+		expectEntries int
+		expectOverMax bool
+	}{
+		{
+			name:          "below limit: 1 GPU × 100 splits = 100 entries",
+			gpuCount:      1,
+			splitCount:    100,
+			expectEntries: 100,
+			expectOverMax: false,
+		},
+		{
+			name:          "at limit: 1 GPU × 60000 splits = 60000 entries",
+			gpuCount:      1,
+			splitCount:    60_000,
+			expectEntries: 60_000,
+			expectOverMax: false,
+		},
+		{
+			name:          "over limit: 1 GPU × 60001 splits = 60001 entries",
+			gpuCount:      1,
+			splitCount:    60_001,
+			expectEntries: 60_001,
+			expectOverMax: true,
+		},
+		{
+			name:          "over limit: 8 GPUs × 10000 splits = 80000 entries",
+			gpuCount:      8,
+			splitCount:    10_000,
+			expectEntries: 80_000,
+			expectOverMax: true,
+		},
+		{
+			name:          "empty device list returns nothing",
+			gpuCount:      0,
+			splitCount:    100,
+			expectEntries: 0,
+			expectOverMax: false,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ds := makeGPUs(tc.gpuCount, kubeletdevicepluginv1beta1.Healthy)
+			result := ds.GetPluginDevices(tc.splitCount, false)
+
+			require.Len(t, result, tc.expectEntries,
+				"expected %d entries, got %d", tc.expectEntries, len(result))
+
+			// Verify that entries beyond the limit are still returned (we warn but
+			// do not truncate — truncation would hide the problem from the caller).
+			if tc.expectOverMax {
+				require.Greater(t, len(result), kubeletListAndWatchMaxEntries,
+					"expected entry count to exceed kubeletListAndWatchMaxEntries")
+			}
+		})
+	}
+}
+
+// TestGetPluginDevices_UniqueIDs verifies that every generated entry has a
+// unique ID of the form "<uuid>-<index>", which is what the gRPC ListAndWatch
+// protocol requires.
+func TestGetPluginDevices_UniqueIDs(t *testing.T) {
+	ds := makeGPUs(3, kubeletdevicepluginv1beta1.Healthy)
+	result := ds.GetPluginDevices(4, false)
+
+	require.Len(t, result, 12) // 3 GPUs × 4 splits
+
+	seen := make(map[string]struct{}, len(result))
+	for _, d := range result {
+		_, dup := seen[d.ID]
+		require.False(t, dup, "duplicate device ID %q", d.ID)
+		seen[d.ID] = struct{}{}
 	}
 }

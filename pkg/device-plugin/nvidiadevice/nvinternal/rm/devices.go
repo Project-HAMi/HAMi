@@ -191,6 +191,11 @@ func (ds Devices) GetUUIDs() []string {
 	return res
 }
 
+// kubeletListAndWatchMaxEntries is the conservative upper bound on the number
+// of kubelet Device entries that fit within the gRPC ~4 MB message limit.
+// Each Device proto is approximately 64 bytes; 60 000 × 64 B ≈ 3.84 MB.
+const kubeletListAndWatchMaxEntries = 60_000
+
 // GetPluginDevices returns the plugin Devices from all devices in the Devices
 func (ds Devices) GetPluginDevices(count uint, numaTopology bool) []*kubeletdevicepluginv1beta1.Device {
 	var res []*kubeletdevicepluginv1beta1.Device
@@ -218,7 +223,18 @@ func (ds Devices) GetPluginDevices(count uint, numaTopology bool) []*kubeletdevi
 		for _, d := range ds {
 			res = append(res, &d.Device)
 		}
+	}
 
+	total := len(res)
+	klog.V(4).Infof("GetPluginDevices: generated %d ListAndWatch entries (gpuCount=%d, splitCount=%d)", total, len(ds), count)
+	if total > kubeletListAndWatchMaxEntries {
+		klog.Warningf(
+			"GetPluginDevices: entry count %d exceeds the kubelet gRPC message limit of ~%d entries (~4 MB). "+
+				"kubelet will reject the ListAndWatch response and vgpu-memory will show 0 or a stale value. "+
+				"Increase memoryFactor so that (totalMemMiB / memoryFactor * gpuCount) <= %d. "+
+				"Current values: gpuCount=%d, splitCount=%d.",
+			total, kubeletListAndWatchMaxEntries, kubeletListAndWatchMaxEntries, len(ds), count,
+		)
 	}
 
 	return res

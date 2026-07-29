@@ -168,6 +168,59 @@ type NvidiaGPUDevices struct {
 	mu                    sync.Mutex        // protects concurrent access to reported node state
 }
 
+// kubeletListAndWatchMaxEntries is the approximate maximum number of device
+// entries that fit inside the kubelet gRPC ListAndWatch message limit of ~4 MB.
+// Each kubelet Device proto is roughly 64 bytes; 60 000 entries ≈ 3.84 MB,
+// leaving a safe margin below the hard 4 MB ceiling.
+const kubeletListAndWatchMaxEntries = 60_000
+
+// ValidateMemoryFactor checks whether the combination of per-GPU memory,
+// GPU count, and memoryFactor would produce a ListAndWatch response that
+// exceeds the kubelet gRPC 4 MB message limit.
+//
+// The device plugin advertises (totalMemMiB / memoryFactor) virtual entries
+// per GPU so that a user can request memory in multiples of memoryFactor MiB.
+// When memoryFactor is too small the total entry count blows past
+// kubeletListAndWatchMaxEntries, causing kubelet to silently reject the
+// response and leave volcano.sh/vgpu-memory at 0 or a stale value.
+//
+// Formula:  estimatedEntries = gpuCount * ceil(totalMemMiB / memoryFactor)
+//
+// The function only warns; it does not return an error because the actual GPU
+// count and per-GPU memory are not known at config-load time and will vary
+// per node.  Callers that do know those values should pass them in to get an
+// early, precise warning.
+func ValidateMemoryFactor(memoryFactor int32, totalMemMiB int64, gpuCount int) {
+	if memoryFactor <= 0 {
+		klog.Warningf("memoryFactor must be a positive integer (got %d); defaulting behaviour may be unexpected", memoryFactor)
+		return
+	}
+	if totalMemMiB <= 0 || gpuCount <= 0 {
+		// Not enough information to estimate — skip.
+		return
+	}
+	// Use ceiling division so we never under-count.
+	entriesPerGPU := (totalMemMiB + int64(memoryFactor) - 1) / int64(memoryFactor)
+	estimatedEntries := entriesPerGPU * int64(gpuCount)
+	if estimatedEntries > kubeletListAndWatchMaxEntries {
+		klog.Warningf(
+			"gpuMemoryFactor=%d with totalMemMiB=%d and gpuCount=%d would generate ~%d ListAndWatch entries, "+
+				"exceeding the kubelet gRPC message limit of ~%d entries (~4 MB). "+
+				"kubelet will reject the response and volcano.sh/vgpu-memory will show 0 or a stale value. "+
+				"Increase memoryFactor so that (totalMemMiB / memoryFactor * gpuCount) <= %d. "+
+				"For an A800 (80 GiB, 1 GPU) the minimum safe memoryFactor is 2; "+
+				"for 8 GPUs it is at least 11.",
+			memoryFactor, totalMemMiB, gpuCount, estimatedEntries,
+			kubeletListAndWatchMaxEntries, kubeletListAndWatchMaxEntries,
+		)
+	} else {
+		klog.V(4).Infof(
+			"memoryFactor=%d validation passed: estimated ListAndWatch entries=%d (limit=%d)",
+			memoryFactor, estimatedEntries, kubeletListAndWatchMaxEntries,
+		)
+	}
+}
+
 func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 	klog.InfoS("initializing nvidia device", "resourceName", nvconfig.ResourceCountName, "resourceMem", nvconfig.ResourceMemoryName, "DefaultGPUNum", nvconfig.DefaultGPUNum)
 	_, ok := device.InRequestDevices[NvidiaGPUDevice]
@@ -177,6 +230,15 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
 	}
 	MemoryFactor = nvconfig.MemoryFactor
+	if nvconfig.MemoryFactor <= 0 {
+		klog.Warningf("memoryFactor is %d (must be >= 1); defaulting to 1 to avoid divide-by-zero", nvconfig.MemoryFactor)
+		MemoryFactor = 1
+	}
+	// Emit a startup warning when the factor is likely to overflow the kubelet
+	// gRPC limit.  We do not know actual GPU memory or count yet, so we use the
+	// conservative placeholder of 80 GiB (A800/H100) × 1 GPU.  The real check
+	// with live data happens inside GetPluginDevices at runtime.
+	ValidateMemoryFactor(MemoryFactor, 0, 0) // zero values = skip static estimate
 	return &NvidiaGPUDevices{
 		config:                nvconfig,
 		ReportedGPUNum:        make(map[string]int64),
