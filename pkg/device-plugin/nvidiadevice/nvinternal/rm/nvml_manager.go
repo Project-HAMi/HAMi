@@ -113,7 +113,7 @@ func (r *nvmlResourceManager) GetDevicePaths(ids []string) []string {
 	return append(paths, r.Devices().Subset(ids).GetPaths()...)
 }
 
-// CheckHealth performs health checks on a set of devices, writing to the 'health' channel with any unhealthy devices
+// CheckHealth performs health checks on a set of devices, writing to the 'health' channel with device health updates or transitions.
 func (r *nvmlResourceManager) CheckHealth(stop <-chan interface{}, health chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	for {
 		// first check if disableNVML channel signal is pass close into checkHealth function

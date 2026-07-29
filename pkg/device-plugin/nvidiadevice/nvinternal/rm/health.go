@@ -88,6 +88,8 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		_ = eventSet.Free()
 	}()
 
+	unhealthyDevices := make(map[string]*Device)
+
 	parentToDeviceMap := make(map[string]*Device)
 	deviceIDToGiMap := make(map[string]uint32)
 	deviceIDToCiMap := make(map[string]uint32)
@@ -125,11 +127,10 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		if ret != nvml.SUCCESS {
 			klog.Infof("Marking device %v as unhealthy: %v", d.ID, ret)
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			unhealthyDevices[d.ID] = d
 			health <- d
 		}
 	}
-
-	unhealthyDevices := make(map[string]*Device)
 
 	for {
 		select {

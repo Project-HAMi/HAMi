@@ -48,7 +48,7 @@ var _ ResourceManager = &ResourceManagerMock{}
 //
 //		// make and configure a mocked ResourceManager
 //		mockedResourceManager := &ResourceManagerMock{
-//			CheckHealthFunc: func(stop <-chan interface{}, unhealthy chan<- *Device) error {
+//			CheckHealthFunc: func(stop <-chan interface{}, health chan<- *Device) error {
 //				panic("mock out the CheckHealth method")
 //			},
 //			DevicesFunc: func() Devices {
@@ -74,7 +74,7 @@ var _ ResourceManager = &ResourceManagerMock{}
 //	}
 type ResourceManagerMock struct {
 	// CheckHealthFunc mocks the CheckHealth method.
-	CheckHealthFunc func(stop <-chan interface{}, unhealthy chan<- *Device) error
+	CheckHealthFunc func(stop <-chan interface{}, health chan<- *Device) error
 
 	// DevicesFunc mocks the Devices method.
 	DevicesFunc func() Devices
@@ -97,8 +97,8 @@ type ResourceManagerMock struct {
 		CheckHealth []struct {
 			// Stop is the stop argument value.
 			Stop <-chan interface{}
-			// Unhealthy is the unhealthy argument value.
-			Unhealthy chan<- *Device
+			// Health is the health argument value.
+			Health chan<- *Device
 		}
 		// Devices holds details about calls to the Devices method.
 		Devices []struct {
@@ -160,8 +160,8 @@ func (mock *ResourceManagerMock) CheckHealth(stop <-chan interface{}, health cha
 //
 //	len(mockedResourceManager.CheckHealthCalls())
 func (mock *ResourceManagerMock) CheckHealthCalls() []struct {
-	Stop      <-chan interface{}
-	Unhealthy chan<- *Device
+	Stop   <-chan interface{}
+	Health chan<- *Device
 } {
 	var calls []struct {
 		Stop      <-chan interface{}
