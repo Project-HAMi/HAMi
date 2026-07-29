@@ -32,24 +32,23 @@ import (
 )
 
 // GetPlugins returns a set of plugins for the specified configuration.
-func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *nvidia.DeviceConfig) ([]plugin.Interface, error) {
-	// TODO: We could consider passing this as an argument since it should already be used to construct nvmllib.
-	driverRoot := root(*config.Flags.Plugin.ContainerDriverRoot)
+func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, driverRoot string, config *nvidia.DeviceConfig) ([]plugin.Interface, error) {
+	dr := root(driverRoot)
 
 	deviceListStrategies, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
 	if err != nil {
 		return nil, fmt.Errorf("invalid device list strategy: %v", err)
 	}
 
-	imexChannels, err := imex.GetChannels(config.Config, driverRoot.getDevRoot())
+	imexChannels, err := imex.GetChannels(config.Config, dr.getDevRoot())
 	if err != nil {
 		return nil, fmt.Errorf("error querying IMEX channels: %w", err)
 	}
 
 	cdiHandler, err := cdi.New(infolib, nvmllib, devicelib,
 		cdi.WithDeviceListStrategies(deviceListStrategies),
-		cdi.WithDriverRoot(string(driverRoot)),
-		cdi.WithDevRoot(driverRoot.getDevRoot()),
+		cdi.WithDriverRoot(driverRoot),
+		cdi.WithDevRoot(dr.getDevRoot()),
 		cdi.WithTargetDriverRoot(*config.Flags.NvidiaDriverRoot),
 		cdi.WithTargetDevRoot(*config.Flags.NvidiaDevRoot),
 		cdi.WithNvidiaCTKPath(*config.Flags.Plugin.NvidiaCTKPath),
