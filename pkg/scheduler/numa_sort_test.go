@@ -27,13 +27,14 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // sortedDevices mirrors what fitInDevices does: it wraps the devices in a
-// DeviceUsageList (carrying Policy and NumaBind), sorts them, and returns the
-// sorted device slice in the same order Fit() will iterate.
-func sortedDevices(devs []*device.DeviceUsage, scores []float32, policyName string, numaBind bool) []*device.DeviceUsage {
-	dl := policy.DeviceUsageList{Policy: policyName, NumaBind: numaBind}
+// DeviceUsageList (carrying Policy and NumaIgnore), sorts them, and returns
+// the sorted device slice in the same order Fit() will iterate.
+func sortedDevices(devs []*device.DeviceUsage, scores []float32, policyName string, numaIgnore bool) []*device.DeviceUsage {
+	dl := policy.DeviceUsageList{Policy: policyName, NumaIgnore: numaIgnore}
 	for i, d := range devs {
 		dl.DeviceLists = append(dl.DeviceLists, &policy.DeviceListsScore{Device: d, Score: scores[i]})
 	}
@@ -54,10 +55,10 @@ func numaTestNvidia() *nvidia.NvidiaGPUDevices {
 	})
 }
 
-// A 2-card numa-bind request fits only on NUMA 0 (two devices there, one on
-// NUMA 1 with a middle score). Fit needs a contiguous same-NUMA run, so the
-// sort decides the outcome: score-primary interleaves NUMA 1 and fails;
-// NumaBind grouping keeps NUMA 0 together and fits.
+// A 2-card request fits only on NUMA 0 (two devices there, one on NUMA 1
+// with a middle score). Fit needs a contiguous same-NUMA run, so the sort
+// decides the outcome: NUMA grouping (the default) keeps NUMA 0 together and
+// fits; NumaIgnore's pure-Score order interleaves NUMA 1 in and breaks it.
 func TestNumaBindSortPreservesAffinity(t *testing.T) {
 	nv := numaTestNvidia()
 	mk := func(id string, numa int) *device.DeviceUsage {
@@ -66,7 +67,7 @@ func TestNumaBindSortPreservesAffinity(t *testing.T) {
 			Type: nvidia.NvidiaGPUDevice, Health: true, Numa: numa,
 		}
 	}
-	// A(n0,score5), B(n0,score1), C(n1,score3): score-primary spread interleaves
+	// A(n0,score5), B(n0,score1), C(n1,score3): pure-Score spread interleaves
 	// C between A and B.
 	devs := []*device.DeviceUsage{mk("A_n0", 0), mk("B_n0", 0), mk("C_n1", 1)}
 	scores := []float32{5, 1, 3}
@@ -76,12 +77,12 @@ func TestNumaBindSortPreservesAffinity(t *testing.T) {
 		Annotations: map[string]string{nvidia.NumaBind: "true"},
 	}}
 
-	// Without NUMA grouping the same-NUMA run is broken and Fit fails.
-	unfit, _, _ := nv.Fit(sortedDevices(devs, scores, "spread", false), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	// With NUMA ignored, the same-NUMA run is broken and Fit fails.
+	unfit, _, _ := nv.Fit(sortedDevices(devs, scores, "spread", true), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, unfit, false)
 
-	// With NUMA grouping (our fix) the two NUMA-0 devices stay contiguous and fit.
-	fit, result, _ := nv.Fit(sortedDevices(devs, scores, "spread", true), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	// By default the two NUMA-0 devices stay contiguous and fit.
+	fit, result, _ := nv.Fit(sortedDevices(devs, scores, "spread", false), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true)
 	assert.Equal(t, len(result[nvidia.NvidiaGPUDevice]), 2)
 	for _, r := range result[nvidia.NvidiaGPUDevice] {
@@ -89,8 +90,9 @@ func TestNumaBindSortPreservesAffinity(t *testing.T) {
 	}
 }
 
-// #1806: without numa-bind, Score wins across NUMA. The idlest device is on
-// the lower NUMA id, which the old NUMA-primary sort would skip. Score-primary
+// #1806: with hami.io/topology-aware-scoring: "false", Score wins across
+// NUMA. The idlest device is on the lower NUMA id, which the default
+// NUMA-primary sort would skip in favor of the NUMA-1 group. NumaIgnore
 // picks the globally idlest device regardless of NUMA.
 func TestScorePrimarySelectsAcrossNuma(t *testing.T) {
 	nv := numaTestNvidia()
@@ -105,9 +107,11 @@ func TestScorePrimarySelectsAcrossNuma(t *testing.T) {
 	scores := []float32{1, 8, 5}
 
 	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: nvidia.NvidiaGPUDevice}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{util.GPUTopologyAwareAnnotationKey: "false"},
+	}}
 
-	fit, result, _ := nv.Fit(sortedDevices(devs, scores, "spread", false), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	fit, result, _ := nv.Fit(sortedDevices(devs, scores, "spread", true), req, pod, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true)
 	assert.Equal(t, len(result[nvidia.NvidiaGPUDevice]), 1)
 	assert.Equal(t, result[nvidia.NvidiaGPUDevice][0].UUID, "P_n0")
