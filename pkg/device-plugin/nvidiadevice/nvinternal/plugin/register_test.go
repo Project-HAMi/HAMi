@@ -20,6 +20,10 @@ import (
 	"testing"
 	"time"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
@@ -79,6 +83,59 @@ func TestInt8SliceString(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetNumaNode(t *testing.T) {
+	t.Run("error getting PCI info", func(t *testing.T) {
+		d := &mock.Device{
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
+			},
+		}
+		hasNode, node, err := GetNumaNode(d)
+		if err == nil {
+			t.Fatal("expected an error getting PCI info")
+		}
+		if hasNode || node != 0 {
+			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+		}
+	})
+
+	t.Run("numa_node file not present for this bus ID", func(t *testing.T) {
+		// The domain prefix ("0000") is stripped before building the sysfs
+		// path, so this never matches a real sysfs directory (which is
+		// always domain-prefixed) - the read deterministically fails.
+		d := &mock.Device{
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+			},
+		}
+		hasNode, node, err := GetNumaNode(d)
+		if err == nil {
+			t.Fatal("expected an error reading the (nonexistent) numa_node file")
+		}
+		if hasNode || node != 0 {
+			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+		}
+	})
+}
+
+// TestGetAPIDevices_PanicsWithoutNVMLDriver documents and locks in existing
+// behavior: getAPIDevices calls the real nvml.Init() (not an injectable
+// interface), which fails on any machine without an NVIDIA driver - as this
+// one - and the code responds by panicking rather than returning an error.
+func TestGetAPIDevices_PanicsWithoutNVMLDriver(t *testing.T) {
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices { return rm.Devices{} },
+	}
+	plugin := &NvidiaDevicePlugin{rm: mockRM}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected getAPIDevices to panic when nvml.Init fails")
+		}
+	}()
+	plugin.getAPIDevices()
 }
 
 func TestProcessMigConfigs(t *testing.T) {
