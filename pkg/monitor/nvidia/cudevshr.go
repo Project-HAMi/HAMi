@@ -281,8 +281,9 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		klog.Infoln("casting......v1")
 		usage.Info = v1.CastSpec(usage.data)
 	} else {
+		majorVersion, minorVersion := head.majorVersion, head.minorVersion
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.majorVersion, head.minorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	return usage, nil
 }
