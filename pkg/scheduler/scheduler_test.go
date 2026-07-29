@@ -1723,6 +1723,7 @@ func TestFilterUsesTemplateNodesWithoutSideEffects(t *testing.T) {
 		},
 	}
 	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+	config.NodeSchedulerPolicy = "binpack"
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{

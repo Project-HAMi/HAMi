@@ -1619,3 +1619,14 @@ func TestMigInUseDeepCopy(t *testing.T) {
 		})
 	}
 }
+
+func FuzzDecodeContainerDevices(f *testing.F) {
+	f.Add("")
+	f.Add("GPU-uuid,NVIDIA,1024,10:")
+	f.Add("GPU-uuid,NVIDIA,1024,10:GPU-uuid2,NVIDIA,2048,20:")
+	f.Add(",,,")
+	f.Fuzz(func(t *testing.T, str string) {
+		// Must never panic on arbitrary pod-annotation input.
+		_, _ = DecodeContainerDevices(str)
+	})
+}

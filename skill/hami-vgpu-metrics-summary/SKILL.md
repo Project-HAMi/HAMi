@@ -245,10 +245,12 @@ These are emitted in **bytes**, even though internal scheduler state stores memo
 These are emitted directly from quota manager `q.Used` and should be interpreted as **MiB-like GPU memory units**, not bytes.
 
 **Overview labels**
+- `hami_node_gpu_overview.device_cores`
 - `hami_node_gpu_overview.device_memory_limit`
+- legacy `nodeGPUOverview.devicecores`
 - legacy `nodeGPUOverview.devicememorylimit`
 
-These label values are also in **MiB-like units**.
+These label values are static. Memory limits are in **MiB-like units**, and cores are integers.
 
 Use these conversions when needed:
 

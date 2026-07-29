@@ -75,10 +75,6 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	// 1. Process InitContainers
 	for idx := range pod.Spec.InitContainers {
 		c := &pod.Spec.InitContainers[idx]
-		if isPrivilegedContainer(c) {
-			klog.Warningf(template+" - Denying admission as init container %s is privileged", pod.Namespace, pod.Name, pod.UID, c.Name)
-			continue
-		}
 		for _, val := range device.GetDevices() {
 			found, err := val.MutateAdmission(c, pod)
 			if err != nil {

@@ -80,7 +80,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nodeGPUOverview := prometheus.NewDesc(
 		"hami_node_gpu_overview",
 		"GPU overview on a certain node",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "shared_containers", "device_memory_limit", "device_type"}, nil,
+		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
@@ -136,7 +136,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		legacyOverview = prometheus.NewDesc(
 			"nodeGPUOverview",
 			"GPU overview on a certain node",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "sharedcontainers", "devicememorylimit", "devicetype"}, nil,
+			[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicememorylimit", "devicetype"}, nil,
 		)
 		legacyMemoryPercentage = prometheus.NewDesc(
 			"nodeGPUMemoryPercentage",
@@ -208,7 +208,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodevGPUMemoryAllocatedDesc,
 				prometheus.GaugeValue,
 				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), devs.Device.Type,
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUSharedNumDesc,
@@ -226,7 +226,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodeGPUOverview,
 				prometheus.GaugeValue,
 				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), fmt.Sprint(devs.Device.Used), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUMemoryPercentage,
@@ -252,7 +252,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					legacyMemoryAllocatedDesc,
 					prometheus.GaugeValue,
 					float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), devs.Device.Type,
+					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type,
 				)
 				ch <- prometheus.MustNewConstMetric(
 					legacySharedNumDesc,
@@ -270,7 +270,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					legacyOverview,
 					prometheus.GaugeValue,
 					float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Usedcores), fmt.Sprint(devs.Device.Used), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
+					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 				)
 				ch <- prometheus.MustNewConstMetric(
 					legacyMemoryPercentage,
