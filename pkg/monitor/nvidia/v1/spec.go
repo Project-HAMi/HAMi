@@ -174,6 +174,12 @@ func CastSpec(data []byte) Spec {
 	}
 }
 
+// MinSize returns the minimum byte length data must have for CastSpec to be
+// memory-safe.
+func MinSize() int {
+	return int(unsafe.Sizeof(sharedRegionT{}))
+}
+
 //	func (s *SharedRegionT) UsedMemory(idx int) (uint64, error) {
 //		return 0, nil
 //	}

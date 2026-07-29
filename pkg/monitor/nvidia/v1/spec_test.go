@@ -18,9 +18,20 @@ package v1
 
 import (
 	"testing"
+	"unsafe"
 
 	"gotest.tools/v3/assert"
 )
+
+func Test_MinSize(t *testing.T) {
+	assert.Equal(t, MinSize(), int(unsafe.Sizeof(sharedRegionT{})))
+}
+
+func Test_CastSpec(t *testing.T) {
+	data := make([]byte, MinSize())
+	spec := CastSpec(data)
+	assert.Assert(t, spec.sr != nil)
+}
 
 func Test_DeviceMax(t *testing.T) {
 	tests := []struct {

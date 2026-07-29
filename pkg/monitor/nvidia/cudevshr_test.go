@@ -35,8 +35,14 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
+
+// v1CacheFileSize is large enough for v1.CastSpec to safely dereference
+// every field of the real v1 sharedRegionT; using a smaller fixture would
+// leave usage.Info backed by an out-of-bounds pointer.
+var v1CacheFileSize = v1.MinSize()
 
 // fakePodLister is a minimal corelisters.PodLister used to drive Update()'s
 // error path without touching a real (or fake) Kubernetes API server.
@@ -112,6 +118,7 @@ func Test_NewContainerLister_errors(t *testing.T) {
 	t.Run("NODE_NAME not set", func(t *testing.T) {
 		t.Setenv("HOOK_PATH", t.TempDir())
 		t.Setenv("KUBECONFIG", writeKubeconfig(t, "http://localhost:8080"))
+		t.Setenv(util.NodeNameEnvName, "")
 		os.Unsetenv(util.NodeNameEnvName)
 		_, err := NewContainerLister()
 		assert.ErrorContains(t, err, "env "+util.NodeNameEnvName+" not set")
@@ -246,9 +253,16 @@ func Test_loadCache(t *testing.T) {
 		assert.ErrorContains(t, err, "unknown cache file size")
 	})
 
-	t.Run("v1 cache file", func(t *testing.T) {
+	t.Run("v1 header but file too small for the v1 spec", func(t *testing.T) {
 		dir := t.TempDir()
 		writeCacheFile(t, dir, "x.cache", headerBytes(64, SharedRegionMagicFlag, 1, 0))
+		_, err := loadCache(dir)
+		assert.ErrorContains(t, err, "unknown cache file size")
+	})
+
+	t.Run("v1 cache file", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
 		usage, err := loadCache(dir)
 		assert.NilError(t, err)
 		assert.Assert(t, usage != nil)
@@ -267,6 +281,9 @@ func Test_loadCache(t *testing.T) {
 	})
 
 	t.Run("open file fails", func(t *testing.T) {
+		if os.Geteuid() == 0 {
+			t.Skip("running as root bypasses file permission checks")
+		}
 		dir := t.TempDir()
 		path := writeCacheFile(t, dir, "x.cache", headerBytes(64, SharedRegionMagicFlag, 1, 0))
 		assert.NilError(t, os.Chmod(path, 0000))
@@ -332,7 +349,7 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.NilError(t, os.Chtimes(ctrDir, old, old))
 
 		cacheDir := t.TempDir()
-		writeCacheFile(t, cacheDir, "x.cache", headerBytes(64, SharedRegionMagicFlag, 1, 0))
+		writeCacheFile(t, cacheDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
 		usage, err := loadCache(cacheDir)
 		assert.NilError(t, err)
 
@@ -402,7 +419,7 @@ func Test_ContainerLister_Update(t *testing.T) {
 		entryName := "uid4_mycontainer"
 		ctrDir := filepath.Join(dir, entryName)
 		assert.NilError(t, os.Mkdir(ctrDir, 0755))
-		writeCacheFile(t, ctrDir, "x.cache", headerBytes(64, SharedRegionMagicFlag, 1, 0))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
 		l := &ContainerLister{
 			containerPath: dir,
 			containers:    map[string]*ContainerUsage{},
