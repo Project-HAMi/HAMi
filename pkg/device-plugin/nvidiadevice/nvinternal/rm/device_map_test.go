@@ -40,6 +40,7 @@ import (
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/protobuf/proto"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -127,8 +128,22 @@ func TestDeviceMapInsert(t *testing.T) {
 }
 
 func TestUpdateDeviceMapWithReplicas(t *testing.T) {
-	device0 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0"}, Index: "0"}
-	device1 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1"}}
+	device0 := Device{
+		Device: kubeletdevicepluginv1beta1.Device{ID: "0", Health: "Healthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 0}}}},
+		Index: "0",
+		Paths: []string{"/dev/nvidia0"},
+		TotalMemory: 1024,
+		ComputeCapability: "8.0",
+		Replicas: 1,
+	}
+	device1 := Device{
+		Device: kubeletdevicepluginv1beta1.Device{ID: "1", Health: "Unhealthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 1}}}},
+		Index: "1",
+		Paths: []string{"/dev/nvidia1"},
+		TotalMemory: 2048,
+		ComputeCapability: "8.6",
+		Replicas: 1,
+	}
 	device2 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2"}}
 	device3 := Device{Device: kubeletdevicepluginv1beta1.Device{ID: "3"}}
 
@@ -179,10 +194,38 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 			},
 			expectedDeviceMap: DeviceMap{
 				"replicated-resource1": Devices{
-					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0", Replicas: 2},
-					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0", Replicas: 2},
-					"1::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::0"}, Replicas: 2},
-					"1::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "1::1"}, Replicas: 2},
+					"0::0": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "0::0", Health: "Healthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 0}}}},
+						Index: "0",
+						Paths: []string{"/dev/nvidia0"},
+						TotalMemory: 1024,
+						ComputeCapability: "8.0",
+						Replicas: 2,
+					},
+					"0::1": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "0::1", Health: "Healthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 0}}}},
+						Index: "0",
+						Paths: []string{"/dev/nvidia0"},
+						TotalMemory: 1024,
+						ComputeCapability: "8.0",
+						Replicas: 2,
+					},
+					"1::0": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "1::0", Health: "Unhealthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 1}}}},
+						Index: "1",
+						Paths: []string{"/dev/nvidia1"},
+						TotalMemory: 2048,
+						ComputeCapability: "8.6",
+						Replicas: 2,
+					},
+					"1::1": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "1::1", Health: "Unhealthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 1}}}},
+						Index: "1",
+						Paths: []string{"/dev/nvidia1"},
+						TotalMemory: 2048,
+						ComputeCapability: "8.6",
+						Replicas: 2,
+					},
 				},
 				"resource2": Devices{
 					"2::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "2::0"}, Replicas: 1},
@@ -220,8 +263,22 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 			},
 			expectedDeviceMap: DeviceMap{
 				"replicated-resource1": Devices{
-					"0::0": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::0"}, Index: "0", Replicas: 2},
-					"0::1": &Device{Device: kubeletdevicepluginv1beta1.Device{ID: "0::1"}, Index: "0", Replicas: 2},
+					"0::0": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "0::0", Health: "Healthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 0}}}},
+						Index: "0",
+						Paths: []string{"/dev/nvidia0"},
+						TotalMemory: 1024,
+						ComputeCapability: "8.0",
+						Replicas: 2,
+					},
+					"0::1": &Device{
+						Device: kubeletdevicepluginv1beta1.Device{ID: "0::1", Health: "Healthy", Topology: &kubeletdevicepluginv1beta1.TopologyInfo{Nodes: []*kubeletdevicepluginv1beta1.NUMANode{{ID: 0}}}},
+						Index: "0",
+						Paths: []string{"/dev/nvidia0"},
+						TotalMemory: 1024,
+						ComputeCapability: "8.0",
+						Replicas: 2,
+					},
 				},
 				"resource1": Devices{
 					"1": &device1,
@@ -233,7 +290,21 @@ func TestUpdateDeviceMapWithReplicas(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.description, func(t *testing.T) {
 			devices, _ := updateDeviceMapWithReplicas(&tc.config.Config.Sharing.TimeSlicing, tc.devices)
-			require.EqualValues(t, tc.expectedDeviceMap, devices)
+			require.Equal(t, len(tc.expectedDeviceMap), len(devices))
+			for resourceName, expectedDevices := range tc.expectedDeviceMap {
+				actualDevices := devices[resourceName]
+				require.Equal(t, len(expectedDevices), len(actualDevices))
+				for id, expectedDevice := range expectedDevices {
+					actualDevice := actualDevices[id]
+					require.NotNil(t, actualDevice)
+					require.Equal(t, expectedDevice.Index, actualDevice.Index)
+					require.Equal(t, expectedDevice.Paths, actualDevice.Paths)
+					require.Equal(t, expectedDevice.TotalMemory, actualDevice.TotalMemory)
+					require.Equal(t, expectedDevice.ComputeCapability, actualDevice.ComputeCapability)
+					require.Equal(t, expectedDevice.Replicas, actualDevice.Replicas)
+					require.True(t, proto.Equal(&expectedDevice.Device, &actualDevice.Device), "proto fields should match")
+				}
+			}
 		})
 	}
 }
