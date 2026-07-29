@@ -40,6 +40,7 @@ import (
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 const (
@@ -56,8 +57,8 @@ const (
 	envEnableHealthChecks = "DP_ENABLE_HEALTHCHECKS"
 )
 
-// CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
-func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devices, unhealthy chan<- *Device, disableNVML <-chan bool) error {
+// CheckHealth performs health checks on a set of devices, writing to the 'health' channel with any unhealthy devices
+func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devices, health chan<- *Device, disableNVML <-chan bool) error {
 	xids := getHealthCheckXids()
 	if xids.IsAllDisabled() {
 		return nil
@@ -123,9 +124,12 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 		if ret != nvml.SUCCESS {
 			klog.Infof("Marking device %v as unhealthy: %v", d.ID, ret)
-			unhealthy <- d
+			d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			health <- d
 		}
 	}
+
+	unhealthyDevices := make(map[string]*Device)
 
 	for {
 		select {
@@ -141,12 +145,31 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 
 		e, ret := eventSet.Wait(5000)
 		if ret == nvml.ERROR_TIMEOUT {
+			for id, d := range unhealthyDevices {
+				uuid, _, _, err := r.getDevicePlacement(d)
+				if err != nil {
+					continue
+				}
+				gpu, ret := r.nvml.DeviceGetHandleByUUID(uuid)
+				if ret != nvml.SUCCESS {
+					continue
+				}
+				_, ret = gpu.GetMemoryInfo()
+				if ret == nvml.SUCCESS {
+					klog.Infof("Device %s has recovered", d.ID)
+					d.Health = kubeletdevicepluginv1beta1.Healthy
+					health <- d
+					delete(unhealthyDevices, id)
+				}
+			}
 			continue
 		}
 		if ret != nvml.SUCCESS {
 			klog.Infof("Error waiting for event: %v; Marking all devices as unhealthy", ret)
 			for _, d := range devices {
-				unhealthy <- d
+				d.Health = kubeletdevicepluginv1beta1.Unhealthy
+				unhealthyDevices[d.ID] = d
+				health <- d
 			}
 			continue
 		}
@@ -167,7 +190,9 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 			// If we cannot reliably determine the device UUID, we mark all devices as unhealthy.
 			klog.Infof("Failed to determine uuid for event %v: %v; Marking all devices as unhealthy.", e, ret)
 			for _, d := range devices {
-				unhealthy <- d
+				d.Health = kubeletdevicepluginv1beta1.Unhealthy
+				unhealthyDevices[d.ID] = d
+				health <- d
 			}
 			continue
 		}
@@ -188,7 +213,9 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 
 		klog.Infof("XidCriticalError: Xid=%d on Device=%s; marking device as unhealthy.", e.EventData, d.ID)
-		unhealthy <- d
+		d.Health = kubeletdevicepluginv1beta1.Unhealthy
+		unhealthyDevices[d.ID] = d
+		health <- d
 	}
 }
 

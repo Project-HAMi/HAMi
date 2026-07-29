@@ -135,13 +135,13 @@ type ResourceManagerMock struct {
 }
 
 // CheckHealth calls CheckHealthFunc.
-func (mock *ResourceManagerMock) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
+func (mock *ResourceManagerMock) CheckHealth(stop <-chan interface{}, health chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	callInfo := struct {
-		Stop      <-chan interface{}
-		Unhealthy chan<- *Device
+		Stop   <-chan interface{}
+		Health chan<- *Device
 	}{
-		Stop:      stop,
-		Unhealthy: unhealthy,
+		Stop:   stop,
+		Health: health,
 	}
 	mock.lockCheckHealth.Lock()
 	mock.calls.CheckHealth = append(mock.calls.CheckHealth, callInfo)
@@ -152,7 +152,7 @@ func (mock *ResourceManagerMock) CheckHealth(stop <-chan interface{}, unhealthy 
 		)
 		return errOut
 	}
-	return mock.CheckHealthFunc(stop, unhealthy)
+	return mock.CheckHealthFunc(stop, health)
 }
 
 // CheckHealthCalls gets all the calls that were made to CheckHealth.

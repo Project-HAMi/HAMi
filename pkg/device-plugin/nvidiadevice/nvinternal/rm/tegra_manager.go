@@ -87,6 +87,6 @@ func (r *tegraResourceManager) GetDevicePaths(ids []string) []string {
 }
 
 // CheckHealth is disabled for the tegraResourceManager
-func (r *tegraResourceManager) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
+func (r *tegraResourceManager) CheckHealth(stop <-chan interface{}, health chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	return nil
 }
