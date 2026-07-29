@@ -52,6 +52,9 @@ func Test_InitKunlunVDevice(t *testing.T) {
 	// Calling again must not panic and must not clobber the already-registered entries.
 	dev2 := InitKunlunVDevice(testVConfig())
 	assert.Assert(t, dev2 != nil)
+	assert.Equal(t, device.InRequestDevices[XPUDevice], "hami.io/xpu-devices-to-allocate")
+	assert.Equal(t, device.SupportDevices[XPUDevice], "hami.io/xpu-devices-allocated")
+	assert.Equal(t, util.HandshakeAnnos[XPUDevice], HandshakeAnnos)
 }
 
 func Test_trimMemory(t *testing.T) {
@@ -115,6 +118,19 @@ func Test_MutateAdmission(t *testing.T) {
 						corev1.ResourceName(KunlunResourceVMemory): resource.MustParse("30000"),
 					},
 					Requests: corev1.ResourceList{},
+				},
+			},
+			want:       true,
+			wantMemory: "49152",
+		},
+		{
+			name: "vcount with vmemory and nil requests does not panic",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount):  resource.MustParse("1"),
+						corev1.ResourceName(KunlunResourceVMemory): resource.MustParse("30000"),
+					},
 				},
 			},
 			want:       true,
@@ -286,6 +302,7 @@ func Test_KunlunVDevices_PatchAnnotations(t *testing.T) {
 }
 
 func Test_KunlunVDevices_LockNode(t *testing.T) {
+	InitKunlunVDevice(testVConfig())
 	tests := []struct {
 		name    string
 		pod     *corev1.Pod
@@ -309,7 +326,6 @@ func Test_KunlunVDevices_LockNode(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			InitKunlunVDevice(testVConfig())
 			dev := &KunlunVDevices{}
 			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "lock-node"}}
@@ -328,6 +344,7 @@ func Test_KunlunVDevices_LockNode(t *testing.T) {
 }
 
 func Test_KunlunVDevices_ReleaseNodeLock(t *testing.T) {
+	InitKunlunVDevice(testVConfig())
 	tests := []struct {
 		name    string
 		pod     *corev1.Pod
@@ -354,7 +371,6 @@ func Test_KunlunVDevices_ReleaseNodeLock(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			InitKunlunVDevice(testVConfig())
 			dev := &KunlunVDevices{}
 			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{
@@ -474,8 +490,8 @@ func Test_KunlunVDevices_GetResourceNames(t *testing.T) {
 	InitKunlunVDevice(testVConfig())
 	dev := &KunlunVDevices{}
 	got := dev.GetResourceNames()
-	assert.Equal(t, got.ResourceCountName, KunlunResourceVCount)
-	assert.Equal(t, got.ResourceMemoryName, KunlunResourceVMemory)
+	assert.Equal(t, got.ResourceCountName, "kunlunxin.com/vxpu")
+	assert.Equal(t, got.ResourceMemoryName, "kunlunxin.com/vxpu-memory")
 	assert.Equal(t, got.ResourceCoreName, "")
 }
 
