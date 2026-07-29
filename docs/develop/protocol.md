@@ -25,6 +25,7 @@ hami.io/node-handshake-mlu: Requesting_2024.01.10 04:06:57
 hami.io/node-mlu-register: MLU-45013011-2257-0000-0000-000000000000,10,23308,0,MLU-MLU370-X4,0,false:MLU-54043011-2257-0000-0000-000000000000,10,23308,0,
 hami.io/node-nvidia-register: GPU-00552014-5c87-89ac-b1a6-7b53aa24b0ec,10,32768,100,NVIDIA-Tesla V100-PCIE-32GB,0,true:GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,10,32768,100,NVIDIA-Tesla V100-PCIE-32GB,0,true:
 ```
+
 In this example, this node has two different AI devices, 2 Nvidia-V100 GPUs, and 2 Cambricon 370-X4 MLUs
 
 Note that a device node may become unavailable due to hardware or network failure, if a node hasn't registered in last 5 minutes, scheduler will mark that node as 'unavailable'.
@@ -50,9 +51,11 @@ hami.io/vgpu-node: {schedule decision node}
 hami.io/vgpu-time: {timestamp}
 ```
 
-`hami.io/vgpu-devices-to-allocate` is the key used for NVIDIA GPUs. Other device types use `hami.io/{device-type}-devices-to-allocate`, for example `hami.io/mthreads-vgpu-devices-to-allocate` or `hami.io/cambricon-mlu-devices-to-allocate`.
+`hami.io/vgpu-devices-to-allocate` is the key for NVIDIA GPUs. Each device backend registers its own key in `InRequestDevices`, and the names do not follow a single `{device-type}` pattern. For example, Cambricon MLU uses `hami.io/cambricon-mlu-devices-to-allocate`, Moore Threads uses `hami.io/mthreads-vgpu-devices-to-allocate`, and Hygon DCU uses `hami.io/dcu-devices-to-allocate`.
 
-each container request lists that container's devices. Every device is four comma-separated fields terminated by `:`, and every container is terminated by `;`:
+The scheduler writes one `-devices-to-allocate` annotation per device type. A pod that asks for more than one device type, for example NVIDIA and MLU, gets one annotation per type, and each annotation lists only the devices of that type.
+
+Each container request lists that container's devices. Every device is four comma-separated fields terminated by `:`, and every container is terminated by `;`:
 
 ```text
 {device UUID},{device type keyword},{device memory request},{device core request}:
