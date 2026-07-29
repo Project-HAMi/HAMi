@@ -138,16 +138,18 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 		return err
 	}
 	if _, ok := node.Annotations[NodeLockKey]; ok {
-		return fmt.Errorf("node %s is locked", nodeName)
+		return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
 	}
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
-		// Retry on any error
-		return true
+		return !IsNodeLockContention(err)
 	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
+		}
+		if _, ok := node.Annotations[NodeLockKey]; ok {
+			return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
 		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
@@ -190,6 +192,7 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 		return nil
 	}
 
+	released := false
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
 		// Retry on any error
 		return true
@@ -199,19 +202,26 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
+		currentLock, ok := node.Annotations[NodeLockKey]
+		if !ok || currentLock != lockStr {
+			return nil
+		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to patch node when retry to patch", "node", nodeName)
 			return err
 		}
+		released = true
 		return nil
 	})
 	if err != nil {
 		return fmt.Errorf("failed to release node lock (node=%s, retry strategy=%+v): %w", nodeName, DefaultStrategy, err)
 	}
 
-	klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
+	if released {
+		klog.InfoS("Node lock released", "node", nodeName, "podName", pod.Name)
+	}
 	return nil
 }
 
