@@ -2,24 +2,26 @@ import time
 import json
 import uuid
 import argparse
-import requests
+import urllib.request
 from datetime import datetime
 
 def now():
     return time.time()
 
-def send_request(url, model, prompt, stream):
+def send_request(url, model, prompt, stream, timeout):
     t0 = now()
-    r = requests.post(
-        url,
-        json={
-            "model": model,
-            "messages": [{"role": "user", "content": prompt}],
-            "stream": stream,
-        },
-        stream=stream,
+    body = json.dumps({
+        "model": model,
+        "messages": [{"role": "user", "content": prompt}],
+        "stream": stream,
+    }).encode()
+    req = urllib.request.Request(
+        url, data=body, headers={"Content-Type": "application/json"}
     )
-    r.raise_for_status()
+    # urlopen raises HTTPError on a non-2xx status and does not read the body
+    # up front, so lines arrive as the server sends them. The timeout applies
+    # per read, so it bounds the gap between tokens rather than the whole run.
+    r = urllib.request.urlopen(req, timeout=timeout)
     if not stream:
         raise RuntimeError("Use stream=True for token timestamps")
 
@@ -27,7 +29,8 @@ def send_request(url, model, prompt, stream):
     token_times = []
     usage = None
 
-    for line in r.iter_lines():
+    for raw in r:
+        line = raw.strip()
         if not line:
             continue
         if not line.startswith(b"data: "):
@@ -70,6 +73,8 @@ def main():
                         help="Number of warmup requests (default: 30)")
     parser.add_argument("--runs", type=int, default=200,
                         help="Number of benchmark requests (default: 200)")
+    parser.add_argument("--timeout", type=float, default=60.0,
+                        help="Seconds to wait for the next chunk before giving up (default: 60)")
     parser.add_argument("--output", default=None,
                         help="Output file path (default: auto-generated)")
     args = parser.parse_args()
@@ -85,14 +90,14 @@ def main():
 
     print("warmup...")
     for i in range(args.warmup):
-        send_request(args.vllm_url, args.model, args.prompt, stream=True)
+        send_request(args.vllm_url, args.model, args.prompt, stream=True, timeout=args.timeout)
         if (i + 1) % 10 == 0:
             print(f"  {i + 1}/{args.warmup}")
 
     print("running...")
     with open(fname, "w") as f:
         for i in range(args.runs):
-            data = send_request(args.vllm_url, args.model, args.prompt, stream=True)
+            data = send_request(args.vllm_url, args.model, args.prompt, stream=True, timeout=args.timeout)
             f.write(json.dumps(data) + "\n")
             if (i + 1) % 10 == 0:
                 print(f"  {i + 1}/{args.runs}")
