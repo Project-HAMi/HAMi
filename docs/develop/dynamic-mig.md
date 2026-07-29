@@ -87,6 +87,20 @@ data:
             - name: 7g.79gb
               memory: 80896
               count: 1
+      - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
+        allowedGeometries:
+          -
+            - name: 1g.24gb
+              memory: 24576
+              count: 4
+          -
+            - name: 2g.48gb
+              memory: 49152
+              count: 2
+          -
+            - name: 4g.96gb
+              memory: 98304
+              count: 1
       nodeconfig: 
           - name: nodeA
             operatingmode: hami-core

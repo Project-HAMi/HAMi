@@ -29,7 +29,13 @@ if util::cmd_exist golangci-lint; then
 else
   echo "Installing golangci-lint ${GOLANGCI_LINT_VER}"
   # https://golangci-lint.run/usage/install/#other-ci
-  curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/HEAD/install.sh | sh -s -- -b $(go env GOPATH)/bin ${GOLANGCI_LINT_VER}
+  GOLANGCI_INSTALL_REF="6b2ddf9224768e2097b028b7ac7f6efb97a5f9f6"
+  GOLANGCI_INSTALL_SHA256="d32d3534af96cfd59546a084d22b213e8a47541cada5013aa8a84c4fa2589905"
+  GOLANGCI_INSTALL_SCRIPT=$(mktemp)
+  trap 'rm -f "${GOLANGCI_INSTALL_SCRIPT}"' EXIT
+  curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_INSTALL_REF}/install.sh" -o "${GOLANGCI_INSTALL_SCRIPT}"
+  echo "${GOLANGCI_INSTALL_SHA256}  ${GOLANGCI_INSTALL_SCRIPT}" | sha256sum -c -
+  sh "${GOLANGCI_INSTALL_SCRIPT}" -b "$(go env GOPATH)/bin" "${GOLANGCI_LINT_VER}"
 fi
 
 if golangci-lint run -v; then

@@ -63,13 +63,13 @@ jobs:
   
 
       - name: Checkout code
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           persist-credentials: false
           ref: ${{ steps.ref.outputs.ref }}
       
       - name: Checkout submodule
-        uses: Mushus/checkout-submodule@v1.0.1
+        uses: Mushus/checkout-submodule@f6a7fddc9798c8f8728b252594243ced3b56e550 # v1.0.1
         with:
           basePath: # optional, default is .
           submodulePath: libvgpu 
@@ -79,27 +79,28 @@ jobs:
           make lint_dockerfile
 
       - name: Docker Login
-        uses: docker/login-action@v4.4.0
+        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
         with:
             username: ${{ secrets.DOCKERHUB_TOKEN }}
             password: ${{ secrets.DOCKERHUB_PASSWD }}
 
       - name: Set up QEMU
-        uses: docker/setup-qemu-action@v4
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
         with:
-          driver-opts: image=moby/buildkit:master
+          driver-opts: image=moby/buildkit:v0.31.2@sha256:2f5adac4ecd194d9f8c10b7b5d7bceb5186853db1b26e5abd3a657af0b7e26ec
 
       - name: Extract metadata (tags, labels) for Docker
         id: meta
-        uses: docker/metadata-action@v6
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_REPO_HAMICORE }}
 
       - name: Build & Pushing hami-core image
-        uses: docker/build-push-action@v7.3.0
+        id: build
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
             context: .
             file: ${{ env.IMAGE_ROOT_PATH }}/Dockerfile.hamicore
@@ -107,9 +108,19 @@ jobs:
             platforms: ${{ env.BUILD_PLATFORM }}
             build-args: |
               VERSION=${{ env.ref }}
-              GOLANG_IMAGE=golang:1.26.2-bookworm
-              NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8
+              GOLANG_IMAGE=golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+              NVIDIA_IMAGE=nvidia/cuda:13.3.0-cudnn-devel-ubi8@sha256:e5b2b971730b6d0defd6d1bd7697630e0e599c359190cc4351e3032134e7b401
               DEST_DIR=/usr/local
             tags: ${{ steps.meta.outputs.tags }}
             push: true
+            provenance: mode=max
+            sbom: true
             github-token: ${{ env.REGISTER_PASSWORD }}
+
+      - name: Install cosign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign hami-core image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "${REGISTRY}/${IMAGE_REPO_HAMICORE}@${DIGEST}"

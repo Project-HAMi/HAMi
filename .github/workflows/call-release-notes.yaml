@@ -15,20 +15,20 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Download Artifact
-      uses: actions/download-artifact@v8
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
       with:
         name: chart_package_artifact
         path: charts/
     # generate release notes for the new release branch
     - name: upload chart tgz to release
       if: startsWith(github.ref, 'refs/tags/')
-      uses: softprops/action-gh-release@v3
+      uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
         files: "charts/*.tgz"
     - name: Checkout
-      uses: actions/checkout@v7
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       with:
         fetch-depth: 0
         ref: master
@@ -64,7 +64,7 @@ jobs:
 
     # - name: Push release notes
     #   id: push_directory
-    #   uses: cpina/github-action-push-to-another-repository@v1.7.2
+    #   uses: cpina/github-action-push-to-another-repository@07c4d7b3def0a8ebe788a8f2c843a4e1de4f6900 # v1.7.2
     #   env:
     #     API_TOKEN_GITHUB: ${{ secrets.API_TOKEN_GITHUB }}
     #   with:

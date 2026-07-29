@@ -50,18 +50,12 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 }
 
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
-	//devmap := make(map[string]device.ContainerDevices)
-	devs := device.ContainerDevices{}
-	total, totalCore, totalMem := int32(0), int32(0), int32(0)
-	free, freeCore, freeMem := int32(0), int32(0), int32(0)
-	sums := 0
 	// computer all device score for one node
 	for index := range node.Devices.DeviceLists {
 		node.Devices.DeviceLists[index].ComputeScore(requests)
 	}
 	//This loop is for requests for different devices
 	for _, k := range requests {
-		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
 			return false, common.NodeInsufficientDevice
@@ -79,12 +73,6 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 					if v.Device.ID != val.UUID {
 						continue
 					}
-					total += v.Device.Count
-					totalCore += v.Device.Totalcore
-					totalMem += v.Device.Totalmem
-					free += v.Device.Count - v.Device.Used
-					freeCore += v.Device.Totalcore - v.Device.Usedcores
-					freeMem += v.Device.Totalmem - v.Device.Usedmem
 					err := device.GetDevices()[k.Type].AddResourceUsage(pod, node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
 					if err != nil {
 						klog.Errorf("AddResourceUsage failed:%s", err.Error())
@@ -93,11 +81,10 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 					klog.V(5).Infoln("After AddResourceUsage:", node.Devices.DeviceLists[nidx].Device)
 				}
 			}
-			devs = append(devs, tmpDevs[k.Type]...)
 		} else {
 			return false, reason
 		}
-		(*devinput)[k.Type] = append((*devinput)[k.Type], devs)
+		(*devinput)[k.Type] = append((*devinput)[k.Type], tmpDevs[k.Type])
 	}
 	return true, ""
 }
