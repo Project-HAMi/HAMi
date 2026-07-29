@@ -8,7 +8,7 @@ ARG GOPROXY=https://goproxy.cn,direct
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM nvidia/cuda:13.3.0-base-ubuntu22.04@sha256:e08868e73d2045f1cbe0c39222441d670f8245d6d98e0434bcc9453c7cdb6a31
 RUN apt-get update && \
