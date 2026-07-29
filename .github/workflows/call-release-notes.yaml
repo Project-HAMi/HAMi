@@ -8,7 +8,9 @@ on:
         required: true
         type: string
 
-permissions: write-all
+# updates the github release page
+permissions:
+  contents: write
 
 jobs:
   generate-release-notes:

@@ -21,7 +21,11 @@ on:
       tagoverride:
         required: false
         type: string
-permissions: write-all
+# id-token is needed for keyless cosign signing
+permissions:
+  contents: read
+  packages: write
+  id-token: write
 
 jobs:
   docker-build:

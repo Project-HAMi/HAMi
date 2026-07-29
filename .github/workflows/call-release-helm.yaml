@@ -28,7 +28,9 @@ on:
         required: true
         default: v1.0.0
 
-permissions: write-all
+# the github_pages push uses API_TOKEN_GITHUB, not GITHUB_TOKEN
+permissions:
+  contents: read
 
 jobs:
   get_ref:
