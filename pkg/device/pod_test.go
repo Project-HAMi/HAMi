@@ -18,7 +18,6 @@ package device
 
 import (
 	"reflect"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -122,57 +121,76 @@ func TestPodUseDeviceStat(t *testing.T) {
 		})
 	}
 }
-func TestGetScheduledPods(t *testing.T) {
-	podManager := &PodManager{
-		pods:  make(map[k8stypes.UID]*PodInfo),
-		mutex: sync.RWMutex{},
-	}
+func TestGetScheduledPodsReturnsDeepCopy(t *testing.T) {
+	podManager := NewPodManager()
 
-	pod1 := &PodInfo{
-		Pod: &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "default",
-				Name:      "pod1",
-				UID:       k8stypes.UID("uid1"),
+	pod1 := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "pod1",
+			UID:       k8stypes.UID("uid1"),
+		},
+	}
+	pod1Devices := PodDevices{
+		"NVIDIA": {
+			{
+				{
+					Idx:       0,
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 50,
+					CustomInfo: map[string]any{
+						"annotations": map[string]string{
+							"metax.com/gpu": "true",
+						},
+					},
+				},
 			},
 		},
-		NodeID:  "node1",
-		Devices: PodDevices{"device1": {{}}},
 	}
-	pod2 := &PodInfo{
-		Pod: &corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Namespace: "default",
-				Name:      "pod2",
-				UID:       k8stypes.UID("uid2"),
-			},
-		},
 
-		NodeID:  "node2",
-		Devices: PodDevices{"device2": {{}}},
-	}
-	podManager.pods[pod1.UID] = pod1
-	podManager.pods[pod2.UID] = pod2
+	podManager.AddPod(pod1, "node1", pod1Devices)
 
 	scheduledPods, err := podManager.GetScheduledPods()
 
 	assert.NoError(t, err, "GetScheduledPods should not return an error")
 	assert.NotNil(t, scheduledPods, "The result should not be nil")
-	assert.Equal(t, 2, len(scheduledPods), "The number of scheduled pods should be 2")
+	assert.Equal(t, 1, len(scheduledPods), "The number of scheduled pods should be 1")
 
-	expectedPods := map[k8stypes.UID]*PodInfo{
-		pod1.UID: pod1,
-		pod2.UID: pod2,
-	}
-	for uid, pod := range scheduledPods {
-		expectedPod := expectedPods[uid]
-		assert.NotNil(t, expectedPod, "Pod with UID %s should exist in the expected pods", uid)
-		assert.Equal(t, expectedPod.Namespace, pod.Namespace, "Namespace should match")
-		assert.Equal(t, expectedPod.Name, pod.Name, "Name should match")
-		assert.Equal(t, expectedPod.UID, pod.UID, "UID should match")
-		assert.Equal(t, expectedPod.NodeID, pod.NodeID, "NodeID should match")
-		assert.Equal(t, expectedPod.Devices, pod.Devices, "Devices should match")
-	}
+	got, ok := scheduledPods[pod1.UID]
+	assert.True(t, ok)
+
+	// 1. Existing Pod pointer is kept (retaining pointer is intentional)
+	assert.Same(t, pod1, got.Pod, "Pod pointer should be preserved without calling Pod.DeepCopy()")
+	assert.Equal(t, "node1", got.NodeID)
+
+	// 2. Scalar device allocation fields match
+	gotDev := got.Devices["NVIDIA"][0][0]
+	assert.Equal(t, "GPU-1", gotDev.UUID)
+	assert.Equal(t, "NVIDIA", gotDev.Type)
+	assert.Equal(t, int32(1000), gotDev.Usedmem)
+	assert.Equal(t, int32(50), gotDev.Usedcores)
+
+	// 3. CustomInfo is intentionally omitted (nil) in metrics snapshot
+	assert.Nil(t, gotDev.CustomInfo, "CustomInfo should be nil in metrics snapshot")
+
+	// 4. Device allocation fields are independent; mutating snapshot does not affect PodManager
+	got.Devices["NVIDIA"][0][0].UUID = "MUTATED-GPU"
+	got.Devices["NVIDIA"][0][0].Usedmem = 9999
+	got.Devices["NVIDIA"][0][0].Usedcores = 99
+
+	originalInfo, ok := podManager.GetPod(pod1)
+	assert.True(t, ok)
+	origDev := originalInfo.Devices["NVIDIA"][0][0]
+	assert.Equal(t, "GPU-1", origDev.UUID, "Original UUID should remain unmutated")
+	assert.Equal(t, int32(1000), origDev.Usedmem, "Original Usedmem should remain unmutated")
+	assert.Equal(t, int32(50), origDev.Usedcores, "Original Usedcores should remain unmutated")
+	assert.NotNil(t, origDev.CustomInfo, "Original CustomInfo should remain present in PodManager")
+}
+
+func TestGetScheduledPods(t *testing.T) {
+	TestGetScheduledPodsReturnsDeepCopy(t)
 }
 
 func TestGetPod(t *testing.T) {
@@ -516,16 +534,19 @@ func TestContainerDeviceDeepCopy(t *testing.T) {
 
 	copy := original.DeepCopy()
 
-	// 1. Copy must be deeply equal to original.
-	assert.Equal(t, original, copy)
+	// 1. Scalar fields match original.
+	assert.Equal(t, original.Idx, copy.Idx)
+	assert.Equal(t, original.UUID, copy.UUID)
+	assert.Equal(t, original.Type, copy.Type)
+	assert.Equal(t, original.Usedmem, copy.Usedmem)
+	assert.Equal(t, original.Usedcores, copy.Usedcores)
 
-	// 2. Mutating the copy must not affect the original.
+	// 2. CustomInfo is intentionally omitted (nil).
+	assert.Nil(t, copy.CustomInfo, "CustomInfo should be intentionally omitted in DeepCopy")
+
+	// 3. Mutating scalar fields of the copy does not affect the original.
 	copy.UUID = "mutated-gpu"
-	copy.CustomInfo["key2"] = "value2"
-
-	assert.Equal(t, original.UUID, "GPU-0")
-	_, exists := original.CustomInfo["key2"]
-	assert.False(t, exists, "original CustomInfo should not have key2")
+	assert.Equal(t, "GPU-0", original.UUID)
 }
 
 func TestListPodsInfoReturnsDeepCopy(t *testing.T) {

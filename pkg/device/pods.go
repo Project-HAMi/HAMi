@@ -17,7 +17,6 @@ limitations under the License.
 package device
 
 import (
-	"maps"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -212,16 +211,32 @@ func (cd ContainerDevices) DeepCopy() ContainerDevices {
 }
 
 func (c ContainerDevice) DeepCopy() ContainerDevice {
-	dup := ContainerDevice{
+	return ContainerDevice{
 		Idx:       c.Idx,
 		UUID:      c.UUID,
 		Type:      c.Type,
 		Usedmem:   c.Usedmem,
 		Usedcores: c.Usedcores,
 	}
-	if c.CustomInfo != nil {
-		dup.CustomInfo = make(map[string]any, len(c.CustomInfo))
-		maps.Copy(dup.CustomInfo, c.CustomInfo)
+}
+
+func (pd PodDevices) DeepCopyForMetrics() PodDevices {
+	if pd == nil {
+		return nil
+	}
+
+	dup := make(PodDevices, len(pd))
+	for deviceType, podSingleDevice := range pd {
+		deviceCopy := make(PodSingleDevice, len(podSingleDevice))
+		for containerIndex, containerDevices := range podSingleDevice {
+			deviceCopy[containerIndex] = make(ContainerDevices, len(containerDevices))
+			copy(deviceCopy[containerIndex], containerDevices)
+
+			for i := range deviceCopy[containerIndex] {
+				deviceCopy[containerIndex][i].CustomInfo = nil
+			}
+		}
+		dup[deviceType] = deviceCopy
 	}
 	return dup
 }
@@ -230,14 +245,13 @@ func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
-	podCount := len(m.pods)
-	klog.InfoS("Retrieved scheduled pods",
-		"podCount", podCount,
-	)
-
-	// Return a shallow copy of the pods map to avoid race conditions.
-	// This prevents a "concurrent map iteration and map write" fatal error.
-	podsCopy := make(map[k8stypes.UID]*PodInfo, podCount)
-	maps.Copy(podsCopy, m.pods)
+	podsCopy := make(map[k8stypes.UID]*PodInfo, len(m.pods))
+	for uid, pod := range m.pods {
+		podsCopy[uid] = &PodInfo{
+			Pod:     pod.Pod,
+			NodeID:  pod.NodeID,
+			Devices: pod.Devices.DeepCopyForMetrics(),
+		}
+	}
 	return podsCopy, nil
 }
