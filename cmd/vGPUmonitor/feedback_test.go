@@ -22,11 +22,27 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
-type stubInfo struct{ priority int }
+// stubDeviceMax mirrors the production Spec.DeviceMax, which reports the constant
+// maxDevices (16) rather than the live device count.
+const stubDeviceMax = 16
 
-func (s *stubInfo) DeviceMax() int                     { return 1 }
-func (s *stubInfo) DeviceNum() int                     { return 0 }
-func (s *stubInfo) DeviceUUID(int) string              { return "gpu-0" }
+// stubInfo mocks nvidia.UsageInfo. The container's real device UUIDs occupy the
+// leading slots of a fixed-size table; DeviceMax still reports the constant slot
+// count and the trailing slots read back invalid, so the check functions walk the
+// same 16 slots they do in production.
+type stubInfo struct {
+	priority int
+	uuids    []string
+}
+
+func (s *stubInfo) DeviceMax() int { return stubDeviceMax }
+func (s *stubInfo) DeviceNum() int { return len(s.uuids) }
+func (s *stubInfo) DeviceUUID(i int) string {
+	if i < len(s.uuids) {
+		return s.uuids[i]
+	}
+	return ""
+}
 func (s *stubInfo) DeviceMemoryContextSize(int) uint64 { return 0 }
 func (s *stubInfo) DeviceMemoryModuleSize(int) uint64  { return 0 }
 func (s *stubInfo) DeviceMemoryBufferSize(int) uint64  { return 0 }
@@ -34,7 +50,7 @@ func (s *stubInfo) DeviceMemoryOffset(int) uint64      { return 0 }
 func (s *stubInfo) DeviceMemoryTotal(int) uint64       { return 0 }
 func (s *stubInfo) DeviceSmUtil(int) uint64            { return 0 }
 func (s *stubInfo) SetDeviceSmLimit(uint64)            {}
-func (s *stubInfo) IsValidUUID(int) bool               { return true }
+func (s *stubInfo) IsValidUUID(i int) bool             { return i < len(s.uuids) }
 func (s *stubInfo) DeviceMemoryLimit(int) uint64       { return 0 }
 func (s *stubInfo) SetDeviceMemoryLimit(uint64)        {}
 func (s *stubInfo) LastKernelTime() int64              { return 0 }
@@ -46,7 +62,7 @@ func (s *stubInfo) SetUtilizationSwitch(int32)         {}
 
 func TestCheckFunctionsHighPriority(t *testing.T) {
 	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 1}}
-	c := &nvidia.ContainerUsage{Info: &stubInfo{priority: 3}}
+	c := &nvidia.ContainerUsage{Info: &stubInfo{priority: 3, uuids: []string{"gpu-0"}}}
 	if !CheckBlocking(sw, 3, c) {
 		t.Error("CheckBlocking: expected true")
 	}
@@ -58,33 +74,6 @@ func TestCheckFunctionsHighPriority(t *testing.T) {
 		t.Error("CheckBlocking: expected false")
 	}
 }
-
-// multiStubInfo mocks a container that uses several devices, so the check
-// functions can be exercised over more than one UUID.
-type multiStubInfo struct {
-	priority int
-	uuids    []string
-}
-
-func (s *multiStubInfo) DeviceMax() int                     { return len(s.uuids) }
-func (s *multiStubInfo) DeviceNum() int                     { return len(s.uuids) }
-func (s *multiStubInfo) DeviceUUID(i int) string            { return s.uuids[i] }
-func (s *multiStubInfo) DeviceMemoryContextSize(int) uint64 { return 0 }
-func (s *multiStubInfo) DeviceMemoryModuleSize(int) uint64  { return 0 }
-func (s *multiStubInfo) DeviceMemoryBufferSize(int) uint64  { return 0 }
-func (s *multiStubInfo) DeviceMemoryOffset(int) uint64      { return 0 }
-func (s *multiStubInfo) DeviceMemoryTotal(int) uint64       { return 0 }
-func (s *multiStubInfo) DeviceSmUtil(int) uint64            { return 0 }
-func (s *multiStubInfo) SetDeviceSmLimit(uint64)            {}
-func (s *multiStubInfo) IsValidUUID(int) bool               { return true }
-func (s *multiStubInfo) DeviceMemoryLimit(int) uint64       { return 0 }
-func (s *multiStubInfo) SetDeviceMemoryLimit(uint64)        {}
-func (s *multiStubInfo) LastKernelTime() int64              { return 0 }
-func (s *multiStubInfo) GetPriority() int                   { return s.priority }
-func (s *multiStubInfo) GetRecentKernel() int32             { return 1 }
-func (s *multiStubInfo) SetRecentKernel(int32)              {}
-func (s *multiStubInfo) GetUtilizationSwitch() int32        { return 0 }
-func (s *multiStubInfo) SetUtilizationSwitch(int32)         {}
 
 // TestCheckBlocking_MultiDevice verifies that CheckBlocking inspects every device
 // the container uses, not just the first one that appears in the switch map. The
@@ -145,7 +134,7 @@ func TestCheckBlocking_MultiDevice(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			c := &nvidia.ContainerUsage{Info: &multiStubInfo{priority: test.priority, uuids: test.uuids}}
+			c := &nvidia.ContainerUsage{Info: &stubInfo{priority: test.priority, uuids: test.uuids}}
 			if got := CheckBlocking(test.sw, test.priority, c); got != test.want {
 				t.Errorf("CheckBlocking: want %v, got %v", test.want, got)
 			}
