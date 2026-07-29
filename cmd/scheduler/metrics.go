@@ -27,7 +27,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	klog "k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
+	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
 
 type ClusterManager struct {
@@ -35,9 +37,16 @@ type ClusterManager struct {
 	LegacyMetrics bool
 }
 
+type schedulerMetricsProvider interface {
+	InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage
+	GetQuotaManager() *device.QuotaManager
+	GetPodManager() *device.PodManager
+}
+
 // ClusterManagerCollector implements the Collector interface.
 type ClusterManagerCollector struct {
-	ClusterManager *ClusterManager
+	ClusterManager  *ClusterManager
+	metricsProvider schedulerMetricsProvider
 }
 
 // Describe is implemented with DescribeByCollect. That's possible because the
@@ -165,7 +174,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		)
 	}
 
-	nu := sher.InspectAllNodesUsage()
+	nu := cc.metricsProvider.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
 			if devs.Device.Mode == "mig" {
@@ -228,12 +237,15 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
 				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 			)
-			ch <- prometheus.MustNewConstMetric(
-				nodeGPUMemoryPercentage,
-				prometheus.GaugeValue,
-				float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
-			)
+
+			if devs.Device.Totalmem > 0 {
+				ch <- prometheus.MustNewConstMetric(
+					nodeGPUMemoryPercentage,
+					prometheus.GaugeValue,
+					float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem),
+					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+				)
+			}
 
 			if legacy {
 				ch <- prometheus.MustNewConstMetric(
@@ -272,12 +284,14 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 					float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
 					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 				)
-				ch <- prometheus.MustNewConstMetric(
-					legacyMemoryPercentage,
-					prometheus.GaugeValue,
-					float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem),
-					nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
-				)
+				if devs.Device.Totalmem > 0 {
+					ch <- prometheus.MustNewConstMetric(
+						legacyMemoryPercentage,
+						prometheus.GaugeValue,
+						float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem),
+						nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index),
+					)
+				}
 			}
 		}
 	}
@@ -297,7 +311,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"resourcequota usage for a certain device",
 		[]string{"namespace", "quota_name", "limit"}, nil,
 	)
-	for ns, val := range sher.GetQuotaManager().GetResourceQuota() {
+	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
 			ch <- prometheus.MustNewConstMetric(
 				quotaUsedDesc,
@@ -315,7 +329,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 	}
-	schedpods, _ := sher.GetPodManager().GetScheduledPods()
+	schedpods, _ := cc.metricsProvider.GetPodManager().GetScheduledPods()
 	for _, val := range schedpods {
 		for _, podSingleDevice := range val.Devices {
 			for ctridx, ctrdevs := range podSingleDevice {
@@ -386,7 +400,10 @@ func NewClusterManager(zone string, reg prometheus.Registerer, legacyMetrics boo
 		Zone:          zone,
 		LegacyMetrics: legacyMetrics,
 	}
-	cc := ClusterManagerCollector{ClusterManager: c}
+	cc := ClusterManagerCollector{
+		ClusterManager:  c,
+		metricsProvider: sher,
+	}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
 }
