@@ -377,7 +377,6 @@ func TestAddResourceUsage_ClampsOnOverflow(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, n.Used, int32(math.MaxInt32))
 
-	// A second oversized slice must saturate, not wrap negative.
 	err = dev.AddResourceUsage(&corev1.Pod{}, n, ctr)
 	assert.NilError(t, err)
 	assert.Equal(t, n.Used, int32(math.MaxInt32))
@@ -424,9 +423,6 @@ func TestAddResourceUsage_ClampsOversizedSliceString(t *testing.T) {
 
 func TestFit_OversizedProfileRejected(t *testing.T) {
 	dev := InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
-	// A profile name parsed with strconv.Atoi can carry a value far beyond
-	// int32; without a bound the conversion wraps into a small or negative
-	// slice count and the profile looks usable.
 	devices := []*device.DeviceUsage{
 		{
 			ID:       "node-a-enflame-drs-0",
@@ -436,9 +432,8 @@ func TestFit_OversizedProfileRejected(t *testing.T) {
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
 			CustomInfo: map[string]any{
-				"minor": "0",
-				"index": "0",
-				// 2^32+3 wraps to a plausible-looking 3 slices and 3072 MiB.
+				"minor":    "0",
+				"index":    "0",
 				"profiles": map[string]string{"4294967299g.4294967299gb": "0"},
 			},
 		},
@@ -448,9 +443,18 @@ func TestFit_OversizedProfileRejected(t *testing.T) {
 	assert.Equal(t, fit, false)
 	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
 
-	// A sane memory size clears the memory bound, so this pins the slice bound
-	// on its own and keeps the raw value out of the drsSlice annotation.
 	devices[0].CustomInfo["profiles"] = map[string]string{"4294967299g.20gb": "0"}
+	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+
+	devices[0].CustomInfo["profiles"] = map[string]string{"2g.4294967299gb": "0"}
+	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+
+	devices[0].CustomInfo["maxSlice"] = "1"
+	devices[0].CustomInfo["profiles"] = map[string]string{"2147483647g.20gb": "0"}
 	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)

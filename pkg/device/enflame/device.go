@@ -391,11 +391,6 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	// Reject rather than clamp: these come from strconv.Atoi on a profile name,
-	// so an out of range value means the profile is malformed, and clamping
-	// would let it through with a plausible looking size. MemoryGB is bounded
-	// before the multiply, otherwise the product wraps in int on its way to the
-	// conversion.
 	if profile.Size <= 0 || profile.Size > math.MaxInt32 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
@@ -409,14 +404,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
-	// Clamp before the conversion, not after, so both bounds are established
-	// on the int value. Same result either way, since the clamp only ever
-	// raises a non-positive value to 1.
-	corePercent := profile.CorePercent
-	if corePercent <= 0 {
-		corePercent = 1
-	}
-	profileCorePercent := int32(corePercent)
+	profileCorePercent := int32(profile.CorePercent)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -672,7 +660,6 @@ func parseDRSCapacity(raw any) (int32, error) {
 	}
 }
 
-// clampToInt32 bounds v to the int32 range instead of letting the cast wrap silently.
 func clampToInt32(v int) int32 {
 	if v > math.MaxInt32 {
 		return math.MaxInt32
