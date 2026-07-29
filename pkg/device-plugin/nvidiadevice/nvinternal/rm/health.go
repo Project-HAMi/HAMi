@@ -88,8 +88,6 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		_ = eventSet.Free()
 	}()
 
-	unhealthyDevices := make(map[string]*Device)
-
 	parentToDeviceMap := make(map[string]*Device)
 	deviceIDToGiMap := make(map[string]uint32)
 	deviceIDToCiMap := make(map[string]uint32)
@@ -126,8 +124,6 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 		if ret != nvml.SUCCESS {
 			klog.Infof("Marking device %v as unhealthy: %v", d.ID, ret)
-			d.Health = kubeletdevicepluginv1beta1.Unhealthy
-			unhealthyDevices[d.ID] = d
 			health <- d
 		}
 	}
@@ -146,30 +142,11 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 
 		e, ret := eventSet.Wait(5000)
 		if ret == nvml.ERROR_TIMEOUT {
-			for id, d := range unhealthyDevices {
-				uuid, _, _, err := r.getDevicePlacement(d)
-				if err != nil {
-					continue
-				}
-				gpu, ret := r.nvml.DeviceGetHandleByUUID(uuid)
-				if ret != nvml.SUCCESS {
-					continue
-				}
-				_, ret = gpu.GetMemoryInfo()
-				if ret == nvml.SUCCESS {
-					klog.Infof("Device %s has recovered", d.ID)
-					d.Health = kubeletdevicepluginv1beta1.Healthy
-					health <- d
-					delete(unhealthyDevices, id)
-				}
-			}
 			continue
 		}
 		if ret != nvml.SUCCESS {
 			klog.Infof("Error waiting for event: %v; Marking all devices as unhealthy", ret)
 			for _, d := range devices {
-				d.Health = kubeletdevicepluginv1beta1.Unhealthy
-				unhealthyDevices[d.ID] = d
 				health <- d
 			}
 			continue
@@ -191,8 +168,6 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 			// If we cannot reliably determine the device UUID, we mark all devices as unhealthy.
 			klog.Infof("Failed to determine uuid for event %v: %v; Marking all devices as unhealthy.", e, ret)
 			for _, d := range devices {
-				d.Health = kubeletdevicepluginv1beta1.Unhealthy
-				unhealthyDevices[d.ID] = d
 				health <- d
 			}
 			continue
@@ -214,8 +189,6 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 
 		klog.Infof("XidCriticalError: Xid=%d on Device=%s; marking device as unhealthy.", e.EventData, d.ID)
-		d.Health = kubeletdevicepluginv1beta1.Unhealthy
-		unhealthyDevices[d.ID] = d
 		health <- d
 	}
 }

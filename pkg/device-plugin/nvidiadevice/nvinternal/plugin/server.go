@@ -461,7 +461,9 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 		case <-plugin.stop:
 			return nil
 		case d := <-plugin.health:
-			klog.Infof("'%s' device health changed to %s: %s", plugin.rm.Resource(), d.Health, d.ID)
+			// FIXME: there is no way to recover from the Unhealthy state.
+			d.Health = kubeletdevicepluginv1beta1.Unhealthy
+			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
 			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
 		}
 	}
