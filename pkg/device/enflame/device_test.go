@@ -421,3 +421,37 @@ func TestAddResourceUsage_ClampsOversizedSliceString(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, n.Used, int32(math.MaxInt32))
 }
+
+func TestFit_OversizedProfileRejected(t *testing.T) {
+	dev := InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
+	// A profile name parsed with strconv.Atoi can carry a value far beyond
+	// int32; without a bound the conversion wraps into a small or negative
+	// slice count and the profile looks usable.
+	devices := []*device.DeviceUsage{
+		{
+			ID:       "node-a-enflame-drs-0",
+			Index:    0,
+			Count:    6,
+			Used:     0,
+			Totalmem: 40960,
+			Type:     EnflameVGCUDevice,
+			CustomInfo: map[string]any{
+				"minor": "0",
+				"index": "0",
+				// 2^32+3 wraps to a plausible-looking 3 slices and 3072 MiB.
+				"profiles": map[string]string{"4294967299g.4294967299gb": "0"},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: EnflameVGCUDevice, Memreq: 3, MemPercentagereq: 101}
+	fit, result, _ := dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+
+	// A sane memory size clears the memory bound, so this pins the slice bound
+	// on its own and keeps the raw value out of the drsSlice annotation.
+	devices[0].CustomInfo["profiles"] = map[string]string{"4294967299g.20gb": "0"}
+	fit, result, _ = dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
+}

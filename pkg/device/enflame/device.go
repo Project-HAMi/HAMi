@@ -391,20 +391,32 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	requiredSlice := int32(profile.Size)
-	if requiredSlice <= 0 {
+	// Reject rather than clamp: these come from strconv.Atoi on a profile name,
+	// so an out of range value means the profile is malformed, and clamping
+	// would let it through with a plausible looking size. MemoryGB is bounded
+	// before the multiply, otherwise the product wraps in int on its way to the
+	// conversion.
+	if profile.Size <= 0 || profile.Size > math.MaxInt32 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.MemoryGB <= 0 || profile.MemoryGB > math.MaxInt32/1024 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.CorePercent > math.MaxInt32 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
-	if profileMemoryMiB <= 0 {
-		reason[common.ModeNotFit]++
-		return false, tmpDevs, common.GenReason(reason, len(devices))
+	// Clamp before the conversion, not after, so both bounds are established
+	// on the int value. Same result either way, since the clamp only ever
+	// raises a non-positive value to 1.
+	corePercent := profile.CorePercent
+	if corePercent <= 0 {
+		corePercent = 1
 	}
-	profileCorePercent := int32(profile.CorePercent)
-	if profileCorePercent <= 0 {
-		profileCorePercent = 1
-	}
+	profileCorePercent := int32(corePercent)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
