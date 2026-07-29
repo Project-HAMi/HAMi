@@ -91,8 +91,6 @@ func ParseConfig(fs *flag.FlagSet) {
 func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCount)]
 	if !ok {
-		// Mirror GenerateResourceRequests, which also honours Requests; otherwise a
-		// request-only count would skip this validation and be consumed unchecked.
 		count, ok = ctr.Resources.Requests[corev1.ResourceName(MthreadsResourceCount)]
 	}
 	if ok {
@@ -207,10 +205,6 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				"container", ctr.Name,
 				"deviceCount", n)
 			if n <= 0 || n > math.MaxInt32 {
-				// A non-positive count is invalid. A count above math.MaxInt32 is
-				// rejected too: the Memreq/Coresreq below divide by int32(n), and a
-				// value such as 1<<32 truncates to 0 (or wraps negative), which would
-				// panic the scheduler's Filter handler with a divide-by-zero.
 				return device.ContainerDeviceRequest{}
 			}
 			memnum := 0

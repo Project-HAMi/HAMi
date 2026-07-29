@@ -190,7 +190,6 @@ func Test_MutateAdmission(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// A negative count must be rejected by the <= 0 guard as well.
 			name: "count set to negative is rejected",
 			args: struct {
 				ctr *corev1.Container
@@ -217,9 +216,6 @@ func Test_MutateAdmission(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			// A request-only non-positive count must be rejected too: admission
-			// mirrors GenerateResourceRequests, which reads Requests when Limits is
-			// absent, so the count cannot slip through unvalidated.
 			name: "request-only count set to zero is rejected",
 			args: struct {
 				ctr *corev1.Container
@@ -475,8 +471,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			// A zero device count alongside a memory/core request must not panic
-			// with a divide-by-zero; it should be treated as no request.
 			name: "count set to zero with memory and cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -490,8 +484,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// A negative device count must be treated as no request as well, and
-			// must not reach the division below.
 			name: "count set to negative with memory and cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -505,9 +497,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// A count that overflows int32 must be rejected: it stays positive as
-			// an int64 (so a bare n <= 0 guard misses it) but int32(1<<32) == 0,
-			// which would divide-by-zero in the Memreq/Coresreq below.
 			name: "count overflowing int32 with memory and cores",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
