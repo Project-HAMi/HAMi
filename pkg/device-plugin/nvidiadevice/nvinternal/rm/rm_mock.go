@@ -85,6 +85,9 @@ type ResourceManagerMock struct {
 	// GetPreferredAllocationFunc mocks the GetPreferredAllocation method.
 	GetPreferredAllocationFunc func(available []string, required []string, size int) ([]string, error)
 
+	// RecoverDeviceFunc mocks the RecoverDevice method.
+	RecoverDeviceFunc func(id string) bool
+
 	// ResourceFunc mocks the Resource method.
 	ResourceFunc func() spec.ResourceName
 
@@ -117,6 +120,11 @@ type ResourceManagerMock struct {
 			// Size is the size argument value.
 			Size int
 		}
+		// RecoverDevice holds details about calls to the RecoverDevice method.
+		RecoverDevice []struct {
+			// ID is the id argument value.
+			ID string
+		}
 		// Resource holds details about calls to the Resource method.
 		Resource []struct {
 		}
@@ -130,6 +138,7 @@ type ResourceManagerMock struct {
 	lockDevices                sync.RWMutex
 	lockGetDevicePaths         sync.RWMutex
 	lockGetPreferredAllocation sync.RWMutex
+	lockRecoverDevice          sync.RWMutex
 	lockResource               sync.RWMutex
 	lockValidateRequest        sync.RWMutex
 }
@@ -279,6 +288,41 @@ func (mock *ResourceManagerMock) GetPreferredAllocationCalls() []struct {
 	mock.lockGetPreferredAllocation.RLock()
 	calls = mock.calls.GetPreferredAllocation
 	mock.lockGetPreferredAllocation.RUnlock()
+	return calls
+}
+
+// RecoverDevice calls RecoverDeviceFunc.
+func (mock *ResourceManagerMock) RecoverDevice(id string) bool {
+	callInfo := struct {
+		ID string
+	}{
+		ID: id,
+	}
+	mock.lockRecoverDevice.Lock()
+	mock.calls.RecoverDevice = append(mock.calls.RecoverDevice, callInfo)
+	mock.lockRecoverDevice.Unlock()
+	if mock.RecoverDeviceFunc == nil {
+		var (
+			boolOut bool
+		)
+		return boolOut
+	}
+	return mock.RecoverDeviceFunc(id)
+}
+
+// RecoverDeviceCalls gets all the calls that were made to RecoverDevice.
+// Check the length with:
+//
+//	len(mockedResourceManager.RecoverDeviceCalls())
+func (mock *ResourceManagerMock) RecoverDeviceCalls() []struct {
+	ID string
+} {
+	var calls []struct {
+		ID string
+	}
+	mock.lockRecoverDevice.RLock()
+	calls = mock.calls.RecoverDevice
+	mock.lockRecoverDevice.RUnlock()
 	return calls
 }
 

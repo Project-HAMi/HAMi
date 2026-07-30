@@ -59,6 +59,7 @@ type ResourceManager interface {
 	GetDevicePaths([]string) []string
 	GetPreferredAllocation(available, required []string, size int) ([]string, error)
 	CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error
+	RecoverDevice(id string) bool
 	ValidateRequest(AnnotatedIDs) error
 }
 

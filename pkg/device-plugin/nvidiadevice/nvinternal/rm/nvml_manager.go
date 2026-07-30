@@ -113,6 +113,18 @@ func (r *nvmlResourceManager) GetDevicePaths(ids []string) []string {
 	return append(paths, r.Devices().Subset(ids).GetPaths()...)
 }
 
+// RecoverDevice checks whether the device with the given ID has recovered
+// and is accessible via NVML.
+func (r *nvmlResourceManager) RecoverDevice(id string) bool {
+	ret := r.nvml.Init()
+	if ret != nvml.SUCCESS {
+		return false
+	}
+	defer r.nvml.Shutdown()
+	_, ret = r.nvml.DeviceGetHandleByUUID(id)
+	return ret == nvml.SUCCESS
+}
+
 // CheckHealth performs health checks on a set of devices, writing to the 'unhealthy' channel with any unhealthy devices
 func (r *nvmlResourceManager) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	for {

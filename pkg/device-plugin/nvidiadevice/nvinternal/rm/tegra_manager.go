@@ -90,3 +90,8 @@ func (r *tegraResourceManager) GetDevicePaths(ids []string) []string {
 func (r *tegraResourceManager) CheckHealth(stop <-chan interface{}, unhealthy chan<- *Device, disableNVML <-chan bool, ackDisableHealthChecks chan<- bool) error {
 	return nil
 }
+
+// RecoverDevice is a no-op for the tegraResourceManager (no NVML support).
+func (r *tegraResourceManager) RecoverDevice(id string) bool {
+	return false
+}
