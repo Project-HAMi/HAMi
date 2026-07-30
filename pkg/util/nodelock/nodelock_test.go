@@ -454,25 +454,47 @@ func TestConcurrentNodeLocks(t *testing.T) {
 	}
 }
 
+// TestSetNodeLockRaceIsRetryable covers the narrow race window where two
+// callers both observe an unlocked node in LockNode's initial check and race
+// on SetNodeLock's per-node mutex.
+func TestSetNodeLockRaceIsRetryable(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "race-node"
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	winner := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "winner", Namespace: "test-ns"}}
+	loser := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "loser", Namespace: "test-ns"}}
+
+	if err := SetNodeLock(nodeName, "", winner); err != nil {
+		t.Fatalf("winner SetNodeLock failed: %v", err)
+	}
+	err = SetNodeLock(nodeName, "", loser)
+	if err == nil {
+		t.Fatal("expected loser's SetNodeLock to fail, got nil")
+	}
+	if !IsNodeLockContention(err) {
+		t.Fatalf("expected loser's error to be classified as node lock contention (retryable), got: %v", err)
+	}
+}
+
 // TestCleanupNodeLockOnNodeDelete ensures CleanupNodeLock removes the entry
 // and a subsequent getLock allocates a fresh mutex instance.
 func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
-	// Reset manager state for this test
 	nodeLocks = newNodeLockManager()
-
 	first := nodeLocks.getLock("to-be-deleted")
 	if first == nil {
 		t.Fatalf("expected non-nil mutex from getLock")
 	}
-
-	// Trigger cleanup as if node was removed by autoscaler
 	CleanupNodeLock("to-be-deleted")
-
 	second := nodeLocks.getLock("to-be-deleted")
 	if second == nil {
 		t.Fatalf("expected non-nil mutex from getLock after cleanup")
 	}
-
 	if first == second {
 		t.Fatalf("expected a new mutex instance after cleanup, got the same pointer")
 	}
