@@ -17,7 +17,10 @@ limitations under the License.
 package v1
 
 import (
+	"sync"
+	"sync/atomic"
 	"testing"
+	"unsafe"
 
 	"gotest.tools/v3/assert"
 )
@@ -1082,4 +1085,39 @@ func Test_SetUtilizationSwitch(t *testing.T) {
 			assert.Equal(t, result, test.want)
 		})
 	}
+}
+
+func TestSpec_ConcurrentAtomicAccess(t *testing.T) {
+	data := make([]byte, unsafe.Sizeof(sharedRegionT{}))
+	sr := (*sharedRegionT)(unsafe.Pointer(&data[0]))
+	sr.num = 4
+
+	s := Spec{sr: sr}
+
+	var wg sync.WaitGroup
+	goroutines := 50
+	iterations := 200
+
+	for i := 0; i < goroutines; i++ {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := 0; j < iterations; j++ {
+				val := uint64(id*iterations + j)
+				s.SetDeviceMemoryLimit(val)
+				s.SetDeviceSmLimit(val)
+				s.SetRecentKernel(int32(j))
+				s.SetUtilizationSwitch(int32(j))
+				atomic.StoreInt64(&sr.lastKernelTime, int64(j))
+
+				_ = s.DeviceMemoryLimit(0)
+				_ = s.DeviceMemoryLimit(1)
+				_ = s.GetRecentKernel()
+				_ = s.GetUtilizationSwitch()
+				_ = s.LastKernelTime()
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
