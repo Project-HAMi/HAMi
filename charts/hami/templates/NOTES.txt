@@ -1,3 +1,12 @@
 ** Please be patient while the chart is being deployed **
 Resource name: {{ .Values.resourceName }}
+{{- if .Values.platform.openshift }}
 
+OpenShift support is enabled.
+Ensure the target namespace can use the
+{{ .Values.openshift.securityContextConstraints.name }} SecurityContextConstraints resource.
+{{- if .Values.openshift.selinux.enabled }}
+The device plugin relabels shared vGPU host directories under
+{{ .Values.devicePlugin.libPath }} and {{ .Values.devicePlugin.monitor.ctrPath }} for SELinux access.
+{{- end }}
+{{- end }}

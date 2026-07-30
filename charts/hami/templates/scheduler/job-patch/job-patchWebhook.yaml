@@ -60,6 +60,8 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
+        {{- if not .Values.platform.openshift }}
         runAsUser: {{ .Values.scheduler.patch.runAsUser }}
+        {{- end }}
 {{- end }}
 {{- end }}

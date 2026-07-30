@@ -79,6 +79,13 @@ spec:
         - name: vgpu-scheduler-extender
           image: {{ include "hami.scheduler.extender.image" . }}
           imagePullPolicy: {{ .Values.scheduler.extender.image.pullPolicy }}
+          {{- if .Values.platform.openshift }}
+          securityContext:
+            runAsNonRoot: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           env:
             - name: POD_NAME
               valueFrom:
@@ -101,11 +108,11 @@ spec:
           command:
             - scheduler
             {{- if .Values.scheduler.admissionWebhook.enabled }}
-            - --http_bind=0.0.0.0:443
+            - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort }}
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             {{- else }}
-            - --http_bind=0.0.0.0:80
+            - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort }}
             {{- end }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
@@ -139,11 +146,11 @@ spec:
           ports:
             {{- if .Values.scheduler.admissionWebhook.enabled }}
             - name: https
-              containerPort: 443
+              containerPort: {{ .Values.scheduler.service.httpTargetPort }}
               protocol: TCP
             {{- else }}
             - name: http
-              containerPort: 80
+              containerPort: {{ .Values.scheduler.service.httpTargetPort }}
               protocol: TCP
             {{- end }}
             - name: metrics

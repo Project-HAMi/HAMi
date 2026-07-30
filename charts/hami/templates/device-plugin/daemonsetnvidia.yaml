@@ -42,9 +42,44 @@ spec:
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
+      {{- if .Values.platform.openshift }}
+      securityContext:
+        seLinuxOptions:
+          type: spc_t
+      {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
-      {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+      {{- if or (and .Values.platform.openshift .Values.openshift.selinux.enabled) .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
+        {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+        - name: selinux-relabel
+          image: {{ include "hami.devicePlugin.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+              chmod 0777 /host/hami/containers /host/hami/tmp/vgpulock
+              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
+                /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+          env:
+            - name: SELINUX_TYPE
+              value: {{ .Values.openshift.selinux.type | quote }}
+            - name: SELINUX_LEVEL
+              value: {{ .Values.openshift.selinux.level | quote }}
+          volumeMounts:
+            - name: lib
+              mountPath: /host/hami/vgpu
+            - name: ctrs
+              mountPath: /host/hami/containers
+            - name: hosttmp
+              mountPath: /host/hami/tmp
+        {{- end }}
+        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: toolkit-validation
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
@@ -66,6 +101,7 @@ spec:
               mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
               mountPropagation: HostToContainer
               readOnly: true
+        {{- end }}
       {{- end }}
       containers:
         - name: device-plugin
@@ -208,6 +244,9 @@ spec:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}
+            {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         - name: hosttmp
           hostPath:
             path: /tmp
@@ -223,6 +262,9 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
+            {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: nvidia-validations
           hostPath:

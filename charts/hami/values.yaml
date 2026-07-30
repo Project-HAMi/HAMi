@@ -21,6 +21,17 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    name: privileged
+  selinux:
+    enabled: true
+    type: container_file_t
+    level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -269,7 +280,7 @@ scheduler:
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: 9395
-    httpTargetPort: 443
+    httpTargetPort: 9443  # Target port on which the scheduler extender listens
     labels: {}
     annotations: {}
 

@@ -17,6 +17,11 @@ This document provides detailed descriptions of all configurable values paramete
 | `nameOverride` | Name override | `""` |
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
+| `platform.openshift` | Enable OpenShift-specific SCC and SELinux handling | `false` |
+| `openshift.securityContextConstraints.name` | SecurityContextConstraints resource granted to the device plugin service accounts | `"privileged"` |
+| `openshift.selinux.enabled` | Relabel shared vGPU host directories for SELinux-confined workloads | `true` |
+| `openshift.selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
+| `openshift.selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |
 
 ## Resource Name Configuration
 
@@ -138,6 +143,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
 | `scheduler.service.monitorTargetPort` | Monitor target port | `9395` |
+| `scheduler.service.httpTargetPort` | Target port on which the scheduler extender listens | `9443` |
 
 ## Device Plugin Configuration
 
