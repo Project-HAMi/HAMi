@@ -17,7 +17,7 @@ limitations under the License.
 package nodelock
 
 import (
-	"context" // Added for the new test
+	"context"
 	"errors"
 	"runtime"
 	"strings"
@@ -26,7 +26,7 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added for the new test
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
@@ -119,6 +119,53 @@ func TestReleaseNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
 	}
 	if patchCalls != 1 {
 		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestReleaseNodeLockReleasesRestampedLockForSamePod(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-restamped"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	initialLock := "2026-07-29T13:00:00Z,ns,pod-a"
+	restampedLock := "2026-07-29T13:00:01Z,ns,pod-a"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: initialLock},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls != 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: restampedLock},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		if patchCalls == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated restamp"))
+		}
+		return false, nil, nil
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if _, ok := node.Annotations[NodeLockKey]; ok {
+		t.Fatalf("node lock = %q, want removed", node.Annotations[NodeLockKey])
+	}
+	if patchCalls != 2 {
+		t.Fatalf("patch calls = %d, want 2", patchCalls)
 	}
 }
 
