@@ -32,9 +32,7 @@ import (
 )
 
 // GetPlugins returns a set of plugins for the specified configuration.
-func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *nvidia.DeviceConfig) ([]plugin.Interface, error) {
-	// TODO: We could consider passing this as an argument since it should already be used to construct nvmllib.
-	driverRoot := root(*config.Flags.Plugin.ContainerDriverRoot)
+func GetPlugins(ctx context.Context, infolib info.Interface, nvmllib nvml.Interface, devicelib device.Interface, config *nvidia.DeviceConfig, driverRoot root) ([]plugin.Interface, error) {
 
 	deviceListStrategies, err := spec.NewDeviceListStrategies(*config.Flags.Plugin.DeviceListStrategy)
 	if err != nil {
