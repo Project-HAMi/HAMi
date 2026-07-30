@@ -166,7 +166,7 @@ func (s Spec) SetDeviceMemoryLimit(l uint64) {
 }
 
 func (s Spec) LastKernelTime() int64 {
-	return s.sr.lastKernelTime
+	return atomic.LoadInt64(&s.sr.lastKernelTime)
 }
 
 func CastSpec(data []byte) Spec {
@@ -184,17 +184,17 @@ func (s Spec) GetPriority() int {
 }
 
 func (s Spec) GetRecentKernel() int32 {
-	return s.sr.recentKernel
+	return atomic.LoadInt32(&s.sr.recentKernel)
 }
 
 func (s Spec) SetRecentKernel(v int32) {
-	s.sr.recentKernel = v
+	atomic.StoreInt32(&s.sr.recentKernel, v)
 }
 
 func (s Spec) GetUtilizationSwitch() int32 {
-	return s.sr.utilizationSwitch
+	return atomic.LoadInt32(&s.sr.utilizationSwitch)
 }
 
 func (s Spec) SetUtilizationSwitch(v int32) {
-	s.sr.utilizationSwitch = v
+	atomic.StoreInt32(&s.sr.utilizationSwitch, v)
 }
