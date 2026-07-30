@@ -35,6 +35,40 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
 
+type mockDevices struct {
+	resourceNames device.ResourceNames
+}
+
+func (m *mockDevices) CommonWord() string                                   { return "mock" }
+func (m *mockDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
+	return true, nil
+}
+func (m *mockDevices) CheckHealth(devType string, n *corev1.Node) (bool, bool) {
+	return true, true
+}
+func (m *mockDevices) NodeCleanUp(nn string) error                      { return nil }
+func (m *mockDevices) GetResourceNames() device.ResourceNames           { return m.resourceNames }
+func (m *mockDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
+	return []*device.DeviceInfo{}, nil
+}
+func (m *mockDevices) LockNode(n *corev1.Node, p *corev1.Pod) error       { return nil }
+func (m *mockDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error { return nil }
+func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	return device.ContainerDeviceRequest{}
+}
+func (m *mockDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
+	return map[string]string{}
+}
+func (m *mockDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
+	return 1.0
+}
+func (m *mockDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	return nil
+}
+func (m *mockDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return true, nil, ""
+}
+
 func TestHandle(t *testing.T) {
 	// create a Pod object
 	pod := &corev1.Pod{
@@ -263,14 +297,27 @@ func TestFitResourceQuota(t *testing.T) {
 		klog.Fatalf("Failed to initialize devices with config: %v", err)
 	}
 
+	ascendCountName := "huawei.com/Ascend910B"
+	ascendMemName := "huawei.com/Ascend910B-memory"
+	device.DevicesMap["Ascend910B"] = &mockDevices{
+		resourceNames: device.ResourceNames{
+			ResourceCountName:  ascendCountName,
+			ResourceMemoryName: ascendMemName,
+		},
+	}
+	defer func() {
+		delete(device.DevicesMap, "Ascend910B")
+	}()
+
 	qm := device.NewQuotaManager()
 	ns := "default"
-	memName := "nvidia.com/gpumem"
-	coreName := "nvidia.com/gpucores"
+	nvidiaMemName := "nvidia.com/gpumem"
+	nvidiaCoreName := "nvidia.com/gpucores"
 
 	qm.Quotas[ns] = &device.DeviceQuota{
-		memName:  &device.Quota{Used: 1000, Limit: 2000},
-		coreName: &device.Quota{Used: 200, Limit: 400},
+		nvidiaMemName:  &device.Quota{Used: 1000, Limit: 2000},
+		nvidiaCoreName: &device.Quota{Used: 200, Limit: 400},
+		ascendMemName:  &device.Quota{Used: 0, Limit: 1000},
 	}
 
 	testCases := []struct {
@@ -387,7 +434,7 @@ func TestFitResourceQuota(t *testing.T) {
 			fit: true,
 		},
 		{
-			name: "request ascend",
+			name: "request ascend exceeded quota",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      "test-pod",
@@ -405,6 +452,59 @@ func TestFitResourceQuota(t *testing.T) {
 								Limits: corev1.ResourceList{
 									"huawei.com/Ascend910B":        resource.MustParse("1"),
 									"huawei.com/Ascend910B-memory": resource.MustParse("1024"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: false,
+		},
+		{
+			name: "request ascend within quota",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					Containers: []corev1.Container{
+						{
+							Name: "container1",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: nil,
+							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"huawei.com/Ascend910B":        resource.MustParse("1"),
+									"huawei.com/Ascend910B-memory": resource.MustParse("500"),
+								},
+							},
+						},
+					},
+				},
+			},
+			fit: true,
+		},
+		{
+			name: "request ascend memory only no count",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+				},
+				Spec: corev1.PodSpec{
+					SchedulerName: "hami-scheduler",
+					Containers: []corev1.Container{
+						{
+							Name: "container1",
+							SecurityContext: &corev1.SecurityContext{
+								Privileged: nil,
+							},
+							Resources: corev1.ResourceRequirements{
+								Limits: corev1.ResourceList{
+									"huawei.com/Ascend910B-memory": resource.MustParse("2000"),
 								},
 							},
 						},
