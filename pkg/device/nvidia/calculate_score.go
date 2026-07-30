@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 // Device represents a GPU device as reported by NVML, including all of its
@@ -210,14 +211,20 @@ func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) int {
 		return 0
 	}
 
-	if len(gpu0.Links[gpu1.Index]) != len(gpu1.Links[gpu0.Index]) {
-		err := fmt.Errorf("internal error in bestEffort GPU allocator: all P2PLinks between 2 GPUs should be bidirectional")
-		panic(err)
+	links0 := gpu0.Links[gpu1.Index]
+	links1 := gpu1.Links[gpu0.Index]
+
+	if len(links0) != len(links1) {
+		klog.Warningf("Asymmetric GPU topology detected: %s->%s=%d links, %s->%s=%d links. This may be caused by hardware issues, driver bugs, or inconsistent reporting. Evaluating common subset of links.",
+			gpu0.UUID, gpu1.UUID, len(links0),
+			gpu1.UUID, gpu0.UUID, len(links1))
 	}
 
 	score := 0
+	common := min(len(links0), len(links1))
 
-	for _, link := range gpu0.Links[gpu1.Index] {
+	for i := 0; i < common; i++ {
+		link := links0[i]
 		switch link.Type {
 		case P2PLinkCrossCPU:
 			score += 10

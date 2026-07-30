@@ -108,6 +108,105 @@ func Test_calculateGPUScore(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "asymmetric nvlink test gracefully handles shorter slice",
+			args: []*Device{
+				{
+					Index: 0,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu0",
+					},
+					Links: map[int][]P2PLink{
+						1: {{Type: SingleNVLINKLink}},
+					},
+				},
+				{
+					Index: 1,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu1",
+					},
+					Links: map[int][]P2PLink{
+						0: {{Type: SingleNVLINKLink}, {Type: SingleNVLINKLink}}, // Extra links!
+					},
+				},
+			},
+			want: ListDeviceScore{
+				{
+					UUID:  "gpu0",
+					Score: map[string]int{"gpu1": 100}, // Score for 1 SingleNVLINKLink
+				},
+				{
+					UUID:  "gpu1",
+					Score: map[string]int{"gpu0": 100}, // Evaluates minimum common subset (1 link)
+				},
+			},
+		},
+		{
+			name: "one side zero links gracefully handles",
+			args: []*Device{
+				{
+					Index: 0,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu0",
+					},
+					Links: map[int][]P2PLink{
+						1: {}, // Empty slice
+					},
+				},
+				{
+					Index: 1,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu1",
+					},
+					Links: map[int][]P2PLink{
+						0: {{Type: SingleNVLINKLink}},
+					},
+				},
+			},
+			want: ListDeviceScore{
+				{
+					UUID:  "gpu0",
+					Score: map[string]int{"gpu1": 0},
+				},
+				{
+					UUID:  "gpu1",
+					Score: map[string]int{"gpu0": 0},
+				},
+			},
+		},
+		{
+			name: "nil slices gracefully handles missing index",
+			args: []*Device{
+				{
+					Index: 0,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu0",
+					},
+					Links: map[int][]P2PLink{
+						1: nil, // Nil slice
+					},
+				},
+				{
+					Index: 1,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu1",
+					},
+					Links: map[int][]P2PLink{
+						// gpu0 index 0 is missing entirely from the map
+					},
+				},
+			},
+			want: ListDeviceScore{
+				{
+					UUID:  "gpu0",
+					Score: map[string]int{"gpu1": 0},
+				},
+				{
+					UUID:  "gpu1",
+					Score: map[string]int{"gpu0": 0},
+				},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
