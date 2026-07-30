@@ -96,33 +96,47 @@ func calcscore(p []int, c []int) float32 {
 	return 1000
 }
 
+// parseGroup parses a "-"-separated group of device indices (e.g. "0-4" or
+// "0-1-4-5") and requires it to contain exactly want valid integers.
+// Malformed groups are skipped with a warning instead of panicking.
+func parseGroup(group string, want int) ([]int, bool) {
+	values := strings.Split(group, "-")
+	if len(values) != want {
+		klog.Warningf("skipping malformed interconnect group %q: expected %d values", group, want)
+		return nil, false
+	}
+	connect := make([]int, want)
+	for i, value := range values {
+		v, err := strconv.Atoi(value)
+		if err != nil {
+			klog.Warningf("skipping malformed interconnect group %q: %v", group, err)
+			return nil, false
+		}
+		connect[i] = v
+	}
+	return connect, true
+}
+
+func parsePairs(s string) [][]int {
+	var pairs [][]int
+	for pair := range strings.SplitSeq(s, ",") {
+		if p, ok := parseGroup(pair, 2); ok {
+			pairs = append(pairs, p)
+		}
+	}
+	return pairs
+}
+
 func parseInterconnection() [][]int {
-	var interconnection [][]int
-	pairs := strings.Split(InterGroupConnection, ",")
-	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
-		interconnection = append(interconnection, []int{lw, rw})
-	}
-	pairs = strings.Split(GroupConnection, ",")
-	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
-		interconnection = append(interconnection, []int{lw, rw})
-	}
-	return interconnection
+	return append(parsePairs(InterGroupConnection), parsePairs(GroupConnection)...)
 }
 
 func parseInterconnection2() [][]int {
 	var interconnection2 [][]int
 	for group := range strings.SplitSeq(InterGroupConnection2, ",") {
-		values := strings.Split(group, "-")
-		connect := make([]int, 4)
-		for i, value := range values {
-			v, _ := strconv.Atoi(value)
-			connect[i] = v
+		if connect, ok := parseGroup(group, 4); ok {
+			interconnection2 = append(interconnection2, connect)
 		}
-		interconnection2 = append(interconnection2, connect)
 	}
 	return interconnection2
 }
@@ -130,6 +144,7 @@ func parseInterconnection2() [][]int {
 func interconnect(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	count := int(request.Nums)
 	if count == 2 {
+		interGroupPairs := parsePairs(InterGroupConnection)
 		for _, val := range devices {
 			if !fitFn(val, request) {
 				continue
@@ -138,9 +153,8 @@ func interconnect(devices []*device.DeviceUsage, request device.ContainerDeviceR
 				if !fitFn(val2, request) || val2.Index == val.Index {
 					continue
 				}
-				for p := range strings.SplitSeq(InterGroupConnection, ",") {
-					lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
-					rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
+				for _, p := range interGroupPairs {
+					lw, rw := p[0], p[1]
 					klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
 					if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
 						return []int{int(val.Index), int(val2.Index)}
