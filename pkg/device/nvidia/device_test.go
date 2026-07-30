@@ -2851,6 +2851,7 @@ func TestFit_TopologyNegativeScores(t *testing.T) {
 		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
 		assert.Equal(t, fit, true)
 		assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+		assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-0")
 	})
 
 	// Test multi-GPU request (exercises computeBestCombination)
@@ -2864,5 +2865,11 @@ func TestFit_TopologyNegativeScores(t *testing.T) {
 		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
 		assert.Equal(t, fit, true)
 		assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+		uuids := map[string]bool{}
+		for _, d := range result[NvidiaGPUDevice] {
+			uuids[d.UUID] = true
+		}
+		assert.Assert(t, uuids["dev-1"])
+		assert.Assert(t, uuids["dev-2"])
 	})
 }
