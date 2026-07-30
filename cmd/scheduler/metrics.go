@@ -395,25 +395,25 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 // NewClusterManager creates a ClusterManager and registers its collector.
-func NewClusterManager(zone string, reg prometheus.Registerer, legacyMetrics bool) *ClusterManager {
+func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider schedulerMetricsProvider, legacyMetrics bool) *ClusterManager {
 	c := &ClusterManager{
 		Zone:          zone,
 		LegacyMetrics: legacyMetrics,
 	}
 	cc := ClusterManagerCollector{
 		ClusterManager:  c,
-		metricsProvider: sher,
+		metricsProvider: metricsProvider,
 	}
 	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
 	return c
 }
 
-func initMetrics(bindAddress string, legacyMetrics bool) {
+func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
-	NewClusterManager("vGPU", reg, legacyMetrics)
+	NewClusterManager("vGPU", reg, metricsProvider, legacyMetrics)
 
 	mux := http.NewServeMux()
 	mux.Handle("/metrics", promhttp.HandlerFor(reg, promhttp.HandlerOpts{}))
