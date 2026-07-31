@@ -133,6 +133,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			}
 		default:
 			klog.Error("nvml get memory error ret=", ret)
+			// continue skips to the next device in the outer loop, not just the switch
 			continue
 		}
 		Model, ret := ndev.GetName()
@@ -185,6 +186,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		})
 		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
+
+	if len(res) == 0 && len(devs) > 0 {
+		klog.Warningf("All %d GPU devices failed NVML queries and were skipped. Returning an empty device list.", len(devs))
+	}
+
 	return &res
 }
 
