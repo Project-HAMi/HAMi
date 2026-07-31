@@ -202,6 +202,8 @@ func calculateGPUScore(devices []*Device) ListDeviceScore {
 	return ds
 }
 
+// calculateGPUPairScore calculates a heuristic score representing the P2P connection
+// strength between two GPUs. A higher score implies better/faster communication links.
 func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) int {
 	if gpu0 == nil || gpu1 == nil {
 		return 0
