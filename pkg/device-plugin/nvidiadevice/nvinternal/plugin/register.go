@@ -86,14 +86,23 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 	return true, node, nil
 }
 
+// nvmlInit is overridable in tests so NVML initialization failures can be
+// simulated without depending on whether the host actually has an NVIDIA
+// driver installed.
+var nvmlInit = nvml.Init
+
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
-	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
 	}
+	// nvml.Shutdown must only be deferred once nvml.Init has actually
+	// succeeded: calling it after a failed Init crashes the process (the
+	// underlying NVML library was never loaded, so the shutdown symbol
+	// can't be resolved) instead of returning a normal error.
+	defer nvml.Shutdown()
 	res := make([]*device.DeviceInfo, 0, len(devs))
 
 	// Log mode-related warnings once per scan instead of per device

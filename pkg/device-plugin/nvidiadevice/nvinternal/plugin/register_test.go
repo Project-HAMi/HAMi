@@ -102,12 +102,16 @@ func TestGetNumaNode(t *testing.T) {
 	})
 
 	t.Run("numa_node file not present for this bus ID", func(t *testing.T) {
-		// The domain prefix ("0000") is stripped before building the sysfs
-		// path, so this never matches a real sysfs directory (which is
-		// always domain-prefixed) - the read deterministically fails.
+		// PciInfo.BusId is populated in NVML's modern 8-digit-domain format
+		// (NVML_DEVICE_PCI_BUS_ID_FMT = "%08X:%02X:%02X.0", e.g.
+		// "00000000:02:00.0"), and trimming the "0000" prefix from that
+		// yields a valid, domain-prefixed sysfs path ("0000:02:00.0").
+		// This test still deterministically fails because no such PCI
+		// device exists on the machine running the test, not because of
+		// the domain-trimming logic.
 		d := &mock.Device{
 			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
-				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
 			},
 		}
 		hasNode, node, err := GetNumaNode(d)
@@ -120,11 +124,18 @@ func TestGetNumaNode(t *testing.T) {
 	})
 }
 
-// TestGetAPIDevices_PanicsWithoutNVMLDriver documents and locks in existing
-// behavior: getAPIDevices calls the real nvml.Init() (not an injectable
-// interface), which fails on any machine without an NVIDIA driver - as this
-// one - and the code responds by panicking rather than returning an error.
-func TestGetAPIDevices_PanicsWithoutNVMLDriver(t *testing.T) {
+// TestGetAPIDevices_PanicsOnNVMLInitFailure locks in existing behavior:
+// getAPIDevices panics rather than returning an error when nvml.Init fails.
+// It stubs the package-level nvmlInit seam instead of relying on the real
+// nvml.Init(), so the result doesn't depend on whether the host running the
+// test happens to have an NVIDIA driver installed - calling the real NVML
+// Shutdown() after a simulated failed Init would also crash the test binary
+// outright (the underlying library was never loaded), not just fail it.
+func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
+	origInit := nvmlInit
+	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
+	defer func() { nvmlInit = origInit }()
+
 	mockRM := &rm.ResourceManagerMock{
 		DevicesFunc: func() rm.Devices { return rm.Devices{} },
 	}
