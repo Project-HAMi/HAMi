@@ -108,11 +108,11 @@ spec:
           command:
             - scheduler
             {{- if .Values.scheduler.admissionWebhook.enabled }}
-            - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort }}
+            - --http_bind=0.0.0.0:443
             - --cert_file=/tls/tls.crt
             - --key_file=/tls/tls.key
             {{- else }}
-            - --http_bind=0.0.0.0:{{ .Values.scheduler.service.httpTargetPort }}
+            - --http_bind=0.0.0.0:80
             {{- end }}
             - --scheduler-name={{ .Values.schedulerName }}
             - --metrics-bind-address={{ .Values.scheduler.metricsBindAddress }}
@@ -146,11 +146,11 @@ spec:
           ports:
             {{- if .Values.scheduler.admissionWebhook.enabled }}
             - name: https
-              containerPort: {{ .Values.scheduler.service.httpTargetPort }}
+              containerPort: 443
               protocol: TCP
             {{- else }}
             - name: http
-              containerPort: {{ .Values.scheduler.service.httpTargetPort }}
+              containerPort: 80
               protocol: TCP
             {{- end }}
             - name: metrics

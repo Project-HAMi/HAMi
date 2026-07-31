@@ -143,7 +143,6 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
 | `scheduler.service.monitorPort` | Monitor port | `31993` |
 | `scheduler.service.monitorTargetPort` | Monitor target port | `9395` |
-| `scheduler.service.httpTargetPort` | Target port on which the scheduler extender listens | `9443` |
 
 ## Device Plugin Configuration
 

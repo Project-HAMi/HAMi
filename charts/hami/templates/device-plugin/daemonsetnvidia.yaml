@@ -67,6 +67,10 @@ spec:
               chmod 1777 /host/hami/tmp/vgpulock
               chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
                 /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+              {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
+                /host/hami/driver-root
+              {{- end }}
           env:
             - name: SELINUX_TYPE
               value: {{ .Values.openshift.selinux.type | quote }}
@@ -79,6 +83,10 @@ spec:
               mountPath: /host/hami/containers
             - name: hosttmp
               mountPath: /host/hami/tmp
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: driver-root
+              mountPath: /host/hami/driver-root
+            {{- end }}
         {{- end }}
         {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: toolkit-validation
@@ -135,7 +143,7 @@ spec:
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             - name: NVIDIA_DRIVER_ROOT
               value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
             {{- end }}
@@ -184,7 +192,7 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
             - name: driver-root
@@ -272,7 +280,7 @@ spec:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+        {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
         - name: driver-root
           hostPath:
             path: {{ .Values.devicePlugin.nvidiaDriverRoot }}

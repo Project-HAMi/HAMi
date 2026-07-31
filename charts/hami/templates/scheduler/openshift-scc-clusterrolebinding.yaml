@@ -1,0 +1,20 @@
+{{- if and .Values.platform.openshift .Values.openshift.securityContextConstraints.name }}
+{{- $namespace := include "hami-vgpu.namespace" . -}}
+{{- $scheduler := include "hami-vgpu.scheduler" . -}}
+{{- $bindingHash := sha256sum (printf "%s/%s" $scheduler $namespace) | trunc 8 -}}
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ printf "%s-%s-%s-openshift-scc" ($scheduler | trunc 25 | trimSuffix "-") ($namespace | trunc 12 | trimSuffix "-") $bindingHash }}
+  labels:
+    app.kubernetes.io/component: "hami-scheduler"
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:openshift:scc:{{ .Values.openshift.securityContextConstraints.name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $scheduler }}
+    namespace: {{ $namespace }}
+{{- end }}
