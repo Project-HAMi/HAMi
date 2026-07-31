@@ -211,9 +211,9 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 	}
 }
 
-// Describe is implemented with DescribeByCollect. That's possible because the
-// Collect method will always return the same two metrics with the same two
-// descriptors.
+// Describe sends the superset of every descriptor that Collect can emit,
+// including the ones Collect only emits conditionally, plus the legacy
+// descriptors when legacy metrics are enabled.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
