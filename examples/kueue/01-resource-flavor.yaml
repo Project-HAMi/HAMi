@@ -1,0 +1,12 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ResourceFlavor
+metadata:
+  name: hami-vgpu-flavor
+spec:
+  nodeLabels:
+    accelerator: nvidia
+  # Optional: Tolerations if your HAMi nodes are tainted
+  # tolerations:
+  #   - key: "nvidia.com/gpu"
+  #     operator: "Exists"
+  #     effect: "NoSchedule"

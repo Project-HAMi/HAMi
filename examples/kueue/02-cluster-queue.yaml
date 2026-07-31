@@ -1,0 +1,15 @@
+apiVersion: kueue.x-k8s.io/v1beta1
+kind: ClusterQueue
+metadata:
+  name: hami-cluster-queue
+spec:
+  namespaceSelector: {} # Match all namespaces
+  resourceGroups:
+  - coveredResources: ["hami.io/vgpu-memory", "hami.io/vgpu-core"]
+    flavors:
+    - name: hami-vgpu-flavor
+      resources:
+      - name: "hami.io/vgpu-memory"
+        nominalQuota: 80000 # E.g., 80GB total vGPU memory in the cluster
+      - name: "hami.io/vgpu-core"
+        nominalQuota: 100 # E.g., 100% total vGPU core capacity
