@@ -229,6 +229,14 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		return err
 	}
 
+	// A lock already held by this same pod (e.g., a multi-device pod whose
+	// earlier backend locked the node through the shared annotation key) is an
+	// idempotent re-acquisition, not contention.
+	if ns != "" && previousPodName != "" && ns == pods.Namespace && previousPodName == pods.Name {
+		klog.InfoS("Node lock already held by this pod", "node", nodeName, "podName", pods.Name, "podNamespace", pods.Namespace)
+		return nil
+	}
+
 	var skipOwnerCheck = false
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)

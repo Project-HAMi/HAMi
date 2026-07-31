@@ -2091,6 +2091,74 @@ func (m *bindLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) erro
 	return nil
 }
 
+// sharedLockMockDevice mirrors backends (e.g. nvidia, ascend, hygon, metax) that
+// all acquire the same node-lock annotation key "hami.io/mutex.lock" through the
+// shared pkg/util/nodelock helper.
+type sharedLockMockDevice struct {
+	registerMockDevice
+	vendor string
+}
+
+func (m *sharedLockMockDevice) CommonWord() string { return m.vendor }
+func (m *sharedLockMockDevice) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	return nodelockutil.LockNode(n.Name, nodelockutil.NodeLockKey, p)
+}
+func (m *sharedLockMockDevice) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+	return nodelockutil.ReleaseNodeLock(n.Name, nodelockutil.NodeLockKey, p, false)
+}
+
+// Test_Bind_MultiDeviceBackendsSharingNodeLock reproduces #2243: a pod requesting
+// two device types whose backends both lock the same node annotation must not
+// contend with itself during Bind.
+func Test_Bind_MultiDeviceBackendsSharingNodeLock(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-multi-device", Namespace: "default", UID: types.UID("uid-multi-device"),
+		},
+	}
+	mockA := &sharedLockMockDevice{vendor: "shared-lock-a"}
+	mockB := &sharedLockMockDevice{vendor: "shared-lock-b"}
+
+	oldRetry := config.NodeLockRetryTimeout
+	config.NodeLockRetryTimeout = 500 * time.Millisecond
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{mockA.vendor: mockA, mockB.vendor: mockB}
+	t.Cleanup(func() {
+		config.NodeLockRetryTimeout = oldRetry
+		device.DevicesMap = oldDevicesMap
+	})
+
+	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
+	scheme := runtime.NewScheme()
+	_ = corev1.AddToScheme(scheme)
+	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	fakeClient := fake.NewSimpleClientset(pod, node)
+	s.kubeClient = fakeClient
+	client.KubeClient = fakeClient
+
+	// lockAllDevices must succeed when both backends lock the same node for the
+	// same pod, and the resulting annotation must reference the locking pod.
+	if err := s.lockAllDevices(node, pod); err != nil {
+		t.Fatalf("lockAllDevices failed for same-pod multi-backend lock: %v", err)
+	}
+	nodeAfter, err := fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	lockValue, ok := nodeAfter.Annotations[nodelockutil.NodeLockKey]
+	require.True(t, ok, "node lock annotation must be set")
+	if !strings.HasSuffix(lockValue, nodelockutil.NodeLockSep+nodelockutil.GeneratePodNamespaceName(pod, nodelockutil.NodeLockSep)) {
+		t.Fatalf("node lock %q does not reference the locking pod", lockValue)
+	}
+
+	s.releaseAllDevices(node, pod)
+	nodeAfter, err = fakeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	_, ok = nodeAfter.Annotations[nodelockutil.NodeLockKey]
+	require.False(t, ok, "node lock annotation must be released after all backends finish")
+}
+
 var errContention = fmt.Errorf("contended: %w", nodelockutil.ErrNodeLockContention)
 
 func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev1.Pod, mock *bindLockMockDevice) (*Scheduler, extenderv1.ExtenderBindingArgs, func()) {

@@ -63,6 +63,35 @@ func Test_LockNode(t *testing.T) {
 			args: args{
 				nodeName: func() string {
 					name := "worker-1"
+					client.KubeClient.CoreV1().Pods("hami-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "hami", Namespace: "hami-ns"},
+					}, metav1.CreateOptions{})
+					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: name,
+							Annotations: map[string]string{
+								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
+									ObjectMeta: metav1.ObjectMeta{Name: "hami", Namespace: "hami-ns"},
+								}),
+							},
+						},
+					}, metav1.CreateOptions{})
+					return name
+				},
+				pods: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "other",
+						Namespace: "other-ns",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "node lock is idempotent for the same pod",
+			args: args{
+				nodeName: func() string {
+					name := "worker-1b"
 					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
@@ -82,7 +111,7 @@ func Test_LockNode(t *testing.T) {
 					},
 				},
 			},
-			wantErr: true,
+			wantErr: false,
 		},
 		{
 			name: "node lock is invalid",
