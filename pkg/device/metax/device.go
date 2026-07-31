@@ -59,6 +59,10 @@ func (dev *MetaxDevices) CommonWord() string {
 	return MetaxGPUCommonWord
 }
 
+func (dev *MetaxDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceCount)]
 	return ok, nil

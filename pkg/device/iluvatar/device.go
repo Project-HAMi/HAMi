@@ -80,6 +80,10 @@ func (dev *IluvatarDevices) CommonWord() string {
 	return dev.config.CommonWord
 }
 
+func (dev *IluvatarDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func ParseConfig(fs *flag.FlagSet) {
 	fs.BoolVar(&enableIluvatar, "enable-iluvatar", false, "enable iluvatar device")
 }

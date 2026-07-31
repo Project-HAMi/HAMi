@@ -76,6 +76,10 @@ func (dev *AWSNeuronDevices) CommonWord() string {
 	return AWSNeuronCommonWord
 }
 
+func (dev *AWSNeuronDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 	if !ok {

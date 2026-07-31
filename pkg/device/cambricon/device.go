@@ -93,6 +93,10 @@ func (dev *CambriconDevices) CommonWord() string {
 	return CambriconMLUCommonWord
 }
 
+func (dev *CambriconDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	ctx := context.Background()
 	if _, ok := node.Annotations[DsmluLockTime]; ok {
@@ -374,6 +378,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !device.FitAllocationQuota(pod.Namespace, k.Type, cam.MemoryFactor(), int64(memreq), int64(k.Coresreq), tmpDevs, allocated) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++

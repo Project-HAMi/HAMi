@@ -1154,7 +1154,8 @@ type registerMockDevice struct {
 	nodeCleanedUp int
 }
 
-func (m *registerMockDevice) CommonWord() string { return "mock-vendor" }
+func (m *registerMockDevice) CommonWord() string  { return "mock-vendor" }
+func (m *registerMockDevice) MemoryFactor() int32 { return 1 }
 func (m *registerMockDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
 	return false, nil
 }

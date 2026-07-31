@@ -35,6 +35,7 @@ import (
 
 type Devices interface {
 	CommonWord() string
+	MemoryFactor() int32
 	MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error)
 	CheckHealth(devType string, n *corev1.Node) (bool, bool)
 	NodeCleanUp(nn string) error

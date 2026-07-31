@@ -55,6 +55,10 @@ func (dev *KunlunDevices) CommonWord() string {
 	return KunlunGPUCommonWord
 }
 
+func (dev *KunlunDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *KunlunDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(KunlunResourceCount)]
 	return ok, nil

@@ -1011,7 +1011,8 @@ type mockDevices struct {
 	resourceRequest ContainerDeviceRequest
 }
 
-func (m *mockDevices) CommonWord() string { return "mock" }
+func (m *mockDevices) CommonWord() string  { return "mock" }
+func (m *mockDevices) MemoryFactor() int32 { return 1 }
 func (m *mockDevices) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
 	return false, nil
 }

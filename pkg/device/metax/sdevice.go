@@ -81,6 +81,10 @@ func (sdev *MetaxSDevices) CommonWord() string {
 	return MetaxSGPUCommonWord
 }
 
+func (sdev *MetaxSDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (sdev *MetaxSDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCount)]
 	if !ok {

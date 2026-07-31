@@ -110,6 +110,10 @@ func (dev *EnflameDevices) CommonWord() string {
 	return EnflameVGCUCommonWord
 }
 
+func (dev *EnflameDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	resourceCount := corev1.ResourceName(EnflameResourceNameDRSGCU)
 	count, ok := ctr.Resources.Limits[resourceCount]

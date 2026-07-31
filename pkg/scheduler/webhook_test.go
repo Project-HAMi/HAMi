@@ -272,6 +272,7 @@ func TestFitResourceQuota(t *testing.T) {
 		memName:  &device.Quota{Used: 1000, Limit: 2000},
 		coreName: &device.Quota{Used: 200, Limit: 400},
 	}
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
 
 	testCases := []struct {
 		name string
@@ -422,6 +423,80 @@ func TestFitResourceQuota(t *testing.T) {
 				t.Errorf("Expected %v, but got %v", tc.fit, result)
 			}
 		})
+	}
+}
+
+type quotaWebhookDevice struct {
+	names device.ResourceNames
+	word  string
+}
+
+func (d *quotaWebhookDevice) CommonWord() string  { return d.word }
+func (d *quotaWebhookDevice) MemoryFactor() int32 { return 1 }
+func (d *quotaWebhookDevice) MutateAdmission(*corev1.Container, *corev1.Pod) (bool, error) {
+	return false, nil
+}
+func (d *quotaWebhookDevice) CheckHealth(string, *corev1.Node) (bool, bool) { return true, true }
+func (d *quotaWebhookDevice) NodeCleanUp(string) error                      { return nil }
+func (d *quotaWebhookDevice) GetResourceNames() device.ResourceNames        { return d.names }
+func (d *quotaWebhookDevice) GetNodeDevices(corev1.Node) ([]*device.DeviceInfo, error) {
+	return nil, nil
+}
+func (d *quotaWebhookDevice) LockNode(*corev1.Node, *corev1.Pod) error        { return nil }
+func (d *quotaWebhookDevice) ReleaseNodeLock(*corev1.Node, *corev1.Pod) error { return nil }
+func (d *quotaWebhookDevice) GenerateResourceRequests(*corev1.Container) device.ContainerDeviceRequest {
+	return device.ContainerDeviceRequest{}
+}
+func (d *quotaWebhookDevice) PatchAnnotations(*corev1.Pod, *map[string]string, device.PodDevices) map[string]string {
+	return nil
+}
+func (d *quotaWebhookDevice) ScoreNode(*corev1.Node, device.PodSingleDevice, []*device.DeviceUsage, string) float32 {
+	return 0
+}
+func (d *quotaWebhookDevice) AddResourceUsage(*corev1.Pod, *device.DeviceUsage, *device.ContainerDevice) error {
+	return nil
+}
+func (d *quotaWebhookDevice) Fit([]*device.DeviceUsage, device.ContainerDeviceRequest, *corev1.Pod, *device.NodeInfo, *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	return false, nil, ""
+}
+
+func TestFitResourceQuotaNonNvidiaExceeded(t *testing.T) {
+	oldMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldMap })
+	t.Cleanup(func() { delete(device.GetLocalCache().Quotas, "default") })
+
+	deviceName := "Ascend910B"
+	memName := "huawei.com/Ascend910B-memory"
+	device.DevicesMap = map[string]device.Devices{
+		deviceName: &quotaWebhookDevice{
+			word: deviceName,
+			names: device.ResourceNames{
+				ResourceCountName:  "huawei.com/Ascend910B",
+				ResourceMemoryName: memName,
+				ResourceCoreName:   "huawei.com/Ascend910B-core",
+			},
+		},
+	}
+	qm := device.NewQuotaManager()
+	qm.Quotas["default"] = &device.DeviceQuota{
+		memName: &device.Quota{Used: 9000, Limit: 10000},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B":        resource.MustParse("1"),
+						"huawei.com/Ascend910B-memory": resource.MustParse("2000"),
+					},
+				},
+			}},
+		},
+	}
+	if fitResourceQuota(pod) {
+		t.Fatal("fitResourceQuota should deny non-NVIDIA pod exceeding memory quota")
 	}
 }
 

@@ -32,6 +32,10 @@ func (m *MockDevices) CommonWord() string {
 	return "mock"
 }
 
+func (m *MockDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (m *MockDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {
 	return true, nil
 }
@@ -86,6 +90,13 @@ type PodDeviceInfo struct {
 }
 
 type TestPodDevices map[string]map[string][]PodDeviceInfo
+
+func cleanupNamespaceQuota(t *testing.T, ns string) {
+	t.Helper()
+	t.Cleanup(func() {
+		delete(NewQuotaManager().Quotas, ns)
+	})
+}
 
 func initTest() {
 	DevicesMap = make(map[string]Devices)
@@ -157,6 +168,184 @@ func TestFitQuota(t *testing.T) {
 	// Should fit if device not present
 	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
+	}
+}
+
+func TestPodQuotaRequests(t *testing.T) {
+	initTest()
+	DevicesMap["Ascend910B"] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceCountName:  "huawei.com/Ascend910B",
+			ResourceMemoryName: "huawei.com/Ascend910B-memory",
+			ResourceCoreName:   "huawei.com/Ascend910B-core",
+		},
+	}
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B":        resource.MustParse("1"),
+						"huawei.com/Ascend910B-memory": resource.MustParse("2000"),
+					},
+				},
+			}},
+		},
+	}
+	mem, cores := PodQuotaRequests(pod, "Ascend910B")
+	if mem != 2000 || cores != 0 {
+		t.Fatalf("PodQuotaRequests() = (%d, %d), want (2000, 0)", mem, cores)
+	}
+}
+
+func TestPodQuotaRequestsUnknownDevice(t *testing.T) {
+	initTest()
+	mem, cores := PodQuotaRequests(&corev1.Pod{}, "unknown")
+	if mem != 0 || cores != 0 {
+		t.Fatalf("PodQuotaRequests() = (%d, %d), want (0, 0)", mem, cores)
+	}
+}
+
+func TestFitPodQuotaNoDeviceRequest(t *testing.T) {
+	initTest()
+	cleanupNamespaceQuota(t, "default")
+	if !FitPodQuota(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}, "NVIDIA", 1) {
+		t.Fatal("FitPodQuota should allow pods with no device requests")
+	}
+}
+
+func TestFitPodQuotaMemoryFactor(t *testing.T) {
+	initTest()
+	deviceName := "NVIDIA"
+	memName := "nvidia.com/gpumem"
+	cleanupNamespaceQuota(t, "default")
+	qm := NewQuotaManager()
+	qm.Quotas["default"] = &DeviceQuota{
+		memName: &Quota{Used: 0, Limit: 1000},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    resource.MustParse("1"),
+						"nvidia.com/gpumem": resource.MustParse("1500"),
+					},
+				},
+			}},
+		},
+	}
+	DevicesMap[deviceName] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceCountName:  "nvidia.com/gpu",
+			ResourceMemoryName: memName,
+			ResourceCoreName:   "nvidia.com/gpucore",
+		},
+	}
+	if FitPodQuota(pod, deviceName, 2) {
+		t.Fatal("FitPodQuota should reject request when memoryFactor doubles usage over limit")
+	}
+}
+
+func TestFitAllocationQuota(t *testing.T) {
+	initTest()
+	cleanupNamespaceQuota(t, "default")
+	deviceName := "NVIDIA"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+	DevicesMap[deviceName] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceCountName:  "nvidia.com/gpu",
+			ResourceMemoryName: memName,
+			ResourceCoreName:   coreName,
+		},
+	}
+	qm := NewQuotaManager()
+	qm.Quotas["default"] = &DeviceQuota{
+		memName:  &Quota{Used: 0, Limit: 2048},
+		coreName: &Quota{Used: 0, Limit: 100},
+	}
+
+	tests := []struct {
+		name      string
+		tmpDevs   map[string]ContainerDevices
+		allocated *PodDevices
+		memreq    int64
+		coresreq  int64
+		want      bool
+	}{
+		{
+			name:     "within quota",
+			memreq:   100,
+			coresreq: 1,
+			want:     true,
+		},
+		{
+			name:   "request exceeds quota",
+			memreq: 3000,
+			want:   false,
+		},
+		{
+			name: "tmpdev exceeds quota",
+			tmpDevs: map[string]ContainerDevices{
+				deviceName: {{Usedmem: 1024, Usedcores: 5}},
+			},
+			memreq: 2000,
+			want:   false,
+		},
+		{
+			name: "allocated devs exceed quota",
+			allocated: &PodDevices{
+				deviceName: PodSingleDevice{
+					ContainerDevices{{Usedmem: 1024, Usedcores: 2}},
+				},
+			},
+			memreq: 2000,
+			want:   false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := FitAllocationQuota("default", deviceName, 1, tt.memreq, tt.coresreq, tt.tmpDevs, tt.allocated)
+			if got != tt.want {
+				t.Fatalf("FitAllocationQuota() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestFitPodQuotaNonNvidia(t *testing.T) {
+	initTest()
+	cleanupNamespaceQuota(t, "default")
+	deviceName := "Ascend910B"
+	memName := "huawei.com/Ascend910B-memory"
+	DevicesMap[deviceName] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceCountName:  "huawei.com/Ascend910B",
+			ResourceMemoryName: memName,
+			ResourceCoreName:   "huawei.com/Ascend910B-core",
+		},
+	}
+	qm := NewQuotaManager()
+	qm.Quotas["default"] = &DeviceQuota{
+		memName: &Quota{Used: 9000, Limit: 10000},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "default"},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B":        resource.MustParse("1"),
+						"huawei.com/Ascend910B-memory": resource.MustParse("2000"),
+					},
+				},
+			}},
+		},
+	}
+	if FitPodQuota(pod, deviceName, 1) {
+		t.Fatal("FitPodQuota should reject over-limit non-NVIDIA request")
 	}
 }
 

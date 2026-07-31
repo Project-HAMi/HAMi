@@ -74,6 +74,10 @@ func (dev *KunlunVDevices) CommonWord() string {
 	return XPUDevice
 }
 
+func (dev *KunlunVDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(KunlunResourceVCount)]
 	if !ok {

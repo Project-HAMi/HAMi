@@ -84,6 +84,10 @@ func (dev *DCUDevices) CommonWord() string {
 	return HygonDCUCommonWord
 }
 
+func (dev *DCUDevices) MemoryFactor() int32 {
+	return MemoryFactor
+}
+
 func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&HygonResourceCount, "dcu-name", "hygon.com/dcunum", "dcu resource count")
 	fs.StringVar(&HygonResourceMemory, "dcu-memory", "hygon.com/dcumem", "dcu memory resource")
@@ -300,6 +304,11 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !device.FitAllocationQuota(pod.Namespace, k.Type, MemoryFactor, int64(memreq), int64(k.Coresreq), tmpDevs, allocated) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++

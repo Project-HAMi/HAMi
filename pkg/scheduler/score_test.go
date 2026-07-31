@@ -3580,7 +3580,8 @@ type fitMockDevice struct {
 	uuid     string
 }
 
-func (m *fitMockDevice) CommonWord() string { return m.typeName }
+func (m *fitMockDevice) CommonWord() string  { return m.typeName }
+func (m *fitMockDevice) MemoryFactor() int32 { return 1 }
 func (m *fitMockDevice) MutateAdmission(_ *corev1.Container, _ *corev1.Pod) (bool, error) {
 	return false, nil
 }

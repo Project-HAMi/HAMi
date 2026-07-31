@@ -115,6 +115,10 @@ func (dev *Devices) CommonWord() string {
 	return dev.config.CommonWord
 }
 
+func (dev *Devices) MemoryFactor() int32 {
+	return dev.config.MemoryFactor
+}
+
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
 	if !ok {
@@ -516,6 +520,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !device.FitAllocationQuota(pod.Namespace, k.Type, npu.config.MemoryFactor, int64(memreq), int64(k.Coresreq), tmpDevs, allocated) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++

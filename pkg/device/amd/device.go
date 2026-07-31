@@ -65,6 +65,10 @@ func (dev *AMDDevices) CommonWord() string {
 	return AMDCommonWord
 }
 
+func (dev *AMDDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 	if !ok {

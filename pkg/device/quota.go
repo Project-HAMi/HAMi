@@ -88,6 +88,79 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 	return true
 }
 
+func containerResourceRequest(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
+	v, ok := ctr.Resources.Limits[resName]
+	if !ok {
+		v, ok = ctr.Resources.Requests[resName]
+	}
+	if ok {
+		if n, ok := v.AsInt64(); ok {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+func PodQuotaRequests(pod *corev1.Pod, deviceName string) (memoryReq int64, coresReq int64) {
+	devs, ok := GetDevices()[deviceName]
+	if !ok {
+		return 0, 0
+	}
+	resourceNames := devs.GetResourceNames()
+	if resourceNames.ResourceCountName == "" {
+		return 0, 0
+	}
+	resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
+	memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)
+	coreResourceName := corev1.ResourceName(resourceNames.ResourceCoreName)
+
+	for _, ctr := range pod.Spec.Containers {
+		req, ok := containerResourceRequest(&ctr, resourceName)
+		if !ok {
+			continue
+		}
+		if memReq, ok := containerResourceRequest(&ctr, memResourceName); ok {
+			memoryReq += memReq * req
+		}
+		if coreReq, ok := containerResourceRequest(&ctr, coreResourceName); ok {
+			coresReq += coreReq * req
+		}
+	}
+	return memoryReq, coresReq
+}
+
+func FitPodQuota(pod *corev1.Pod, deviceName string, memoryFactor int32) bool {
+	memoryReq, coresReq := PodQuotaRequests(pod, deviceName)
+	if memoryReq == 0 && coresReq == 0 {
+		return true
+	}
+	if memoryFactor > 1 {
+		memoryReq *= int64(memoryFactor)
+	}
+	return GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName)
+}
+
+func FitAllocationQuota(ns, deviceType string, memoryFactor int32, memreq, coresreq int64, tmpDevs map[string]ContainerDevices, allocated *PodDevices) bool {
+	mem := memreq
+	core := coresreq
+	for _, val := range tmpDevs[deviceType] {
+		mem += int64(val.Usedmem)
+		core += int64(val.Usedcores)
+	}
+	if allocated != nil {
+		if podSingleDevice, exists := (*allocated)[deviceType]; exists {
+			for _, containerDevices := range podSingleDevice {
+				for _, val := range containerDevices {
+					mem += int64(val.Usedmem)
+					core += int64(val.Usedcores)
+				}
+			}
+		}
+	}
+	klog.V(4).InfoS("Allocating quota", "device", deviceType, "mem", mem, "cores", core)
+	return GetLocalCache().FitQuota(ns, mem, memoryFactor, core, deviceType)
+}
+
 func countPodDevices(podDev PodDevices) map[string]int64 {
 	res := make(map[string]int64)
 	for deviceName, podSingle := range podDev {

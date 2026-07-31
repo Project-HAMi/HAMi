@@ -2107,6 +2107,58 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+func TestDevices_Fit_ResourceQuotaExceeded(t *testing.T) {
+	configStr := `- chipName: 910A
+  commonWord: Ascend910A
+  resourceName: huawei.com/Ascend910A
+  resourceMemoryName: huawei.com/Ascend910A-memory
+  memoryAllocatable: 32768
+  memoryCapacity: 32768
+  aiCore: 30
+  templates:
+    - name: vir02
+      memory: 2184
+      aiCore: 2
+`
+	var config []VNPUConfig
+	if err := yaml.Unmarshal([]byte(configStr), &config); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	enableAscend = true
+	devs := InitDevices(VNPUs{Configs: config})
+	if len(devs) != 1 {
+		t.Fatalf("expected one ascend device, got %d", len(devs))
+	}
+	dev := devs[0]
+	oldMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldMap })
+	device.DevicesMap = map[string]device.Devices{
+		dev.config.CommonWord: dev,
+	}
+	memName := "huawei.com/Ascend910A-memory"
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "default") })
+	qm.Quotas["default"] = &device.DeviceQuota{
+		memName: &device.Quota{Used: 9000, Limit: 10000},
+	}
+
+	devices := []*device.DeviceUsage{{
+		ID: "dev-0", Used: 0, Count: 100, Usedmem: 0, Totalmem: 1280,
+		Totalcore: 100, Usedcores: 0, Type: dev.config.CommonWord, Health: true,
+	}}
+	request := device.ContainerDeviceRequest{
+		Nums: 1, Memreq: 2000, Coresreq: 50, Type: dev.config.CommonWord,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	fit, _, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Fatal("Fit should fail when namespace memory quota is exceeded")
+	}
+	if reason != "1/1 ResourceQuotaNotFit" {
+		t.Fatalf("expected ResourceQuotaNotFit, got %q", reason)
+	}
+}
+
 func TestDevices_Fit_910C(t *testing.T) {
 	configStr := `- chipName: Ascend910
   commonWord: Ascend910C

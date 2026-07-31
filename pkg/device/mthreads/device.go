@@ -82,6 +82,10 @@ func (dev *MthreadsDevices) CommonWord() string {
 	return MthreadsGPUCommonWord
 }
 
+func (dev *MthreadsDevices) MemoryFactor() int32 {
+	return 1
+}
+
 func ParseConfig(fs *flag.FlagSet) {
 	fs.StringVar(&MthreadsResourceCount, "mthreads-name", "mthreads.com/vgpu", "mthreads resource count")
 	fs.StringVar(&MthreadsResourceMemory, "mthreads-memory", "mthreads.com/sgpu-memory", "mthreads memory resource")

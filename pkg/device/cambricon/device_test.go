@@ -1071,6 +1071,42 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+func TestDevices_Fit_ResourceQuotaExceeded(t *testing.T) {
+	config := CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	}
+	dev := InitMLUDevice(config)
+	oldMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldMap })
+	device.DevicesMap = map[string]device.Devices{
+		CambriconMLUDevice: dev,
+	}
+	memName := "cambricon.com/mlu.smlu.vmemory"
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "default") })
+	qm.Quotas["default"] = &device.DeviceQuota{
+		memName: &device.Quota{Used: 9000, Limit: 10000},
+	}
+
+	devices := []*device.DeviceUsage{{
+		ID: "dev-0", Used: 0, Count: 100, Usedmem: 0, Totalmem: 1280,
+		Totalcore: 100, Usedcores: 0, Type: CambriconMLUDevice, Health: true,
+	}}
+	request := device.ContainerDeviceRequest{
+		Nums: 1, Memreq: 2000, Coresreq: 50, Type: CambriconMLUDevice,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "default"}}
+	fit, _, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Fatal("Fit should fail when namespace memory quota is exceeded")
+	}
+	if reason != "1/1 ResourceQuotaNotFit" {
+		t.Fatalf("expected ResourceQuotaNotFit, got %q", reason)
+	}
+}
+
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
