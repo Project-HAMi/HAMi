@@ -10,6 +10,13 @@ permissions:
 
 jobs:
   translate: # make sure the action works on a clean machine without building
+    if: >-
+      github.event_name == 'issues' ||
+      (
+        github.event_name == 'issue_comment' &&
+        github.event.comment.user.type != 'Bot' &&
+        !startsWith(github.event.comment.body, '/')
+      )
     runs-on: ubuntu-latest
     steps:
       - uses: tomsun28/issues-translate-action@b41f55ddc81d7d54bd542a4f289fe28ec081898e # v2.7
