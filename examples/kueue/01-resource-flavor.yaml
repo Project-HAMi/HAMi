@@ -3,6 +3,7 @@ kind: ResourceFlavor
 metadata:
   name: hami-vgpu-flavor
 spec:
+  topologyName: hami-topology
   nodeLabels:
     gpu: "on"
   # Optional: Tolerations if your HAMi nodes are tainted

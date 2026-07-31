@@ -5,11 +5,13 @@ metadata:
 spec:
   namespaceSelector: {} # Match all namespaces
   resourceGroups:
-  - coveredResources: ["hami.io/vgpu-memory", "hami.io/vgpu-core"]
+  - coveredResources: ["nvidia.com/gpu", "nvidia.com/gpumem", "nvidia.com/gpucores"]
     flavors:
     - name: hami-vgpu-flavor
       resources:
-      - name: "hami.io/vgpu-memory"
+      - name: "nvidia.com/gpu"
+        nominalQuota: 10 # E.g., 10 GPUs in the cluster
+      - name: "nvidia.com/gpumem"
         nominalQuota: 80000 # E.g., 80GB total vGPU memory in the cluster
-      - name: "hami.io/vgpu-core"
+      - name: "nvidia.com/gpucores"
         nominalQuota: 100 # E.g., 100% total vGPU core capacity
