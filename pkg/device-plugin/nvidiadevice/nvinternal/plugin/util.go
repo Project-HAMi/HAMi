@@ -169,15 +169,19 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 		num = strings.TrimSpace(num)
 		index, err := strconv.Atoi(num)
 		if err != nil {
-			klog.Fatal("atoi failed num=", num)
+			klog.Errorf("failed to parse device index from smi output line %q: %v", val, err)
+			continue
 		}
 		if index == idx {
 			colonParts := strings.Split(val, ":")
-			if len(colonParts) < 3 {
+			if len(colonParts) < 3 || !strings.Contains(colonParts[1], "UUID") {
 				continue
 			}
 			outputStr := strings.TrimSpace(colonParts[2])
 			outputStr = strings.TrimRight(outputStr, ")")
+			if !strings.HasPrefix(outputStr, "MIG-") {
+				continue
+			}
 			return outputStr
 		}
 	}
