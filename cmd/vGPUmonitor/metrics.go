@@ -224,6 +224,8 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
+	ch <- ctrDeviceLastKernelDesc
+	ch <- ctrDeviceMigInfo
 
 	if cc.ClusterManager.LegacyMetrics {
 		ch <- legacyHostGPUdesc
