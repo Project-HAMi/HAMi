@@ -498,6 +498,26 @@ var _ = ginkgo.Describe("isHolderOf hostname prefix boundary", func() {
 		}
 		g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
 	})
+
+	ginkgo.It("should not match a holder with an empty uuid suffix", func() {
+		emptySuffixHolder := "dev_"
+		lease := &coordinationv1.Lease{
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &emptySuffixHolder,
+			},
+		}
+		g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
+	})
+
+	ginkgo.It("should not match a holder with a malformed uuid suffix", func() {
+		invalidHolder := "dev_not-a-uuid"
+		lease := &coordinationv1.Lease{
+			Spec: coordinationv1.LeaseSpec{
+				HolderIdentity: &invalidHolder,
+			},
+		}
+		g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
+	})
 })
 
 var _ = ginkgo.Describe("DummyLeaderManager", func() {

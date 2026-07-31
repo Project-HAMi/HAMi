@@ -21,6 +21,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/google/uuid"
 	coordinationv1 "k8s.io/api/coordination/v1"
 	"k8s.io/client-go/tools/cache"
 )
@@ -162,11 +163,23 @@ func (m *leaderManager) onDelete(obj any) {
 }
 
 func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
-	// kube-scheduler lease id take format of `hostname + "_" + string(uuid.NewUUID())`
+	// Kubernetes leader election holder identities use hostname_<uuid>.
+	// The trailing "_" is required so one hostname cannot match another whose
+	// name extends the local prefix (e.g. "dev" must not match "dev-server_<uuid>").
 	if lease == nil || lease.Spec.HolderIdentity == nil {
 		return false
 	}
-	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname+"_")
+	holder := *lease.Spec.HolderIdentity
+	prefix := m.hostname + "_"
+	if !strings.HasPrefix(holder, prefix) {
+		return false
+	}
+	suffix := strings.TrimPrefix(holder, prefix)
+	if suffix == "" {
+		return false
+	}
+	_, err := uuid.Parse(suffix)
+	return err == nil
 }
 
 func (m *leaderManager) isLeaseValid(now time.Time) bool {
