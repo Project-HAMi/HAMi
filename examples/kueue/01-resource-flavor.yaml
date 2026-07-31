@@ -4,7 +4,7 @@ metadata:
   name: hami-vgpu-flavor
 spec:
   nodeLabels:
-    accelerator: nvidia
+    gpu: "on"
   # Optional: Tolerations if your HAMi nodes are tainted
   # tolerations:
   #   - key: "nvidia.com/gpu"
