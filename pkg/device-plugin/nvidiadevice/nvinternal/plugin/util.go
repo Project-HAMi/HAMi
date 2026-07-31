@@ -121,29 +121,25 @@ var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 	return util.PatchPodAnnotations(&p, newannos)
 }
 
-func GetIndexAndTypeFromUUID(uuid string) (string, int) {
+func GetIndexAndTypeFromUUID(uuid string) (string, int, error) {
 	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		return "", 0, fmt.Errorf("nvml Init err: %v", nvret)
 	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get handlebyuuid error ret=", ret)
-		panic(0)
+		return "", 0, fmt.Errorf("nvml get handlebyuuid error ret=%v", ret)
 	}
 	Model, ret := ndev.GetName()
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get name error ret=", ret)
-		panic(0)
+		return "", 0, fmt.Errorf("nvml get name error ret=%v", ret)
 	}
 	index, ret := ndev.GetIndex()
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get index error ret=", ret)
-		panic(0)
+		return "", 0, fmt.Errorf("nvml get index error ret=%v", ret)
 	}
-	return Model, index
+	return Model, index, nil
 }
 
 func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
@@ -178,17 +174,15 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 	return ""
 }
 
-func GetMigUUIDFromIndex(uuid string, idx int) string {
+func GetMigUUIDFromIndex(uuid string, idx int) (string, error) {
 	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		return "", fmt.Errorf("nvml Init err: %v", nvret)
 	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
-		klog.Error(`nvml get device uuid error ret=`, ret)
-		panic(0)
+		return "", fmt.Errorf("nvml get device uuid error ret=%v", ret)
 	}
 	migdev, ret := nvml.DeviceGetMigDeviceHandleByIndex(ndev, idx)
 	if ret != nvml.SUCCESS {
@@ -199,18 +193,17 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 		cmd.Stderr = &stderr
 		err := cmd.Run()
 		if err != nil {
-			klog.Fatalf("nvidia-smi -L failed with %s\n", err)
+			return "", fmt.Errorf("nvidia-smi -L failed with %s", err)
 		}
 		outStr := stdout.String()
 		uuid := GetMigUUIDFromSmiOutput(outStr, originuuid, idx)
-		return uuid
+		return uuid, nil
 	}
 	res, ret := migdev.GetUUID()
 	if ret != nvml.SUCCESS {
-		klog.Error(`nvml get mig uuid error ret=`, ret)
-		panic(0)
+		return "", fmt.Errorf("nvml get mig uuid error ret=%v", ret)
 	}
-	return res
+	return res, nil
 }
 
 func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
@@ -465,7 +458,11 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if !strings.Contains(val.UUID, "[") {
 			tmp = append(tmp, val.UUID)
 		} else {
-			devtype, devindex := GetIndexAndTypeFromUUID(val.UUID)
+			devtype, devindex, err := GetIndexAndTypeFromUUID(val.UUID)
+			if err != nil {
+				klog.Errorf("failed to get index and type from UUID %s: %v", val.UUID, err)
+				continue
+			}
 			position, needsreset = nv.GenerateMigTemplate(devtype, devindex, val)
 			if needsreset {
 				nv.ApplyMigTemplate()
@@ -500,7 +497,12 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 					}
 				}
 			}
-			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
+			migUUID, err := GetMigUUIDFromIndex(val.UUID, position)
+			if err != nil {
+				klog.Errorf("failed to get mig uuid for %s: %v", val.UUID, err)
+				continue
+			}
+			tmp = append(tmp, migUUID)
 		}
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)
