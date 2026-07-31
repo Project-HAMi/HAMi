@@ -161,16 +161,22 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 			continue
 		}
 		klog.Infoln("inspecting", val)
-		num := strings.Split(val, "Device")[1]
-		num = strings.Split(num, ":")[0]
+		deviceParts := strings.Split(val, "Device")
+		if len(deviceParts) < 2 {
+			continue
+		}
+		num := strings.Split(deviceParts[1], ":")[0]
 		num = strings.TrimSpace(num)
 		index, err := strconv.Atoi(num)
 		if err != nil {
 			klog.Fatal("atoi failed num=", num)
 		}
 		if index == idx {
-			outputStr := strings.Split(val, ":")[2]
-			outputStr = strings.TrimSpace(outputStr)
+			colonParts := strings.Split(val, ":")
+			if len(colonParts) < 3 {
+				continue
+			}
+			outputStr := strings.TrimSpace(colonParts[2])
 			outputStr = strings.TrimRight(outputStr, ")")
 			return outputStr
 		}
