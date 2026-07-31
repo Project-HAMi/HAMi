@@ -106,12 +106,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
 			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
-			panic(0)
+			continue
 		}
 		idx, ret := ndev.GetIndex()
 		if ret != nvml.SUCCESS {
 			klog.Errorln("nvml get index error ret=", ret)
-			panic(0)
+			continue
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
@@ -133,12 +133,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			}
 		default:
 			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+			continue
 		}
 		Model, ret := ndev.GetName()
 		if ret != nvml.SUCCESS {
 			klog.Error("nvml get name error ret=", ret)
-			panic(0)
+			continue
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
