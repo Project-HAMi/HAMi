@@ -20,6 +20,7 @@ import (
 	"context" // Added for the new test
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -455,8 +456,8 @@ func TestConcurrentNodeLocks(t *testing.T) {
 }
 
 // TestSetNodeLockRaceIsRetryable covers the narrow race window where two
-// callers both observe an unlocked node in LockNode's initial check and race
-// on SetNodeLock's per-node mutex.
+// callers both observe an unlocked node in LockNode's outer check and then
+// genuinely race on SetNodeLock's per-node mutex to actually claim the lock.
 func TestSetNodeLockRaceIsRetryable(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	nodeLocks = newNodeLockManager()
@@ -467,18 +468,36 @@ func TestSetNodeLockRaceIsRetryable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to create node: %v", err)
 	}
-	winner := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "winner", Namespace: "test-ns"}}
-	loser := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "loser", Namespace: "test-ns"}}
-
-	if err := SetNodeLock(nodeName, "", winner); err != nil {
-		t.Fatalf("winner SetNodeLock failed: %v", err)
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+	raceLock := nodeLocks.getLock(nodeName)
+	raceLock.Lock()
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, pod := range []*corev1.Pod{podA, podB} {
+		wg.Add(1)
+		go func(pod *corev1.Pod) {
+			defer wg.Done()
+			results <- LockNode(nodeName, "", pod)
+		}(pod)
 	}
-	err = SetNodeLock(nodeName, "", loser)
-	if err == nil {
-		t.Fatal("expected loser's SetNodeLock to fail, got nil")
+	time.Sleep(50 * time.Millisecond)
+	raceLock.Unlock()
+	wg.Wait()
+	close(results)
+	var successes, contentions int
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case IsNodeLockContention(err):
+			contentions++
+		default:
+			t.Fatalf("unexpected error from LockNode: %v", err)
+		}
 	}
-	if !IsNodeLockContention(err) {
-		t.Fatalf("expected loser's error to be classified as node lock contention (retryable), got: %v", err)
+	if successes != 1 || contentions != 1 {
+		t.Fatalf("expected exactly 1 winner and 1 retryable contention out of 2 concurrent LockNode calls, got successes=%d contentions=%d", successes, contentions)
 	}
 }
 
