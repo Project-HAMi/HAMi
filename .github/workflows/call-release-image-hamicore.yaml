@@ -21,15 +21,17 @@ on:
       tagoverride:
         required: false
         type: string
-# id-token is needed for keyless cosign signing
 permissions:
   contents: read
-  packages: write
-  id-token: write
 
 jobs:
   docker-build:
     runs-on: ubuntu-latest
+    # id-token is needed for keyless cosign signing
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     steps:
       - name: Free disk space
         # https://github.com/actions/virtual-environments/issues/709
