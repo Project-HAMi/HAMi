@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 // Device represents a GPU device as reported by NVML, including all of its
@@ -212,7 +213,8 @@ func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) int {
 
 	if len(gpu0.Links[gpu1.Index]) != len(gpu1.Links[gpu0.Index]) {
 		err := fmt.Errorf("internal error in bestEffort GPU allocator: all P2PLinks between 2 GPUs should be bidirectional")
-		panic(err)
+		klog.ErrorS(err, "P2PLinks mismatch", "gpu0", gpu0.UUID, "gpu1", gpu1.UUID)
+		return 0
 	}
 
 	score := 0
