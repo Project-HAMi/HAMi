@@ -18,7 +18,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
 | `platform.openshift` | Enable OpenShift-specific SCC and SELinux handling | `false` |
-| `openshift.securityContextConstraints.name` | SecurityContextConstraints resource granted to the device plugin service accounts | `"privileged"` |
+| `openshift.securityContextConstraints.name` | SecurityContextConstraints resource granted to enabled device plugin service accounts. Leave empty to manage the grant outside this chart; set to `privileged` only as an explicit opt-in | `""` |
 | `openshift.selinux.enabled` | Relabel shared vGPU host directories for SELinux-confined workloads | `true` |
 | `openshift.selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
 | `openshift.selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |

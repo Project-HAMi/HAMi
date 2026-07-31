@@ -1,10 +1,22 @@
 ** Please be patient while the chart is being deployed **
 Resource name: {{ .Values.resourceName }}
 {{- if .Values.platform.openshift }}
+{{- $namespace := include "hami-vgpu.namespace" . }}
 
 OpenShift support is enabled.
-Ensure the target namespace can use the
-{{ .Values.openshift.securityContextConstraints.name }} SecurityContextConstraints resource.
+Install HAMi in a dedicated project rather than a highly privileged default project such as `kube-system`.
+After the pods start, verify their assigned SCC:
+  oc get pods -n {{ $namespace }} \
+    -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc'
+{{- if or .Values.devicePlugin.enabled .Values.mockDevicePlugin.enabled }}
+{{- if .Values.openshift.securityContextConstraints.name }}
+The chart grants the `{{ .Values.openshift.securityContextConstraints.name }}`
+SecurityContextConstraints resource to the enabled device plugin service accounts.
+{{- else }}
+No SCC RoleBinding is created by default. Grant a suitable SCC to the enabled
+device plugin service accounts, or explicitly set `openshift.securityContextConstraints.name`.
+{{- end }}
+{{- end }}
 {{- if .Values.openshift.selinux.enabled }}
 The device plugin relabels shared vGPU host directories under
 {{ .Values.devicePlugin.libPath }} and {{ .Values.devicePlugin.monitor.ctrPath }} for SELinux access.

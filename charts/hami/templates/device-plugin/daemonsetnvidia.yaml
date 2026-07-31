@@ -63,7 +63,8 @@ spec:
             - |
               set -eu
               mkdir -p /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
-              chmod 0777 /host/hami/containers /host/hami/tmp/vgpulock
+              chmod 0777 /host/hami/containers
+              chmod 1777 /host/hami/tmp/vgpulock
               chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
                 /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
           env:

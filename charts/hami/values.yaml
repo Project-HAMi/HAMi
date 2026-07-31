@@ -26,7 +26,9 @@ platform:
 
 openshift:
   securityContextConstraints:
-    name: privileged
+    # Leave empty to manage SCC grants outside this chart.
+    # Set to privileged only as an explicit opt-in.
+    name: ""
   selinux:
     enabled: true
     type: container_file_t
