@@ -149,6 +149,32 @@ func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
 	plugin.getAPIDevices()
 }
 
+// TestGetAPIDevices_ShutsDownOnNVMLInitSuccess covers the success path:
+// getAPIDevices must defer nvml.Shutdown only after nvmlInit succeeds. Both
+// nvmlInit and nvml.Shutdown are stubbed (both are reassignable package
+// vars, same as the seam used above) so the test never touches the real
+// NVML library, which this test host doesn't have loaded.
+func TestGetAPIDevices_ShutsDownOnNVMLInitSuccess(t *testing.T) {
+	origInit := nvmlInit
+	origShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = origInit
+		nvml.Shutdown = origShutdown
+	}()
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices { return rm.Devices{} },
+	}
+	plugin := &NvidiaDevicePlugin{rm: mockRM}
+
+	got := plugin.getAPIDevices()
+	if got == nil || len(*got) != 0 {
+		t.Fatalf("got %v, want a non-nil empty slice", got)
+	}
+}
+
 func TestProcessMigConfigs(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
 
