@@ -846,3 +846,39 @@ func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
 		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }
+
+func TestGetMigUUIDFromSmiOutput_HappyPath(t *testing.T) {
+	uuid := "GPU-b8f3c1a2-0000-0000-0000-000000000000"
+	output := "GPU 0: NVIDIA A100-SXM4-40GB (UUID: " + uuid + ")\n" +
+		"  MIG 3g.20gb     Device  0: (UUID: MIG-11111111-1111-1111-1111-111111111111)\n" +
+		"  MIG 3g.20gb     Device  1: (UUID: MIG-22222222-2222-2222-2222-222222222222)\n" +
+		"GPU 1: NVIDIA A100-SXM4-40GB (UUID: GPU-c9f4d2b3-0000-0000-0000-000000000000)\n"
+
+	got := GetMigUUIDFromSmiOutput(output, uuid, 1)
+	want := "MIG-22222222-2222-2222-2222-222222222222"
+	if got != want {
+		t.Errorf("expected %q, got %q", want, got)
+	}
+}
+
+func TestGetMigUUIDFromSmiOutput_MalformedLineWithoutDeviceKeyword(t *testing.T) {
+	uuid := "GPU-b8f3c1a2-0000-0000-0000-000000000000"
+	output := "GPU 0: NVIDIA A100-SXM4-40GB (UUID: " + uuid + ")\n" +
+		"  MIG-instance-not-yet-configured\n"
+
+	got := GetMigUUIDFromSmiOutput(output, uuid, 0)
+	if got != "" {
+		t.Errorf("expected empty string for malformed line, got %q", got)
+	}
+}
+
+func TestGetMigUUIDFromSmiOutput_MalformedLineTooFewColons(t *testing.T) {
+	uuid := "GPU-b8f3c1a2-0000-0000-0000-000000000000"
+	output := "GPU 0: NVIDIA A100-SXM4-40GB (UUID: " + uuid + ")\n" +
+		"  MIG 3g.20gb  Device 0: no-uuid-here\n"
+
+	got := GetMigUUIDFromSmiOutput(output, uuid, 0)
+	if got != "" {
+		t.Errorf("expected empty string for malformed line, got %q", got)
+	}
+}
