@@ -35,6 +35,8 @@ jobs:
     steps:
       - name: checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Acquire shared e2e runner lock
         run: bash hack/e2e-runner-lock.sh acquire

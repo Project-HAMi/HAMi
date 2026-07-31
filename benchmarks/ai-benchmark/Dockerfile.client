@@ -1,8 +1,5 @@
 FROM python:3.12-slim@sha256:57cd7c3a7a273101a6485ba99423ee568157882804b1124b4dd04266317710de
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/* \
-    && pip install requests==2.34.2
-
 COPY benchmark.py /benchmark.py
 
 RUN cat > /run_client.sh <<'SCRIPT' && chmod +x /run_client.sh
@@ -11,7 +8,7 @@ set -e
 echo "Waiting for vLLM to be ready..."
 MAX_RETRIES=30
 COUNT=0
-while ! curl -s http://127.0.0.1:8000/v1/models > /dev/null 2>&1; do
+while ! python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/v1/models', timeout=2)" 2>/dev/null; do
   if [ $COUNT -ge $MAX_RETRIES ]; then
     echo "Timeout waiting for vLLM"
     exit 1

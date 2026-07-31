@@ -8,7 +8,7 @@ ADD . /k8s-vgpu
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM nvidia/cuda:13.3.1-base-ubuntu22.04@sha256:ea2a388e99273207c6389b3098a61ebca5ab41d31168dfc4350d0cfa614703e4
 RUN apt-get update && \
