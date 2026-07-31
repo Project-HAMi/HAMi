@@ -24,8 +24,11 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added for the new test
+	apiruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -613,5 +616,118 @@ func TestSetupNodeLockTimeout(t *testing.T) {
 				t.Errorf("got %v, want %v", NodeLockTimeout, tt.want)
 			}
 		})
+	}
+}
+
+func TestSetNodeLock_RetryOwnLock(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeName := "retry-node"
+	podName := "retry-pod"
+	podNamespace := "retry-ns"
+
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}, metav1.CreateOptions{})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+		},
+	}
+
+	fakeClient := client.KubeClient.(*fake.Clientset)
+	patchAttempts := 0
+
+	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (handled bool, ret apiruntime.Object, err error) {
+		patchAction := action.(k8stesting.PatchAction)
+		if patchAction.GetName() == nodeName {
+			if patchAttempts == 0 {
+				patchAttempts++
+
+				// Simulate successful patch on backend but client timed out / got conflict
+				// We actually apply the lock so the next Get sees it
+				obj, _ := fakeClient.Tracker().Get(corev1.SchemeGroupVersion.WithResource("nodes"), "", nodeName)
+				node := obj.(*corev1.Node)
+				node.Annotations = map[string]string{
+					NodeLockKey: GenerateNodeLockKeyByPod(pod),
+				}
+				fakeClient.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), node, "")
+
+				return true, nil, apierrors.NewConflict(corev1.Resource("nodes"), nodeName, nil)
+			}
+		}
+		return false, nil, nil
+	})
+
+	err := SetNodeLock(nodeName, "", pod)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
+	if patchAttempts == 0 {
+		t.Fatalf("expected patch to be intercepted")
+	}
+}
+
+func TestReleaseNodeLock_RetryAborted(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeName := "retry-node-release"
+	podName := "retry-pod"
+	podNamespace := "retry-ns"
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      podName,
+			Namespace: podNamespace,
+		},
+	}
+
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: GenerateNodeLockKeyByPod(pod),
+			},
+		},
+	}, metav1.CreateOptions{})
+
+	fakeClient := client.KubeClient.(*fake.Clientset)
+	patchAttempts := 0
+
+	fakeClient.PrependReactor("patch", "nodes", func(action k8stesting.Action) (handled bool, ret apiruntime.Object, err error) {
+		patchAction := action.(k8stesting.PatchAction)
+		if patchAction.GetName() == nodeName {
+			if patchAttempts == 0 {
+				patchAttempts++
+
+				// Simulate that during the retry interval, another pod acquired the lock
+				obj, _ := fakeClient.Tracker().Get(corev1.SchemeGroupVersion.WithResource("nodes"), "", nodeName)
+				node := obj.(*corev1.Node)
+				otherPod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{Name: "other", Namespace: "other"},
+				}
+				node.Annotations = map[string]string{
+					NodeLockKey: GenerateNodeLockKeyByPod(otherPod),
+				}
+				fakeClient.Tracker().Update(corev1.SchemeGroupVersion.WithResource("nodes"), node, "")
+
+				return true, nil, apierrors.NewConflict(corev1.Resource("nodes"), nodeName, nil)
+			}
+		}
+		return false, nil, nil
+	})
+
+	err := ReleaseNodeLock(nodeName, "", pod, false)
+	if err != nil {
+		t.Fatalf("expected nil error (aborted gracefully), got %v", err)
+	}
+	if patchAttempts == 0 {
+		t.Fatalf("expected patch to be intercepted")
+	}
+
+	// Verify the lock is still held by 'other'
+	node, _ := fakeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if !strings.Contains(node.Annotations[NodeLockKey], "other") {
+		t.Fatalf("expected lock to be held by other pod, got %v", node.Annotations[NodeLockKey])
 	}
 }

@@ -45,6 +45,9 @@ const (
 // valid pod. Callers may retry this error when the caller is a PodGroup member.
 var ErrNodeLockContention = errors.New("node lock contention")
 
+// ErrNodeLockAborted indicates the lock operation was safely aborted to avoid blindly overwriting state.
+var ErrNodeLockAborted = errors.New("node lock operation aborted")
+
 func IsNodeLockContention(err error) bool {
 	return errors.Is(err, ErrNodeLockContention)
 }
@@ -141,14 +144,24 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 		return fmt.Errorf("node %s is locked", nodeName)
 	}
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
-		// Retry on any error
-		return true
+		// Retry on any error except our own contention error
+		return !IsNodeLockContention(err)
 	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
+
+		// Re-evaluate lock status after fetching latest state
+		if lockStr, ok := node.Annotations[NodeLockKey]; ok {
+			// If our first patch succeeded but the resp was lost, this retry sees our own lock.
+			if strings.Contains(lockStr, NodeLockSep) && strings.HasSuffix(lockStr, NodeLockSep+GeneratePodNamespaceName(pods, NodeLockSep)) {
+				return nil
+			}
+			return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
+		}
+
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if err != nil {
@@ -191,14 +204,25 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	}
 
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
-		// Retry on any error
-		return true
+		// Retry on any error except our own abort signal
+		return !errors.Is(err, ErrNodeLockAborted)
 	}, func() error {
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
+
+		// Re-evaluate lock ownership after fetching latest state
+		lockStr, ok := node.Annotations[NodeLockKey]
+		if !ok {
+			return nil // Already released
+		}
+		if !skipNodeLockOwnerCheck && strings.Contains(lockStr, NodeLockSep) && !strings.HasSuffix(lockStr, NodeLockSep+GeneratePodNamespaceName(pod, NodeLockSep)) {
+			klog.InfoS("NodeLock is not set by this pod during retry", NodeLockKey, lockStr, "podName", pod.Name, "podNamespace", pod.Namespace)
+			return ErrNodeLockAborted // Abort retry
+		}
+
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
 		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 		if err != nil {
@@ -207,6 +231,9 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 		}
 		return nil
 	})
+	if errors.Is(err, ErrNodeLockAborted) {
+		return nil // Gracefully handled abort
+	}
 	if err != nil {
 		return fmt.Errorf("failed to release node lock (node=%s, retry strategy=%+v): %w", nodeName, DefaultStrategy, err)
 	}
