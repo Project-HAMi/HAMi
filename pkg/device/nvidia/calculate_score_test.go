@@ -106,6 +106,38 @@ func Test_calculateGPUScore(t *testing.T) {
 					UUID:  "gpu3",
 					Score: map[string]int{"gpu0": 200, "gpu1": 100, "gpu2": 200},
 				},
+		},
+		{
+			name: "asymmetric links",
+			args: []*Device{
+				{
+					Index: 0,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu0",
+					},
+					Links: map[int][]P2PLink{
+						1: {{Type: SingleNVLINKLink}},
+					},
+				},
+				{
+					Index: 1,
+					nvlibDevice: nvlibDevice{
+						UUID: "gpu1",
+					},
+					Links: map[int][]P2PLink{
+						0: {{Type: SingleNVLINKLink}, {Type: SingleNVLINKLink}}, // Asymmetric: 2 links here vs 1 above
+					},
+				},
+			},
+			want: ListDeviceScore{
+				{
+					UUID:  "gpu0",
+					Score: map[string]int{"gpu1": 0},
+				},
+				{
+					UUID:  "gpu1",
+					Score: map[string]int{"gpu0": 0},
+				},
 			},
 		},
 	}
