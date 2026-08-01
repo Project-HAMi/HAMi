@@ -453,7 +453,7 @@ func TestLockNode(t *testing.T) {
 			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
 			assert.NoError(t, err)
 			_, ok := updated.Annotations[nodelock.NodeLockKey]
-			assert.Equal(t, ok, tt.hasLock)
+			assert.Equal(t, tt.hasLock, ok)
 		})
 	}
 }
@@ -499,7 +499,8 @@ func TestReleaseNodeLock(t *testing.T) {
 
 	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})
 	assert.NoError(t, err)
-	assert.Equal(t, updated.Annotations[nodelock.NodeLockKey], "")
+	_, ok := updated.Annotations[nodelock.NodeLockKey]
+	assert.False(t, ok)
 }
 
 func TestDevices_Fit(t *testing.T) {

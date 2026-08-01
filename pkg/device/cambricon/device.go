@@ -17,6 +17,7 @@ limitations under the License.
 package cambricon
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"slices"
@@ -25,10 +26,13 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 )
 
@@ -44,7 +48,7 @@ const (
 	MLUNoUseUUID           = "cambricon.com/nouse-gpuuuid"
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
 	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
-	NodeLockMLU           = "hami.io/mutex.lock"
+	dsmluLockTime         = "cambricon.com/dsmlu.lock"
 )
 
 var (
@@ -84,32 +88,46 @@ func (dev *CambriconDevices) CommonWord() string {
 	return CambriconMLUCommonWord
 }
 
-func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
+func (dev *CambriconDevices) hasMLURequest(p *corev1.Pod) bool {
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
+			return true
 		}
 	}
-	if !found {
+	return false
+}
+
+func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
+	if !dev.hasMLURequest(p) {
 		return nil
 	}
-	return nodelock.LockNode(n.Name, NodeLockMLU, p)
+	dev.cleanupLegacyLock(n.Name)
+	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !dev.hasMLURequest(p) {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockMLU, p, false)
+	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
+}
+
+func (dev *CambriconDevices) cleanupLegacyLock(nodeName string) {
+	node, err := client.GetClient().CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		klog.V(4).InfoS("cleanupLegacyLock: failed to get node", "node", nodeName, "err", err)
+		return
+	}
+	if _, ok := node.Annotations[dsmluLockTime]; !ok {
+		return
+	}
+	patch := []byte(`[{"op":"remove","path":"/metadata/annotations/cambricon.com~1dsmlu.lock"}]`)
+	_, err = client.GetClient().CoreV1().Nodes().Patch(context.Background(), nodeName, types.JSONPatchType, patch, metav1.PatchOptions{})
+	if err != nil {
+		klog.V(4).InfoS("cleanupLegacyLock: failed to remove legacy annotation", "node", nodeName, "err", err)
+		return
+	}
+	klog.InfoS("cleanupLegacyLock: removed legacy lock annotation", "node", nodeName)
 }
 
 func (dev *CambriconDevices) NodeCleanUp(nn string) error {
