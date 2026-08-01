@@ -36,6 +36,7 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
@@ -45,6 +46,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	nodelockutil "github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -685,11 +687,11 @@ func Test_Filter(t *testing.T) {
 	}
 
 	tests := []struct {
-		name                      string
-		args                      extenderv1.ExtenderArgs
-		want                      *extenderv1.ExtenderFilterResult
-		wantPodAnnotationDeviceID string
-		wantErr                   error
+		name             string
+		args             extenderv1.ExtenderArgs
+		want             *extenderv1.ExtenderFilterResult
+		wantPriorityNode string
+		wantErr          error
 	}{
 		{
 			name: "node use binpack gpu use binpack policy",
@@ -724,9 +726,9 @@ func Test_Filter(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames: &[]string{"node2"},
+				NodeNames: &[]string{"node1", "node2"},
 			},
-			wantPodAnnotationDeviceID: "device4",
+			wantPriorityNode: "node2",
 		},
 		{
 			name: "node use binpack gpu use spread policy",
@@ -761,9 +763,9 @@ func Test_Filter(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames: &[]string{"node2"},
+				NodeNames: &[]string{"node1", "node2"},
 			},
-			wantPodAnnotationDeviceID: "device3",
+			wantPriorityNode: "node2",
 		},
 		{
 			name: "node use spread gpu use binpack policy",
@@ -798,9 +800,9 @@ func Test_Filter(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames: &[]string{"node1"},
+				NodeNames: &[]string{"node1", "node2"},
 			},
-			wantPodAnnotationDeviceID: "device1",
+			wantPriorityNode: "node1",
 		},
 		{
 			name: "node use spread gpu use spread policy",
@@ -835,9 +837,9 @@ func Test_Filter(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames: &[]string{"node1"},
+				NodeNames: &[]string{"node1", "node2"},
 			},
-			wantPodAnnotationDeviceID: "device2",
+			wantPriorityNode: "node1",
 		},
 	}
 
@@ -849,10 +851,169 @@ func Test_Filter(t *testing.T) {
 			assert.DeepEqual(t, test.wantErr, gotErr)
 			assert.DeepEqual(t, test.want, got)
 			getPod, _ := client.KubeClient.CoreV1().Pods(test.args.Pod.Namespace).Get(context.Background(), test.args.Pod.Name, metav1.GetOptions{})
-			podDevices, _ := device.DecodePodDevices(device.SupportDevices, getPod.Annotations)
-			assert.DeepEqual(t, test.wantPodAnnotationDeviceID, podDevices["NVIDIA"][0][0].UUID)
+			assert.Equal(t, "", getPod.Annotations[util.AssignedNodeAnnotations])
+			_, reserved := s.podManager.GetPod(test.args.Pod)
+			assert.Equal(t, false, reserved)
+
+			priorities, err := s.Prioritize(test.args)
+			require.NoError(t, err)
+			require.Len(t, *priorities, 2)
+			best := (*priorities)[0]
+			for _, priority := range (*priorities)[1:] {
+				if priority.Score > best.Score {
+					best = priority
+				}
+			}
+			assert.Equal(t, test.wantPriorityNode, best.Host)
+			assert.Equal(t, extenderv1.MaxExtenderPriority, best.Score)
 		})
 	}
+}
+
+func TestNormalizeHostPriorities(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		want   map[string]int64
+	}{
+		{name: "binpack prefers higher utilization", policy: util.NodeSchedulerPolicyBinpack.String(), want: map[string]int64{"node-low": 0, "node-high": 10}},
+		{name: "spread prefers lower utilization", policy: util.NodeSchedulerPolicySpread.String(), want: map[string]int64{"node-low": 10, "node-high": 0}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			priorities := normalizeHostPriorities(&policy.NodeScoreList{
+				Policy: test.policy,
+				NodeList: []*policy.NodeScore{
+					{NodeID: "node-low", Score: 2},
+					{NodeID: "node-high", Score: 8},
+				},
+			})
+			got := make(map[string]int64, len(*priorities))
+			for _, priority := range *priorities {
+				got[priority.Host] = priority.Score
+			}
+			assert.DeepEqual(t, test.want, got)
+		})
+	}
+
+	equal := normalizeHostPriorities(&policy.NodeScoreList{
+		Policy: util.NodeSchedulerPolicyBinpack.String(),
+		NodeList: []*policy.NodeScore{
+			{NodeID: "node-a", Score: 3},
+			{NodeID: "node-b", Score: 3},
+		},
+	})
+	require.Len(t, *equal, 2)
+	assert.Equal(t, int64(0), (*equal)[0].Score)
+	assert.Equal(t, int64(0), (*equal)[1].Score)
+}
+
+type bindAllocationMockDevice struct {
+	registerMockDevice
+	fit bool
+}
+
+func (m *bindAllocationMockDevice) CommonWord() string { return "bind-allocation-mock" }
+func (m *bindAllocationMockDevice) GetResourceNames() device.ResourceNames {
+	return device.ResourceNames{ResourceCountName: "example.com/mock"}
+}
+func (m *bindAllocationMockDevice) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
+	if ctr.Resources.Limits.Name("example.com/mock", resource.DecimalSI).Value() == 0 {
+		return device.ContainerDeviceRequest{}
+	}
+	return device.ContainerDeviceRequest{Nums: 1, Type: m.CommonWord(), Memreq: 1, Coresreq: 1}
+}
+func (m *bindAllocationMockDevice) Fit(_ []*device.DeviceUsage, request device.ContainerDeviceRequest, _ *corev1.Pod, _ *device.NodeInfo, _ *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
+	if !m.fit {
+		return false, nil, "mock capacity exhausted"
+	}
+	return true, map[string]device.ContainerDevices{
+		m.CommonWord(): {{UUID: "mock-device-0", Type: m.CommonWord(), Usedmem: request.Memreq, Usedcores: request.Coresreq}},
+	}, ""
+}
+func (m *bindAllocationMockDevice) PatchAnnotations(_ *corev1.Pod, annotations *map[string]string, _ device.PodDevices) map[string]string {
+	(*annotations)["hami.io/mock-devices-allocated"] = "mock-device-0"
+	return *annotations
+}
+
+func setupBindAllocationTest(t *testing.T, mock *bindAllocationMockDevice) (*Scheduler, *fake.Clientset, *corev1.Pod, *corev1.Node) {
+	t.Helper()
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"bind-allocation-mock": mock}
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "bind-allocation", Namespace: "default", UID: "bind-allocation-uid"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "worker",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"example.com/mock": *resource.NewQuantity(1, resource.DecimalSI),
+			}},
+		}}},
+	}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-selected"}}
+	fakeClient := fake.NewSimpleClientset(pod, node)
+	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		if action.GetSubresource() == "binding" {
+			return true, &corev1.Binding{}, nil
+		}
+		return false, nil, nil
+	})
+	client.KubeClient = fakeClient
+
+	s := NewScheduler()
+	s.kubeClient = fakeClient
+	scheme := runtime.NewScheme()
+	require.NoError(t, corev1.AddToScheme(scheme))
+	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour)
+	require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod))
+	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	s.addNode(node.Name, &device.NodeInfo{
+		ID:   node.Name,
+		Node: node,
+		Devices: map[string][]device.DeviceInfo{
+			"bind-allocation-mock": {{
+				ID: "mock-device-0", Type: "bind-allocation-mock", DeviceVendor: "bind-allocation-mock",
+				Count: 10, Devmem: 100, Devcore: 100, Health: true,
+			}},
+		},
+	})
+	return s, fakeClient, pod, node
+}
+
+func TestBindRevalidatesAndAllocatesSelectedNode(t *testing.T) {
+	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: true})
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: node.Name,
+	})
+	require.NoError(t, err)
+	require.Empty(t, res.Error)
+	updated, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, node.Name, updated.Annotations[util.AssignedNodeAnnotations])
+	assert.Equal(t, "mock-device-0", updated.Annotations["hami.io/mock-devices-allocated"])
+	allocation, ok := s.podManager.GetPod(pod)
+	require.True(t, ok)
+	assert.Equal(t, node.Name, allocation.NodeID)
+}
+
+func TestBindRejectsNodeThatIsNoLongerFeasible(t *testing.T) {
+	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: false})
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: node.Name,
+	})
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "failed to revalidate node")
+	updated, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+	require.NoError(t, err)
+	assert.Equal(t, "", updated.Annotations[util.AssignedNodeAnnotations])
+	_, allocated := s.podManager.GetPod(pod)
+	assert.Equal(t, false, allocated)
 }
 
 func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {

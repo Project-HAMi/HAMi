@@ -76,6 +76,19 @@ func TestMaxRequestSizeBind(t *testing.T) {
 	}
 }
 
+func TestMaxRequestSizePrioritize(t *testing.T) {
+	hugePayload := strings.Repeat(" ", maxRequestSize+100)
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader(hugePayload))
+	w := httptest.NewRecorder()
+	handler := PrioritizeRoute(&scheduler.Scheduler{})
+
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Fatalf("expected invalid oversized JSON to return 400, got %d", w.Code)
+	}
+}
+
 func TestWebHookRoute(t *testing.T) {
 	handler := WebHookRoute()
 	if handler == nil {
@@ -210,5 +223,20 @@ func TestBind_DecodeError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected a decode error to be reported in the bind result")
+	}
+}
+
+func TestPrioritizeRoute_DecodeError(t *testing.T) {
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+
+	handler := PrioritizeRoute(&scheduler.Scheduler{})
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for invalid prioritize request, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "invalid character") {
+		t.Fatalf("expected decode error in response, got %q", w.Body.String())
 	}
 }

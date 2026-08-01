@@ -144,6 +144,7 @@ func start() error {
 	// start http server
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(sher))
+	router.POST("/prioritize", routes.PrioritizeRoute(sher))
 	router.POST("/bind", routes.Bind(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())

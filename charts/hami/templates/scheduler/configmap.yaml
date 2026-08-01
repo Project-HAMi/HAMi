@@ -35,6 +35,7 @@ data:
       enableHTTPS: false
     {{- end }}
       filterVerb: filter
+      prioritizeVerb: prioritize
       bindVerb: bind
       nodeCacheCapable: true
       weight: 1
@@ -60,6 +61,7 @@ data:
                 "enableHttps": false,
                 {{- end }}
                 "filterVerb": "filter",
+                "prioritizeVerb": "prioritize",
                 "bindVerb": "bind",
                 "weight": 1,
                 "nodeCacheCapable": true,

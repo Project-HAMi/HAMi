@@ -95,6 +95,37 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	}
 }
 
+func PrioritizeRoute(s *scheduler.Scheduler) httprouter.Handle {
+	klog.Infoln("Initializing Prioritize Route")
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		limitedReader := io.LimitReader(r.Body, maxRequestSize)
+		var extenderArgs extenderv1.ExtenderArgs
+		if err := json.NewDecoder(limitedReader).Decode(&extenderArgs); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if !s.WaitForCacheSync(r.Context()) {
+			http.Error(w, "context cancelled", http.StatusServiceUnavailable)
+			return
+		}
+
+		priorities, err := s.Prioritize(extenderArgs)
+		if err != nil {
+			klog.ErrorS(err, "Prioritize error for pod", "pod", extenderArgs.Pod.Name)
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		response, err := json.Marshal(priorities)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(response)
+	}
+}
+
 func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		klog.V(5).Infoln("Entering Bind handler")

@@ -20,8 +20,8 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"os"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -851,11 +851,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return res, nil
 	}
 
-	tmppatch := map[string]string{
-		util.DeviceBindPhase:     "allocating",
-		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
-	}
-
 	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
 		klog.InfoS("Release node locks", "node", args.Node)
 		s.releaseAllDevices(node, current)
@@ -872,8 +867,55 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(err)
 	}
 
-	if err = util.PatchPodAnnotations(current, tmppatch); err != nil {
+	// Filter and Prioritize are deliberately side-effect free. Revalidate the
+	// node selected by kube-scheduler while holding the device lock, then commit
+	// the concrete device allocation immediately before binding.
+	resourceReqs := device.Resourcereqs(current)
+	annotations := map[string]string{
+		util.DeviceBindPhase:     util.DeviceBindAllocating,
+		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
+	}
+	var allocation *policy.NodeScore
+	added := false
+	if countDeviceRequests(resourceReqs) > 0 {
+		s.cleanupStalePodAllocation(current)
+		nodeNames := []string{args.Node}
+		nodeUsage, _, failedNodes, err := s.getNodesUsage(&nodeNames, current)
+		if err != nil {
+			return fail(err)
+		}
+		nodeScores, err := s.calcScoreWithOptions(nodeUsage, resourceReqs, current, failedNodes, false, false)
+		if err != nil {
+			return fail(fmt.Errorf("failed to revalidate node %s: %w", args.Node, err))
+		}
+		if len(nodeScores.NodeList) != 1 {
+			reason := failedNodes[args.Node]
+			if reason == "" {
+				reason = "node is no longer feasible"
+			}
+			return fail(fmt.Errorf("failed to revalidate node %s: %s", args.Node, reason))
+		}
+
+		allocation = nodeScores.NodeList[0]
+		annotations[util.AssignedNodeAnnotations] = allocation.NodeID
+		annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
+		for _, dev := range device.GetDevices() {
+			dev.PatchAnnotations(current, &annotations, allocation.Devices)
+		}
+
+		added = s.podManager.AddPod(current, allocation.NodeID, allocation.Devices)
+		if added {
+			s.quotaManager.AddUsage(current, allocation.Devices)
+		}
+	}
+	if err = util.PatchPodAnnotations(current, annotations); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
+		if added && allocation != nil {
+			s.quotaManager.RmUsage(current, allocation.Devices)
+		}
+		if allocation != nil {
+			s.podManager.DelPod(current)
+		}
 		return fail(err)
 	}
 
@@ -890,13 +932,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
-	resourceReqTotal := 0
-	for _, n := range resourceReqs {
-		for _, k := range n {
-			resourceReqTotal += int(k.Nums)
-		}
-	}
-	if resourceReqTotal == 0 {
+	if countDeviceRequests(resourceReqs) == 0 {
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
@@ -952,39 +988,55 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}, nil
 	}
 	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
-	sort.Sort(nodeScores)
-	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
-	klog.InfoS("Scheduling pod to node",
-		"podNamespace", args.Pod.Namespace,
-		"podName", args.Pod.Name,
-		"nodeID", m.NodeID,
-		"devices", m.Devices)
-	annotations := make(map[string]string)
-	annotations[util.AssignedNodeAnnotations] = m.NodeID
-	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
-
-	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
+	fit := make(map[string]struct{}, len(nodeScores.NodeList))
+	for _, nodeScore := range nodeScores.NodeList {
+		fit[nodeScore.NodeID] = struct{}{}
 	}
-
-	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
-	if added {
-		s.quotaManager.AddUsage(args.Pod, m.Devices)
-	}
-
-	err = util.PatchPodAnnotations(args.Pod, annotations)
-	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		if added {
-			s.quotaManager.RmUsage(args.Pod, m.Devices)
+	feasibleNodes := make([]string, 0, len(fit))
+	for _, nodeName := range *args.NodeNames {
+		if _, ok := fit[nodeName]; ok {
+			feasibleNodes = append(feasibleNodes, nodeName)
 		}
-		s.podManager.DelPod(args.Pod)
-		return nil, err
 	}
-	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
+	successMsg := genFilterSuccessMsg(len(*args.NodeNames), nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
-	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
+	res := extenderv1.ExtenderFilterResult{NodeNames: &feasibleNodes}
+	if len(failedNodes) > 0 {
+		res.FailedNodes = failedNodes
+	}
 	return &res, nil
+}
+
+// Prioritize exposes HAMi's node policy to kube-scheduler without reserving
+// devices or changing the Pod. Higher extender scores are always preferred,
+// so spread policy reverses HAMi's internal utilization score before the
+// values are normalized to the extender range.
+func (s *Scheduler) Prioritize(args extenderv1.ExtenderArgs) (*extenderv1.HostPriorityList, error) {
+	resourceReqs := device.Resourcereqs(args.Pod)
+	if countDeviceRequests(resourceReqs) == 0 {
+		return zeroHostPriorities(args), nil
+	}
+
+	failedNodes := make(map[string]string)
+	var nodeScores *policy.NodeScoreList
+	var err error
+	if args.Nodes != nil {
+		var nodeUsage *map[string]*NodeUsage
+		nodeUsage, failedNodes, err = s.getSimulationNodesUsage(args.Nodes, args.Pod)
+		if err == nil {
+			nodeScores, err = s.calcScoreWithOptions(nodeUsage, resourceReqs, args.Pod, failedNodes, false, true)
+		}
+	} else {
+		var nodeUsage *map[string]*NodeUsage
+		nodeUsage, _, failedNodes, err = s.getNodesUsage(args.NodeNames, args.Pod)
+		if err == nil {
+			nodeScores, err = s.calcScoreWithOptions(nodeUsage, resourceReqs, args.Pod, failedNodes, false, false)
+		}
+	}
+	if err != nil {
+		return nil, fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
+	}
+	return normalizeHostPriorities(nodeScores), nil
 }
 
 func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs device.PodDeviceRequests) (*extenderv1.ExtenderFilterResult, error) {
@@ -1011,18 +1063,18 @@ func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs 
 			FailedNodes: failedNodes,
 		}, nil
 	}
-	sort.Sort(nodeScores)
-	bestNodeID := nodeScores.NodeList[len(nodeScores.NodeList)-1].NodeID
-	filteredNodes := make([]corev1.Node, 0, 1)
+	fit := make(map[string]struct{}, len(nodeScores.NodeList))
+	for _, nodeScore := range nodeScores.NodeList {
+		fit[nodeScore.NodeID] = struct{}{}
+	}
+	filteredNodes := make([]corev1.Node, 0, len(fit))
 	for i := range args.Nodes.Items {
-		if args.Nodes.Items[i].Name == bestNodeID {
+		if _, ok := fit[args.Nodes.Items[i].Name]; ok {
 			filteredNodes = append(filteredNodes, *args.Nodes.Items[i].DeepCopy())
-			break
 		}
 	}
-	klog.V(2).InfoS("Simulation filter selected best node",
+	klog.V(2).InfoS("Simulation filter returned feasible nodes",
 		"pod", klog.KObj(args.Pod),
-		"selectedNode", bestNodeID,
 		"filteredNodesLen", len(filteredNodes))
 	return &extenderv1.ExtenderFilterResult{
 		Nodes: &corev1.NodeList{
@@ -1032,12 +1084,72 @@ func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs 
 	}, nil
 }
 
-func genSuccessMsg(totalNodes int, target string, nodes []*policy.NodeScore) string {
-	successMsg := "find fit node(%s), %d nodes not fit, %d nodes fit(%s)"
+func countDeviceRequests(resourceReqs device.PodDeviceRequests) int {
+	total := 0
+	for _, containerReqs := range resourceReqs {
+		for _, req := range containerReqs {
+			total += int(req.Nums)
+		}
+	}
+	return total
+}
+
+func zeroHostPriorities(args extenderv1.ExtenderArgs) *extenderv1.HostPriorityList {
+	priorities := make(extenderv1.HostPriorityList, 0)
+	if args.NodeNames != nil {
+		priorities = make(extenderv1.HostPriorityList, 0, len(*args.NodeNames))
+		for _, nodeName := range *args.NodeNames {
+			priorities = append(priorities, extenderv1.HostPriority{Host: nodeName})
+		}
+		return &priorities
+	}
+	if args.Nodes != nil {
+		priorities = make(extenderv1.HostPriorityList, 0, len(args.Nodes.Items))
+		for i := range args.Nodes.Items {
+			priorities = append(priorities, extenderv1.HostPriority{Host: args.Nodes.Items[i].Name})
+		}
+	}
+	return &priorities
+}
+
+func normalizeHostPriorities(nodeScores *policy.NodeScoreList) *extenderv1.HostPriorityList {
+	priorities := make(extenderv1.HostPriorityList, 0, len(nodeScores.NodeList))
+	if len(nodeScores.NodeList) == 0 {
+		return &priorities
+	}
+
+	desirability := make([]float64, len(nodeScores.NodeList))
+	minScore, maxScore := float64(0), float64(0)
+	for i, nodeScore := range nodeScores.NodeList {
+		score := float64(nodeScore.Score)
+		if nodeScores.Policy == util.NodeSchedulerPolicySpread.String() {
+			score = -score
+		}
+		desirability[i] = score
+		if i == 0 || score < minScore {
+			minScore = score
+		}
+		if i == 0 || score > maxScore {
+			maxScore = score
+		}
+	}
+
+	for i, nodeScore := range nodeScores.NodeList {
+		score := int64(0)
+		if maxScore > minScore {
+			score = int64(math.Round((desirability[i] - minScore) * float64(extenderv1.MaxExtenderPriority) / (maxScore - minScore)))
+		}
+		priorities = append(priorities, extenderv1.HostPriority{Host: nodeScore.NodeID, Score: score})
+	}
+	return &priorities
+}
+
+func genFilterSuccessMsg(totalNodes int, nodes []*policy.NodeScore) string {
+	successMsg := "%d nodes not fit, %d nodes fit(%s)"
 	var scores []string
 	for _, no := range nodes {
 		scores = append(scores, fmt.Sprintf("%s:%.2f", no.NodeID, no.Score))
 	}
 	score := strings.Join(scores, ",")
-	return fmt.Sprintf(successMsg, target, totalNodes-len(nodes), len(nodes), score)
+	return fmt.Sprintf(successMsg, totalNodes-len(nodes), len(nodes), score)
 }
