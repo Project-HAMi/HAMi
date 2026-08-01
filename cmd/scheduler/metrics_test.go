@@ -83,6 +83,7 @@ func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *te
 		},
 	}
 
+	initLegacyDescriptors()
 	collector := ClusterManagerCollector{
 		ClusterManager: &ClusterManager{
 			LegacyMetrics: true,

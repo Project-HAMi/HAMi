@@ -38,42 +38,17 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ClusterManager is an example for a system that might have been built without
-// Prometheus in mind. It models a central manager of jobs running in a
-// cluster. Thus, we implement a custom Collector called
-// ClusterManagerCollector, which collects information from a ClusterManager
-// using its provided methods and turns them into Prometheus Metrics for
-// collection.
-//
-// An additional challenge is that multiple instances of the ClusterManager are
-// run within the same binary, each in charge of a different zone. We need to
-// make use of wrapping Registerers to be able to register each
-// ClusterManagerCollector instance with Prometheus.
+// ClusterManager models the vGPU monitoring state for a single node and holds
+// the informers and listers used to discover the pods and containers running
+// on that node. A custom Collector called ClusterManagerCollector collects
+// information from a ClusterManager using its provided methods and turns them
+// into Prometheus Metrics for collection.
 type ClusterManager struct {
 	Zone string
-	// Contains many more fields not listed in this example.
+	// PodLister lists pods assigned to the monitored node.
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
-}
-
-// ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
-// real cluster manager would have to do. Since it may actually be really
-// expensive, it must only be called once per collection. This implementation,
-// obviously, only returns some made-up data.
-func (c *ClusterManager) ReallyExpensiveAssessmentOfTheSystemState() (
-	oomCountByHost map[string]int, ramUsageByHost map[string]float64,
-) {
-	// Just example fake data.
-	oomCountByHost = map[string]int{
-		"foo.example.org": 42,
-		"bar.example.org": 2001,
-	}
-	ramUsageByHost = map[string]float64{
-		"foo.example.org": 6.023e23,
-		"bar.example.org": 3.14,
-	}
-	return
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -211,9 +186,8 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 	}
 }
 
-// Describe is implemented with DescribeByCollect. That's possible because the
-// Collect method will always return the same two metrics with the same two
-// descriptors.
+// Describe sends the metric descriptors to the provided channel. The Collect
+// method always returns the same metrics with the same descriptors.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
@@ -237,52 +211,10 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
-//func parseidstr(podusage string) (string, string, error) {
-//	tmp := strings.Split(podusage, "_")
-//	if len(tmp) > 1 {
-//		return tmp[0], tmp[1], nil
-//	} else {
-//		return "", "", errors.New("parse error")
-//	}
-//}
-//
-//func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
-//	added := deviceMemory{
-//		bufferSize:  0,
-//		contextSize: 0,
-//		moduleSize:  0,
-//		offset:      0,
-//		total:       0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.bufferSize += val.used[vidx].bufferSize
-//		added.contextSize += val.used[vidx].contextSize
-//		added.moduleSize += val.used[vidx].moduleSize
-//		added.offset += val.used[vidx].offset
-//		added.total += val.used[vidx].total
-//	}
-//	return added, nil
-//}
-//
-//func getTotalUtilization(usage podusage, vidx int) deviceUtilization {
-//	added := deviceUtilization{
-//		decUtil: 0,
-//		encUtil: 0,
-//		smUtil:  0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.decUtil += val.deviceUtil[vidx].decUtil
-//		added.encUtil += val.deviceUtil[vidx].encUtil
-//		added.smUtil += val.deviceUtil[vidx].smUtil
-//	}
-//	return added
-//}
-
-// Collect first triggers the ReallyExpensiveAssessmentOfTheSystemState. Then it
-// creates constant metrics for each host on the fly based on the returned data.
-//
-// Note that Collect could be called concurrently, so we depend on
-// ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
+// Collect gathers all device, pod and container metrics for the monitored
+// node and emits them as constant metrics on the fly based on the returned
+// data. Note that Collect could be called concurrently, so all state read
+// here is expected to be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 

@@ -49,6 +49,140 @@ type ClusterManagerCollector struct {
 	metricsProvider schedulerMetricsProvider
 }
 
+// Descriptors used by ClusterManagerCollector below.
+// Metric and label names follow Prometheus naming best practices:
+// https://prometheus.io/docs/practices/naming/
+var (
+	nodevGPUMemoryLimitDesc = prometheus.NewDesc(
+		"hami_gpu_memory_limit_bytes",
+		"Device memory limit for a certain GPU",
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+	)
+	nodevGPUCoreLimitDesc = prometheus.NewDesc(
+		"hami_gpu_core_limit_ratio",
+		"Device core limit for a certain GPU",
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+	)
+	nodevGPUMemoryAllocatedDesc = prometheus.NewDesc(
+		"hami_gpu_memory_allocated_bytes",
+		"Device memory allocated for a certain GPU",
+		[]string{"node", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
+	)
+	nodevGPUSharedNumDesc = prometheus.NewDesc(
+		"hami_gpu_shared_count",
+		"Number of containers sharing this GPU",
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+	)
+	nodeGPUCoreAllocatedDesc = prometheus.NewDesc(
+		"hami_gpu_core_allocated_ratio",
+		"Device core allocated for a certain GPU",
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+	)
+	nodeGPUOverview = prometheus.NewDesc(
+		"hami_node_gpu_overview",
+		"GPU overview on a certain node",
+		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
+	)
+	nodeGPUMemoryPercentage = prometheus.NewDesc(
+		"hami_node_gpu_memory_allocated_ratio",
+		"GPU Memory Allocated Percentage on a certain GPU",
+		[]string{"node", "device_uuid", "device_index"}, nil,
+	)
+	nodeGPUMigInstance = prometheus.NewDesc(
+		"hami_node_gpu_mig_instance_info",
+		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
+		[]string{"node", "device_uuid", "device_index", "mig_name"}, nil,
+	)
+	ctrvGPUdeviceAllocatedMemoryDesc = prometheus.NewDesc(
+		"hami_vgpu_memory_allocated_bytes",
+		"vGPU memory allocated from a container",
+		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+	)
+	ctrvGPUdeviceAllocatedCoreDesc = prometheus.NewDesc(
+		"hami_vgpu_core_allocated_ratio",
+		"vGPU core allocated from a container",
+		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+	)
+	quotaUsedDesc = prometheus.NewDesc(
+		"hami_resource_quota_used",
+		"resourcequota usage for a certain device",
+		[]string{"namespace", "quota_name", "limit"}, nil,
+	)
+)
+
+// Legacy metric descriptors (populated only when legacy mode is enabled).
+var (
+	legacyMemoryLimitDesc     *prometheus.Desc
+	legacyCoreLimitDesc       *prometheus.Desc
+	legacyMemoryAllocatedDesc *prometheus.Desc
+	legacySharedNumDesc       *prometheus.Desc
+	legacyCoreAllocatedDesc   *prometheus.Desc
+	legacyOverview            *prometheus.Desc
+	legacyMemoryPercentage    *prometheus.Desc
+	legacyMigInstance         *prometheus.Desc
+	legacyAllocatedMemory     *prometheus.Desc
+	legacyAllocatedCore       *prometheus.Desc
+	legacyQuotaUsed           *prometheus.Desc
+)
+
+func initLegacyDescriptors() {
+	legacyMemoryLimitDesc = prometheus.NewDesc(
+		"GPUDeviceMemoryLimit",
+		"Device memory limit for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+	)
+	legacyCoreLimitDesc = prometheus.NewDesc(
+		"GPUDeviceCoreLimit",
+		"Device memory core limit for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+	)
+	legacyMemoryAllocatedDesc = prometheus.NewDesc(
+		"GPUDeviceMemoryAllocated",
+		"Device memory allocated for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicetype"}, nil,
+	)
+	legacySharedNumDesc = prometheus.NewDesc(
+		"GPUDeviceSharedNum",
+		"Number of containers sharing this GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+	)
+	legacyCoreAllocatedDesc = prometheus.NewDesc(
+		"GPUDeviceCoreAllocated",
+		"Device core allocated for a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+	)
+	legacyOverview = prometheus.NewDesc(
+		"nodeGPUOverview",
+		"GPU overview on a certain node",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicememorylimit", "devicetype"}, nil,
+	)
+	legacyMemoryPercentage = prometheus.NewDesc(
+		"nodeGPUMemoryPercentage",
+		"GPU Memory Allocated Percentage on a certain GPU",
+		[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+	)
+	legacyMigInstance = prometheus.NewDesc(
+		"nodeGPUMigInstance",
+		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
+		[]string{"nodeid", "deviceuuid", "deviceidx", "migname"}, nil,
+	)
+	legacyAllocatedMemory = prometheus.NewDesc(
+		"vGPUMemoryAllocated",
+		"vGPU memory allocated from a container",
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+	)
+	legacyAllocatedCore = prometheus.NewDesc(
+		"vGPUCoreAllocated",
+		"vGPU core allocated from a container",
+		[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+	)
+	legacyQuotaUsed = prometheus.NewDesc(
+		"QuotaUsed",
+		"resourcequota usage for a certain device",
+		[]string{"quotanamespace", "quotaName", "limit"}, nil,
+	)
+}
+
 // Describe is implemented with DescribeByCollect. That's possible because the
 // Collect method will always return the same metrics with the same descriptors.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
@@ -59,120 +193,6 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
 	legacy := cc.ClusterManager.LegacyMetrics
-
-	// New metric descriptors
-	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
-		"hami_gpu_memory_limit_bytes",
-		"Device memory limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
-	)
-	nodevGPUCoreLimitDesc := prometheus.NewDesc(
-		"hami_gpu_core_limit_ratio",
-		"Device core limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
-	)
-	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
-		"hami_gpu_memory_allocated_bytes",
-		"Device memory allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
-	)
-	nodevGPUSharedNumDesc := prometheus.NewDesc(
-		"hami_gpu_shared_count",
-		"Number of containers sharing this GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
-	)
-	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
-		"hami_gpu_core_allocated_ratio",
-		"Device core allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
-	)
-	nodeGPUOverview := prometheus.NewDesc(
-		"hami_node_gpu_overview",
-		"GPU overview on a certain node",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
-	)
-	nodeGPUMemoryPercentage := prometheus.NewDesc(
-		"hami_node_gpu_memory_allocated_ratio",
-		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"node", "device_uuid", "device_index"}, nil,
-	)
-	nodeGPUMigInstance := prometheus.NewDesc(
-		"hami_node_gpu_mig_instance_info",
-		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
-		[]string{"node", "device_uuid", "device_index", "mig_name"}, nil,
-	)
-
-	// Legacy metric descriptors (only created when legacy mode is enabled)
-	var (
-		legacyMemoryLimitDesc     *prometheus.Desc
-		legacyCoreLimitDesc       *prometheus.Desc
-		legacyMemoryAllocatedDesc *prometheus.Desc
-		legacySharedNumDesc       *prometheus.Desc
-		legacyCoreAllocatedDesc   *prometheus.Desc
-		legacyOverview            *prometheus.Desc
-		legacyMemoryPercentage    *prometheus.Desc
-		legacyMigInstance         *prometheus.Desc
-		legacyAllocatedMemory     *prometheus.Desc
-		legacyAllocatedCore       *prometheus.Desc
-		legacyQuotaUsed           *prometheus.Desc
-	)
-	if legacy {
-		legacyMemoryLimitDesc = prometheus.NewDesc(
-			"GPUDeviceMemoryLimit",
-			"Device memory limit for a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
-		)
-		legacyCoreLimitDesc = prometheus.NewDesc(
-			"GPUDeviceCoreLimit",
-			"Device memory core limit for a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
-		)
-		legacyMemoryAllocatedDesc = prometheus.NewDesc(
-			"GPUDeviceMemoryAllocated",
-			"Device memory allocated for a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicetype"}, nil,
-		)
-		legacySharedNumDesc = prometheus.NewDesc(
-			"GPUDeviceSharedNum",
-			"Number of containers sharing this GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
-		)
-		legacyCoreAllocatedDesc = prometheus.NewDesc(
-			"GPUDeviceCoreAllocated",
-			"Device core allocated for a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
-		)
-		legacyOverview = prometheus.NewDesc(
-			"nodeGPUOverview",
-			"GPU overview on a certain node",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicecores", "devicememorylimit", "devicetype"}, nil,
-		)
-		legacyMemoryPercentage = prometheus.NewDesc(
-			"nodeGPUMemoryPercentage",
-			"GPU Memory Allocated Percentage on a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
-		)
-		legacyMigInstance = prometheus.NewDesc(
-			"nodeGPUMigInstance",
-			"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "migname"}, nil,
-		)
-		legacyAllocatedMemory = prometheus.NewDesc(
-			"vGPUMemoryAllocated",
-			"vGPU memory allocated from a container",
-			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
-		)
-		legacyAllocatedCore = prometheus.NewDesc(
-			"vGPUCoreAllocated",
-			"vGPU core allocated from a container",
-			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
-		)
-		legacyQuotaUsed = prometheus.NewDesc(
-			"QuotaUsed",
-			"resourcequota usage for a certain device",
-			[]string{"quotanamespace", "quotaName", "limit"}, nil,
-		)
-	}
 
 	nu := cc.metricsProvider.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
@@ -296,21 +316,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		}
 	}
 
-	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
-		"hami_vgpu_memory_allocated_bytes",
-		"vGPU memory allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
-	)
-	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
-		"hami_vgpu_core_allocated_ratio",
-		"vGPU core allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
-	)
-	quotaUsedDesc := prometheus.NewDesc(
-		"hami_resource_quota_used",
-		"resourcequota usage for a certain device",
-		[]string{"namespace", "quota_name", "limit"}, nil,
-	)
 	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
 			ch <- prometheus.MustNewConstMetric(
@@ -396,6 +401,9 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 
 // NewClusterManager creates a ClusterManager and registers its collector.
 func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider schedulerMetricsProvider, legacyMetrics bool) *ClusterManager {
+	if legacyMetrics {
+		initLegacyDescriptors()
+	}
 	c := &ClusterManager{
 		Zone:          zone,
 		LegacyMetrics: legacyMetrics,
