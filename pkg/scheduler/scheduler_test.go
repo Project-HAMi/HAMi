@@ -899,6 +899,35 @@ func TestSchedulerOnDelQuotaClearsLimitFromTombstone(t *testing.T) {
 	require.Equal(t, int64(0), (*namespaceQuota)[resourceName].Limit)
 }
 
+func TestSchedulerOnDelQuotaIgnoresInvalidObjects(t *testing.T) {
+	s := NewScheduler()
+
+	tests := []struct {
+		name string
+		obj  any
+	}{
+		{
+			name: "tombstone containing non-quota object",
+			obj: cache.DeletedFinalStateUnknown{
+				Key: "test/invalid",
+				Obj: struct{}{},
+			},
+		},
+		{
+			name: "unknown delete object",
+			obj:  struct{}{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				s.onDelQuota(test.obj)
+			})
+		})
+	}
+}
+
 func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
