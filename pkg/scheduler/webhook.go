@@ -167,13 +167,12 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			return 0, false
 		}
 
-		var initMemoryReq, initCoresReq, initCountReq int64
-		var appMemoryReq, appCoresReq, appCountReq int64
+		var initMemoryReq, initCoresReq int64
+		var appMemoryReq, appCoresReq int64
 
 		for _, ctr := range pod.Spec.InitContainers {
 			req, ok := getRequest(&ctr, resourceName)
 			if ok {
-				initCountReq = max(initCountReq, req)
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
 					initMemoryReq = max(initMemoryReq, memReq*req)
 				}
@@ -186,7 +185,6 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		for _, ctr := range pod.Spec.Containers {
 			req, ok := getRequest(&ctr, resourceName)
 			if ok {
-				appCountReq += req
 				if memReq, ok := getRequest(&ctr, memResourceName); ok {
 					appMemoryReq += memReq * req
 				}
@@ -198,8 +196,6 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 
 		memoryReq := max(appMemoryReq, initMemoryReq)
 		coresReq := max(appCoresReq, initCoresReq)
-		effectiveCountReq := max(appCountReq, initCountReq)
-		_ = effectiveCountReq
 
 		if memoryFactor > 1 {
 			oriMemReq := memoryReq

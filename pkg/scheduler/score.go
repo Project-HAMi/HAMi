@@ -42,10 +42,7 @@ func viewStatus(usage NodeUsage) {
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
 	for _, val := range list.Devices.DeviceLists {
-		if val.Device == nil {
-			continue
-		}
-		if getDeviceBaseType(val.Device.Type) == t {
+		if strings.Contains(val.Device.Type, t) {
 			l = append(l, val.Device)
 		}
 	}
@@ -415,7 +412,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 	wg.Wait()
 	close(errCh)
 
-	if len(res.NodeList) == 0 {
+	if recordEvents && len(res.NodeList) == 0 {
 		s.recordFilteringFailures(task, failureReason)
 	}
 
