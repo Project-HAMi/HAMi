@@ -460,6 +460,24 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 			g.Expect(result).Should(g.BeFalse())
 		})
 	})
+
+	ginkgo.Context("When holder identity is a longer hostname sharing our prefix", func() {
+		ginkgo.It("isHolderOf should return false to prevent false positive", func() {
+			// lm.hostname = "dev"; holder identity belongs to "dev-server", not "dev"
+			holderIdentity := generateHolderIdentity("dev-server")
+			lease := &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: coordinationv1.LeaseSpec{
+					HolderIdentity: &holderIdentity,
+				},
+			}
+			result := lm.isHolderOf(lease)
+			g.Expect(result).Should(g.BeFalse())
+		})
+	})
 })
 
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
