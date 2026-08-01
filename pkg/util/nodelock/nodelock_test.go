@@ -34,7 +34,7 @@ import (
 func Test_LockNode(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	type args struct {
-		nodeName func() string
+		nodeName func(t *testing.T) string
 		lockname string
 		pods     *corev1.Pod
 	}
@@ -46,7 +46,7 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node not found",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					return "node"
 				},
 				pods: &corev1.Pod{
@@ -61,9 +61,9 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node has been locked by another pod",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-1"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
 							Annotations: map[string]string{
@@ -72,12 +72,16 @@ func Test_LockNode(t *testing.T) {
 								}),
 							},
 						},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					// The lock holder ("other-pod"/"other-ns") must exist and not be
 					// dangling, otherwise LockNode treats it as stale and takes over.
-					client.KubeClient.CoreV1().Pods("other-ns").Create(context.TODO(), &corev1.Pod{
+					if _, err := client.KubeClient.CoreV1().Pods("other-ns").Create(context.TODO(), &corev1.Pod{
 						ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create lock-holder pod fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -92,9 +96,9 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node has been locked by another pod in the same namespace",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-1b"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
 							Annotations: map[string]string{
@@ -103,15 +107,19 @@ func Test_LockNode(t *testing.T) {
 								}),
 							},
 						},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					// Same namespace as the requester below, but a different pod
 					// name: exercises ns == pods.Namespace (true) with
 					// previousPodName == pods.Name (false), distinct from both the
 					// "another pod" case above (both false) and the reentrant
 					// same-pod case (both true).
-					client.KubeClient.CoreV1().Pods("hami-ns").Create(context.TODO(), &corev1.Pod{
+					if _, err := client.KubeClient.CoreV1().Pods("hami-ns").Create(context.TODO(), &corev1.Pod{
 						ObjectMeta: metav1.ObjectMeta{Name: "other-pod-same-ns", Namespace: "hami-ns"},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create lock-holder pod fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -126,16 +134,18 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node lock is invalid",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-2"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
 							Annotations: map[string]string{
 								NodeLockKey: "lock",
 							},
 						},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -150,11 +160,13 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "successfully set node lock",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-3"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -169,7 +181,7 @@ func Test_LockNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := LockNode(tt.args.nodeName(), tt.args.lockname, tt.args.pods); (err != nil) != tt.wantErr {
+			if err := LockNode(tt.args.nodeName(t), tt.args.lockname, tt.args.pods); (err != nil) != tt.wantErr {
 				t.Errorf("LockNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -289,6 +301,14 @@ func TestLockNodeReentrantSamePod(t *testing.T) {
 		t.Fatalf("Failed to create node: %v", err)
 	}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "multi-vendor-pod", Namespace: "test-ns"}}
+	// The requesting pod must actually exist for this test to exercise the
+	// intended live-ownership scenario. Without it, the first LockNode call
+	// still succeeds, but only because it's setting a fresh lock, not
+	// because the reentrancy branch has verified anything about a real,
+	// live pod - so a real dangling-lock path could be masked instead.
+	if _, err := client.KubeClient.CoreV1().Pods("test-ns").Create(context.TODO(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to create pod: %v", err)
+	}
 
 	if err := LockNode(nodeName, "nvidia", pod); err != nil {
 		t.Fatalf("first LockNode call (simulating the nvidia backend) failed: %v", err)
