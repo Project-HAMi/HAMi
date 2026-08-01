@@ -90,6 +90,40 @@ func Test_LockNode(t *testing.T) {
 			wantErr: true,
 		},
 		{
+			name: "node has been locked by another pod in the same namespace",
+			args: args{
+				nodeName: func() string {
+					name := "worker-1b"
+					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: name,
+							Annotations: map[string]string{
+								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
+									ObjectMeta: metav1.ObjectMeta{Name: "other-pod-same-ns", Namespace: "hami-ns"},
+								}),
+							},
+						},
+					}, metav1.CreateOptions{})
+					// Same namespace as the requester below, but a different pod
+					// name: exercises ns == pods.Namespace (true) with
+					// previousPodName == pods.Name (false), distinct from both the
+					// "another pod" case above (both false) and the reentrant
+					// same-pod case (both true).
+					client.KubeClient.CoreV1().Pods("hami-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "other-pod-same-ns", Namespace: "hami-ns"},
+					}, metav1.CreateOptions{})
+					return name
+				},
+				pods: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "hami",
+						Namespace: "hami-ns",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
 			name: "node lock is invalid",
 			args: args{
 				nodeName: func() string {
