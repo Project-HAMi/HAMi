@@ -39,10 +39,10 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"google.golang.org/protobuf/proto"
-
 )
 
 type deviceMapBuilder struct {
@@ -344,13 +344,13 @@ func updateDeviceMapWithReplicas(replicatedResources *spec.ReplicatedResources, 
 				annotatedID := string(NewAnnotatedID(id, i))
 				orig := oDevices[r.Name][id]
 				replicatedDevice := &Device{
+					Device:            *proto.Clone(&orig.Device).(*kubeletdevicepluginv1beta1.Device),
 					Paths:             orig.Paths,
 					Index:             orig.Index,
 					TotalMemory:       orig.TotalMemory,
 					ComputeCapability: orig.ComputeCapability,
 					Replicas:          r.Replicas,
 				}
-				proto.Merge(&replicatedDevice.Device, &orig.Device)
 				replicatedDevice.ID = annotatedID
 				devices.insert(name, replicatedDevice)
 			}
