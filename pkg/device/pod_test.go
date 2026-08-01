@@ -555,3 +555,112 @@ func TestTakeAndDeletePodIsAtomic(t *testing.T) {
 	assert.False(t, ok2)
 	assert.Nil(t, pi2)
 }
+
+func TestDelPod(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-del", Name: "del-pod", Namespace: "default"}}
+	pm.AddPod(pod, "node-1", PodDevices{})
+
+	// Ensure pod is added
+	_, ok := pm.GetPod(pod)
+	assert.True(t, ok)
+
+	// Delete existing pod
+	pm.DelPod(pod)
+	_, ok = pm.GetPod(pod)
+	assert.False(t, ok)
+
+	// Deleting a non-existing pod should not panic or cause errors
+	nonExistent := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-nonexistent"}}
+	pm.DelPod(nonExistent)
+}
+
+func TestListPodsUID(t *testing.T) {
+	pm := NewPodManager()
+	pods, err := pm.ListPodsUID()
+	assert.NoError(t, err)
+	assert.Len(t, pods, 0)
+
+	pod1 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-1", Name: "p1", Namespace: "ns"}}
+	pod2 := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-2", Name: "p2", Namespace: "ns"}}
+	pm.AddPod(pod1, "node-1", PodDevices{})
+	pm.AddPod(pod2, "node-2", PodDevices{})
+
+	pods, err = pm.ListPodsUID()
+	assert.NoError(t, err)
+	assert.Len(t, pods, 2)
+
+	uids := make(map[k8stypes.UID]bool)
+	for _, p := range pods {
+		uids[p.UID] = true
+	}
+	assert.True(t, uids["uid-1"])
+	assert.True(t, uids["uid-2"])
+}
+
+func TestAddPodExistingUpdate(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-update", Name: "up-pod", Namespace: "default"}}
+	initialDevs := PodDevices{"dev1": {{{UUID: "GPU-1"}}}}
+	updatedDevs := PodDevices{"dev1": {{{UUID: "GPU-2"}}}}
+
+	// First add should return true (was newly added)
+	added := pm.AddPod(pod, "node-1", initialDevs)
+	assert.True(t, added)
+	pi, ok := pm.GetPod(pod)
+	assert.True(t, ok)
+	assert.Equal(t, "GPU-1", pi.Devices["dev1"][0][0].UUID)
+
+	// Second add should return false (existing pod updated with new devices)
+	added = pm.AddPod(pod, "node-1", updatedDevs)
+	assert.False(t, added)
+	pi, ok = pm.GetPod(pod)
+	assert.True(t, ok)
+	assert.Equal(t, "GPU-2", pi.Devices["dev1"][0][0].UUID)
+}
+
+func TestDeepCopyNilSliceEdgeCases(t *testing.T) {
+	var pd PodDevices = nil
+	assert.Nil(t, pd.DeepCopy())
+
+	var psd PodSingleDevice = nil
+	assert.Nil(t, psd.DeepCopy())
+
+	var cd ContainerDevices = nil
+	assert.Nil(t, cd.DeepCopy())
+}
+
+func TestPodManagerConcurrency(t *testing.T) {
+	pm := NewPodManager()
+	uids := []k8stypes.UID{"uid-0", "uid-1", "uid-2", "uid-3", "uid-4"}
+
+	var wg sync.WaitGroup
+	for i := 0; i < 10; i++ {
+		wg.Add(1)
+		go func(worker int) {
+			defer wg.Done()
+			for j := 0; j < 50; j++ {
+				uid := uids[j%len(uids)]
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						UID:       uid,
+						Name:      string(uid),
+						Namespace: "default",
+					},
+				}
+				pm.AddPod(pod, "node-1", PodDevices{"dev": {{{UUID: "GPU-0"}}}})
+				pm.UpdatePod(pod)
+				pm.GetPod(pod)
+				pm.ListPodsInfo()
+				_, _ = pm.ListPodsUID()
+				_, _ = pm.GetScheduledPods()
+				if j%2 == 0 {
+					pm.DelPod(pod)
+				} else {
+					pm.TakeAndDeletePod(pod)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+}
