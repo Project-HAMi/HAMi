@@ -19,4 +19,13 @@ Fixes #
 
 **Special notes for your reviewer**:
 
+**Was AI assistance used in this PR?**:
+
+<!--
+Required by the AI Assistance Notice in CONTRIBUTING.md. Disclose any use of AI
+assistance and the extent of it, e.g. docs only vs. code generation. This also
+applies to AI-generated replies to review comments. Trivial tab-completion limited
+to single keywords or short phrases does not need to be disclosed.
+-->
+
 **Does this PR introduce a user-facing change?**:
