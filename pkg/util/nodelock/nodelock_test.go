@@ -77,6 +77,39 @@ func TestSetNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
 	}
 }
 
+func TestSetNodeLockSucceedsAfterLostPatchResponse(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-set-lost-response"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	lockStr := "2026-08-01T06:00:00Z,ns,pod-a"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: lockStr},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, errors.New("simulated lost patch response")
+	})
+
+	if err := SetNodeLock(nodeName, "", pod); err != nil {
+		t.Fatalf("SetNodeLock() error = %v, want nil", err)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
 func TestReleaseNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
 	nodeLocks = newNodeLockManager()
 	nodeName := "node-release-conflict"
@@ -116,6 +149,50 @@ func TestReleaseNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
 	}
 	if got := node.Annotations[NodeLockKey]; got != holderB {
 		t.Fatalf("node lock = %q, want concurrent holder %q", got, holderB)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestReleaseNodeLockPreservesReplacedLegacyLockAfterConflict(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-legacy-conflict"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	initialLock := "2026-08-01T06:00:00Z"
+	replacedLock := "2026-08-01T06:00:01Z"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: initialLock},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: replacedLock},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent legacy lock"))
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != replacedLock {
+		t.Fatalf("node lock = %q, want concurrent legacy lock %q", got, replacedLock)
 	}
 	if patchCalls != 1 {
 		t.Fatalf("patch calls = %d, want 1", patchCalls)

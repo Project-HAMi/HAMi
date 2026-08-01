@@ -140,6 +140,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	if _, ok := node.Annotations[NodeLockKey]; ok {
 		return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
 	}
+	lockOwner := NodeLockSep + GeneratePodNamespaceName(pods, NodeLockSep)
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
 		return !IsNodeLockContention(err)
 	}, func() error {
@@ -148,7 +149,11 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
 			return err
 		}
-		if _, ok := node.Annotations[NodeLockKey]; ok {
+		lockStr, ok := node.Annotations[NodeLockKey]
+		if ok && strings.Contains(lockStr, NodeLockSep) && strings.HasSuffix(lockStr, lockOwner) {
+			return nil
+		}
+		if ok {
 			return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
 		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
@@ -207,10 +212,11 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 		if !ok {
 			return nil
 		}
-		if skipNodeLockOwnerCheck && currentLock != lockStr {
-			return nil
-		}
-		if !skipNodeLockOwnerCheck && strings.Contains(currentLock, NodeLockSep) && !strings.HasSuffix(currentLock, lockOwner) {
+		if skipNodeLockOwnerCheck || !strings.Contains(currentLock, NodeLockSep) {
+			if currentLock != lockStr {
+				return nil
+			}
+		} else if !strings.HasSuffix(currentLock, lockOwner) {
 			return nil
 		}
 		patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null},"resourceVersion":"%s"}}`, NodeLockKey, node.ResourceVersion)
