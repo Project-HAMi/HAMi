@@ -1,6 +1,6 @@
 # HAMi Integration with Kueue (Kubernetes-native Job Queueing)
 
-This directory contains examples for integrating HAMi's virtualized GPU resources (`hami.io/vgpu-memory` and `hami.io/vgpu-core`) with [Kueue](https://kueue.sigs.k8s.io/).
+This directory contains examples for integrating HAMi's virtualized GPU resources (`nvidia.com/gpumem` and `nvidia.com/gpucores`) with [Kueue](https://kueue.sigs.k8s.io/).
 
 Kueue natively supports tracking extended resources like those provided by HAMi. By defining a `ClusterQueue` with HAMi resources, Kueue will ensure that batch ML workloads (Jobs, PyTorchJobs, RayJobs) are only admitted to the cluster if there is sufficient fragmented vGPU capacity available.
 
@@ -19,9 +19,9 @@ Kueue natively supports tracking extended resources like those provided by HAMi.
    ```bash
    kubectl apply -f 03-local-queue.yaml
    ```
-5. **Submit a Workload:** Submit a Job that requests `hami.io/vgpu-memory` and specifies the Kueue queue.
+5. **Submit a Workload:** Submit a Job that requests `nvidia.com/gpumem` and specifies the Kueue queue.
    ```bash
    kubectl apply -f 04-sample-job.yaml
    ```
 
-Kueue will suspend the job if the `hami.io/vgpu-memory` requested exceeds the available quota in the `ClusterQueue`, and automatically resume it once vGPU memory frees up.
+Kueue will suspend the job if the `nvidia.com/gpumem` requested exceeds the available quota in the `ClusterQueue`, and automatically resume it once vGPU memory frees up.

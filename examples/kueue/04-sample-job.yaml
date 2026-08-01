@@ -12,13 +12,25 @@ spec:
     metadata:
       labels:
         kueue.x-k8s.io/queue-name: hami-local-queue
+      annotations:
+        kueue.x-k8s.io/podset-required-topology: "hami-topology"
     spec:
       containers:
       - name: training-container
         image: nvidia/cuda:11.8.0-base-ubuntu22.04
-        command: ["nvidia-smi"]
+        command: ["/bin/sh", "-c", "nvidia-smi && sleep infinity"]
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1000
+          allowPrivilegeEscalation: false
+          seccompProfile:
+            type: RuntimeDefault
+          capabilities:
+            drop:
+              - ALL
         resources:
           limits:
-            hami.io/vgpu-memory: 4000 # Request 4GB vGPU Memory
-            hami.io/vgpu-core: 10     # Request 10% vGPU Core
+            nvidia.com/gpu: 1         # Request 1 vGPU device
+            nvidia.com/gpumem: 4000   # Request 4GB vGPU Memory
+            nvidia.com/gpucores: 10   # Request 10% vGPU Core
       restartPolicy: Never

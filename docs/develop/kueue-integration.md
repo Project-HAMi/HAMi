@@ -6,7 +6,7 @@ We propose adding a native integration or topology-aware extension between HAMi 
 
 ## Why is this needed
 
-As AI workloads scale, users are increasingly relying on Kueue to manage batch ML jobs like `PyTorchJob` or `RayJob`. Currently, Kueue lacks native visibility into HAMi's virtualized GPU resources (e.g., `hami.io/vgpu-memory`). 
+As AI workloads scale, users are increasingly relying on Kueue to manage batch ML jobs like `PyTorchJob` or `RayJob`. Currently, Kueue lacks native visibility into HAMi's virtualized GPU resources (e.g., `nvidia.com/gpumem` and `nvidia.com/gpucores`). 
 
 If multiple teams submit large ML jobs requesting vGPUs, Kueue cannot accurately queue these jobs based on HAMi's actual fragmented capacity. This leads to scheduling deadlocks or pods getting stuck in the `Pending` state indefinitely, defeating the entire purpose of a batch queue.
 
