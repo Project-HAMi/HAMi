@@ -77,7 +77,7 @@ func TestMaxRequestSizeBind(t *testing.T) {
 }
 
 func TestMaxRequestSizePrioritize(t *testing.T) {
-	hugePayload := strings.Repeat(" ", maxRequestSize+100)
+	hugePayload := `{"Pod":{"metadata":{"name":"` + strings.Repeat("a", maxRequestSize+100) + `"}}}`
 	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader(hugePayload))
 	w := httptest.NewRecorder()
 	handler := PrioritizeRoute(&scheduler.Scheduler{})
@@ -86,6 +86,9 @@ func TestMaxRequestSizePrioritize(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Fatalf("expected invalid oversized JSON to return 400, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "unexpected EOF") {
+		t.Fatalf("expected truncation error, got %q", w.Body.String())
 	}
 }
 
@@ -238,5 +241,20 @@ func TestPrioritizeRoute_DecodeError(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "invalid character") {
 		t.Fatalf("expected decode error in response, got %q", w.Body.String())
+	}
+}
+
+func TestPrioritizeRoute_MissingPod(t *testing.T) {
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	handler := PrioritizeRoute(&scheduler.Scheduler{})
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Fatalf("expected 400 for request without a pod, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "extender args must contain a pod") {
+		t.Fatalf("expected missing pod error in response, got %q", w.Body.String())
 	}
 }

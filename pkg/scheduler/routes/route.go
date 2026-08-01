@@ -104,6 +104,10 @@ func PrioritizeRoute(s *scheduler.Scheduler) httprouter.Handle {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
+		if extenderArgs.Pod == nil {
+			http.Error(w, "extender args must contain a pod", http.StatusBadRequest)
+			return
+		}
 		if !s.WaitForCacheSync(r.Context()) {
 			http.Error(w, "context cancelled", http.StatusServiceUnavailable)
 			return

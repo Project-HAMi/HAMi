@@ -959,6 +959,8 @@ func setupBindAllocationTest(t *testing.T, mock *bindAllocationMockDevice) (*Sch
 		}
 		return false, nil, nil
 	})
+	oldKubeClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
 	client.KubeClient = fakeClient
 
 	s := NewScheduler()

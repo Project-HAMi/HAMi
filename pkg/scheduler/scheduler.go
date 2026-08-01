@@ -1017,7 +1017,7 @@ func (s *Scheduler) Prioritize(args extenderv1.ExtenderArgs) (*extenderv1.HostPr
 		return zeroHostPriorities(args), nil
 	}
 
-	failedNodes := make(map[string]string)
+	var failedNodes map[string]string
 	var nodeScores *policy.NodeScoreList
 	var err error
 	if args.Nodes != nil {
