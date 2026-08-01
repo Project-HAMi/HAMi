@@ -233,9 +233,18 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
 		skipOwnerCheck = true
+	} else if ns == pods.Namespace && previousPodName == pods.Name {
+		// The lock is already held by this exact pod. lockAllDevices calls
+		// LockNode once per device vendor a pod requests resources from, so
+		// a pod requesting resources from two or more vendors (e.g. both
+		// nvidia.com/gpu and cambricon.com/vmlu) would otherwise contend
+		// with its own still-valid lock on the second call and never
+		// become schedulable. Treat this as already acquired.
+		klog.V(4).InfoS("Node lock already held by this pod, treating as acquired", "node", nodeName, "podName", pods.Name)
+		return nil
 	} else
 	// Check dangling nodeLock
-	if ns != "" && previousPodName != "" && (ns != pods.Namespace || previousPodName != pods.Name) {
+	if ns != "" && previousPodName != "" {
 		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)

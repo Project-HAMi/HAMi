@@ -59,7 +59,7 @@ func Test_LockNode(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "node has been locked",
+			name: "node has been locked by another pod",
 			args: args{
 				nodeName: func() string {
 					name := "worker-1"
@@ -68,10 +68,15 @@ func Test_LockNode(t *testing.T) {
 							Name: name,
 							Annotations: map[string]string{
 								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
-									ObjectMeta: metav1.ObjectMeta{Name: "hami", Namespace: "hami-ns"},
+									ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
 								}),
 							},
 						},
+					}, metav1.CreateOptions{})
+					// The lock holder ("other-pod"/"other-ns") must exist and not be
+					// dangling, otherwise LockNode treats it as stale and takes over.
+					client.KubeClient.CoreV1().Pods("other-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
 					}, metav1.CreateOptions{})
 					return name
 				},
@@ -230,6 +235,32 @@ func TestLockNodeWithDangling(t *testing.T) {
 	// Try to lock the node again - this should pass and release the old dangling lock
 	if err := LockNode(nodeName, "", pod); err != nil {
 		t.Fatal("Expected nil but got error")
+	}
+}
+
+// TestLockNodeReentrantSamePod covers lockAllDevices' actual call pattern:
+// it calls LockNode once per device vendor a pod requests resources from, so
+// a pod requesting e.g. both nvidia.com/gpu and cambricon.com/vmlu locks the
+// same node twice for itself in a row. The second call must succeed instead
+// of contending with the pod's own still-valid lock, or such a pod could
+// never become schedulable.
+func TestLockNodeReentrantSamePod(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "multi-vendor-node"
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "multi-vendor-pod", Namespace: "test-ns"}}
+
+	if err := LockNode(nodeName, "nvidia", pod); err != nil {
+		t.Fatalf("first LockNode call (simulating the nvidia backend) failed: %v", err)
+	}
+	if err := LockNode(nodeName, "cambricon", pod); err != nil {
+		t.Fatalf("second LockNode call for the same pod (simulating the cambricon backend) should succeed, got: %v", err)
 	}
 }
 
