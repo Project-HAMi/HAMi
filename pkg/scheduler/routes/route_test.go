@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -256,5 +257,75 @@ func TestPrioritizeRoute_MissingPod(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "extender args must contain a pod") {
 		t.Fatalf("expected missing pod error in response, got %q", w.Body.String())
+	}
+}
+
+func TestPrioritizeRoute_CacheNotSynced(t *testing.T) {
+	prioritizeCalled := false
+	handler := prioritizeRoute(
+		func(context.Context) bool { return false },
+		func(extenderv1.ExtenderArgs) (*extenderv1.HostPriorityList, error) {
+			prioritizeCalled = true
+			return nil, nil
+		},
+	)
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader(`{"Pod":{"metadata":{"name":"test"}}}`))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != 503 {
+		t.Fatalf("expected 503 while cache is not synced, got %d", w.Code)
+	}
+	if prioritizeCalled {
+		t.Fatal("prioritize should not be called before cache sync")
+	}
+}
+
+func TestPrioritizeRoute_Success(t *testing.T) {
+	want := extenderv1.HostPriorityList{{Host: "node-a", Score: 7}}
+	handler := prioritizeRoute(
+		func(context.Context) bool { return true },
+		func(args extenderv1.ExtenderArgs) (*extenderv1.HostPriorityList, error) {
+			if args.Pod == nil || args.Pod.Name != "test" {
+				t.Fatalf("unexpected pod in prioritize request: %#v", args.Pod)
+			}
+			return &want, nil
+		},
+	)
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader(`{"Pod":{"metadata":{"name":"test"}}}`))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Fatalf("expected 200 for successful prioritize request, got %d: %s", w.Code, w.Body.String())
+	}
+	var got extenderv1.HostPriorityList
+	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
+		t.Fatalf("decode prioritize response: %v", err)
+	}
+	if len(got) != 1 || got[0] != want[0] {
+		t.Fatalf("unexpected prioritize response: %#v", got)
+	}
+}
+
+func TestPrioritizeRoute_SchedulerError(t *testing.T) {
+	handler := prioritizeRoute(
+		func(context.Context) bool { return true },
+		func(extenderv1.ExtenderArgs) (*extenderv1.HostPriorityList, error) {
+			return nil, errors.New("scoring failed")
+		},
+	)
+	req := httptest.NewRequest("POST", "/prioritize", strings.NewReader(`{"Pod":{"metadata":{"name":"test"}}}`))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != 500 {
+		t.Fatalf("expected 500 for prioritize failure, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "scoring failed") {
+		t.Fatalf("expected scoring error in response, got %q", w.Body.String())
 	}
 }

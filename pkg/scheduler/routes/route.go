@@ -18,6 +18,7 @@ package routes
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -97,6 +98,13 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 func PrioritizeRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Prioritize Route")
+	return prioritizeRoute(s.WaitForCacheSync, s.Prioritize)
+}
+
+func prioritizeRoute(
+	waitForCacheSync func(context.Context) bool,
+	prioritize func(extenderv1.ExtenderArgs) (*extenderv1.HostPriorityList, error),
+) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)
 		var extenderArgs extenderv1.ExtenderArgs
@@ -108,12 +116,12 @@ func PrioritizeRoute(s *scheduler.Scheduler) httprouter.Handle {
 			http.Error(w, "extender args must contain a pod", http.StatusBadRequest)
 			return
 		}
-		if !s.WaitForCacheSync(r.Context()) {
+		if !waitForCacheSync(r.Context()) {
 			http.Error(w, "context cancelled", http.StatusServiceUnavailable)
 			return
 		}
 
-		priorities, err := s.Prioritize(extenderArgs)
+		priorities, err := prioritize(extenderArgs)
 		if err != nil {
 			klog.ErrorS(err, "Prioritize error for pod", "pod", extenderArgs.Pod.Name)
 			http.Error(w, err.Error(), http.StatusInternalServerError)

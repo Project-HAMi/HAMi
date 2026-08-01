@@ -908,6 +908,36 @@ func TestNormalizeHostPriorities(t *testing.T) {
 	assert.Equal(t, int64(0), (*equal)[1].Score)
 }
 
+func TestPrioritizeWithoutDeviceRequests(t *testing.T) {
+	s := &Scheduler{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "no-devices"}}
+
+	t.Run("node names", func(t *testing.T) {
+		nodeNames := []string{"node-a", "node-b"}
+		priorities, err := s.Prioritize(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+		require.NoError(t, err)
+		require.Len(t, *priorities, 2)
+		assert.Equal(t, "node-a", (*priorities)[0].Host)
+		assert.Equal(t, int64(0), (*priorities)[0].Score)
+		assert.Equal(t, "node-b", (*priorities)[1].Host)
+		assert.Equal(t, int64(0), (*priorities)[1].Score)
+	})
+
+	t.Run("full nodes", func(t *testing.T) {
+		nodes := &corev1.NodeList{Items: []corev1.Node{
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-a"}},
+			{ObjectMeta: metav1.ObjectMeta{Name: "node-b"}},
+		}}
+		priorities, err := s.Prioritize(extenderv1.ExtenderArgs{Pod: pod, Nodes: nodes})
+		require.NoError(t, err)
+		require.Len(t, *priorities, 2)
+		assert.Equal(t, "node-a", (*priorities)[0].Host)
+		assert.Equal(t, int64(0), (*priorities)[0].Score)
+		assert.Equal(t, "node-b", (*priorities)[1].Host)
+		assert.Equal(t, int64(0), (*priorities)[1].Score)
+	})
+}
+
 type bindAllocationMockDevice struct {
 	registerMockDevice
 	fit bool
