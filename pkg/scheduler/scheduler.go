@@ -889,7 +889,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 	var allocation *policy.NodeScore
-	added := false
+	var reservationID uint64
 	if countDeviceRequests(resourceReqs) > 0 {
 		s.cleanupStalePodAllocation(current)
 		nodeNames := []string{args.Node}
@@ -916,24 +916,29 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 			dev.PatchAnnotations(current, &annotations, allocation.Devices)
 		}
 
-		added = s.podManager.AddPodIfAbsent(current, allocation.NodeID, allocation.Devices)
-		if !added {
+		var reserved bool
+		reservationID, reserved = s.podManager.ReservePodIfAbsent(current, allocation.NodeID, allocation.Devices)
+		if !reserved {
 			return fail(fmt.Errorf("pod allocation already exists for UID %s", current.UID))
 		}
 		s.quotaManager.AddUsage(current, allocation.Devices)
 	}
 	rollbackAllocation := func() {
-		if !added || allocation == nil {
+		if allocation == nil {
 			return
 		}
-		s.quotaManager.RmUsage(current, allocation.Devices)
-		s.podManager.DelPod(current)
-		added = false
+		reservation, rolledBack := s.podManager.RollbackPodReservation(current, reservationID)
+		if rolledBack {
+			s.quotaManager.RmUsage(current, reservation.Devices)
+		}
 	}
 	if err = util.PatchPodAnnotations(current, annotations); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
 		rollbackAllocation()
 		return fail(err)
+	}
+	if allocation != nil {
+		s.podManager.CommitPodReservation(current, reservationID)
 	}
 
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {

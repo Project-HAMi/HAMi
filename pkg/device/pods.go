@@ -18,6 +18,7 @@ package device
 
 import (
 	"maps"
+	"reflect"
 	"sync"
 
 	corev1 "k8s.io/api/core/v1"
@@ -39,13 +40,16 @@ type PodUseDeviceStat struct {
 }
 
 type PodManager struct {
-	pods  map[k8stypes.UID]*PodInfo
-	mutex sync.RWMutex
+	pods              map[k8stypes.UID]*PodInfo
+	reservations      map[k8stypes.UID]uint64
+	nextReservationID uint64
+	mutex             sync.RWMutex
 }
 
 func NewPodManager() *PodManager {
 	pm := &PodManager{
-		pods: make(map[k8stypes.UID]*PodInfo),
+		pods:         make(map[k8stypes.UID]*PodInfo),
+		reservations: make(map[k8stypes.UID]uint64),
 	}
 	klog.InfoS("Pod manager initialized", "podCount", len(pm.pods))
 	return pm
@@ -55,9 +59,9 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
-	_, exists := m.pods[pod.UID]
+	pi, exists := m.pods[pod.UID]
 	if !exists {
-		pi := &PodInfo{
+		pi = &PodInfo{
 			Pod:     pod,
 			NodeID:  nodeID,
 			Devices: devices,
@@ -68,8 +72,25 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"nodeID", nodeID,
 			"devices", devices,
 		)
+	} else if m.reservations[pod.UID] != 0 {
+		if pi.NodeID == nodeID && reservationMatchesInformerDevices(pi.Devices, devices) {
+			// The informer observed the allocation written by Bind. Transfer
+			// ownership so a late Bind rollback cannot delete persisted state.
+			pi.Pod = pod
+			delete(m.reservations, pod.UID)
+			klog.V(5).InfoS("Pod reservation observed by informer",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+				"nodeID", nodeID,
+			)
+		} else {
+			klog.V(5).InfoS("Ignoring informer update for bind-owned reservation",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+				"reservedNodeID", pi.NodeID,
+				"informerNodeID", nodeID,
+			)
+		}
 	} else {
-		m.pods[pod.UID].Devices = devices
+		pi.Devices = devices
 		klog.V(5).InfoS("Pod devices updated",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
 			"devices", devices,
@@ -79,26 +100,79 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	return !exists
 }
 
-// AddPodIfAbsent records a new allocation without replacing an allocation
-// installed concurrently by an informer or another binding attempt.
-func (m *PodManager) AddPodIfAbsent(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
+func reservationMatchesInformerDevices(reserved, observed PodDevices) bool {
+	if reflect.DeepEqual(reserved, observed) {
+		return true
+	}
+
+	// DecodePodDevices preserves the trailing annotation separator as an empty
+	// container entry. Remove only that decoder artifact before comparing with
+	// the in-memory allocation produced by Bind.
+	normalized := observed.DeepCopy()
+	for deviceType, containers := range normalized {
+		if len(containers) > 0 && len(containers[len(containers)-1]) == 0 {
+			normalized[deviceType] = containers[:len(containers)-1]
+		}
+	}
+	return reflect.DeepEqual(reserved, normalized)
+}
+
+// ReservePodIfAbsent records a bind-owned allocation without replacing an
+// allocation installed concurrently by an informer or another binding attempt.
+func (m *PodManager) ReservePodIfAbsent(pod *corev1.Pod, nodeID string, devices PodDevices) (uint64, bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if _, exists := m.pods[pod.UID]; exists {
-		return false
+		return 0, false
+	}
+	if m.reservations == nil {
+		m.reservations = make(map[k8stypes.UID]uint64)
+	}
+	m.nextReservationID++
+	if m.nextReservationID == 0 {
+		m.nextReservationID++
 	}
 	m.pods[pod.UID] = &PodInfo{
 		Pod:     pod,
 		NodeID:  nodeID,
 		Devices: devices,
 	}
+	m.reservations[pod.UID] = m.nextReservationID
 	klog.InfoS("Pod allocation reserved",
 		"pod", klog.KRef(pod.Namespace, pod.Name),
 		"nodeID", nodeID,
 		"devices", devices,
 	)
+	return m.nextReservationID, true
+}
+
+// CommitPodReservation releases Bind ownership while retaining the allocation.
+func (m *PodManager) CommitPodReservation(pod *corev1.Pod, reservationID uint64) bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	_, exists := m.pods[pod.UID]
+	if !exists || reservationID == 0 || m.reservations[pod.UID] != reservationID {
+		return false
+	}
+	delete(m.reservations, pod.UID)
 	return true
+}
+
+// RollbackPodReservation removes an allocation only while the calling Bind
+// attempt still owns the matching reservation.
+func (m *PodManager) RollbackPodReservation(pod *corev1.Pod, reservationID uint64) (*PodInfo, bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, exists := m.pods[pod.UID]
+	if !exists || reservationID == 0 || m.reservations[pod.UID] != reservationID {
+		return nil, false
+	}
+	delete(m.pods, pod.UID)
+	delete(m.reservations, pod.UID)
+	return pi, true
 }
 
 func (m *PodManager) UpdatePod(pod *corev1.Pod) {
@@ -125,6 +199,7 @@ func (m *PodManager) DelPod(pod *corev1.Pod) {
 			"nodeID", pi.NodeID,
 		)
 		delete(m.pods, pod.UID)
+		delete(m.reservations, pod.UID)
 	} else {
 		klog.InfoS("Pod not found for deletion",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
@@ -147,6 +222,7 @@ func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	pi, ok := m.pods[pod.UID]
 	if ok {
 		delete(m.pods, pod.UID)
+		delete(m.reservations, pod.UID)
 		klog.InfoS("Pod taken and deleted", "pod", klog.KRef(pod.Namespace, pod.Name), "nodeID", pi.NodeID)
 	}
 	return pi, ok

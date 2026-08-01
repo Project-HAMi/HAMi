@@ -943,6 +943,8 @@ type bindAllocationMockDevice struct {
 	fit bool
 }
 
+const bindAllocationMockAnnotation = "hami.io/mock-devices-allocated"
+
 func (m *bindAllocationMockDevice) CommonWord() string { return "bind-allocation-mock" }
 func (m *bindAllocationMockDevice) GetResourceNames() device.ResourceNames {
 	return device.ResourceNames{
@@ -965,8 +967,8 @@ func (m *bindAllocationMockDevice) Fit(_ []*device.DeviceUsage, request device.C
 		m.CommonWord(): {{UUID: "mock-device-0", Type: m.CommonWord(), Usedmem: request.Memreq, Usedcores: request.Coresreq}},
 	}, ""
 }
-func (m *bindAllocationMockDevice) PatchAnnotations(_ *corev1.Pod, annotations *map[string]string, _ device.PodDevices) map[string]string {
-	(*annotations)["hami.io/mock-devices-allocated"] = "mock-device-0"
+func (m *bindAllocationMockDevice) PatchAnnotations(_ *corev1.Pod, annotations *map[string]string, devices device.PodDevices) map[string]string {
+	(*annotations)[bindAllocationMockAnnotation] = device.EncodePodSingleDevice(devices[m.CommonWord()])
 	return *annotations
 }
 
@@ -975,6 +977,10 @@ func setupBindAllocationTest(t *testing.T, mock *bindAllocationMockDevice) (*Sch
 	oldDevicesMap := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{"bind-allocation-mock": mock}
 	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+	oldSupportDevices := device.SupportDevices
+	device.SupportDevices = maps.Clone(device.SupportDevices)
+	device.SupportDevices[mock.CommonWord()] = bindAllocationMockAnnotation
+	t.Cleanup(func() { device.SupportDevices = oldSupportDevices })
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Name: "bind-allocation", Namespace: "bind-allocation-test", UID: "bind-allocation-uid"},
@@ -1036,7 +1042,7 @@ func TestBindRevalidatesAndAllocatesSelectedNode(t *testing.T) {
 	updated, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, node.Name, updated.Annotations[util.AssignedNodeAnnotations])
-	assert.Equal(t, "mock-device-0", updated.Annotations["hami.io/mock-devices-allocated"])
+	assert.Equal(t, "mock-device-0,bind-allocation-mock,1,1:;", updated.Annotations[bindAllocationMockAnnotation])
 	allocation, ok := s.podManager.GetPod(pod)
 	require.True(t, ok)
 	assert.Equal(t, node.Name, allocation.NodeID)
@@ -1066,7 +1072,8 @@ func TestBindRejectsMismatchedPodUIDBeforeMutation(t *testing.T) {
 			UUID: "mock-device-0", Type: "bind-allocation-mock", Usedmem: 1, Usedcores: 1,
 		}}},
 	}
-	require.True(t, s.podManager.AddPodIfAbsent(stalePod, node.Name, staleDevices))
+	_, reserved := s.podManager.ReservePodIfAbsent(stalePod, node.Name, staleDevices)
+	require.True(t, reserved)
 	s.quotaManager.AddUsage(stalePod, staleDevices)
 
 	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
@@ -1113,6 +1120,38 @@ func TestBindPatchFailureRollsBackOwnedAllocation(t *testing.T) {
 	}
 }
 
+func TestBindPatchFailurePreservesInformerObservedAllocation(t *testing.T) {
+	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: true})
+	devices := device.PodDevices{
+		"bind-allocation-mock": {{{
+			UUID: "mock-device-0", Type: "bind-allocation-mock", Usedmem: 1, Usedcores: 1,
+		}}},
+	}
+	fakeClient.PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		observed := pod.DeepCopy()
+		observed.Annotations = map[string]string{
+			util.AssignedNodeAnnotations: node.Name,
+			bindAllocationMockAnnotation: device.EncodePodSingleDevice(devices["bind-allocation-mock"]),
+		}
+		s.onAddPod(observed)
+		return true, nil, fmt.Errorf("injected ambiguous patch failure")
+	})
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: node.Name,
+	})
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "injected ambiguous patch failure")
+	allocation, allocated := s.podManager.GetPod(pod)
+	require.True(t, allocated)
+	assert.Equal(t, node.Name, allocation.NodeID)
+	assert.DeepEqual(t, devices, allocation.Devices)
+	quota := s.quotaManager.GetResourceQuota()[pod.Namespace]
+	assert.Assert(t, quota != nil)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-memory"].Used)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-cores"].Used)
+}
+
 func TestBindFailurePreservesAllocationForRetry(t *testing.T) {
 	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: true})
 	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (bool, runtime.Object, error) {
@@ -1137,7 +1176,7 @@ func TestBindFailurePreservesAllocationForRetry(t *testing.T) {
 	updated, err := fakeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	require.NoError(t, err)
 	assert.Equal(t, node.Name, updated.Annotations[util.AssignedNodeAnnotations])
-	assert.Equal(t, "mock-device-0", updated.Annotations["hami.io/mock-devices-allocated"])
+	assert.Equal(t, "mock-device-0,bind-allocation-mock,1,1:;", updated.Annotations[bindAllocationMockAnnotation])
 	assert.Equal(t, node.Name, updated.Labels[util.AssignedNodeAnnotations])
 }
 
