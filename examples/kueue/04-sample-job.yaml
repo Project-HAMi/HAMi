@@ -12,8 +12,6 @@ spec:
     metadata:
       labels:
         kueue.x-k8s.io/queue-name: hami-local-queue
-      annotations:
-        kueue.x-k8s.io/podset-required-topology: "hami-topology"
     spec:
       containers:
       - name: training-container

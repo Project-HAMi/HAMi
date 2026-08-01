@@ -164,7 +164,10 @@ residual interference remains (as reported in #1707).
   alignment when building `HSA_CU_MASK`
   ([setting CUs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html))
   and land in a follow-up.
+- **`LD_AUDIT` Container Image Portability (glibc / Distro Compatibility).**
+  Injecting host-compiled `LD_AUDIT` (`la_symbind64`) shared libraries into arbitrary user container images can fail due to dynamic linker (`ld-linux.so`) symbol version mismatches across different `glibc` versions or non-glibc runtime environments (such as Alpine Linux with `musl`). Future enhancements will require multi-ABI library variants or kernel/cgroup v2 memory limiting fallbacks to bypass user-space injection dependencies.
 
 ## 7. Discussion points
 
 - **Device-plugin layering.** In #1707, the AMD vGPU device-plugin is proposed to be built on ROCm/k8s-device-plugin, which already advertises whole-GPU `amd.com/gpu`. Since kubelet cannot register the same resource from two plugins, the natural path is to **extend the ROCm plugin** so a single plugin owns `amd.com/gpu` and also advertises the fractional `amd.com/gpumem` / `amd.com/gpucores` (optional, which is not a must-have for HAMi but can be useful for other schedulers).
+- **Cross-distro `LD_AUDIT` Portability & Fallbacks.** To address `glibc` dynamic linker version mismatches and non-glibc runtimes (e.g. Alpine/`musl`), the injection strategy should provide multi-ABI legacy `glibc` shim binaries and investigate driver-level / `cgroups v2` GPU memory controllers for non-interposable container environments.
