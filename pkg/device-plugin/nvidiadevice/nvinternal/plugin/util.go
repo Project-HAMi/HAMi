@@ -510,7 +510,12 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 					}
 				}
 			}
-			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
+			migUUID := GetMigUUIDFromIndex(val.UUID, position)
+			if migUUID == "" {
+				klog.Errorf("failed to resolve MIG UUID for %s at position %d, skipping", val.UUID, position)
+				continue
+			}
+			tmp = append(tmp, migUUID)
 		}
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)
