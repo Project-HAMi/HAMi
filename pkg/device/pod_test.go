@@ -299,6 +299,20 @@ func TestAddPod(t *testing.T) {
 	}
 }
 
+func TestAddPodIfAbsentDoesNotReplaceExistingAllocation(t *testing.T) {
+	manager := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
+	first := PodDevices{"device": {{{UUID: "device-0"}}}}
+	second := PodDevices{"device": {{{UUID: "device-1"}}}}
+
+	assert.Equal(t, true, manager.AddPodIfAbsent(pod, "node-a", first))
+	assert.Equal(t, false, manager.AddPodIfAbsent(pod, "node-b", second))
+	allocation, ok := manager.GetPod(pod)
+	assert.Equal(t, true, ok)
+	assert.Equal(t, "node-a", allocation.NodeID)
+	assert.Equal(t, first, allocation.Devices)
+}
+
 func TestUpdatePod(t *testing.T) {
 	podManager := NewPodManager()
 

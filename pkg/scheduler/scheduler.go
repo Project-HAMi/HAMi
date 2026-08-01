@@ -839,6 +839,19 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		})
 		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, err
 	}
+	if current.UID != args.PodUID {
+		err := fmt.Errorf("pod UID mismatch for %s/%s: cached %s, binding request %s", args.PodNamespace, args.PodName, current.UID, args.PodUID)
+		// The Pod name was reused before this binding request completed. Remove
+		// only the stale UID's reservation; never mutate the replacement Pod.
+		stalePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name:      args.PodName,
+			Namespace: args.PodNamespace,
+			UID:       args.PodUID,
+		}}
+		s.cleanupStalePodAllocation(stalePod)
+		s.recordScheduleBindingResultEvent(stalePod, EventReasonBindingFailed, []string{}, err)
+		return &extenderv1.ExtenderBindingResult{Error: err.Error()}, nil
+	}
 
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 
@@ -903,19 +916,23 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 			dev.PatchAnnotations(current, &annotations, allocation.Devices)
 		}
 
-		added = s.podManager.AddPod(current, allocation.NodeID, allocation.Devices)
-		if added {
-			s.quotaManager.AddUsage(current, allocation.Devices)
+		added = s.podManager.AddPodIfAbsent(current, allocation.NodeID, allocation.Devices)
+		if !added {
+			return fail(fmt.Errorf("pod allocation already exists for UID %s", current.UID))
 		}
+		s.quotaManager.AddUsage(current, allocation.Devices)
+	}
+	rollbackAllocation := func() {
+		if !added || allocation == nil {
+			return
+		}
+		s.quotaManager.RmUsage(current, allocation.Devices)
+		s.podManager.DelPod(current)
+		added = false
 	}
 	if err = util.PatchPodAnnotations(current, annotations); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		if added && allocation != nil {
-			s.quotaManager.RmUsage(current, allocation.Devices)
-		}
-		if allocation != nil {
-			s.podManager.DelPod(current)
-		}
+		rollbackAllocation()
 		return fail(err)
 	}
 

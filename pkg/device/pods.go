@@ -79,6 +79,28 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	return !exists
 }
 
+// AddPodIfAbsent records a new allocation without replacing an allocation
+// installed concurrently by an informer or another binding attempt.
+func (m *PodManager) AddPodIfAbsent(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	if _, exists := m.pods[pod.UID]; exists {
+		return false
+	}
+	m.pods[pod.UID] = &PodInfo{
+		Pod:     pod,
+		NodeID:  nodeID,
+		Devices: devices,
+	}
+	klog.InfoS("Pod allocation reserved",
+		"pod", klog.KRef(pod.Namespace, pod.Name),
+		"nodeID", nodeID,
+		"devices", devices,
+	)
+	return true
+}
+
 func (m *PodManager) UpdatePod(pod *corev1.Pod) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
