@@ -38,6 +38,7 @@ var (
 )
 
 type IluvatarDevices struct {
+	device.DefaultMemoryFactor
 	config           IluvatarConfig
 	nodeRegisterAnno string
 	useUUIDAnno      string
@@ -78,10 +79,6 @@ func InitIluvatarDevice(config []IluvatarConfig) []*IluvatarDevices {
 
 func (dev *IluvatarDevices) CommonWord() string {
 	return dev.config.CommonWord
-}
-
-func (dev *IluvatarDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func ParseConfig(fs *flag.FlagSet) {

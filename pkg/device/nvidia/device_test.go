@@ -1907,6 +1907,14 @@ func TestGenerateResourceRequests(t *testing.T) {
 	}
 }
 
+func TestMemoryFactor(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName: "nvidia.com/gpu",
+		MemoryFactor:      3,
+	})
+	assert.Equal(t, dev.MemoryFactor(), int32(3))
+}
+
 func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",

@@ -35,7 +35,9 @@ import (
 	"k8s.io/klog/v2"
 )
 
-type EnflameDevices struct{}
+type EnflameDevices struct {
+	device.DefaultMemoryFactor
+}
 
 const (
 	EnflameVGCUDevice     = "Enflame"
@@ -108,10 +110,6 @@ func InitEnflameDevice(config EnflameConfig) *EnflameDevices {
 
 func (dev *EnflameDevices) CommonWord() string {
 	return EnflameVGCUCommonWord
-}
-
-func (dev *EnflameDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

@@ -206,6 +206,55 @@ func TestPodQuotaRequestsUnknownDevice(t *testing.T) {
 	}
 }
 
+func TestPodQuotaRequestsEmptyCountName(t *testing.T) {
+	initTest()
+	DevicesMap["empty"] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceMemoryName: "nvidia.com/gpumem",
+		},
+	}
+	mem, cores := PodQuotaRequests(&corev1.Pod{}, "empty")
+	if mem != 0 || cores != 0 {
+		t.Fatalf("PodQuotaRequests() = (%d, %d), want (0, 0)", mem, cores)
+	}
+}
+
+func TestPodQuotaRequestsWithCores(t *testing.T) {
+	initTest()
+	deviceName := "NVIDIA"
+	DevicesMap[deviceName] = &MockDevices{
+		resourceNames: ResourceNames{
+			ResourceCountName:  "nvidia.com/gpu",
+			ResourceMemoryName: "nvidia.com/gpumem",
+			ResourceCoreName:   "nvidia.com/gpucore",
+		},
+	}
+	pod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":     resource.MustParse("2"),
+						"nvidia.com/gpumem":  resource.MustParse("1000"),
+						"nvidia.com/gpucore": resource.MustParse("50"),
+					},
+				},
+			}},
+		},
+	}
+	mem, cores := PodQuotaRequests(pod, deviceName)
+	if mem != 2000 || cores != 100 {
+		t.Fatalf("PodQuotaRequests() = (%d, %d), want (2000, 100)", mem, cores)
+	}
+}
+
+func TestDefaultMemoryFactor(t *testing.T) {
+	var d DefaultMemoryFactor
+	if got := d.MemoryFactor(); got != 1 {
+		t.Fatalf("DefaultMemoryFactor.MemoryFactor() = %d, want 1", got)
+	}
+}
+
 func TestFitPodQuotaNoDeviceRequest(t *testing.T) {
 	initTest()
 	cleanupNamespaceQuota(t, "default")

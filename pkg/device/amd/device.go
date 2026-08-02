@@ -31,6 +31,7 @@ import (
 )
 
 type AMDDevices struct {
+	device.DefaultMemoryFactor
 	resourceCountName  string
 	resourceMemoryName string
 }
@@ -63,10 +64,6 @@ func InitAMDGPUDevice(config AMDConfig) *AMDDevices {
 
 func (dev *AMDDevices) CommonWord() string {
 	return AMDCommonWord
-}
-
-func (dev *AMDDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

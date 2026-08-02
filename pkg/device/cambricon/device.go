@@ -69,6 +69,7 @@ type CambriconConfig struct {
 }
 
 type CambriconDevices struct {
+	device.DefaultMemoryFactor
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -91,10 +92,6 @@ func InitMLUDevice(config CambriconConfig) *CambriconDevices {
 
 func (dev *CambriconDevices) CommonWord() string {
 	return CambriconMLUCommonWord
-}
-
-func (dev *CambriconDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {

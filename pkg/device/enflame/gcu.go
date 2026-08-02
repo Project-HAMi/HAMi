@@ -34,6 +34,7 @@ const (
 )
 
 type GCUDevices struct {
+	device.DefaultMemoryFactor
 }
 
 func InitGCUDevice(config EnflameConfig) *GCUDevices {
@@ -48,10 +49,6 @@ func InitGCUDevice(config EnflameConfig) *GCUDevices {
 
 func (dev *GCUDevices) CommonWord() string {
 	return EnflameGCUCommonWord
-}
-
-func (dev *GCUDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *GCUDevices) MutateAdmission(ctr *corev1.Container, pod *corev1.Pod) (bool, error) {

@@ -33,6 +33,7 @@ import (
 )
 
 type VastaiDevices struct {
+	device.DefaultMemoryFactor
 }
 
 const (
@@ -68,10 +69,6 @@ func InitVastaiDevice(config VastaiConfig) *VastaiDevices {
 
 func (dev *VastaiDevices) CommonWord() string {
 	return VastaiCommonWord
-}
-
-func (dev *VastaiDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *VastaiDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {

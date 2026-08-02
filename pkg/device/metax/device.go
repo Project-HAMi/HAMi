@@ -32,6 +32,7 @@ import (
 )
 
 type MetaxDevices struct {
+	device.DefaultMemoryFactor
 }
 
 const (
@@ -57,10 +58,6 @@ func InitMetaxDevice(config MetaxConfig) *MetaxDevices {
 
 func (dev *MetaxDevices) CommonWord() string {
 	return MetaxGPUCommonWord
-}
-
-func (dev *MetaxDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *MetaxDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

@@ -31,6 +31,7 @@ import (
 )
 
 type BirenDevices struct {
+	device.DefaultMemoryFactor
 }
 
 const (
@@ -66,10 +67,6 @@ func InitBirenDevice(config BirenConfig) *BirenDevices {
 
 func (dev *BirenDevices) CommonWord() string {
 	return BirenCommonWord
-}
-
-func (dev *BirenDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *BirenDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {

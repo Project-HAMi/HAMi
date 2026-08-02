@@ -46,6 +46,7 @@ const (
 )
 
 type KunlunVDevices struct {
+	device.DefaultMemoryFactor
 }
 
 func InitKunlunVDevice(config KunlunConfig) *KunlunVDevices {
@@ -72,10 +73,6 @@ func (dev *KunlunVDevices) trimMemory(m int64) int64 {
 
 func (dev *KunlunVDevices) CommonWord() string {
 	return XPUDevice
-}
-
-func (dev *KunlunVDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

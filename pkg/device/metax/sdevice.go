@@ -57,6 +57,7 @@ var (
 )
 
 type MetaxSDevices struct {
+	device.DefaultMemoryFactor
 	jqCache *JitteryQosCache
 }
 
@@ -79,10 +80,6 @@ func InitMetaxSDevice(config MetaxConfig) *MetaxSDevices {
 
 func (sdev *MetaxSDevices) CommonWord() string {
 	return MetaxSGPUCommonWord
-}
-
-func (sdev *MetaxSDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (sdev *MetaxSDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

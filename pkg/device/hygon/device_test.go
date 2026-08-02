@@ -1164,6 +1164,16 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+func TestMemoryFactor(t *testing.T) {
+	dev := InitDCUDevice(HygonConfig{
+		ResourceCountName:  "hygon.com/dcunum",
+		ResourceMemoryName: "hygon.com/dcumem",
+		ResourceCoreName:   "hygon.com/dcucores",
+		MemoryFactor:       5,
+	})
+	assert.Equal(t, dev.MemoryFactor(), int32(5))
+}
+
 func TestDevices_Fit_ResourceQuotaExceeded(t *testing.T) {
 	config := HygonConfig{
 		ResourceCountName:  "hygon.com/dcunum",

@@ -50,6 +50,13 @@ type Devices interface {
 	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
+// DefaultMemoryFactor provides MemoryFactor() for backends without memory scaling.
+type DefaultMemoryFactor struct{}
+
+func (DefaultMemoryFactor) MemoryFactor() int32 {
+	return 1
+}
+
 type MigTemplate struct {
 	Name   string `yaml:"name"`
 	Core   int32  `yaml:"core"`

@@ -2361,3 +2361,8 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 		})
 	}
 }
+
+func TestMemoryFactor(t *testing.T) {
+	dev := &Devices{config: VNPUConfig{MemoryFactor: 10}}
+	assert.Equal(t, dev.MemoryFactor(), int32(10))
+}

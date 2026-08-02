@@ -40,6 +40,7 @@ const (
 )
 
 type KunlunDevices struct {
+	device.DefaultMemoryFactor
 }
 
 func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
@@ -53,10 +54,6 @@ func InitKunlunDevice(config KunlunConfig) *KunlunDevices {
 
 func (dev *KunlunDevices) CommonWord() string {
 	return KunlunGPUCommonWord
-}
-
-func (dev *KunlunDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *KunlunDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {

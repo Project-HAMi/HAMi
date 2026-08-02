@@ -36,6 +36,7 @@ import (
 )
 
 type MthreadsDevices struct {
+	device.DefaultMemoryFactor
 }
 
 const (
@@ -80,10 +81,6 @@ func InitMthreadsDevice(config MthreadsConfig) *MthreadsDevices {
 
 func (dev *MthreadsDevices) CommonWord() string {
 	return MthreadsGPUCommonWord
-}
-
-func (dev *MthreadsDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func ParseConfig(fs *flag.FlagSet) {

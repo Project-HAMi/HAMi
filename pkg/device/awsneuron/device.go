@@ -33,6 +33,7 @@ import (
 )
 
 type AWSNeuronDevices struct {
+	device.DefaultMemoryFactor
 	resourceCountName string
 	resourceCoreName  string
 	coresPerAWSNeuron uint
@@ -74,10 +75,6 @@ func InitAWSNeuronDevice(config AWSNeuronConfig) *AWSNeuronDevices {
 
 func (dev *AWSNeuronDevices) CommonWord() string {
 	return AWSNeuronCommonWord
-}
-
-func (dev *AWSNeuronDevices) MemoryFactor() int32 {
-	return 1
 }
 
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
