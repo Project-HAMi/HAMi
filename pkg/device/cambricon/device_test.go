@@ -19,6 +19,7 @@ package cambricon
 import (
 	"context"
 	"flag"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -284,6 +285,44 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Type:             CambriconMLUDevice,
 				Memreq:           int32(0),
 				MemPercentagereq: int32(100),
+				Coresreq:         int32(2),
+			},
+		},
+		{
+			name: "vmemory expressed in Gi units no longer wraps to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             CambriconMLUDevice,
+				Memreq:           int32(math.MaxInt32),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(2),
+			},
+		},
+		{
+			name: "oversized plain vmemory value clamps to max int32",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("10000000"),
+						"cambricon.com/mlu.smlu.vcore":   resource.MustParse("2"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             CambriconMLUDevice,
+				Memreq:           int32(math.MaxInt32),
+				MemPercentagereq: int32(0),
 				Coresreq:         int32(2),
 			},
 		},

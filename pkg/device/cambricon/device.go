@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
@@ -251,7 +252,12 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				memnums, ok := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
-					memnum = int(memnums) * 256
+					if memnums > math.MaxInt32/256 || memnums < 0 {
+						klog.ErrorS(nil, "cambricon memory request is out of int32 range, clamping to max int32", "container", ctr.Name, "request", memnums)
+						memnum = math.MaxInt32
+					} else {
+						memnum = int(memnums * 256)
+					}
 				}
 			}
 			corenum := int32(100)
