@@ -65,7 +65,8 @@ func TestSpec_DeviceMemoryContextSize(t *testing.T) {
 		{
 			name: "device memory context size for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{contextSize: 100}, {contextSize: 200}}},
 					{used: [16]deviceMemory{{contextSize: 300}, {contextSize: 400}}},
@@ -77,7 +78,8 @@ func TestSpec_DeviceMemoryContextSize(t *testing.T) {
 		{
 			name: "device memory context size for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{contextSize: 100}, {contextSize: 200}}},
 					{used: [16]deviceMemory{{contextSize: 300}, {contextSize: 400}}},
@@ -85,6 +87,19 @@ func TestSpec_DeviceMemoryContextSize(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{used: [16]deviceMemory{{contextSize: 100}, {contextSize: 200}}},
+					{used: [16]deviceMemory{{contextSize: 300}, {contextSize: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
@@ -103,7 +118,8 @@ func TestSpec_DeviceMemoryModuleSize(t *testing.T) {
 		{
 			name: "device memory module size for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{moduleSize: 100}, {moduleSize: 200}}},
 					{used: [16]deviceMemory{{moduleSize: 300}, {moduleSize: 400}}},
@@ -115,7 +131,8 @@ func TestSpec_DeviceMemoryModuleSize(t *testing.T) {
 		{
 			name: "device memory module size for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{moduleSize: 100}, {moduleSize: 200}}},
 					{used: [16]deviceMemory{{moduleSize: 300}, {moduleSize: 400}}},
@@ -123,6 +140,19 @@ func TestSpec_DeviceMemoryModuleSize(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{used: [16]deviceMemory{{moduleSize: 100}, {moduleSize: 200}}},
+					{used: [16]deviceMemory{{moduleSize: 300}, {moduleSize: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
@@ -141,7 +171,8 @@ func TestSpec_DeviceMemoryBufferSize(t *testing.T) {
 		{
 			name: "device memory buffer size for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{bufferSize: 100}, {bufferSize: 200}}},
 					{used: [16]deviceMemory{{bufferSize: 300}, {bufferSize: 400}}},
@@ -153,7 +184,8 @@ func TestSpec_DeviceMemoryBufferSize(t *testing.T) {
 		{
 			name: "device memory buffer size for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{bufferSize: 100}, {bufferSize: 200}}},
 					{used: [16]deviceMemory{{bufferSize: 300}, {bufferSize: 400}}},
@@ -161,6 +193,19 @@ func TestSpec_DeviceMemoryBufferSize(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{used: [16]deviceMemory{{bufferSize: 100}, {bufferSize: 200}}},
+					{used: [16]deviceMemory{{bufferSize: 300}, {bufferSize: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
@@ -179,7 +224,8 @@ func TestSpec_DeviceMemoryOffset(t *testing.T) {
 		{
 			name: "device memory offset for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{offset: 100}, {offset: 200}}},
 					{used: [16]deviceMemory{{offset: 300}, {offset: 400}}},
@@ -191,7 +237,8 @@ func TestSpec_DeviceMemoryOffset(t *testing.T) {
 		{
 			name: "device memory offset for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{offset: 100}, {offset: 200}}},
 					{used: [16]deviceMemory{{offset: 300}, {offset: 400}}},
@@ -199,6 +246,19 @@ func TestSpec_DeviceMemoryOffset(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{used: [16]deviceMemory{{offset: 100}, {offset: 200}}},
+					{used: [16]deviceMemory{{offset: 300}, {offset: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
@@ -217,7 +277,8 @@ func TestSpec_DeviceMemoryTotal(t *testing.T) {
 		{
 			name: "device memory total for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{total: 100}, {total: 200}}},
 					{used: [16]deviceMemory{{total: 300}, {total: 400}}},
@@ -229,7 +290,8 @@ func TestSpec_DeviceMemoryTotal(t *testing.T) {
 		{
 			name: "device memory total for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{used: [16]deviceMemory{{total: 100}, {total: 200}}},
 					{used: [16]deviceMemory{{total: 300}, {total: 400}}},
@@ -237,6 +299,19 @@ func TestSpec_DeviceMemoryTotal(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{used: [16]deviceMemory{{total: 100}, {total: 200}}},
+					{used: [16]deviceMemory{{total: 300}, {total: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
@@ -255,7 +330,8 @@ func TestSpec_DeviceSmUtil(t *testing.T) {
 		{
 			name: "device sm util for index 1",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{deviceUtil: [16]deviceUtilization{{smUtil: 100}, {smUtil: 200}}},
 					{deviceUtil: [16]deviceUtilization{{smUtil: 300}, {smUtil: 400}}},
@@ -267,7 +343,8 @@ func TestSpec_DeviceSmUtil(t *testing.T) {
 		{
 			name: "device sm util for index 0",
 			spec: &Spec{sr: &sharedRegionT{
-				num: 2,
+				num:     2,
+				procnum: 2,
 				procs: [1024]shrregProcSlotT{
 					{deviceUtil: [16]deviceUtilization{{smUtil: 100}, {smUtil: 200}}},
 					{deviceUtil: [16]deviceUtilization{{smUtil: 300}, {smUtil: 400}}},
@@ -275,6 +352,19 @@ func TestSpec_DeviceSmUtil(t *testing.T) {
 			}},
 			input:    0,
 			expected: uint64(400),
+		},
+		{
+			name: "stale proc slot beyond procnum is ignored",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{deviceUtil: [16]deviceUtilization{{smUtil: 100}, {smUtil: 200}}},
+					{deviceUtil: [16]deviceUtilization{{smUtil: 300}, {smUtil: 400}}},
+				},
+			}},
+			input:    1,
+			expected: uint64(200),
 		},
 	}
 
