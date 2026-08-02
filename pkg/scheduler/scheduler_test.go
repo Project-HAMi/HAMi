@@ -1063,6 +1063,42 @@ func TestBindRejectsNodeThatIsNoLongerFeasible(t *testing.T) {
 	assert.Equal(t, false, allocated)
 }
 
+func TestBindRevalidationFailureRestoresPreviousAllocation(t *testing.T) {
+	s, _, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: false})
+	previousDevices := device.PodDevices{
+		"bind-allocation-mock": {{{
+			UUID: "previous-device", Type: "bind-allocation-mock", Usedmem: 1, Usedcores: 1,
+		}}},
+	}
+	_, reserved := s.podManager.ReservePodIfAbsent(pod, node.Name, previousDevices)
+	require.True(t, reserved)
+	s.quotaManager.AddUsage(pod, previousDevices)
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: node.Name,
+	})
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "failed to revalidate node")
+	allocation, allocated := s.podManager.GetPod(pod)
+	require.True(t, allocated)
+	assert.Equal(t, node.Name, allocation.NodeID)
+	assert.DeepEqual(t, previousDevices, allocation.Devices)
+	quota := s.quotaManager.GetResourceQuota()[pod.Namespace]
+	assert.Assert(t, quota != nil)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-memory"].Used)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-cores"].Used)
+	stale := pod.DeepCopy()
+	stale.Annotations = map[string]string{
+		util.AssignedNodeAnnotations: "stale-node",
+		bindAllocationMockAnnotation: "stale-device,bind-allocation-mock,1,1:;",
+	}
+	s.onAddPod(stale)
+	allocation, allocated = s.podManager.GetPod(pod)
+	require.True(t, allocated)
+	assert.Equal(t, node.Name, allocation.NodeID)
+	assert.DeepEqual(t, previousDevices, allocation.Devices)
+}
+
 func TestBindRejectsMismatchedPodUIDBeforeMutation(t *testing.T) {
 	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: true})
 	stalePod := pod.DeepCopy()
@@ -1118,6 +1154,34 @@ func TestBindPatchFailureRollsBackOwnedAllocation(t *testing.T) {
 	for _, action := range fakeClient.Actions() {
 		assert.Assert(t, action.GetSubresource() != "binding", "annotation failure must stop before the binding API")
 	}
+}
+
+func TestBindPatchFailureRestoresPreviousAllocation(t *testing.T) {
+	s, fakeClient, pod, node := setupBindAllocationTest(t, &bindAllocationMockDevice{fit: true})
+	previousDevices := device.PodDevices{
+		"bind-allocation-mock": {{{
+			UUID: "previous-device", Type: "bind-allocation-mock", Usedmem: 1, Usedcores: 1,
+		}}},
+	}
+	s.podManager.AddPod(pod, "previous-node", previousDevices)
+	s.quotaManager.AddUsage(pod, previousDevices)
+	fakeClient.PrependReactor("patch", "pods", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("injected patch failure")
+	})
+
+	res, err := s.Bind(extenderv1.ExtenderBindingArgs{
+		PodName: pod.Name, PodNamespace: pod.Namespace, PodUID: pod.UID, Node: node.Name,
+	})
+	require.NoError(t, err)
+	require.Contains(t, res.Error, "injected patch failure")
+	allocation, allocated := s.podManager.GetPod(pod)
+	require.True(t, allocated)
+	assert.Equal(t, "previous-node", allocation.NodeID)
+	assert.DeepEqual(t, previousDevices, allocation.Devices)
+	quota := s.quotaManager.GetResourceQuota()[pod.Namespace]
+	assert.Assert(t, quota != nil)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-memory"].Used)
+	assert.Equal(t, int64(1), (*quota)["example.com/mock-cores"].Used)
 }
 
 func TestBindPatchFailurePreservesInformerObservedAllocation(t *testing.T) {

@@ -31,6 +31,7 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/labels"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
@@ -621,6 +622,10 @@ func nodeListLen(nodes *corev1.NodeList) int {
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
+	return s.getNodesUsageIgnoringPod(nodes, task, nil)
+}
+
+func (s *Scheduler) getNodesUsageIgnoringPod(nodes *[]string, task *corev1.Pod, ignoredPodUID *k8stypes.UID) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
 	overallnodeMap := make(map[string]*NodeUsage)
 	cachenodeMap := make(map[string]*NodeUsage)
 	failedNodes := make(map[string]string)
@@ -635,6 +640,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
+		if ignoredPodUID != nil && p.UID == *ignoredPodUID {
+			continue
+		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			klog.V(5).InfoS("pod allocated unknown node resources",
@@ -880,7 +888,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return fail(err)
 	}
 
-	// Filter and Prioritize are deliberately side-effect free. Revalidate the
+	// Filter and Prioritize do not commit a device allocation. Revalidate the
 	// node selected by kube-scheduler while holding the device lock, then commit
 	// the concrete device allocation immediately before binding.
 	resourceReqs := device.Resourcereqs(current)
@@ -890,10 +898,14 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 	var allocation *policy.NodeScore
 	var reservationID uint64
+	var previousAllocation *device.PodInfo
 	if countDeviceRequests(resourceReqs) > 0 {
-		s.cleanupStalePodAllocation(current)
+		if existing, ok := s.podManager.GetPod(current); ok {
+			previousAllocation = existing.DeepCopy()
+		}
 		nodeNames := []string{args.Node}
-		nodeUsage, _, failedNodes, err := s.getNodesUsage(&nodeNames, current)
+		ignoredPodUID := current.UID
+		nodeUsage, _, failedNodes, err := s.getNodesUsageIgnoringPod(&nodeNames, current, &ignoredPodUID)
 		if err != nil {
 			return fail(err)
 		}
@@ -917,9 +929,16 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		}
 
 		var reserved bool
-		reservationID, reserved = s.podManager.ReservePodIfAbsent(current, allocation.NodeID, allocation.Devices)
+		if previousAllocation == nil {
+			reservationID, reserved = s.podManager.ReservePodIfAbsent(current, allocation.NodeID, allocation.Devices)
+		} else {
+			reservationID, reserved = s.podManager.ReplacePodReservation(current, previousAllocation, allocation.NodeID, allocation.Devices)
+		}
 		if !reserved {
 			return fail(fmt.Errorf("pod allocation already exists for UID %s", current.UID))
+		}
+		if previousAllocation != nil {
+			s.quotaManager.RmUsage(current, previousAllocation.Devices)
 		}
 		s.quotaManager.AddUsage(current, allocation.Devices)
 	}
@@ -927,9 +946,12 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		if allocation == nil {
 			return
 		}
-		reservation, rolledBack := s.podManager.RollbackPodReservation(current, reservationID)
+		reservation, rolledBack := s.podManager.RollbackPodReservationTo(current, reservationID, previousAllocation)
 		if rolledBack {
 			s.quotaManager.RmUsage(current, reservation.Devices)
+			if previousAllocation != nil {
+				s.quotaManager.AddUsage(current, previousAllocation.Devices)
+			}
 		}
 	}
 	if err = util.PatchPodAnnotations(current, annotations); err != nil {
@@ -937,10 +959,6 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		rollbackAllocation()
 		return fail(err)
 	}
-	if allocation != nil {
-		s.podManager.CommitPodReservation(current, reservationID)
-	}
-
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 		return fail(err)
