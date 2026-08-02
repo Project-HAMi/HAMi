@@ -547,7 +547,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			if !needTopology {
+			if !needTopology && !(k.Type == Ascend910CType && originReq > 1) {
 				k.Nums--
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
@@ -559,32 +559,32 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 && !needTopology {
+		if k.Nums == 0 && !needTopology && !(k.Type == Ascend910CType && originReq > 1) {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
 	}
 
-	if needTopology {
-		if k.Type == Ascend910CType && originReq > 1 {
-			// Ascend 910C requires full module-pair allocation (2 NPUs per
-			// physical card). Always run the pairing filter here, even when
-			// the raw candidate count already equals originReq, because
-			// candidates satisfying the count alone may still be spread
-			// across incomplete/partial modules rather than full pairs.
-			combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
-			if len(combination) != int(originReq) {
-				// Never report success on a short allocation: doing so silently
-				// under-allocates NPUs relative to what the pod requested.
-				reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-				klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
-				return false, tmpDevs, common.GenReason(reason, len(devices))
-			}
-			tmpDevs[k.Type] = combination
-			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
-			return true, tmpDevs, ""
+	if k.Type == Ascend910CType && originReq > 1 {
+		// Ascend 910C requires full module-pair allocation (2 NPUs per
+		// physical card). Always run the pairing filter here, even when
+		// NetworkID is absent or needTopology is false, because
+		// candidates satisfying the count alone may still be spread
+		// across incomplete/partial modules rather than full pairs.
+		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
+		if len(combination) != int(originReq) {
+			// Never report success on a short allocation: doing so silently
+			// under-allocates NPUs relative to what the pod requested.
+			reason[common.AllocatedCardsInsufficientRequest] = len(combination)
+			klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
+			return false, tmpDevs, common.GenReason(reason, int(originReq))
 		}
+		tmpDevs[k.Type] = combination
+		klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+		return true, tmpDevs, ""
+	}
 
+	if needTopology {
 		if len(tmpDevs[k.Type]) == int(originReq) {
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""

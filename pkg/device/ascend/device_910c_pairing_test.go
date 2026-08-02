@@ -1,11 +1,28 @@
+/*
+Copyright 2024 The HAMi Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package ascend
 
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
 // TestAscend910C_FitPartialAllocationBug reproduces the case where a pod
@@ -104,5 +121,50 @@ func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
 	if !fit || len(tmpDevs[Ascend910CType]) != 2 {
 		t.Errorf("expected fit=true with 2 allocated devices for one full module pair, got fit=%v, allocated=%d, reason=%q",
 			fit, len(tmpDevs[Ascend910CType]), reason)
+	}
+}
+
+// TestAscend910C_FitWithoutNetworkID_ValidatesPairing ensures that Ascend 910C
+// full-pair validation runs for multi-device requests even when CustomInfo["NetworkID"]
+// is absent on devices (needTopology=false).
+func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	nodeInfo := &device.NodeInfo{
+		Node: &corev1.Node{},
+		Devices: map[string][]device.DeviceInfo{
+			Ascend910CType: {
+				// dev-0 (module 0) and dev-2 (module 1) without NetworkID in CustomInfo.
+				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
+				{ID: "dev-2", Index: 2, CustomInfo: map[string]any{}},
+			},
+		},
+	}
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Type: Ascend910CType}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-no-netid"}}
+
+	fit, tmpDevs, reason := dev.Fit(devices, req, pod, nodeInfo, nil)
+
+	if fit {
+		t.Errorf("expected fit=false when NetworkID is absent and the 2 candidate NPUs belong to different modules (indices 0 and 2), got fit=true, allocated=%d, reason=%q",
+			len(tmpDevs[Ascend910CType]), reason)
+	}
+
+	// Positive check without NetworkID when candidate devices form a full module pair (indices 0 and 1).
+	nodeInfo.Devices[Ascend910CType] = []device.DeviceInfo{
+		{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
+		{ID: "dev-1", Index: 1, CustomInfo: map[string]any{}},
+	}
+	devicesPair := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+	}
+	fitPair, tmpDevsPair, reasonPair := dev.Fit(devicesPair, req, pod, nodeInfo, nil)
+	if !fitPair || len(tmpDevsPair[Ascend910CType]) != 2 {
+		t.Errorf("expected fit=true when NetworkID is absent but candidate devices form a full module pair (indices 0 and 1), got fit=%v, allocated=%d, reason=%q",
+			fitPair, len(tmpDevsPair[Ascend910CType]), reasonPair)
 	}
 }
