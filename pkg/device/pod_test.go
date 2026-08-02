@@ -570,9 +570,15 @@ func TestDelPod(t *testing.T) {
 	_, ok = pm.GetPod(pod)
 	assert.False(t, ok)
 
-	// Deleting a non-existing pod should not panic or cause errors
+	// Add another pod so cache is not empty, to cleanly verify no-op deletion does not alter cache
+	podKeep := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-keep", Name: "keep-pod", Namespace: "default"}}
+	pm.AddPod(podKeep, "node-2", PodDevices{})
+	initialCount := len(pm.pods)
+
+	// Deleting a non-existing pod should be a safe no-op and not alter existing pod count
 	nonExistent := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "uid-nonexistent"}}
 	pm.DelPod(nonExistent)
+	assert.Equal(t, initialCount, len(pm.pods), "Pod count must remain unchanged after no-op deletion")
 }
 
 func TestListPodsUID(t *testing.T) {
