@@ -217,5 +217,5 @@ func (dev *KunlunDevices) GetResourceNames() device.ResourceNames {
 }
 
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
-	return device.Used == 0
+	return device.Used == 0 && device.Health
 }

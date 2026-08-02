@@ -589,6 +589,33 @@ func Test_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MR-V100",
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "MR-V100",
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+		},
 	}
 
 	for _, test := range tests {

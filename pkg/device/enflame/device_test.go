@@ -167,6 +167,7 @@ func TestFit_SelectProfileByRequest(t *testing.T) {
 			Used:     0,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",
@@ -203,6 +204,7 @@ func TestFit_SelectProfileByMemoryCoreRequest(t *testing.T) {
 			Used:     0,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",
@@ -289,6 +291,7 @@ func TestFit_MutexRejectsUsedDevice(t *testing.T) {
 			Used:     1,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",

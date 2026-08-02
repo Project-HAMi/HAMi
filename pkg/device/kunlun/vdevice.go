@@ -275,6 +275,9 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 }
 
 func FitVXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
+	if !device.Health {
+		return false
+	}
 	if request.Memreq+device.Usedmem > device.Totalmem {
 		return false
 	}

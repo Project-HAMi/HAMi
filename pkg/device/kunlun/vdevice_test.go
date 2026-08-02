@@ -526,6 +526,12 @@ func Test_FitVXPU_direct(t *testing.T) {
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    false,
 		},
+		{
+			name:    "unhealthy device is rejected",
+			usage:   &device.DeviceUsage{Health: false, Used: 0, Usedmem: 0, Totalmem: 98304},
+			request: device.ContainerDeviceRequest{Memreq: 24576},
+			want:    false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
