@@ -86,11 +86,15 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 				Error: fmt.Sprintf("Failed to marshal extender filter result: %s", err.Error()),
 			}
 			resultBody, _ = json.Marshal(extenderFilterResult)
-			w.Write(resultBody)
+			if _, err := w.Write(resultBody); err != nil {
+				klog.ErrorS(err, "Failed to write response")
+			}
 		} else {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write(resultBody)
+			if _, err := w.Write(resultBody); err != nil {
+				klog.ErrorS(err, "Failed to write response")
+			}
 		}
 	}
 }
@@ -128,12 +132,16 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 				Error: fmt.Sprintf("Failed to marshal binding result: %s", err.Error()),
 			}
 			response, _ := json.Marshal(extenderBindingResult)
-			w.Write(response)
+			if _, err := w.Write(response); err != nil {
+				klog.ErrorS(err, "Failed to write response")
+			}
 		} else {
 			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+			if _, err := w.Write(response); err != nil {
+				klog.ErrorS(err, "Failed to write response")
+			}
 		}
 	}
 }
