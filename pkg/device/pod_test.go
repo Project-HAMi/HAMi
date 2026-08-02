@@ -455,6 +455,45 @@ func TestReplacementReservationRetainsOwnershipUntilObserved(t *testing.T) {
 	assert.Equal(t, false, owned)
 }
 
+func TestReplacePodReservationRejectsStaleExpectedAllocation(t *testing.T) {
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
+	reservedDevices := PodDevices{"device": {{{UUID: "device-current"}}}}
+	replacementDevices := PodDevices{"device": {{{UUID: "device-replacement"}}}}
+	tests := []struct {
+		name     string
+		expected *PodInfo
+	}{
+		{
+			name: "stale node",
+			expected: &PodInfo{
+				Pod:     pod.DeepCopy(),
+				NodeID:  "node-stale",
+				Devices: reservedDevices.DeepCopy(),
+			},
+		},
+		{
+			name:     "missing expected allocation",
+			expected: nil,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			manager := NewPodManager()
+			assert.Equal(t, true, manager.ReservePodIfAbsent(pod, "node-current", reservedDevices))
+
+			replaced := manager.ReplacePodReservation(pod, test.expected, "node-replacement", replacementDevices)
+			assert.Equal(t, false, replaced)
+			allocation, ok := manager.GetPod(pod)
+			assert.Equal(t, true, ok)
+			assert.Equal(t, "node-current", allocation.NodeID)
+			assert.Equal(t, reservedDevices, allocation.Devices)
+			_, owned := manager.reservations[pod.UID]
+			assert.Equal(t, true, owned)
+		})
+	}
+}
+
 func TestReplacePodReservationMatchesDecodedInformerDevices(t *testing.T) {
 	manager := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}

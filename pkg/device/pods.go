@@ -146,11 +146,21 @@ func (m *PodManager) ReplacePodReservation(pod *corev1.Pod, expected *PodInfo, n
 	defer m.mutex.Unlock()
 
 	current, exists := m.pods[pod.UID]
+	currentNodeID := ""
+	if exists {
+		currentNodeID = current.NodeID
+	}
+	expectedNodeID := ""
+	if expected != nil {
+		expectedNodeID = expected.NodeID
+	}
 	if !exists || expected == nil || current.NodeID != expected.NodeID ||
 		!reservationMatchesInformerDevices(expected.Devices, current.Devices) {
 		klog.V(5).InfoS("Pod reservation replacement rejected",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
 			"exists", exists,
+			"currentNodeID", currentNodeID,
+			"expectedNodeID", expectedNodeID,
 		)
 		return false
 	}
