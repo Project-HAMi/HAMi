@@ -168,3 +168,59 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 			fitPair, len(tmpDevsPair[Ascend910CType]), reasonPair)
 	}
 }
+
+// TestComputeBestCombination910C_NoFullPairsReturnsEmpty directly answers
+// whether computeBestCombination910C returns an empty combination (rather
+// than panicking or fabricating a partial/incorrect pairing) when none of
+// the candidate NPUs share a full physical module and no NetworkID is set
+// anywhere in CustomInfo. It also verifies that Fit() turns that empty
+// combination into a clean fit=false rejection, so such pods are correctly
+// left unschedulable rather than crashing the scheduler or being silently
+// under-allocated.
+func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
+	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
+	nodeInfo := &device.NodeInfo{
+		Node: &corev1.Node{},
+		Devices: map[string][]device.DeviceInfo{
+			Ascend910CType: {
+				// Four singleton NPUs, each alone on its own module
+				// (indices 0, 2, 4, 6 -> module IDs 0, 1, 2, 3), no
+				// NetworkID present anywhere in CustomInfo.
+				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
+				{ID: "dev-2", Index: 2, CustomInfo: map[string]any{}},
+				{ID: "dev-4", Index: 4, CustomInfo: map[string]any{}},
+				{ID: "dev-6", Index: 6, CustomInfo: map[string]any{}},
+			},
+		},
+	}
+
+	// Unit-level check: computeBestCombination910C itself must return an
+	// empty slice here, not panic and not fabricate a mismatched pairing.
+	candidates := device.ContainerDevices{
+		{Idx: 0, UUID: "dev-0"},
+		{Idx: 2, UUID: "dev-2"},
+		{Idx: 4, UUID: "dev-4"},
+		{Idx: 6, UUID: "dev-6"},
+	}
+	combination := dev.computeBestCombination910C(nodeInfo, 4, candidates)
+	if len(combination) != 0 {
+		t.Errorf("expected computeBestCombination910C to return an empty combination when no candidates share a full module, got %d devices", len(combination))
+	}
+
+	// End-to-end check: Fit() must turn that empty combination into a clean
+	// rejection, not a panic and not a false "success".
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-4", Index: 4, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-6", Index: 6, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+	}
+	req := device.ContainerDeviceRequest{Nums: 4, Type: Ascend910CType}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-no-netid-no-pairs"}}
+
+	fit, tmpDevs, reason := dev.Fit(devices, req, pod, nodeInfo, nil)
+	if fit {
+		t.Errorf("expected fit=false when no candidates without NetworkID form full module pairs, got fit=true, allocated=%d, reason=%q",
+			len(tmpDevs[Ascend910CType]), reason)
+	}
+}
