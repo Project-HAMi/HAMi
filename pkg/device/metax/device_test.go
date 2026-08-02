@@ -761,7 +761,7 @@ func TestMetaxDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    1,
 			wantDevIDs: []string{},
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
@@ -864,10 +864,10 @@ func TestMetaxDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[MetaxGPUDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MetaxGPUDevice]))
+			}
 			if test.wantFit {
-				if len(result[MetaxGPUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MetaxGPUDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[MetaxGPUDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[MetaxGPUDevice][idx].UUID)

@@ -436,6 +436,7 @@ func Test_Fit(t *testing.T) {
 		wantOK     bool
 		wantLen    int
 		wantDevIDs []string
+		wantReason string
 	}{
 		{
 			name: "fit success",
@@ -615,6 +616,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -626,7 +628,7 @@ func Test_Fit(t *testing.T) {
 					Annotations: test.annos,
 				},
 			}
-			ok, result, _ := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
+			ok, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if test.wantOK {
 				if len(result["MR-V100"]) != test.wantLen {
 					t.Errorf("expected %d, got %d", test.wantLen, len(result["MR-V100"]))
@@ -646,6 +648,9 @@ func Test_Fit(t *testing.T) {
 				if len(result["MR-V100"]) != test.wantLen {
 					t.Errorf("expected %d, got %d", test.wantLen, len(result["MR-V100"]))
 				}
+			}
+			if reason != test.wantReason {
+				t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
 			}
 		})
 	}

@@ -905,10 +905,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[AWSNeuronDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[AWSNeuronDevice]))
+			}
 			if test.wantFit {
-				if len(result[AWSNeuronDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[AWSNeuronDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[AWSNeuronDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[AWSNeuronDevice][idx].UUID)
