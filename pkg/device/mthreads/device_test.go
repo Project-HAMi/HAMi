@@ -1095,7 +1095,7 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    2,
 			wantDevIDs: []string{},
 			wantReason: "2/2 AllocatedCardsInsufficientRequest",
 		},

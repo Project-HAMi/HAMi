@@ -506,6 +506,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
 		},
 		{
 			name: "fit fail: core not enough",
@@ -533,6 +534,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
 		},
 		{
 			name: "fit fail: type mismatch",
@@ -560,6 +562,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
 		},
 		{
 			name: "mutex policy rejects used device",
@@ -589,6 +592,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
 		{
 			name: "fit fail: CardNotHealth",
