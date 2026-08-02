@@ -551,11 +551,9 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 	return nil
 }
 
-// NewClusterManager first creates a Prometheus-ignorant ClusterManager
-// instance. Then, it creates a ClusterManagerCollector for the just created
-// ClusterManager. Finally, it registers the ClusterManagerCollector with a
-// wrapping Registerer that adds the zone as a label. In this way, the metrics
-// collected by different ClusterManagerCollectors do not collide.
+// NewClusterManager creates a ClusterManager for the given zone, backs its pod
+// lookups with a shared informer, and registers its collector with reg through
+// a wrapping Registerer that adds the zone as a label.
 func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
