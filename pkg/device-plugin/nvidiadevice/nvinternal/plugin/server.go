@@ -314,15 +314,17 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 				outStr := stdout.Bytes()
 				if err := yaml.Unmarshal(outStr, &plugin.migCurrent); err != nil {
 					klog.Errorf("failed to unmarshal mig config: %v", err)
-				}
-				writeMigConfig(outStr)
-
-				HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-				if err != nil {
-					klog.Infof("no device in node: %v", err)
+					klog.Warning("Falling back to non-MIG configuration")
 				} else {
-					plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-					migApplied = true
+					writeMigConfig(outStr)
+
+					HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
+					if err != nil {
+						klog.Infof("no device in node: %v", err)
+					} else {
+						plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
+						migApplied = true
+					}
 				}
 			}
 		}
@@ -675,18 +677,27 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					response.Envs[util.CoreLimitSwitch] = "disable"
 				}
 				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
-				os.RemoveAll(cacheFileHostDirectory)
+				if err := os.RemoveAll(cacheFileHostDirectory); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, fmt.Errorf("failed to remove cache directory: %v", err)
+				}
 
 				if err := os.MkdirAll(cacheFileHostDirectory, 0777); err != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return &kubeletdevicepluginv1beta1.AllocateResponse{}, fmt.Errorf("failed to create cache directory: %v", err)
 				}
-				os.Chmod(cacheFileHostDirectory, 0777)
+				if err := os.Chmod(cacheFileHostDirectory, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, fmt.Errorf("failed to chmod cache directory: %v", err)
+				}
 				if err := os.MkdirAll("/tmp/vgpulock", 0777); err != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return &kubeletdevicepluginv1beta1.AllocateResponse{}, fmt.Errorf("failed to create lock directory: %v", err)
 				}
-				os.Chmod("/tmp/vgpulock", 0777)
+				if err := os.Chmod("/tmp/vgpulock", 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return &kubeletdevicepluginv1beta1.AllocateResponse{}, fmt.Errorf("failed to chmod lock directory: %v", err)
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
