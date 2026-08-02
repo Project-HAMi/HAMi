@@ -192,10 +192,6 @@ func (s *Scheduler) onDelPod(obj any) {
 		return
 	}
 
-	_, ok = pod.Annotations[util.AssignedNodeAnnotations]
-	if !ok {
-		return
-	}
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
@@ -897,11 +893,10 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		util.BindTimeAnnotations: strconv.FormatInt(time.Now().Unix(), 10),
 	}
 	var allocation *policy.NodeScore
-	var reservationID uint64
 	var previousAllocation *device.PodInfo
 	if countDeviceRequests(resourceReqs) > 0 {
 		if existing, ok := s.podManager.GetPod(current); ok {
-			previousAllocation = existing.DeepCopy()
+			previousAllocation = existing
 		}
 		nodeNames := []string{args.Node}
 		ignoredPodUID := current.UID
@@ -930,9 +925,9 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 		var reserved bool
 		if previousAllocation == nil {
-			reservationID, reserved = s.podManager.ReservePodIfAbsent(current, allocation.NodeID, allocation.Devices)
+			reserved = s.podManager.ReservePodIfAbsent(current, allocation.NodeID, allocation.Devices)
 		} else {
-			reservationID, reserved = s.podManager.ReplacePodReservation(current, previousAllocation, allocation.NodeID, allocation.Devices)
+			reserved = s.podManager.ReplacePodReservation(current, previousAllocation, allocation.NodeID, allocation.Devices)
 		}
 		if !reserved {
 			return fail(fmt.Errorf("pod allocation already exists for UID %s", current.UID))
@@ -942,21 +937,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		}
 		s.quotaManager.AddUsage(current, allocation.Devices)
 	}
-	rollbackAllocation := func() {
-		if allocation == nil {
-			return
-		}
-		reservation, rolledBack := s.podManager.RollbackPodReservationTo(current, reservationID, previousAllocation)
-		if rolledBack {
-			s.quotaManager.RmUsage(current, reservation.Devices)
-			if previousAllocation != nil {
-				s.quotaManager.AddUsage(current, previousAllocation.Devices)
-			}
-		}
-	}
 	if err = util.PatchPodAnnotations(current, annotations); err != nil {
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
-		rollbackAllocation()
+		// A patch error is ambiguous: the API server may have persisted the
+		// allocation before the response was lost. Keep the reservation until an
+		// informer update confirms it or the next scheduling attempt replaces it.
 		return fail(err)
 	}
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {

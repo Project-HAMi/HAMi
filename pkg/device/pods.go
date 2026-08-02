@@ -40,16 +40,15 @@ type PodUseDeviceStat struct {
 }
 
 type PodManager struct {
-	pods              map[k8stypes.UID]*PodInfo
-	reservations      map[k8stypes.UID]uint64
-	nextReservationID uint64
-	mutex             sync.RWMutex
+	pods         map[k8stypes.UID]*PodInfo
+	reservations map[k8stypes.UID]struct{}
+	mutex        sync.RWMutex
 }
 
 func NewPodManager() *PodManager {
 	pm := &PodManager{
 		pods:         make(map[k8stypes.UID]*PodInfo),
-		reservations: make(map[k8stypes.UID]uint64),
+		reservations: make(map[k8stypes.UID]struct{}),
 	}
 	klog.InfoS("Pod manager initialized", "podCount", len(pm.pods))
 	return pm
@@ -72,10 +71,10 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"nodeID", nodeID,
 			"devices", devices,
 		)
-	} else if m.reservations[pod.UID] != 0 {
+	} else if _, reserved := m.reservations[pod.UID]; reserved {
 		if pi.NodeID == nodeID && reservationMatchesInformerDevices(pi.Devices, devices) {
-			// The informer observed the allocation written by Bind. Transfer
-			// ownership so a late Bind rollback cannot delete persisted state.
+			// The informer observed the allocation written by Bind. Clear the
+			// reservation marker so later informer updates reconcile normally.
 			pi.Pod = pod
 			delete(m.reservations, pod.UID)
 			klog.V(5).InfoS("Pod reservation observed by informer",
@@ -119,79 +118,45 @@ func reservationMatchesInformerDevices(reserved, observed PodDevices) bool {
 
 // ReservePodIfAbsent records a bind-owned allocation without replacing an
 // allocation installed concurrently by an informer or another binding attempt.
-func (m *PodManager) ReservePodIfAbsent(pod *corev1.Pod, nodeID string, devices PodDevices) (uint64, bool) {
+func (m *PodManager) ReservePodIfAbsent(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if _, exists := m.pods[pod.UID]; exists {
-		return 0, false
+		return false
 	}
-	reservationID := m.nextReservationIDLocked()
 	m.pods[pod.UID] = &PodInfo{
 		Pod:     pod,
 		NodeID:  nodeID,
 		Devices: devices,
 	}
-	m.reservations[pod.UID] = reservationID
+	m.reservations[pod.UID] = struct{}{}
 	klog.InfoS("Pod allocation reserved",
 		"pod", klog.KRef(pod.Namespace, pod.Name),
 		"nodeID", nodeID,
 		"devices", devices,
 	)
-	return reservationID, true
+	return true
 }
 
 // ReplacePodReservation atomically replaces the expected allocation with a
 // bind-owned reservation.
-func (m *PodManager) ReplacePodReservation(pod *corev1.Pod, expected *PodInfo, nodeID string, devices PodDevices) (uint64, bool) {
+func (m *PodManager) ReplacePodReservation(pod *corev1.Pod, expected *PodInfo, nodeID string, devices PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	current, exists := m.pods[pod.UID]
-	if !exists || expected == nil || current.NodeID != expected.NodeID || !reflect.DeepEqual(current.Devices, expected.Devices) {
-		return 0, false
+	if !exists || expected == nil || current.NodeID != expected.NodeID ||
+		!reservationMatchesInformerDevices(expected.Devices, current.Devices) {
+		klog.V(5).InfoS("Pod reservation replacement rejected",
+			"pod", klog.KRef(pod.Namespace, pod.Name),
+			"exists", exists,
+		)
+		return false
 	}
-	reservationID := m.nextReservationIDLocked()
 	m.pods[pod.UID] = &PodInfo{Pod: pod, NodeID: nodeID, Devices: devices}
-	m.reservations[pod.UID] = reservationID
-	return reservationID, true
-}
-
-func (m *PodManager) nextReservationIDLocked() uint64 {
-	if m.reservations == nil {
-		m.reservations = make(map[k8stypes.UID]uint64)
-	}
-	m.nextReservationID++
-	if m.nextReservationID == 0 {
-		m.nextReservationID++
-	}
-	return m.nextReservationID
-}
-
-// RollbackPodReservation removes an allocation only while the calling Bind
-// attempt still owns the matching reservation.
-func (m *PodManager) RollbackPodReservation(pod *corev1.Pod, reservationID uint64) (*PodInfo, bool) {
-	return m.RollbackPodReservationTo(pod, reservationID, nil)
-}
-
-// RollbackPodReservationTo restores a previous allocation only while the
-// caller still owns the matching reservation.
-func (m *PodManager) RollbackPodReservationTo(pod *corev1.Pod, reservationID uint64, previous *PodInfo) (*PodInfo, bool) {
-	m.mutex.Lock()
-	defer m.mutex.Unlock()
-
-	pi, exists := m.pods[pod.UID]
-	if !exists || reservationID == 0 || m.reservations[pod.UID] != reservationID {
-		return nil, false
-	}
-	if previous == nil {
-		delete(m.pods, pod.UID)
-		delete(m.reservations, pod.UID)
-	} else {
-		m.pods[pod.UID] = previous.DeepCopy()
-		m.reservations[pod.UID] = m.nextReservationIDLocked()
-	}
-	return pi, true
+	m.reservations[pod.UID] = struct{}{}
+	return true
 }
 
 func (m *PodManager) UpdatePod(pod *corev1.Pod) {
@@ -231,7 +196,10 @@ func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	defer m.mutex.RUnlock()
 
 	pi, ok := m.pods[pod.UID]
-	return pi, ok
+	if !ok {
+		return nil, false
+	}
+	return pi.DeepCopy(), true
 }
 
 func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {

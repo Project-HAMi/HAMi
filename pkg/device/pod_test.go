@@ -229,6 +229,44 @@ func TestGetPod(t *testing.T) {
 	}
 }
 
+func TestGetPodReturnsConcurrentSnapshot(t *testing.T) {
+	manager := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
+	first := PodDevices{"device": {{{UUID: "device-0"}}}}
+	second := PodDevices{"device": {{{UUID: "device-1"}}}}
+	manager.AddPod(pod, "node-a", first)
+	snapshot, ok := manager.GetPod(pod)
+	assert.Equal(t, true, ok)
+	snapshot.NodeID = "mutated-node"
+	snapshot.Devices["device"][0][0].UUID = "mutated-device"
+	stored, ok := manager.GetPod(pod)
+	assert.Equal(t, true, ok)
+	assert.Equal(t, "node-a", stored.NodeID)
+	assert.Equal(t, "device-0", stored.Devices["device"][0][0].UUID)
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		for range 10000 {
+			if allocation, ok := manager.GetPod(pod); ok {
+				_ = allocation.DeepCopy()
+			}
+		}
+	}()
+	go func() {
+		defer wg.Done()
+		for i := range 10000 {
+			if i%2 == 0 {
+				manager.AddPod(pod, "node-a", first)
+			} else {
+				manager.AddPod(pod, "node-a", second)
+			}
+		}
+	}()
+	wg.Wait()
+}
+
 func TestAddPod(t *testing.T) {
 	podManager := NewPodManager()
 	podManager.pods["uid1"] = &PodInfo{
@@ -305,20 +343,17 @@ func TestPodReservationOwnership(t *testing.T) {
 	first := PodDevices{"device": {{{UUID: "device-0"}}}}
 	second := PodDevices{"device": {{{UUID: "device-1"}}}}
 
-	reservationID, reserved := manager.ReservePodIfAbsent(pod, "node-a", first)
+	reserved := manager.ReservePodIfAbsent(pod, "node-a", first)
 	assert.Equal(t, true, reserved)
-	_, reserved = manager.ReservePodIfAbsent(pod, "node-b", second)
+	reserved = manager.ReservePodIfAbsent(pod, "node-b", second)
 	assert.Equal(t, false, reserved)
 	assert.Equal(t, false, manager.AddPod(pod.DeepCopy(), "node-b", second))
 	allocation, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, "node-a", allocation.NodeID)
 	assert.Equal(t, first, allocation.Devices)
-	rolledBack, ok := manager.RollbackPodReservation(pod, reservationID)
-	assert.Equal(t, true, ok)
-	assert.Equal(t, first, rolledBack.Devices)
-	_, ok = manager.GetPod(pod)
-	assert.Equal(t, false, ok)
+	_, owned := manager.reservations[pod.UID]
+	assert.Equal(t, true, owned)
 }
 
 func TestInformerObservationTransfersPodReservationOwnership(t *testing.T) {
@@ -326,13 +361,13 @@ func TestInformerObservationTransfersPodReservationOwnership(t *testing.T) {
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
 	devices := PodDevices{"device": {{{UUID: "device-0"}}}}
 
-	reservationID, reserved := manager.ReservePodIfAbsent(pod, "node-a", devices)
+	reserved := manager.ReservePodIfAbsent(pod, "node-a", devices)
 	assert.Equal(t, true, reserved)
 	observed := pod.DeepCopy()
 	observed.ResourceVersion = "2"
 	assert.Equal(t, false, manager.AddPod(observed, "node-a", devices.DeepCopy()))
-	_, rolledBack := manager.RollbackPodReservation(pod, reservationID)
-	assert.Equal(t, false, rolledBack)
+	_, owned := manager.reservations[pod.UID]
+	assert.Equal(t, false, owned)
 	allocation, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, observed, allocation.Pod)
@@ -348,36 +383,34 @@ func TestEncodedInformerObservationTransfersPodReservationOwnership(t *testing.T
 	assert.NoError(t, err)
 	assert.NotEqual(t, devices, observed)
 
-	reservationID, reserved := manager.ReservePodIfAbsent(pod, "node-a", devices)
+	reserved := manager.ReservePodIfAbsent(pod, "node-a", devices)
 	assert.Equal(t, true, reserved)
 	assert.Equal(t, false, manager.AddPod(pod.DeepCopy(), "node-a", observed))
-	_, rolledBack := manager.RollbackPodReservation(pod, reservationID)
-	assert.Equal(t, false, rolledBack)
+	_, owned := manager.reservations[pod.UID]
+	assert.Equal(t, false, owned)
 	allocation, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, devices, allocation.Devices)
 }
 
-func TestStaleRollbackDoesNotDeleteReplacementReservation(t *testing.T) {
+func TestTakeAndDeleteClearsReservationOwnership(t *testing.T) {
 	manager := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
 	first := PodDevices{"device": {{{UUID: "device-0"}}}}
 	second := PodDevices{"device": {{{UUID: "device-1"}}}}
 
-	staleID, reserved := manager.ReservePodIfAbsent(pod, "node-a", first)
+	reserved := manager.ReservePodIfAbsent(pod, "node-a", first)
 	assert.Equal(t, true, reserved)
 	_, removed := manager.TakeAndDeletePod(pod)
 	assert.Equal(t, true, removed)
-	replacementID, reserved := manager.ReservePodIfAbsent(pod, "node-b", second)
+	_, owned := manager.reservations[pod.UID]
+	assert.Equal(t, false, owned)
+	reserved = manager.ReservePodIfAbsent(pod, "node-b", second)
 	assert.Equal(t, true, reserved)
-	_, rolledBack := manager.RollbackPodReservation(pod, staleID)
-	assert.Equal(t, false, rolledBack)
 	allocation, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
 	assert.Equal(t, "node-b", allocation.NodeID)
 	assert.Equal(t, second, allocation.Devices)
-	_, rolledBack = manager.RollbackPodReservation(pod, replacementID)
-	assert.Equal(t, true, rolledBack)
 }
 
 func TestStaleInformerUpdateDoesNotOverwritePodReservation(t *testing.T) {
@@ -386,7 +419,7 @@ func TestStaleInformerUpdateDoesNotOverwritePodReservation(t *testing.T) {
 	reservedDevices := PodDevices{"device": {{{UUID: "device-new"}}}}
 	staleDevices := PodDevices{"device": {{{UUID: "device-old"}}}}
 
-	_, reserved := manager.ReservePodIfAbsent(pod, "node-new", reservedDevices)
+	reserved := manager.ReservePodIfAbsent(pod, "node-new", reservedDevices)
 	assert.Equal(t, true, reserved)
 	assert.Equal(t, false, manager.AddPod(pod.DeepCopy(), "node-old", staleDevices))
 
@@ -402,7 +435,7 @@ func TestStaleInformerUpdateDoesNotOverwritePodReservation(t *testing.T) {
 	assert.Equal(t, reservedDevices, allocation.Devices)
 }
 
-func TestReplacementReservationRollbackRestoresPreviousAllocation(t *testing.T) {
+func TestReplacementReservationRetainsOwnershipUntilObserved(t *testing.T) {
 	manager := NewPodManager()
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
 	previousDevices := PodDevices{"device": {{{UUID: "device-old"}}}}
@@ -410,24 +443,39 @@ func TestReplacementReservationRollbackRestoresPreviousAllocation(t *testing.T) 
 	manager.AddPod(pod, "node-old", previousDevices)
 	previous, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
-	previous = previous.DeepCopy()
-
-	reservationID, replaced := manager.ReplacePodReservation(pod, previous, "node-new", replacementDevices)
+	replaced := manager.ReplacePodReservation(pod, previous, "node-new", replacementDevices)
 	assert.Equal(t, true, replaced)
 	assert.Equal(t, false, manager.AddPod(pod.DeepCopy(), "node-old", previousDevices.DeepCopy()))
-	replacement, ok := manager.RollbackPodReservationTo(pod, reservationID, previous)
-	assert.Equal(t, true, ok)
-	assert.Equal(t, replacementDevices, replacement.Devices)
-
 	allocation, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
-	assert.Equal(t, "node-old", allocation.NodeID)
-	assert.Equal(t, previousDevices, allocation.Devices)
+	assert.Equal(t, "node-new", allocation.NodeID)
+	assert.Equal(t, replacementDevices, allocation.Devices)
 	assert.Equal(t, false, manager.AddPod(pod.DeepCopy(), "node-new", replacementDevices.DeepCopy()))
-	allocation, ok = manager.GetPod(pod)
+	_, owned := manager.reservations[pod.UID]
+	assert.Equal(t, false, owned)
+}
+
+func TestReplacePodReservationMatchesDecodedInformerDevices(t *testing.T) {
+	manager := NewPodManager()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "pod-uid", Namespace: "default", Name: "pod"}}
+	previousDevices := PodDevices{"device": {{{UUID: "device-old", Type: "device", Usedmem: 1, Usedcores: 1}}}}
+	replacementDevices := PodDevices{"device": {{{UUID: "device-new", Type: "device", Usedmem: 1, Usedcores: 1}}}}
+	manager.AddPod(pod, "node-old", previousDevices)
+	expected, ok := manager.GetPod(pod)
 	assert.Equal(t, true, ok)
-	assert.Equal(t, "node-old", allocation.NodeID)
-	assert.Equal(t, previousDevices, allocation.Devices)
+
+	annotations := EncodePodDevices(map[string]string{"device": "hami.io/device-allocated"}, previousDevices)
+	observed, err := DecodePodDevices(map[string]string{"device": "hami.io/device-allocated"}, annotations)
+	assert.NoError(t, err)
+	assert.NotEqual(t, previousDevices, observed)
+	manager.AddPod(pod.DeepCopy(), "node-old", observed)
+
+	replaced := manager.ReplacePodReservation(pod, expected, "node-new", replacementDevices)
+	assert.Equal(t, true, replaced)
+	allocation, ok := manager.GetPod(pod)
+	assert.Equal(t, true, ok)
+	assert.Equal(t, "node-new", allocation.NodeID)
+	assert.Equal(t, replacementDevices, allocation.Devices)
 }
 
 func TestUpdatePod(t *testing.T) {
