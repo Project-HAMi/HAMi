@@ -97,9 +97,15 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 		if count.Value() <= 0 {
 			return false, fmt.Errorf("%s must be greater than 0", MthreadsResourceCount)
 		}
+		if ctr.Resources.Limits == nil {
+			ctr.Resources.Limits = corev1.ResourceList{}
+		}
 		if count.Value() > 1 {
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*int64(coresPerMthreadsGPU), resource.DecimalSI)
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
+			if p.Annotations == nil {
+				p.Annotations = make(map[string]string)
+			}
 			p.Annotations["mthreads.com/request-gpu-num"] = fmt.Sprint(count.Value())
 			return ok, nil
 		}
