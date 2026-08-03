@@ -261,6 +261,9 @@ func (dev *AWSNeuronDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 
+	if n.CustomInfo == nil {
+		n.CustomInfo = make(map[string]any)
+	}
 	num, ok := n.CustomInfo[AWSUsageInfo]
 	if !ok || num == nil {
 		n.CustomInfo[AWSUsageInfo] = 0
@@ -393,6 +396,9 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	}
 	for i, v := range slices.Backward(devices) {
 		dev := v
+		if dev.CustomInfo == nil {
+			dev.CustomInfo = make(map[string]any)
+		}
 		_, ok := dev.CustomInfo[AWSUsageInfo]
 		if !ok {
 			dev.CustomInfo[AWSUsageInfo] = int(dev.Usedcores)

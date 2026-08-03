@@ -402,6 +402,46 @@ func Test_GenerateResourceRequests(t *testing.T) {
 	}
 }
 
+func TestAddResourceUsageInitializesNilCustomInfo(t *testing.T) {
+	dev := &AWSNeuronDevices{}
+	usage := &device.DeviceUsage{}
+	container := &device.ContainerDevice{
+		CustomInfo: map[string]any{AWSUsageInfo: 1},
+	}
+
+	assert.NilError(t, dev.AddResourceUsage(&corev1.Pod{}, usage, container))
+	assert.Equal(t, usage.CustomInfo[AWSUsageInfo], 1)
+}
+
+func TestFitInitializesNilCustomInfo(t *testing.T) {
+	dev := InitAWSNeuronDevice(AWSNeuronConfig{})
+	usage := &device.DeviceUsage{
+		ID:        "dev-0",
+		Count:     2,
+		Totalcore: 3,
+		Usedcores: 1,
+		Type:      AWSNeuronDevice,
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:     1,
+		Type:     AWSNeuronDevice,
+		Coresreq: 1,
+	}
+
+	fit, allocations, reason := dev.Fit(
+		[]*device.DeviceUsage{usage},
+		request,
+		&corev1.Pod{},
+		nil,
+		nil,
+	)
+
+	assert.Assert(t, fit)
+	assert.Equal(t, reason, "")
+	assert.Equal(t, usage.CustomInfo[AWSUsageInfo], 1)
+	assert.Equal(t, len(allocations[AWSNeuronDevice]), 1)
+}
+
 func Test_countMaskAvailable(t *testing.T) {
 	tests := []struct {
 		name string
