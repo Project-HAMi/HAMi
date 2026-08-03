@@ -463,3 +463,62 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.Equal(t, len(l.containers), 0)
 	})
 }
+
+// Test_ListContainers_snapshot verifies ListContainers returns a copy that is
+// safe to iterate while Update() concurrently mutates the internal map.
+func Test_ListContainers_snapshot(t *testing.T) {
+	l := &ContainerLister{
+		containers: map[string]*ContainerUsage{
+			"a_ctr": {PodUID: "a", ContainerName: "ctr"},
+		},
+	}
+	snapshot := l.ListContainers()
+	assert.Equal(t, len(snapshot), 1)
+
+	// Mutating the internal map must not affect the snapshot.
+	l.mutex.Lock()
+	delete(l.containers, "a_ctr")
+	l.containers["b_ctr"] = &ContainerUsage{PodUID: "b", ContainerName: "ctr"}
+	l.mutex.Unlock()
+
+	_, ok := snapshot["a_ctr"]
+	assert.Equal(t, ok, true)
+	_, ok = snapshot["b_ctr"]
+	assert.Equal(t, ok, false)
+}
+
+// Test_ListContainers_concurrentUpdate drives ListContainers and Update
+// concurrently; under -race this fails on the previous implementation, which
+// returned the internal map without holding the lock.
+func Test_ListContainers_concurrentUpdate(t *testing.T) {
+	dir := t.TempDir()
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uidr"}}
+	entryName := "uidr_ctr"
+	ctrDir := filepath.Join(dir, entryName)
+	assert.NilError(t, os.Mkdir(ctrDir, 0755))
+	writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+
+	l := &ContainerLister{
+		containerPath: dir,
+		containers:    map[string]*ContainerUsage{},
+		podLister:     newTestPodLister(pod),
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for range 100 {
+			for _, c := range l.ListContainers() {
+				_ = c.PodUID
+			}
+		}
+	}()
+	for range 100 {
+		assert.NilError(t, l.Update())
+	}
+	<-done
+
+	for _, c := range l.ListContainers() {
+		_ = syscall.Munmap(c.data)
+	}
+}
