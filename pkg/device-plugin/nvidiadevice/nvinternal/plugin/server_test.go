@@ -1038,6 +1038,8 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 func TestAllocateReleasesNodeLockWhenNonMIGAllocateResponseFails(t *testing.T) {
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"cdi-annotations"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	expectedNodeName := "node-a"
+	t.Setenv(util.NodeNameEnvName, expectedNodeName)
 
 	plugin := &NvidiaDevicePlugin{
 		config: &nvidia.DeviceConfig{
@@ -1092,6 +1094,7 @@ func TestAllocateReleasesNodeLockWhenNonMIGAllocateResponseFails(t *testing.T) {
 	previousPodAllocationFailed := podAllocationFailed
 	podAllocationFailed = func(nodeName string, failedPod *corev1.Pod, lockName string) {
 		failedCalled = true
+		require.Equal(t, expectedNodeName, nodeName)
 		require.Equal(t, pod, failedPod)
 		require.Equal(t, NodeLockNvidia, lockName)
 	}
