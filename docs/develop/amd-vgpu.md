@@ -60,7 +60,7 @@ Registered under `hami.io/node-amd-register`, in JSON format — an array of `De
     "count": 1,
     "devmem": 196608,
     "devcore": 304,
-    "type": "AMDGPU",
+    "type": "AMD Instinct MI300X VF",
     "numa": 0,
     "mode": "hami-core",
     "health": true
@@ -78,11 +78,11 @@ Registered under `hami.io/node-amd-register`, in JSON format — an array of `De
 The scheduler allocation result is written under the **AMD-specific** keys:
 
 ```text
-hami.io/amd-devices-to-allocate: <UUID>,AMDGPU,<memMiB>,<cuCount>:;
-hami.io/amd-devices-allocated:   <UUID>,AMDGPU,<memMiB>,<cuCount>:;
+hami.io/amd-devices-to-allocate: <UUID>,<type>,<memMiB>,<cuCount>:;
+hami.io/amd-devices-allocated:   <UUID>,<type>,<memMiB>,<cuCount>:;
 ```
 
-The type field uses the existing `AMDGPU` constant (see `pkg/device/amd/device.go`).
+The type field uses device product name.
 
 During `Allocate`, the device-plugin reads `hami.io/amd-devices-allocated`
 from the pod annotations, converts each device's `cuCount` into a

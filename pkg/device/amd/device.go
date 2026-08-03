@@ -41,8 +41,8 @@ type AMDDevices struct {
 }
 
 const (
-	AMDDevice          = "amd"
-	AMDCommonWord      = "amd"
+	AMDDevice          = "AMDGPU"
+	AMDCommonWord      = "AMDGPU"
 	AMDDeviceSelection = "amd.com/gpu-index"
 	AMDInUse           = "amd.com/use-gputype"
 	AMDNoUse           = "amd.com/nouse-gputype"
