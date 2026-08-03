@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
@@ -251,6 +252,11 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				memnums, ok := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
+					if memnums < 0 || memnums > int64(math.MaxInt32)/256 {
+						klog.ErrorS(nil, "cambricon memory request exceeds int32 range; rejecting to avoid silent under-allocation",
+							"container", ctr.Name)
+						return device.ContainerDeviceRequest{}
+					}
 					memnum = int(memnums) * 256
 				}
 			}
