@@ -62,10 +62,17 @@ type sharedRegionT struct {
 	majorVersion    int32
 	minorVersion    int32
 	smInitFlag      int32
-	ownerPid        uint32
-	sem             semT
-	num             uint64
-	uuids           [16]uuid
+	// ownerPid mirrors libvgpu's `_Atomic size_t owner_pid`, which is 8
+	// bytes on the 64-bit Linux ABI this cache format targets. It was
+	// previously typed uint32 (4 bytes); every field after it still lined
+	// up with the C layout only because Go's own 8-byte alignment padding
+	// ahead of `num` happened to absorb the missing 4 bytes. Typing it
+	// uint64 makes the two layouts match for the actual reason instead of
+	// by accident. See TestSharedRegionTLayoutMatchesCABI.
+	ownerPid uint64
+	sem      semT
+	num      uint64
+	uuids    [16]uuid
 
 	limit   [16]uint64
 	smLimit [16]uint64
@@ -173,6 +180,12 @@ func CastSpec(data []byte) Spec {
 	return Spec{
 		sr: (*sharedRegionT)(unsafe.Pointer(&data[0])),
 	}
+}
+
+// MinSize returns the minimum byte length data must have for CastSpec to be
+// memory-safe.
+func MinSize() int {
+	return int(unsafe.Sizeof(sharedRegionT{}))
 }
 
 //	func (s *SharedRegionT) UsedMemory(idx int) (uint64, error) {

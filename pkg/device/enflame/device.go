@@ -255,7 +255,7 @@ func (dev *EnflameDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 				continue
 			}
 			chosen := ctrDevices[0]
-			slice := int32(readCustomInfoInt(chosen.CustomInfo, "drsSlice"))
+			slice := clampToInt32(readCustomInfoInt(chosen.CustomInfo, "drsSlice"))
 			if slice <= 0 {
 				slice = 1
 			}
@@ -369,11 +369,11 @@ func (dev *EnflameDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 }
 
 func (dev *EnflameDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	slice := int32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
+	slice := clampToInt32(readCustomInfoInt(ctr.CustomInfo, "drsSlice"))
 	if slice <= 0 {
 		slice = 1
 	}
-	n.Used += slice
+	n.Used = clampToInt32(int(n.Used) + int(slice))
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
@@ -391,20 +391,20 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	requiredSlice := int32(profile.Size)
-	if requiredSlice <= 0 {
+	if profile.Size <= 0 || profile.Size > math.MaxInt32 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.MemoryGB <= 0 || profile.MemoryGB > math.MaxInt32/1024 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.CorePercent > math.MaxInt32 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
-	if profileMemoryMiB <= 0 {
-		reason[common.ModeNotFit]++
-		return false, tmpDevs, common.GenReason(reason, len(devices))
-	}
 	profileCorePercent := int32(profile.CorePercent)
-	if profileCorePercent <= 0 {
-		profileCorePercent = 1
-	}
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -639,22 +639,35 @@ func normalizeMemoryRequestToGB(rawMemory int32, maxProfileMemoryGB int) int {
 func parseDRSCapacity(raw any) (int32, error) {
 	switch typed := raw.(type) {
 	case float64:
+		if math.IsNaN(typed) || typed > math.MaxInt32 || typed < math.MinInt32 {
+			return 0, fmt.Errorf("invalid capacity value: %v", typed)
+		}
 		return int32(typed), nil
 	case int:
-		return int32(typed), nil
+		return clampToInt32(typed), nil
 	case int32:
 		return typed, nil
 	case int64:
-		return int32(typed), nil
+		return clampToInt32(int(typed)), nil
 	case string:
 		capacity, err := strconv.Atoi(strings.TrimSpace(typed))
 		if err != nil {
 			return 0, err
 		}
-		return int32(capacity), nil
+		return clampToInt32(capacity), nil
 	default:
 		return 0, fmt.Errorf("unknown capacity type: %T", raw)
 	}
+}
+
+func clampToInt32(v int) int32 {
+	if v > math.MaxInt32 {
+		return math.MaxInt32
+	}
+	if v < math.MinInt32 {
+		return math.MinInt32
+	}
+	return int32(v)
 }
 
 func containerNameByIndex(pod *corev1.Pod, index int) string {
@@ -712,6 +725,9 @@ func readCustomInfoInt(customInfo map[string]any, key string) int {
 	case int64:
 		return int(typed)
 	case float64:
+		if math.IsNaN(typed) || typed > math.MaxInt32 || typed < math.MinInt32 {
+			return 0
+		}
 		return int(typed)
 	case string:
 		v, err := strconv.Atoi(strings.TrimSpace(typed))

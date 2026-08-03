@@ -139,7 +139,7 @@ func start() error {
 	defer sher.Stop()
 
 	// start monitor metrics
-	go initMetrics(config.MetricsBindAddress, legacyMetrics)
+	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
 
 	// start http server
 	router := httprouter.New()
