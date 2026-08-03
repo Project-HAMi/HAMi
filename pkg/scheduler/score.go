@@ -211,11 +211,6 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 		if i >= numInitContainers {
 			break
 		}
-		for typ := range baseTypes {
-			for len(initAllocs[typ]) < i {
-				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
-			}
-		}
 		if len(req) == 0 {
 			for typ := range baseTypes {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
@@ -244,11 +239,6 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
 			continue
-		}
-		for typ := range baseTypes {
-			for len(score.Devices[typ]) < appIndex {
-				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
-			}
 		}
 		sums := 0
 		for _, k := range n {
