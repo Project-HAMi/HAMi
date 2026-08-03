@@ -90,6 +90,25 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
+// padDeviceAllocations ensures that for every device type discovered so far,
+// devices has exactly one entry per container, indexed by container order.
+// fitInDevices appends the current container's allocation to each requested
+// type, so when earlier containers did not request a type, its entry lands at
+// the wrong index; those entries are shifted right by the missing leading empty
+// slots. Types not requested by the current container only need a trailing
+// empty slot.
+func padDeviceAllocations(devices device.PodDevices, ctrid int, requestedTypes map[string]bool) {
+	for idx := range devices {
+		for len(devices[idx]) <= ctrid {
+			if requestedTypes[idx] {
+				devices[idx] = append(device.PodSingleDevice{device.ContainerDevices{}}, devices[idx]...)
+			} else {
+				devices[idx] = append(devices[idx], device.ContainerDevices{})
+			}
+		}
+	}
+}
+
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
 }
@@ -135,7 +154,6 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 			// Assume the node is a fit by default. This handles pods with no device
 			// requests, which should be schedulable on any node.
 			ctrfit := true
-			deviceType := ""
 			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
@@ -143,23 +161,21 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 					sums += int(k.Nums)
 				}
 
-				// container need no device and we have got certain deviceType
-				if sums == 0 && deviceType != "" {
-					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
+				// container need no device, fill missing empty allocation for all device types
+				if sums == 0 {
+					for idx := range score.Devices {
+						score.Devices[idx] = append(score.Devices[idx], device.ContainerDevices{})
+					}
 					continue
+				}
+				requestedTypes := make(map[string]bool, len(n))
+				for _, k := range n {
+					requestedTypes[k.Type] = true
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
 				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
-				// found certain deviceType, fill missing empty allocation for containers before this
-				for idx := range score.Devices {
-					deviceType = idx
-					for len(score.Devices[idx]) <= ctrid {
-						emptyContainerDevices := device.ContainerDevices{}
-						emptyPodSingleDevice := device.PodSingleDevice{}
-						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
-						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
-					}
-				}
+				// fill missing empty allocation for containers before this
+				padDeviceAllocations(score.Devices, ctrid, requestedTypes)
 				ctrfit = fit
 				if !fit {
 					klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
