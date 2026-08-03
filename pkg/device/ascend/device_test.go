@@ -318,7 +318,7 @@ func Test_PatchAnnotations(t *testing.T) {
 				device.InRequestDevices[dev.config.CommonWord]: "device-0,Ascend,8738,1:;",
 				device.SupportDevices[dev.config.CommonWord]:   "device-0,Ascend,8738,1:;",
 				"predicate-time":        strconv.FormatInt(time.Now().Unix(), 10),
-				"huawei.com/Ascend910A": "[{\"UUID\":\"device-0\",\"temp\":\"vir08\"}]",
+				"huawei.com/Ascend910A": "[{\"UUID\":\"device-0\",\"temp\":\"vir08\",\"memory\":8738,\"core\":1}]",
 			},
 		},
 		{
@@ -399,6 +399,62 @@ func Test_PatchAnnotations_VNPUCoreMode(t *testing.T) {
 			assert.Assert(t, !strings.Contains(val, "\"temp\""))
 		})
 	}
+}
+
+func Test_PatchAnnotations_ZeroCore(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:     "Ascend910A",
+			MemoryCapacity: int64(32768),
+			Templates: []Template{
+				{
+					Name:   "vir02",
+					Memory: int64(2184),
+					AICore: int32(2),
+				}, {
+					Name:   "vir04",
+					Memory: int64(4369),
+					AICore: int32(4),
+				}, {
+					Name:   "vir08",
+					Memory: int64(8738),
+					AICore: int32(8),
+				}, {
+					Name:   "vir16",
+					Memory: int64(17476),
+					AICore: int32(16),
+				},
+			},
+		},
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{},
+		},
+	}
+	pd := device.PodDevices{
+		"Ascend910A": device.PodSingleDevice{
+			[]device.ContainerDevice{
+				{
+					Idx:       0,
+					UUID:      "device-zero-core",
+					Type:      "Ascend",
+					Usedcores: 0,
+					Usedmem:   8738,
+				},
+			},
+		},
+	}
+
+	annoInput := make(map[string]string)
+	result := dev.PatchAnnotations(pod, &annoInput, pd)
+
+	val, ok := result["huawei.com/Ascend910A"]
+	assert.Assert(t, ok)
+	assert.Assert(t, strings.Contains(val, "\"memory\":8738"))
+	assert.Assert(t, strings.Contains(val, "\"temp\":\"vir08\""))
+	assert.Assert(t, !strings.Contains(val, "\"core\""))
 }
 
 func Test_checkType(t *testing.T) {
@@ -888,6 +944,31 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 			wantMem:       15360,
 			wantCore:      20,
 		},
+		{
+			name: "no vnpu-mode annotation: no postStart, memory trimmed",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Name: "test-container",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+						Requests: corev1.ResourceList{
+							"huawei.com/Ascend910B3":        resource.MustParse("1"),
+							"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+						},
+					},
+				},
+				pod: corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			},
+			wantPostStart: false,
+			wantMem:       32768, // no template configured -> MemoryAllocatable
+			wantCore:      0,
+		},
 	}
 
 	for _, test := range tests {
@@ -899,6 +980,7 @@ func Test_MutateAdmission_VNPUCoreMode(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
 					ResourceCoreName:   "huawei.com/Ascend910B3-core",
 					MemoryAllocatable:  32768,
+					MemoryCapacity:     32768,
 				},
 			}
 
@@ -1911,7 +1993,7 @@ func TestDevices_Fit(t *testing.T) {
 			nodeAnnotation: map[string]string{},
 		},
 		{
-			name: "fit fail: legacy pod on hami-core reserved node (ModeNotFit)",
+			name: "fit ok: annotation-less pod on hami-core node follows node",
 			devices: []*device.DeviceUsage{{
 				ID: "dev-0", Index: 0, Used: 0, Count: 100,
 				Usedmem: 0, Totalmem: 32768, Totalcore: 100, Usedcores: 0,
@@ -1921,10 +2003,10 @@ func TestDevices_Fit(t *testing.T) {
 				Nums: 1, Memreq: 8738, MemPercentagereq: 0, Coresreq: 0,
 			},
 			annos:          map[string]string{},
-			wantFit:        false,
-			wantLen:        0,
-			wantDevIDs:     []string{},
-			wantReason:     "1/1 ModeNotFit",
+			wantFit:        true,
+			wantLen:        1,
+			wantDevIDs:     []string{"dev-0"},
+			wantReason:     "",
 			nodeAnnotation: map[string]string{VNPUNodeSelectorAnnotation: "true"},
 		},
 		{
