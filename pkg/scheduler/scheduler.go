@@ -200,6 +200,20 @@ func (s *Scheduler) onDelPod(obj any) {
 	}
 }
 
+// onUpdateNode notifies registration when node labels or annotations change.
+// Status-only updates are ignored so Node heartbeats do not wake register().
+func (s *Scheduler) onUpdateNode(oldObj, newObj any) {
+	oldNode, ok1 := oldObj.(*corev1.Node)
+	newNode, ok2 := newObj.(*corev1.Node)
+	if !ok1 || !ok2 {
+		return
+	}
+	if maps.Equal(oldNode.Labels, newNode.Labels) && maps.Equal(oldNode.Annotations, newNode.Annotations) {
+		return
+	}
+	s.doNodeNotify()
+}
+
 // onDelNode handles node delete events. It removes any in-memory per-node
 // lock bookkeeping to avoid unbounded growth when nodes are removed by
 // autoscalers or administratively.
@@ -294,6 +308,7 @@ func (s *Scheduler) Start() error {
 	}
 	nodeEventHandlerRegistration, err := informerFactory.Core().V1().Nodes().Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
 		AddFunc:    func(_ any) { s.doNodeNotify() },
+		UpdateFunc: s.onUpdateNode,
 		DeleteFunc: s.onDelNode,
 	})
 	if err != nil {

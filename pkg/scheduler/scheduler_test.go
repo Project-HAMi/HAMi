@@ -987,6 +987,71 @@ func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	require.Equal(t, 0, nodelockutil.NodeLockCountForTest())
 }
 
+func TestSchedulerOnUpdateNode(t *testing.T) {
+	drainNotify := func(s *Scheduler) {
+		select {
+		case <-s.nodeNotify:
+		default:
+		}
+	}
+	expectNotify := func(t *testing.T, s *Scheduler) {
+		t.Helper()
+		select {
+		case <-s.nodeNotify:
+		case <-time.After(time.Second):
+			t.Fatal("expected node notification")
+		}
+	}
+	expectNoNotify := func(t *testing.T, s *Scheduler) {
+		t.Helper()
+		select {
+		case <-s.nodeNotify:
+			t.Fatal("unexpected node notification")
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
+
+	t.Run("annotation change notifies", func(t *testing.T) {
+		s := NewScheduler()
+		drainNotify(s)
+		oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Annotations: map[string]string{"a": "1"}}}
+		newNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Annotations: map[string]string{"a": "2"}}}
+		s.onUpdateNode(oldNode, newNode)
+		expectNotify(t, s)
+	})
+
+	t.Run("label change notifies", func(t *testing.T) {
+		s := NewScheduler()
+		drainNotify(s)
+		oldNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"l": "1"}}}
+		newNode := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "n1", Labels: map[string]string{"l": "2"}}}
+		s.onUpdateNode(oldNode, newNode)
+		expectNotify(t, s)
+	})
+
+	t.Run("status-only change does not notify", func(t *testing.T) {
+		s := NewScheduler()
+		drainNotify(s)
+		oldNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "n1", Annotations: map[string]string{"a": "1"}},
+			Status:     corev1.NodeStatus{Phase: corev1.NodePending},
+		}
+		newNode := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: "n1", Annotations: map[string]string{"a": "1"}},
+			Status:     corev1.NodeStatus{Phase: corev1.NodeRunning},
+		}
+		s.onUpdateNode(oldNode, newNode)
+		expectNoNotify(t, s)
+	})
+
+	t.Run("non-node objects do not notify", func(t *testing.T) {
+		s := NewScheduler()
+		drainNotify(s)
+		s.onUpdateNode(struct{}{}, struct{}{})
+		expectNoNotify(t, s)
+	})
+}
+
 func TestSchedulerOnDelNodeCleansLockFromTombstone(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
