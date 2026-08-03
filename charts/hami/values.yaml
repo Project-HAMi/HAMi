@@ -541,3 +541,20 @@ legacyMetrics: false
 
 prometheus:
   enabled: false
+
+# Device config overrides
+# If content is set under device-config.content, it will be used as the device-config.yaml
+# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
+# Example:
+# device-config:
+#   content: |
+#     nvidia:
+#       knownMigGeometries:
+#         - models: [ "RTX 6000 Ada" ]
+#           allowedGeometries:
+#             - - name: "1g.6gb"
+#                 core: 25
+#                 memory: 6144
+#                 count: 4
+device-config:
+  content: ""
