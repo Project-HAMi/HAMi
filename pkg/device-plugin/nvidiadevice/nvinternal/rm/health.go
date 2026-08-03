@@ -148,7 +148,7 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 			for _, d := range devices {
 				unhealthy <- d
 			}
-			continue
+			return fmt.Errorf("error waiting for event: %v", ret)
 		}
 
 		if e.EventType != nvml.EventTypeXidCriticalError {
