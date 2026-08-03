@@ -18,6 +18,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"flag"
 	"fmt"
 	"os"
@@ -259,7 +260,7 @@ func loadConfig(c *cli.Context, flags []cli.Flag) (*spec.Config, error) {
 	return config, nil
 }
 
-func start(c *cli.Context, o *options) error {
+func start(c *cli.Context, o *options) (resultErr error) {
 	util.NodeName = os.Getenv(util.NodeNameEnvName)
 	client.InitGlobalClient()
 
@@ -270,6 +271,23 @@ func start(c *cli.Context, o *options) error {
 		return fmt.Errorf("failed to create FS watcher for %s: %v", kubeletdevicepluginv1beta1.DevicePluginPath, err)
 	}
 	defer watcher.Close()
+
+	hostPIDBroker, err := startHostPIDBroker()
+	if err != nil {
+		return fmt.Errorf("failed to start host PID broker: %w", err)
+	}
+	var hostPIDBrokerDone <-chan struct{}
+	hostPIDBrokerFailureReported := false
+	if hostPIDBroker != nil {
+		hostPIDBrokerDone = hostPIDBroker.done
+		defer func() {
+			stopErr := hostPIDBroker.stop()
+			if !hostPIDBrokerFailureReported {
+				stopErr = errors.Join(stopErr, hostPIDBroker.serveErr)
+			}
+			resultErr = errors.Join(resultErr, stopErr)
+		}()
+	}
 
 	/*Loading config files*/
 	klog.Infof("Start working on node %s", util.NodeName)
@@ -304,6 +322,16 @@ restart:
 	// some messages, trigger a restart of the plugins, or exit the program.
 	for {
 		select {
+		case <-hostPIDBrokerDone:
+			hostPIDBrokerFailureReported = true
+			if hostPIDBroker.serveErr != nil {
+				resultErr = fmt.Errorf("host PID broker stopped: %w",
+					hostPIDBroker.serveErr)
+			} else {
+				resultErr = errors.New("host PID broker stopped unexpectedly")
+			}
+			goto exit
+
 		// If the restart timeout has expired, then restart the plugins
 		case <-restartTimeout:
 			goto restart
@@ -336,11 +364,11 @@ restart:
 		}
 	}
 exit:
-	err = stopPlugins(plugins)
-	if err != nil {
-		return fmt.Errorf("error stopping plugins: %v", err)
+	if err := stopPlugins(plugins); err != nil {
+		resultErr = errors.Join(resultErr,
+			fmt.Errorf("error stopping plugins: %v", err))
 	}
-	return nil
+	return resultErr
 }
 
 func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) {
