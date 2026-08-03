@@ -98,7 +98,6 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		klog.Errorln("nvml Init err: ", nvret)
 		panic(0)
 	}
-	// nvml.Shutdown must only be deferred once nvml.Init has actually
 	// succeeded: calling it after a failed Init crashes the process (the
 	// underlying NVML library was never loaded, so the shutdown symbol
 	// can't be resolved) instead of returning a normal error.
