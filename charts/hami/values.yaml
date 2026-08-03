@@ -457,6 +457,7 @@ devices:
     customresources:
       - amd.com/gpu
       - amd.com/gpumem
+      - amd.com/gpucores
   awsneuron:
     customresources:
       - aws.amazon.com/neuron
