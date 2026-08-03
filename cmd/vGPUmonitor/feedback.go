@@ -47,7 +47,6 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 					return true
 				}
 			}
-			return false
 		}
 	}
 	return false
