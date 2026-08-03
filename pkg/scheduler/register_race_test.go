@@ -103,22 +103,26 @@ func Test_register_NodeCacheConcurrency(t *testing.T) {
 	// CheckHealth reports needUpdate and register() reaches the s.nodes read/write.
 	// indexer.Update never errors for the default store and require/FailNow must not
 	// run outside the test goroutine, so the error is ignored.
-	wg.Go(func() {
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
 		printed := map[string]bool{}
 		sel := labels.Everything()
 		for v := 1; v <= rounds; v++ {
 			_ = indexer.Update(mkNode(v%2 == 0))
 			s.register(sel, printed)
 		}
-	})
+	}()
 
 	// delete loop(s): the real informer delete callback removes the node from s.nodes.
 	for range deleters {
-		wg.Go(func() {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
 			for v := 1; v <= rounds; v++ {
 				s.onDelNode(mkNode(true))
 			}
-		})
+		}()
 	}
 
 	wg.Wait()
