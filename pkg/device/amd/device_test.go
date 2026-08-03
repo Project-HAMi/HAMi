@@ -551,6 +551,40 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
+		{
+			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest",
+			devices: []*device.DeviceUsage{
+				{
+					ID:         "dev-0",
+					Index:      0,
+					Used:       0,
+					Count:      1,
+					Totalcore:  100,
+					Type:       AMDDevice,
+					Health:     true,
+					CustomInfo: map[string]any{},
+				},
+				{
+					ID:         "dev-1",
+					Index:      1,
+					Used:       0,
+					Count:      1,
+					Totalcore:  100,
+					Type:       AMDDevice,
+					Health:     true,
+					CustomInfo: map[string]any{},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums: 3,
+				Type: AMDDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
 	}
 
 	for _, test := range tests {
