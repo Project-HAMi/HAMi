@@ -277,12 +277,13 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	if info.Size() == 1197897 {
 		klog.Infoln("casting......v0")
 		usage.Info = v0.CastSpec(usage.data)
-	} else if head.majorVersion == 1 {
+	} else if head.majorVersion == 1 && info.Size() >= int64(v1.MinSize()) {
 		klog.Infoln("casting......v1")
 		usage.Info = v1.CastSpec(usage.data)
 	} else {
+		majorVersion, minorVersion := head.majorVersion, head.minorVersion
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.majorVersion, head.minorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	return usage, nil
 }

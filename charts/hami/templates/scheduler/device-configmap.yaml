@@ -301,6 +301,8 @@ data:
       resourceCoreName: "aws.amazon.com/neuroncore"
     amd:
       resourceCountName: "amd.com/gpu"
+      resourceCoreName: "amd.com/gpucores"
+      resourceMemoryName: "amd.com/gpumem"
     vastai:
       resourceCountName: {{ .Values.vastaiResourceName }}
     biren:

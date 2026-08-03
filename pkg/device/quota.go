@@ -228,10 +228,10 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
 		if ok {
-			if len(idx.String()) <= len("limits.") {
+			if !strings.HasPrefix(idx.String(), "limits.") {
 				continue
 			}
-			dn := idx.String()[len("limits."):]
+			dn := strings.TrimPrefix(idx.String(), "limits.")
 			if !IsManagedQuota(dn) {
 				continue
 			}
