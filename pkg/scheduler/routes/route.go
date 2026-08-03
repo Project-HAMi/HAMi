@@ -32,18 +32,21 @@ import (
 
 const maxRequestSize = 1024 * 1024 // 1MB limit
 
-func checkBody(w http.ResponseWriter, r *http.Request) {
+func checkBody(w http.ResponseWriter, r *http.Request) bool {
 	if r.Body == nil {
 		http.Error(w, "Please send a request body", 400)
-		return
+		return false
 	}
+	return true
 }
 
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.V(5).Infoln("Entering Predicate Route handler")
-		checkBody(w, r)
+		if !checkBody(w, r) {
+			return
+		}
 
 		var buf bytes.Buffer
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
@@ -98,6 +101,9 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		klog.V(5).Infoln("Entering Bind handler")
+		if !checkBody(w, r) {
+			return
+		}
 		var buf bytes.Buffer
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)

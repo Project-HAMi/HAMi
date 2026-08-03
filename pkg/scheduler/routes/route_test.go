@@ -134,7 +134,9 @@ func TestCheckBodyNil(t *testing.T) {
 	req.Body = nil
 	w := httptest.NewRecorder()
 
-	checkBody(w, req)
+	if checkBody(w, req) {
+		t.Error("Expected checkBody to return false for nil body")
+	}
 
 	if w.Code != 400 {
 		t.Errorf("Expected status 400 for nil body, got %d", w.Code)
@@ -210,5 +212,19 @@ func TestBind_DecodeError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected a decode error to be reported in the bind result")
+	}
+}
+
+func TestBind_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/bind", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := Bind(s)
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Errorf("Expected status 400 for nil body, got %d", w.Code)
 	}
 }
