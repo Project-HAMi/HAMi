@@ -24,6 +24,57 @@ import (
 	"gotest.tools/v3/assert"
 )
 
+func Test_MinSize(t *testing.T) {
+	assert.Equal(t, MinSize(), int(unsafe.Sizeof(sharedRegionT{})))
+}
+
+// TestSharedRegionTLayoutMatchesCABI locks sharedRegionT's field offsets to
+// libvgpu's C `shared_region_t` (multiprocess_memory_limit.h), computed with
+// C's offsetof on linux/amd64 glibc (sizeof(sem_t) == 32 there). MinSize only
+// checks the total size, which is not enough: two structs can have the same
+// total size while individual fields sit at different offsets, in which case
+// CastSpec would silently read the wrong bytes for every field after the
+// first mismatch. If this test fails, the Go mirror has drifted from the C
+// struct and needs to be brought back in line with it, not just have this
+// test's expectations bumped.
+func TestSharedRegionTLayoutMatchesCABI(t *testing.T) {
+	var s sharedRegionT
+	cases := []struct {
+		field string
+		got   uintptr
+		want  uintptr
+	}{
+		{"initializedFlag", unsafe.Offsetof(s.initializedFlag), 0},
+		{"majorVersion", unsafe.Offsetof(s.majorVersion), 4},
+		{"minorVersion", unsafe.Offsetof(s.minorVersion), 8},
+		{"smInitFlag", unsafe.Offsetof(s.smInitFlag), 12},
+		{"ownerPid", unsafe.Offsetof(s.ownerPid), 16},
+		{"sem", unsafe.Offsetof(s.sem), 24},
+		{"num", unsafe.Offsetof(s.num), 56},
+		{"uuids", unsafe.Offsetof(s.uuids), 64},
+		{"limit", unsafe.Offsetof(s.limit), 1600},
+		{"smLimit", unsafe.Offsetof(s.smLimit), 1728},
+		{"procs", unsafe.Offsetof(s.procs), 1856},
+		{"procnum", unsafe.Offsetof(s.procnum), 2008896},
+		{"utilizationSwitch", unsafe.Offsetof(s.utilizationSwitch), 2008900},
+		{"recentKernel", unsafe.Offsetof(s.recentKernel), 2008904},
+		{"priority", unsafe.Offsetof(s.priority), 2008908},
+		{"lastKernelTime", unsafe.Offsetof(s.lastKernelTime), 2008912},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("field %s at offset %d, want %d (libvgpu shared_region_t layout has drifted)", c.field, c.got, c.want)
+		}
+	}
+	assert.Equal(t, int(unsafe.Sizeof(s)), 2008952)
+}
+
+func Test_CastSpec(t *testing.T) {
+	data := make([]byte, MinSize())
+	spec := CastSpec(data)
+	assert.Assert(t, spec.sr != nil)
+}
+
 func Test_DeviceMax(t *testing.T) {
 	tests := []struct {
 		name string

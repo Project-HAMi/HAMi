@@ -138,7 +138,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 		return err
 	}
 	if _, ok := node.Annotations[NodeLockKey]; ok {
-		return fmt.Errorf("node %s is locked", nodeName)
+		return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
 	}
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
 		// Retry on any error

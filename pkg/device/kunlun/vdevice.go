@@ -83,6 +83,9 @@ func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	if ok {
 		trimMem := dev.trimMemory(memory.Value())
 		ctr.Resources.Limits[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
 		ctr.Resources.Requests[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
 		return true, nil
 	}
