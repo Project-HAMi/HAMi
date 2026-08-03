@@ -629,12 +629,12 @@ func Test_pathGeneration(t *testing.T) {
 }
 
 func Test_configOverride(t *testing.T) {
-	t.Setenv("NODE_NAME", "testnode")
 	logLevel1 := nvidia.Debugs
 	logLevel2 := nvidia.Infos
 	split1 := uint(2)
 	memScale1 := 1.5
 	coreScale1 := 1.2
+	memFactor1 := int32(2)
 
 	split2 := uint(3)
 	memScale2 := 0.8
@@ -655,6 +655,7 @@ func Test_configOverride(t *testing.T) {
 					DeviceMemoryScaling: &memScale1,
 					DeviceCoreScaling:   &coreScale1,
 					LogLevel:            &logLevel1,
+					MemoryFactor:        &memFactor1,
 				},
 				Name:                         "node-1",
 				OperatingMode:                "default",
@@ -684,6 +685,9 @@ func Test_configOverride(t *testing.T) {
 	}
 	path := t.TempDir()
 	os.WriteFile(path+"/config.json", bytes, 0644)
+
+	// Test 1: testnode (no MemoryFactor override, should fall back to global value 5)
+	t.Setenv("NODE_NAME", "testnode")
 	nvconfig := nvidia.NvidiaConfig{
 		NodeDefaultConfig: nvidia.NodeDefaultConfig{
 			DeviceSplitCount:    func() *uint { v := uint(1); return &v }(),
@@ -696,6 +700,7 @@ func Test_configOverride(t *testing.T) {
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
 		DefaultGPUNum:                int32(2),
+		MemoryFactor:                 int32(5), // global value
 	}
 	_, err = readFromConfigFile(&nvconfig, path+"/config.json")
 	if err != nil {
@@ -707,15 +712,56 @@ func Test_configOverride(t *testing.T) {
 			DeviceMemoryScaling: func() *float64 { v := 0.8; return &v }(),
 			DeviceCoreScaling:   func() *float64 { v := 1.4; return &v }(),
 			LogLevel:            func() *nvidia.LibCudaLogLevel { v := nvidia.Infos; return &v }(),
+			MemoryFactor:        nil,
 		},
 		ResourceCountName:            "nvidia.com/gpu",
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 		ResourceCoreName:             "nvidia.com/gpucores",
 		DefaultGPUNum:                int32(2),
+		MemoryFactor:                 int32(5), // remains global value
 	}
 	if !reflect.DeepEqual(nvconfig, expected) {
 		t.Errorf("Expected %v, got %v", expected, nvconfig)
+	}
+
+	// Test 2: node-1 (with MemoryFactor override, should override global value 5 to 2)
+	t.Setenv("NODE_NAME", "node-1")
+	nvconfig2 := nvidia.NvidiaConfig{
+		NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceSplitCount:    func() *uint { v := uint(1); return &v }(),
+			DeviceMemoryScaling: func() *float64 { v := 1.0; return &v }(),
+			DeviceCoreScaling:   func() *float64 { v := 1.0; return &v }(),
+			LogLevel:            func() *nvidia.LibCudaLogLevel { v := nvidia.Error; return &v }(),
+		},
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultGPUNum:                int32(2),
+		MemoryFactor:                 int32(5), // global value
+	}
+	_, err = readFromConfigFile(&nvconfig2, path+"/config.json")
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	expected2 := nvidia.NvidiaConfig{
+		NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceSplitCount:    func() *uint { v := uint(2); return &v }(),
+			DeviceMemoryScaling: func() *float64 { v := 1.5; return &v }(),
+			DeviceCoreScaling:   func() *float64 { v := 1.2; return &v }(),
+			LogLevel:            func() *nvidia.LibCudaLogLevel { v := nvidia.Debugs; return &v }(),
+			MemoryFactor:        func() *int32 { v := int32(2); return &v }(),
+		},
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		DefaultGPUNum:                int32(2),
+		MemoryFactor:                 int32(2), // overridden value
+	}
+	if !reflect.DeepEqual(nvconfig2, expected2) {
+		t.Errorf("Expected %v, got %v", expected2, nvconfig2)
 	}
 }
 

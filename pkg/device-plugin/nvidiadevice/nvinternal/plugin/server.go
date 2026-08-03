@@ -137,6 +137,9 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 			if err := mergo.Merge(&sConfig.NodeDefaultConfig, val.NodeDefaultConfig, mergo.WithOverride); err != nil {
 				return "", err
 			}
+			if val.NodeDefaultConfig.MemoryFactor != nil {
+				sConfig.MemoryFactor = *val.NodeDefaultConfig.MemoryFactor
+			}
 			if val.FilterDevice != nil && (len(val.FilterDevice.UUID) > 0 || len(val.FilterDevice.Index) > 0) {
 				nvidia.DevicePluginFilterDevice = val.FilterDevice
 			}

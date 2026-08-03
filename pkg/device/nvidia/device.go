@@ -132,7 +132,8 @@ type NodeDefaultConfig struct {
 	// EnableNUMATopology advertises the physical GPU's NUMA node on each vGPU
 	// replica so kubelet's TopologyManager can align CPU and GPU NUMA nodes.
 	// Defaults to false to preserve existing admission behavior.
-	EnableNUMATopology *bool `yaml:"enableNumaTopology" json:"enablenumatopology"`
+	EnableNUMATopology *bool  `yaml:"enableNumaTopology" json:"enablenumatopology"`
+	MemoryFactor       *int32 `yaml:"memoryFactor,omitempty" json:"memoryfactor,omitempty"`
 }
 
 type FilterDevice struct {

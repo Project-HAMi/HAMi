@@ -370,6 +370,7 @@ devicePlugin:
             "preconfigureddevicememory": 0,
             "enablenumatopology": false,
             "migstrategy": "none",
+            "memoryfactor": 1,
             "filterdevices": {
               "uuid": [],
               "index": []
