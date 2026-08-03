@@ -214,13 +214,13 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if memnums < 0 || memnums > int64(math.MaxInt32)/256 {
+						klog.ErrorS(nil, "iluvatar memory request exceeds int32 range; rejecting to avoid silent under-allocation",
+							"container", ctr.Name)
+						return device.ContainerDeviceRequest{}
+					}
 					memnum = int(memnums) * 256
 				}
-			}
-			if memnum < 0 || memnum > math.MaxInt32 {
-				klog.ErrorS(nil, "iluvatar memory request exceeds int32 range; rejecting to avoid silent under-allocation",
-					"container", ctr.Name)
-				return device.ContainerDeviceRequest{}
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]

@@ -215,17 +215,17 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if memnums < 0 || memnums > int64(math.MaxInt32)/512 {
+						klog.ErrorS(nil, "mthreads memory request exceeds int32 range; rejecting to avoid silent under-allocation",
+							"container", ctr.Name)
+						return device.ContainerDeviceRequest{}
+					}
 					memnum = int(memnums) * 512
 					klog.InfoS("Memory allocation calculated",
 						"container", ctr.Name,
 						"requestedMem", memnums,
 						"allocatedMem", memnum)
 				}
-			}
-			if memnum < 0 || memnum > math.MaxInt32 {
-				klog.ErrorS(nil, "mthreads memory request exceeds int32 range; rejecting to avoid silent under-allocation",
-					"container", ctr.Name)
-				return device.ContainerDeviceRequest{}
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[mthreadsResourceCores]
