@@ -440,6 +440,15 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 
+	// Update() can run concurrently on its own resync timer and munmap a
+	// container's backing memory while removing it from the map. c.Info is
+	// backed by that same mmap'd memory, so holding the lister's lock for
+	// the whole read-and-scrape below keeps it alive for as long as we
+	// dereference it - the same use-after-unmap hazard loadCache's error
+	// path guards against, just on the read side instead of the write side.
+	cc.ClusterManager.containerLister.Lock()
+	defer cc.ClusterManager.containerLister.UnLock()
+
 	containers := cc.ClusterManager.containerLister.ListContainers()
 	containerMap := make(map[string][]*nvidia.ContainerUsage) // podUID -> containers
 	for _, c := range containers {

@@ -20,6 +20,7 @@ import (
 	"context" // Added for the new test
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -454,25 +455,65 @@ func TestConcurrentNodeLocks(t *testing.T) {
 	}
 }
 
+// TestSetNodeLockRaceIsRetryable covers the narrow race window where two
+// callers both observe an unlocked node in LockNode's outer check and then
+// genuinely race on SetNodeLock's per-node mutex to actually claim the lock.
+func TestSetNodeLockRaceIsRetryable(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "race-node"
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+	raceLock := nodeLocks.getLock(nodeName)
+	raceLock.Lock()
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, pod := range []*corev1.Pod{podA, podB} {
+		wg.Add(1)
+		go func(pod *corev1.Pod) {
+			defer wg.Done()
+			results <- LockNode(nodeName, "", pod)
+		}(pod)
+	}
+	time.Sleep(50 * time.Millisecond)
+	raceLock.Unlock()
+	wg.Wait()
+	close(results)
+	var successes, contentions int
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case IsNodeLockContention(err):
+			contentions++
+		default:
+			t.Fatalf("unexpected error from LockNode: %v", err)
+		}
+	}
+	if successes != 1 || contentions != 1 {
+		t.Fatalf("expected exactly 1 winner and 1 retryable contention out of 2 concurrent LockNode calls, got successes=%d contentions=%d", successes, contentions)
+	}
+}
+
 // TestCleanupNodeLockOnNodeDelete ensures CleanupNodeLock removes the entry
 // and a subsequent getLock allocates a fresh mutex instance.
 func TestCleanupNodeLockOnNodeDelete(t *testing.T) {
-	// Reset manager state for this test
 	nodeLocks = newNodeLockManager()
-
 	first := nodeLocks.getLock("to-be-deleted")
 	if first == nil {
 		t.Fatalf("expected non-nil mutex from getLock")
 	}
-
-	// Trigger cleanup as if node was removed by autoscaler
 	CleanupNodeLock("to-be-deleted")
-
 	second := nodeLocks.getLock("to-be-deleted")
 	if second == nil {
 		t.Fatalf("expected non-nil mutex from getLock after cleanup")
 	}
-
 	if first == second {
 		t.Fatalf("expected a new mutex instance after cleanup, got the same pointer")
 	}

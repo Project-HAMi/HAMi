@@ -307,11 +307,23 @@ func (s *Scheduler) onUpdateQuota(oldObj, newObj any) {
 }
 
 func (s *Scheduler) onDelQuota(obj any) {
-	quota, ok := obj.(*corev1.ResourceQuota)
-	if !ok {
-		klog.Errorf("unknown del object type")
+	var quota *corev1.ResourceQuota
+
+	switch t := obj.(type) {
+	case *corev1.ResourceQuota:
+		quota = t
+	case cache.DeletedFinalStateUnknown:
+		var ok bool
+		quota, ok = t.Obj.(*corev1.ResourceQuota)
+		if !ok {
+			klog.Errorf("resource quota tombstone contained object of type %T", t.Obj)
+			return
+		}
+	default:
+		klog.Errorf("unknown resource quota delete object type %T", obj)
 		return
 	}
+
 	s.quotaManager.DelQuota(quota)
 }
 

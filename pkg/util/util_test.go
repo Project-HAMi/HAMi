@@ -518,6 +518,98 @@ func Test_AllContainersCreated(t *testing.T) {
 	}
 }
 
+func TestIsPodGroupMember(t *testing.T) {
+	podGroupName := "my-training-job"
+	emptyPodGroupName := ""
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "nil pod",
+			pod:  nil,
+			want: false,
+		},
+		{
+			name: "no group membership at all",
+			pod:  &corev1.Pod{},
+			want: false,
+		},
+		{
+			name: "scheduler-plugins Coscheduling label present",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: podGroupName},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "coscheduling label present but empty",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: ""},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "native GenericWorkload PodGroup via Spec.SchedulingGroup",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &podGroupName,
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Spec.SchedulingGroup set but PodGroupName nil",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Spec.SchedulingGroup set but PodGroupName empty",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &emptyPodGroupName,
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "both coscheduling label and native SchedulingGroup present",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: podGroupName},
+				},
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &podGroupName,
+					},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodGroupMember(test.pod)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func TestPatchPodLabels(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 

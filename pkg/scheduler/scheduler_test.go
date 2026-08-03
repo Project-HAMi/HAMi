@@ -910,6 +910,114 @@ func Test_Filter(t *testing.T) {
 	}
 }
 
+func TestSchedulerOnDelQuotaClearsLimitFromTombstone(t *testing.T) {
+	const namespace = "quota-tombstone-test"
+
+	s := NewScheduler()
+
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	require.True(t, ok, "NVIDIA device should be registered")
+
+	resourceName := nvidiaDevice.GetResourceNames().ResourceMemoryName
+	require.NotEmpty(t, resourceName, "NVIDIA memory resource name should not be empty")
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-quota",
+			Namespace: namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + resourceName): *resource.NewQuantity(1024, resource.BinarySI),
+			},
+		},
+	}
+
+	s.onAddQuota(quota)
+	t.Cleanup(func() {
+		s.onDelQuota(quota)
+	})
+
+	quotas := s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok := quotas[namespace]
+	require.True(t, ok)
+	require.Equal(t, int64(1024), (*namespaceQuota)[resourceName].Limit)
+
+	s.onDelQuota(cache.DeletedFinalStateUnknown{
+		Key: namespace + "/" + quota.Name,
+		Obj: quota,
+	})
+
+	quotas = s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok = quotas[namespace]
+	require.True(t, ok)
+	require.Equal(t, int64(0), (*namespaceQuota)[resourceName].Limit)
+}
+
+func TestSchedulerOnDelQuotaIgnoresInvalidObjects(t *testing.T) {
+	const namespace = "invalid-quota-delete-test"
+
+	s := NewScheduler()
+
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	require.True(t, ok, "NVIDIA device should be registered")
+
+	resourceName := nvidiaDevice.GetResourceNames().ResourceMemoryName
+	require.NotEmpty(t, resourceName)
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-quota",
+			Namespace: namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + resourceName): *resource.NewQuantity(1024, resource.BinarySI),
+			},
+		},
+	}
+
+	s.onAddQuota(quota)
+	t.Cleanup(func() {
+		s.onDelQuota(quota)
+	})
+
+	quotas := s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok := quotas[namespace]
+	require.True(t, ok)
+	expectedLimit := (*namespaceQuota)[resourceName].Limit
+
+	tests := []struct {
+		name string
+		obj  any
+	}{
+		{
+			name: "tombstone containing non-quota object",
+			obj: cache.DeletedFinalStateUnknown{
+				Key: "test/invalid",
+				Obj: struct{}{},
+			},
+		},
+		{
+			name: "unknown delete object",
+			obj:  struct{}{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				s.onDelQuota(test.obj)
+			})
+
+			currentQuotas := s.quotaManager.GetResourceQuota()
+			currentNamespaceQuota, ok := currentQuotas[namespace]
+			require.True(t, ok)
+			require.Equal(t, expectedLimit, (*currentNamespaceQuota)[resourceName].Limit)
+		})
+	}
+}
+
 func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)

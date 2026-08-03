@@ -33,7 +33,7 @@ jobs:
       - name: Get branch name
         uses: nelonoel/branch-name@1ea5c86cb559a8c4e623da7f188496208232e49f # v1.0.1
       - name: Docker Login
-        uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
         with:
           username: ${{ secrets.DOCKERHUB_TOKEN }}
           password: ${{ secrets.DOCKERHUB_PASSWD }}
@@ -74,7 +74,7 @@ jobs:
           trivyignores: .trivyignore
         if: always() && github.repository == 'Project-HAMi/HAMi'
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/upload-sarif@f205ea1c3313d32999d8d6a48b4f6530d4437b38 # v4
         with:
           sarif_file: "trivy-results.sarif"
         if: always() && github.repository == 'Project-HAMi/HAMi'
