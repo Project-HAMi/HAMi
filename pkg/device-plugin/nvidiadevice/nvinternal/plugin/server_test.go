@@ -1035,6 +1035,90 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 }
 
+func TestAllocateReleasesNodeLockWhenNonMIGAllocateResponseFails(t *testing.T) {
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"cdi-annotations"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		cdiHandler: &cdi.InterfaceMock{
+			QualifiedNameFunc: func(string, string) string {
+				return "invalid-cdi-device-name"
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		cdiAnnotationPrefix:  v1.DefaultCDIAnnotationPrefix,
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-annotated-a,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	eraseCalled := false
+	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
+	eraseNextDeviceTypeFromAnnotation = func(string, corev1.Pod) error {
+		eraseCalled = true
+		return nil
+	}
+	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
+
+	failedCalled := false
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(nodeName string, failedPod *corev1.Pod, lockName string) {
+		failedCalled = true
+		require.Equal(t, pod, failedPod)
+		require.Equal(t, NodeLockNvidia, lockName)
+	}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	successCalled := false
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {
+		successCalled = true
+	}
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
+			DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"},
+		}},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, response)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "failed to get allocate response")
+	require.True(t, failedCalled)
+	require.False(t, eraseCalled)
+	require.False(t, successCalled)
+}
+
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
