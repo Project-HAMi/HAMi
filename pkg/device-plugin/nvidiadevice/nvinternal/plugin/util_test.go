@@ -31,6 +31,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func TestGenerateMigTemplate(t *testing.T) {
@@ -502,6 +503,38 @@ func Test_PodAllocationFailed(t *testing.T) {
 		t.Error("Expected DeviceBindPhase annotation to be present")
 	} else if annos != util.DeviceBindFailed {
 		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
+	}
+}
+
+func TestUpdatePodAnnotationsAndReleaseLockReleasesLockWhenPatchFails(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "testpod",
+			Namespace: "default",
+		},
+	}
+	nodeName := "test-node"
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod),
+			},
+		},
+	}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to create test node: %v", err)
+	}
+
+	updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", util.DeviceBindFailed)
+
+	refreshedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed node: %v", err)
+	}
+	if _, ok := refreshedNode.Annotations[nodelock.NodeLockKey]; ok {
+		t.Fatal("expected node lock to be released when PatchPodAnnotations fails")
 	}
 }
 
