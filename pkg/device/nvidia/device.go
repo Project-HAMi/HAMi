@@ -722,27 +722,6 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-func fitQuota(tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, memreq int64, coresreq int64) bool {
-	mem := memreq
-	core := coresreq
-	for _, val := range tmpDevs[NvidiaGPUDevice] {
-		mem += int64(val.Usedmem)
-		core += int64(val.Usedcores)
-	}
-	if allocated != nil {
-		if podSingleDevice, exists := (*allocated)[NvidiaGPUDevice]; exists {
-			for _, containerDevices := range podSingleDevice {
-				for _, val := range containerDevices {
-					mem += int64(val.Usedmem)
-					core += int64(val.Usedcores)
-				}
-			}
-		}
-	}
-	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
-}
-
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -806,11 +785,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(tmpDevs, allocated, pod.Namespace, int64(memreq), int64(k.Coresreq)) {
-			reason[common.ResourceQuotaNotFit]++
-			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
-			continue
-		}
+		// if !fitQuota(tmpDevs, allocated, pod.Namespace, int64(memreq), int64(k.Coresreq), pod) {
+		// 	reason[common.ResourceQuotaNotFit]++
+		// 	klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+		// 	continue
+		// }
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
