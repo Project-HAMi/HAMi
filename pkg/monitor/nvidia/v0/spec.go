@@ -81,9 +81,22 @@ func (s Spec) DeviceNum() int {
 	return int(s.sr.num)
 }
 
+// activeProcCount returns procnum clamped to [0, len(procs)], guarding
+// against a corrupted shared-memory region reporting a bogus value.
+func (s Spec) activeProcCount() int {
+	n := int(s.sr.procnum)
+	if n < 0 {
+		return 0
+	}
+	if n > len(s.sr.procs) {
+		return len(s.sr.procs)
+	}
+	return n
+}
+
 func (s Spec) DeviceMemoryContextSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.used[idx].contextSize
 	}
 	return v
@@ -91,7 +104,7 @@ func (s Spec) DeviceMemoryContextSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryModuleSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.used[idx].moduleSize
 	}
 	return v
@@ -99,7 +112,7 @@ func (s Spec) DeviceMemoryModuleSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryBufferSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.used[idx].bufferSize
 	}
 	return v
@@ -107,7 +120,7 @@ func (s Spec) DeviceMemoryBufferSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryOffset(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.used[idx].offset
 	}
 	return v
@@ -115,7 +128,7 @@ func (s Spec) DeviceMemoryOffset(idx int) uint64 {
 
 func (s Spec) DeviceMemoryTotal(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.used[idx].total
 	}
 	return v
@@ -123,7 +136,7 @@ func (s Spec) DeviceMemoryTotal(idx int) uint64 {
 
 func (s Spec) DeviceSmUtil(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs {
+	for _, p := range s.sr.procs[:s.activeProcCount()] {
 		v += p.deviceUtil[idx].smUtil
 	}
 	return v
