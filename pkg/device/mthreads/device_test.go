@@ -509,6 +509,23 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			// A Gi-scale memory quantity, times the x512 factor, overflows
+			// int32. Rather than silently wrapping to Memreq: 0 (which would
+			// let the pod schedule onto a full device), the request is rejected,
+			// mirroring the count-overflow handling above.
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("1"),
+						"mthreads.com/sgpu-memory": resource.MustParse("16Gi"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

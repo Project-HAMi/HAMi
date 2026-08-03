@@ -374,6 +374,21 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(0),
 			},
 		},
+		{
+			// A Gi-scale memory quantity, times the x256 factor, overflows
+			// int32. Rather than silently wrapping to Memreq: 0 (which would
+			// let the pod schedule onto a full device), the request is rejected.
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
+						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
