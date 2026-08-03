@@ -19,6 +19,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -47,6 +48,18 @@ type schedulerMetricsProvider interface {
 type ClusterManagerCollector struct {
 	ClusterManager  *ClusterManager
 	metricsProvider schedulerMetricsProvider
+}
+
+const normalizedCoreLimit = 100
+
+// normalizeAMDCoreMetrics converts AMD physical CU counts to the percentage
+// unit used by HAMi's core ratio metrics. Other devices keep their existing
+// metric values.
+func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64, float64) {
+	if !strings.HasPrefix(strings.ToUpper(deviceType), "AMD") || total <= 0 {
+		return float64(total), float64(allocated)
+	}
+	return normalizedCoreLimit, math.Ceil(float64(allocated) / float64(total) * normalizedCoreLimit)
 }
 
 // Describe is implemented with DescribeByCollect. That's possible because the
@@ -177,6 +190,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nu := cc.metricsProvider.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
+			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
 			if devs.Device.Mode == "mig" {
 				for idx, migs := range devs.Device.MigUsage.UsageList {
 					klog.V(3).Infoln("mig instances=", devs.Device.MigUsage)
@@ -210,7 +224,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				nodevGPUCoreLimitDesc,
 				prometheus.GaugeValue,
-				float64(devs.Device.Totalcore),
+				coreLimit,
 				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
@@ -228,7 +242,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			ch <- prometheus.MustNewConstMetric(
 				nodeGPUCoreAllocatedDesc,
 				prometheus.GaugeValue,
-				float64(devs.Device.Usedcores),
+				coreAllocated,
 				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
 			)
 			ch <- prometheus.MustNewConstMetric(
