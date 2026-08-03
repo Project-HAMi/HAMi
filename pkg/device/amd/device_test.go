@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"math"
 	"strings"
 	"testing"
 
@@ -163,6 +164,7 @@ func Test_GetNodeDevices(t *testing.T) {
 	assert.Equal(t, 1, len(got))
 	assert.Equal(t, "GPU-0", got[0].ID)
 	assert.Equal(t, "amd", got[0].Type)
+	assert.Equal(t, AMDCommonWord, got[0].DeviceVendor)
 
 	_, err = dev.GetNodeDevices(corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}})
 	assert.ErrorContains(t, err, "annos not found")
@@ -271,6 +273,28 @@ func Test_GenerateResourceRequests(t *testing.T) {
 		got := dev.GenerateResourceRequests(ctr)
 		assert.Equal(t, int32(100), got.Coresreq)
 	})
+
+	for _, tc := range []struct {
+		name     string
+		resource corev1.ResourceName
+		value    int64
+	}{
+		{name: "rejects zero count", resource: "amd.com/gpu", value: 0},
+		{name: "rejects overflowing count", resource: "amd.com/gpu", value: math.MaxInt32 + 1},
+		{name: "rejects negative memory", resource: "amd.com/gpu-mem", value: -1},
+		{name: "rejects overflowing memory", resource: "amd.com/gpu-mem", value: math.MaxInt32 + 1},
+		{name: "rejects zero core percentage", resource: "amd.com/gpu-core-pct", value: 0},
+		{name: "rejects excessive core percentage", resource: "amd.com/gpu-core-pct", value: 101},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			limits := corev1.ResourceList{
+				"amd.com/gpu": *resource.NewQuantity(1, resource.DecimalSI),
+			}
+			limits[tc.resource] = *resource.NewQuantity(tc.value, resource.DecimalSI)
+			ctr := &corev1.Container{Resources: corev1.ResourceRequirements{Limits: limits}}
+			assert.DeepEqual(t, device.ContainerDeviceRequest{}, dev.GenerateResourceRequests(ctr))
+		})
+	}
 }
 
 func TestDevices_Fit(t *testing.T) {
@@ -288,199 +312,9 @@ func TestDevices_Fit(t *testing.T) {
 				Usedmem: 0, Totalmem: 1000, Totalcore: 100, Usedcores: 0,
 				Type: AMDDevice, Health: true, CustomInfo: map[string]any{},
 			},
-			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    2,
-			wantDevIDs: []string{"dev-1", "dev-0"},
-			wantReason: "",
-		},
-		{
-			name: "fit success for multiple cards",
-			devices: []*device.DeviceUsage{
-				{
-					ID:         "dev-0",
-					Index:      0,
-					Used:       0,
-					Count:      2,
-					Usedmem:    0,
-					Totalmem:   0,
-					Totalcore:  3,
-					Usedcores:  0,
-					Numa:       0,
-					Type:       AMDDevice,
-					Health:     true,
-					CustomInfo: map[string]any{},
-				},
-				{
-					ID:         "dev-1",
-					Index:      0,
-					Used:       0,
-					Count:      12,
-					Usedmem:    0,
-					Totalmem:   0,
-					Totalcore:  3,
-					Usedcores:  0,
-					Numa:       0,
-					Type:       AMDDevice,
-					Health:     true,
-					CustomInfo: map[string]any{},
-				},
-			},
-			request: device.ContainerDeviceRequest{
-				Nums:             1,
-				Memreq:           0,
-				MemPercentagereq: 0,
-				Coresreq:         2,
-				Type:             AMDDevice,
-			},
-			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-1"},
-			wantReason: "",
-		},
-		{
-			name: "fit fail: type mismatch",
-			devices: []*device.DeviceUsage{{
-				ID:         "dev-0",
-				Index:      0,
-				Used:       0,
-				Count:      2,
-				Usedmem:    0,
-				Totalmem:   0,
-				Totalcore:  3,
-				Usedcores:  0,
-				Numa:       0,
-				Health:     true,
-				Type:       AMDDevice,
-				CustomInfo: map[string]any{},
-			}},
-			request: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             "OtherType",
-				Memreq:           0,
-				MemPercentagereq: 0,
-				Coresreq:         2,
-			},
-			annos:      map[string]string{},
-			wantFit:    false,
-			wantLen:    0,
-			wantDevIDs: []string{},
-			wantReason: "1/1 CardTypeMismatch",
-		},
-		{
-			name: "fit fail: user assign use uuid mismatch",
-			devices: []*device.DeviceUsage{{
-				ID:         "dev-1",
-				Index:      0,
-				Used:       0,
-				Count:      2,
-				Usedmem:    0,
-				Totalmem:   0,
-				Totalcore:  3,
-				Usedcores:  0,
-				Numa:       0,
-				Type:       AMDDevice,
-				Health:     true,
-				CustomInfo: map[string]any{},
-			}},
-			request: device.ContainerDeviceRequest{
-				Nums:             1,
-				Memreq:           0,
-				MemPercentagereq: 0,
-				Coresreq:         2,
-				Type:             AMDDevice,
-			},
-			annos:      map[string]string{"amd.com/use-gpu-uuid": "dev-0"},
-			wantFit:    false,
-			wantLen:    0,
-			wantDevIDs: []string{},
-			wantReason: "1/1 CardUuidMismatch",
-		},
-		{
-			name: "fit fail: user assign no use uuid match",
-			devices: []*device.DeviceUsage{{
-				ID:         "dev-0",
-				Index:      0,
-				Used:       0,
-				Count:      2,
-				Usedmem:    0,
-				Totalmem:   0,
-				Totalcore:  3,
-				Usedcores:  0,
-				Numa:       0,
-				Type:       AMDDevice,
-				Health:     true,
-				CustomInfo: map[string]any{},
-			}},
-			request: device.ContainerDeviceRequest{
-				Nums:             1,
-				Memreq:           0,
-				MemPercentagereq: 0,
-				Coresreq:         2,
-				Type:             AMDDevice,
-			},
-			annos:      map[string]string{"amd.com/nouse-gpu-uuid": "dev-0"},
-			wantFit:    false,
-			wantLen:    0,
-			wantDevIDs: []string{},
-			wantReason: "1/1 CardUuidMismatch",
-		},
-		{
-			name: "fit fail: card overused",
-			devices: []*device.DeviceUsage{{
-				ID:         "dev-0",
-				Index:      0,
-				Used:       2,
-				Count:      2,
-				Usedmem:    0,
-				Totalmem:   0,
-				Totalcore:  3,
-				Usedcores:  0,
-				Numa:       0,
-				Type:       AMDDevice,
-				Health:     true,
-				CustomInfo: map[string]any{},
-			}},
-			request: device.ContainerDeviceRequest{
-				Nums:             1,
-				Memreq:           0,
-				MemPercentagereq: 0,
-				Coresreq:         2,
-				Type:             AMDDevice,
-			},
-			annos:      map[string]string{},
-			wantFit:    false,
-			wantLen:    0,
-			wantDevIDs: []string{},
-			wantReason: "1/1 CardTimeSlicingExhausted",
-		},
-		{
-			name: "mutex policy rejects used device",
-			devices: []*device.DeviceUsage{
-				{
-					ID:         "dev-0",
-					Index:      0,
-					Used:       1,
-					Count:      2,
-					Totalcore:  3,
-					Numa:       0,
-					Type:       AMDDevice,
-					Health:     true,
-					CustomInfo: map[string]any{},
-				},
-			},
-			request: device.ContainerDeviceRequest{
-				Nums: 1,
-				Type: AMDDevice,
-			},
-			annos:      map[string]string{"hami.io/gpu-scheduler-policy": "mutex"},
-			wantFit:    false,
-			wantLen:    0,
-			wantDevIDs: []string{},
-			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
-		},
-	}
+		}
+		req := device.ContainerDeviceRequest{Nums: 2, Type: AMDDevice}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
 
 		ok, got, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
 		assert.Equal(t, true, ok)

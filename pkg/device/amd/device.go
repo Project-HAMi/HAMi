@@ -17,10 +17,9 @@ limitations under the License.
 package amd
 
 import (
-	"fmt"
 	"errors"
-	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -41,8 +40,8 @@ type AMDDevices struct {
 }
 
 const (
-	AMDDevice          = "AMDGPU"
-	AMDCommonWord      = "AMDGPU"
+	AMDDevice          = "AMD"
+	AMDCommonWord      = "AMD"
 	AMDDeviceSelection = "amd.com/gpu-index"
 	AMDInUse           = "amd.com/use-gputype"
 	AMDNoUse           = "amd.com/nouse-gputype"
@@ -111,6 +110,9 @@ func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, erro
 	if len(nodedevices) == 0 {
 		klog.InfoS("no amd gpu device found", "node", n.Name, "device annotation", devEncoded)
 		return []*device.DeviceInfo{}, errors.New("no gpu found on node")
+	}
+	for idx := range nodedevices {
+		nodedevices[idx].DeviceVendor = AMDCommonWord
 	}
 	return nodedevices, nil
 }
@@ -218,12 +220,19 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	count, ok := ctr.Resources.Limits[amdResourceCount]
 	if ok {
 		if n, ok := count.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "amd device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			memnum := int32(0)
 			mem, memOK := ctr.Resources.Limits[amdResourceMemory]
 			if memOK {
-				if memnums, ok := mem.AsInt64(); ok {
-					memnum = int32(memnums)
+				memnums, ok := mem.AsInt64()
+				if !ok || memnums < 0 || memnums > math.MaxInt32 {
+					klog.ErrorS(nil, "amd device memory request is out of range", "container", ctr.Name, "request", mem.String())
+					return device.ContainerDeviceRequest{}
 				}
+				memnum = int32(memnums)
 			}
 
 			// An omitted core limit means the container receives all CUs on each
@@ -231,9 +240,12 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			corePercentageNum := int32(100)
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
 			if corePercentageOK {
-				if corePercentageNums, ok := corePercentage.AsInt64(); ok {
-					corePercentageNum = int32(corePercentageNums)
+				corePercentageNums, ok := corePercentage.AsInt64()
+				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
+					klog.ErrorS(nil, "amd device core percentage request is out of range", "container", ctr.Name, "request", corePercentage.String())
+					return device.ContainerDeviceRequest{}
 				}
+				corePercentageNum = int32(corePercentageNums)
 			}
 
 			klog.InfoS("Detected AMD device request",
@@ -264,7 +276,6 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
-	requestTypeLower := strings.ToLower(k.Type)
 	originReq := k.Nums
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
@@ -275,11 +286,6 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
-		if !strings.Contains(strings.ToLower(dev.Type), requestTypeLower) {
-			reason[common.CardTypeMismatch]++
-			continue
-		}
-
 		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -300,6 +306,8 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if isMutex && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+			continue
+		}
 		memReq := k.Memreq
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
@@ -317,12 +325,8 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 				continue
 			}
 			coreReq = dev.Totalcore * k.Coresreq / 100
-			if coreReq < 1 {
-				coreReq = 1
-			}
-			if coreReq > dev.Totalcore {
-				coreReq = dev.Totalcore
-			}
+			coreReq = max(coreReq, 1)
+			coreReq = min(coreReq, dev.Totalcore)
 		} else if dev.Totalmem > 0 && memReq >= dev.Totalmem {
 			// Memreq omitted or zero means whole-card memory; treat core request as whole-card as well.
 			coreReq = dev.Totalcore
