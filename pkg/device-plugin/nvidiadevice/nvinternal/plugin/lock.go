@@ -24,9 +24,17 @@ import (
 	"k8s.io/klog/v2"
 )
 
-const (
-	MigApplyLockFile = "/tmp/hami/hami-mig-apply.lock"
+var (
+	MigApplyLockFile = getMigApplyLockFile()
 )
+
+func getMigApplyLockFile() string {
+	if val := os.Getenv("HAMI_MIG_LOCK_FILE"); val != "" {
+		return val
+	}
+	return "/tmp/hami/hami-mig-apply.lock"
+}
+
 
 // CreateMigApplyLockDir creates the lock directory for MIG apply operation
 func CreateMigApplyLockDir() error {

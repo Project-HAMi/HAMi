@@ -157,6 +157,12 @@ func TestWatchLockFile(t *testing.T) {
 }
 
 func TestCreateAndRemoveMigApplyLock(t *testing.T) {
+	oldLockFile := MigApplyLockFile
+	tmpDir := t.TempDir()
+	MigApplyLockFile = filepath.Join(tmpDir, "hami-mig-apply.lock")
+	defer func() {
+		MigApplyLockFile = oldLockFile
+	}()
 
 	t.Run("CreateLock", func(t *testing.T) {
 		err := CreateMigApplyLockDir()

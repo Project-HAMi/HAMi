@@ -295,11 +295,11 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		if deviceSupportMig {
 			err = CreateMigApplyLockDir()
 			if err != nil {
-				klog.Fatalf("CreateMIGLockSubDir failed: %v", err)
+				klog.Fatalf("CreateMIGLockSubDir failed: %v. You can configure a writeable lock file path using the HAMI_MIG_LOCK_FILE environment variable.", err)
 			}
 			err = RemoveMigApplyLock()
 			if err != nil {
-				klog.Fatalf("RemoveMigApplyLock failed: %v", err)
+				klog.Fatalf("RemoveMigApplyLock failed: %v. You can configure a writeable lock file path using the HAMI_MIG_LOCK_FILE environment variable.", err)
 			}
 
 			cmd := exec.Command("nvidia-mig-parted", "export")

@@ -80,12 +80,12 @@ func start() error {
 	// and the vGPU monitor should attempt to create this directory by default to ensure its creation.
 	err = plugin.CreateMigApplyLockDir()
 	if err != nil {
-		return fmt.Errorf("failed to create MIG apply lock directory: %v", err)
+		return fmt.Errorf("failed to create MIG apply lock directory: %v. You can configure a writeable lock file path using the HAMI_MIG_LOCK_FILE environment variable", err)
 	}
 
 	lockChannel, err := plugin.WatchLockFile()
 	if err != nil {
-		return fmt.Errorf("failed to watch lock file: %v", err)
+		return fmt.Errorf("failed to watch lock file: %v. You can configure a writeable lock file path using the HAMI_MIG_LOCK_FILE environment variable", err)
 	}
 
 	var wg sync.WaitGroup

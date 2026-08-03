@@ -283,7 +283,7 @@ func (nv *NvidiaDevicePlugin) DisableOtherNVMLOperation() {
 	// Create MIG apply lock file
 	if err := CreateMigApplyLock(); err != nil {
 		// If the lock file creation fails, it is highly likely that the mig apply will be failed, so the plugin should terminate.
-		klog.Fatalf("Failed to create MIG apply lock: %v", err)
+		klog.Fatalf("Failed to create MIG apply lock: %v. You can configure a writeable lock file path using the HAMI_MIG_LOCK_FILE environment variable.", err)
 		return
 	}
 
