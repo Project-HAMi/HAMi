@@ -17,7 +17,6 @@ limitations under the License.
 package kunlun
 
 import (
-	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -50,7 +49,20 @@ func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
 	}}
 	fit, _, reason := dev.Fit(devices, req, mutexPod, nodeInfo, allocated)
 	assert.Equal(t, fit, false)
-	assert.Assert(t, strings.Contains(reason, common.ExclusiveDeviceAllocateConflict), reason)
+	assert.Equal(t, reason, "8/8 "+common.ExclusiveDeviceAllocateConflict)
+}
+
+func TestKunlunDevices_Fit_NumaNotFit(t *testing.T) {
+	dev := &KunlunDevices{}
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{Index: uint(i), Used: 1}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: KunlunGPUDevice}
+
+	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, reason, "1/8 "+common.NumaNotFit)
 }
 
 func Test_graphSelect(t *testing.T) {

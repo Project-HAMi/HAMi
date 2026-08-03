@@ -860,6 +860,33 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
+		{
+			name: "fit fail: NumaNotFit with multiple devices",
+			devices: []*device.DeviceUsage{
+				{
+					ID: "dev-0", Index: 0, Used: 0, Count: 2, Totalcore: 3,
+					Type: AWSNeuronDevice, Health: true,
+					CustomInfo: map[string]any{AWSNodeType: "trn"},
+				},
+				{
+					ID: "dev-1", Index: 1, Used: 0, Count: 2, Totalcore: 3,
+					Type: AWSNeuronDevice, Health: true,
+					CustomInfo: map[string]any{AWSNodeType: "trn"},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/2 NumaNotFit",
+		},
 	}
 
 	for _, test := range tests {
