@@ -52,6 +52,19 @@ func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
 	assert.Equal(t, reason, "8/8 "+common.ExclusiveDeviceAllocateConflict)
 }
 
+func TestKunlunVDevices_Fit_NumaNotFit(t *testing.T) {
+	dev := &KunlunVDevices{}
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{Index: uint(i), Used: 0, Usedmem: 0, Totalmem: 1024}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Memreq: 2048}
+
+	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, reason, "1/8 "+common.NumaNotFit)
+}
+
 func TestKunlunDevices_Fit_NumaNotFit(t *testing.T) {
 	dev := &KunlunDevices{}
 	devices := make([]*device.DeviceUsage, 8)
