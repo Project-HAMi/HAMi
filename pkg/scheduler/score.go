@@ -49,25 +49,6 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	return l
 }
 
-func getDeviceBaseType(model string) string {
-	bestName := ""
-	bestWordLen := -1
-	for name, dev := range device.GetDevices() {
-		word := dev.CommonWord()
-		if !strings.HasPrefix(model, word) {
-			continue
-		}
-		if len(word) > bestWordLen || (len(word) == bestWordLen && name < bestName) {
-			bestName = name
-			bestWordLen = len(word)
-		}
-	}
-	if bestWordLen == -1 {
-		return model
-	}
-	return bestName
-}
-
 func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
 	types := make(map[string]struct{})
 	for _, dl := range list.DeviceLists {
