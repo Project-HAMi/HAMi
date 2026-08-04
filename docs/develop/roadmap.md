@@ -1,18 +1,18 @@
-# roadmap
-| Production | Manufacturer  | Type             | MemoryIsolation | CoreIsolation | MultiCard support |
+# Roadmap
+| Product    | Manufacturer  | Type             | MemoryIsolation | CoreIsolation | MultiCard support |
 |------------|---------------|------------------|-----------------|---------------|-------------------|
 | GPU        | NVIDIA        | All              | ✅              | ✅            | ✅                |
 | MLU        | Cambricon     | 370, 590         | ✅              | ✅            | ❌                |
 | GCU        | Enflame       | S60              | ✅              | ✅            | ❌                |
 | DCU        | Hygon         | Z100, Z100L      | ✅              | ✅            | ❌                |
 | NPU        | Ascend        | 310P, 910B, 910B3| ✅              | ✅            | ❌                |
-| GPU        | iluvatar      | All              | ✅              | ✅            | ❌                |
+| GPU        | Iluvatar      | All              | ✅              | ✅            | ❌                |
 | DPU        | Teco          | Checking         | In progress     | In progress   | ❌                |
 | GPU        | Moore Threads | MTT S4000        | ✅              | ✅            | ❌                |
 | GPU        | Birentech     | Biren166M        | ✅              | ✅            | ❌                |
 | GPU        | MetaX         | MXC500           | ✅              | ✅            | ❌                |
 | XPU        | Kunlunxin     | P800             | ✅              | ✅            | ❌                |
-| GPU        | Vastai        | VA16             | ✅              | ✅            | ❌              |      
+| GPU        | Vastai        | VA16             | ✅              | ✅            | ❌                |
 
 
 - [ ] Support video codec processing
