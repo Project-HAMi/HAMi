@@ -442,9 +442,8 @@ func Test_countMaskAvailable(t *testing.T) {
 // usedOverrides maps device index to its Used value; all other indices default to 0.
 // health sets the Health field on every entry.
 func makeDeviceUsages(nodeType string, usedOverrides map[int]int32, health bool) []*device.DeviceUsage {
-	const total = 16
-	devices := make([]*device.DeviceUsage, total)
-	for i := 0; i < total; i++ {
+	devices := make([]*device.DeviceUsage, 16)
+	for i := range 16 {
 		du := &device.DeviceUsage{Index: uint(i), Health: health}
 		if i == 0 {
 			du.CustomInfo = map[string]any{AWSNodeType: nodeType}
