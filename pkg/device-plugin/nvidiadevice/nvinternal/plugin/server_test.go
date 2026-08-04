@@ -964,6 +964,10 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 }
 
 func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
+	previousHostHookPath := hostHookPath
+	hostHookPath = t.TempDir()
+	defer func() { hostHookPath = previousHostHookPath }()
+
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
@@ -1036,6 +1040,10 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 }
 
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
+	previousHostHookPath := hostHookPath
+	hostHookPath = t.TempDir()
+	defer func() { hostHookPath = previousHostHookPath }()
+
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
