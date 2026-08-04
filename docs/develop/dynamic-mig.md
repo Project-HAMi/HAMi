@@ -45,7 +45,7 @@ data:
             - name: 4g.24gb
               memory: 24576
               count: 1
-      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB" ]
+      - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB" ]
         allowedGeometries:
           - 
             - name: 1g.5gb
@@ -130,7 +130,7 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-          nvidia.com/gpumem: 8000 # Each vGPU contains 8000m device memory （Optional,Integer)
+          nvidia.com/gpumem: 8000 # Each vGPU contains 8000M device memory (Optional, Integer)
 ```
 
 A task can decide only to use `mig` or `hami-core` by setting `annotations.nvidia.com/vgpu-mode` to corresponding value, as the example below shows:
@@ -150,7 +150,7 @@ spec:
       resources:
         limits:
           nvidia.com/gpu: 2 # requesting 2 vGPUs
-          nvidia.com/gpumem: 8000 # Each vGPU contains 8000m device memory （Optional,Integer
+          nvidia.com/gpumem: 8000 # Each vGPU contains 8000M device memory (Optional, Integer)
 ```
 
 ## Procedures
