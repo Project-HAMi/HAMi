@@ -44,11 +44,11 @@ func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
 		},
 	}
 	devices := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-4", Index: 4, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-6", Index: 6, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-4", Index: 4, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-6", Index: 6, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 	}
 	req := device.ContainerDeviceRequest{Nums: 4, Type: Ascend910CType}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod"}}
@@ -80,8 +80,8 @@ func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
 		},
 	}
 	devices := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 	}
 	req := device.ContainerDeviceRequest{Nums: 2, Type: Ascend910CType}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-2"}}
@@ -110,8 +110,8 @@ func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
 		},
 	}
 	devices := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
-		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
+		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 	}
 	req := device.ContainerDeviceRequest{Nums: 2, Type: Ascend910CType}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-3"}}
@@ -140,8 +140,8 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 		},
 	}
 	devices := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
-		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
 	}
 	req := device.ContainerDeviceRequest{Nums: 2, Type: Ascend910CType}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-no-netid"}}
@@ -159,8 +159,8 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 		{ID: "dev-1", Index: 1, CustomInfo: map[string]any{}},
 	}
 	devicesPair := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
-		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
+		{ID: "dev-1", Index: 1, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
 	}
 	fitPair, tmpDevsPair, reasonPair := dev.Fit(devicesPair, req, pod, nodeInfo, nil)
 	if !fitPair || len(tmpDevsPair[Ascend910CType]) != 2 {
@@ -210,10 +210,10 @@ func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
 	// End-to-end check: Fit() must turn that empty combination into a clean
 	// rejection, not a panic and not a false "success".
 	devices := []*device.DeviceUsage{
-		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
-		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
-		{ID: "dev-4", Index: 4, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
-		{ID: "dev-6", Index: 6, Count: 1, Used: 0, Totalmem: 32000, CustomInfo: map[string]any{}},
+		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
+		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
+		{ID: "dev-4", Index: 4, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
+		{ID: "dev-6", Index: 6, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
 	}
 	req := device.ContainerDeviceRequest{Nums: 4, Type: Ascend910CType}
 	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-pod-no-netid-no-pairs"}}
