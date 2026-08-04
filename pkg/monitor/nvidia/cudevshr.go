@@ -19,6 +19,7 @@ package nvidia
 import (
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"strings"
@@ -160,9 +161,7 @@ func (l *ContainerLister) ListContainers() map[string]*ContainerUsage {
 	l.mutex.Lock()
 	defer l.mutex.Unlock()
 	snapshot := make(map[string]*ContainerUsage, len(l.containers))
-	for k, v := range l.containers {
-		snapshot[k] = v
-	}
+	maps.Copy(snapshot, l.containers)
 	return snapshot
 }
 
