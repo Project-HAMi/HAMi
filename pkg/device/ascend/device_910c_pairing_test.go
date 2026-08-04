@@ -17,12 +17,14 @@ limitations under the License.
 package ascend
 
 import (
+	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 // TestAscend910C_FitPartialAllocationBug reproduces the case where a pod
@@ -59,6 +61,9 @@ func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
 		t.Errorf("expected fit=false when only 2 of 4 requested NPUs form full module pairs, got fit=true, allocated=%d, reason=%q",
 			len(tmpDevs[Ascend910CType]), reason)
 	}
+	if !strings.Contains(reason, common.AllocatedCardsInsufficientRequest) {
+		t.Errorf("expected reason to contain %q, got %q", common.AllocatedCardsInsufficientRequest, reason)
+	}
 }
 
 // TestAscend910C_FitExactCountBypassBug reproduces the L568-571 bypass: a
@@ -91,6 +96,9 @@ func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
 	if fit {
 		t.Errorf("expected fit=false when the 2 candidate NPUs come from two different partial modules (not one full pair), got fit=true, allocated=%d, reason=%q",
 			len(tmpDevs[Ascend910CType]), reason)
+	}
+	if !strings.Contains(reason, common.AllocatedCardsInsufficientRequest) {
+		t.Errorf("expected reason to contain %q, got %q", common.AllocatedCardsInsufficientRequest, reason)
 	}
 }
 

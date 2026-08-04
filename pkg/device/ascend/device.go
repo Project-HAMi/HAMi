@@ -541,7 +541,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			if !needTopology && !(k.Type == Ascend910CType && originReq > 1) {
+			if !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
 				k.Nums--
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
@@ -553,7 +553,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 && !needTopology && !(k.Type == Ascend910CType && originReq > 1) {
+		if k.Nums == 0 && !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
