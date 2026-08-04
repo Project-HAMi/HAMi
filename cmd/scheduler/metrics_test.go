@@ -17,9 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
@@ -29,10 +31,33 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
 
-type fakeMetricsProvider struct{}
+type fakeMetricsProvider struct {
+	nodeUsage    map[string]*schedulerpkg.NodeUsage
+	quotaManager *device.QuotaManager
+	podManager   *device.PodManager
+}
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
-	m := map[string]*schedulerpkg.NodeUsage{
+	return &f.nodeUsage
+}
+
+func (f *fakeMetricsProvider) GetQuotaManager() *device.QuotaManager {
+	return f.quotaManager
+}
+
+func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
+	return f.podManager
+}
+
+func TestSchedulerDescribeCollectSync(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+
+	c := &ClusterManager{
+		Zone:          "test-zone",
+		LegacyMetrics: false,
+	}
+
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
 		"node-1": {
 			Devices: policy.DeviceUsageList{
 				DeviceLists: []*policy.DeviceListsScore{
@@ -54,15 +79,8 @@ func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.N
 			},
 		},
 	}
-	return &m
-}
 
-func (f *fakeMetricsProvider) GetQuotaManager() *device.QuotaManager {
 	qm := device.NewQuotaManager()
-	return qm
-}
-
-func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 	pm := device.NewPodManager()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -84,19 +102,14 @@ func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 		},
 	}
 	pm.AddPod(pod, "node-1", podDevices)
-	return pm
-}
 
-func TestSchedulerDescribeCollectSync(t *testing.T) {
-	reg := prometheus.NewPedanticRegistry()
-
-	c := &ClusterManager{
-		Zone:          "test-zone",
-		LegacyMetrics: false,
-	}
 	cc := ClusterManagerCollector{
-		ClusterManager:  c,
-		metricsProvider: &fakeMetricsProvider{},
+		ClusterManager: c,
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: qm,
+			podManager:   pm,
+		},
 	}
 
 	if err := reg.Register(cc); err != nil {
@@ -113,8 +126,12 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 		LegacyMetrics: true,
 	}
 	ccLegacy := ClusterManagerCollector{
-		ClusterManager:  cLegacy,
-		metricsProvider: &fakeMetricsProvider{},
+		ClusterManager: cLegacy,
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: qm,
+			podManager:   pm,
+		},
 	}
 
 	if err := regLegacy.Register(ccLegacy); err != nil {
@@ -122,5 +139,79 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 	}
 	if _, err := regLegacy.Gather(); err != nil {
 		t.Errorf("Gather failed (legacy): %v", err)
+	}
+}
+
+func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "zero-memory",
+							Index:     0,
+							Totalmem:  0,
+							Totalcore: 2,
+							Type:      "AWSNeuron",
+						},
+					},
+					{
+						Device: &device.DeviceUsage{
+							ID:        "negative-memory",
+							Index:     1,
+							Totalmem:  -1,
+							Totalcore: 2,
+							Type:      "test-device",
+						},
+					},
+					{
+						Device: &device.DeviceUsage{
+							ID:        "normal-memory",
+							Index:     2,
+							Usedmem:   1,
+							Totalmem:  4,
+							Totalcore: 2,
+							Type:      "NVIDIA",
+						},
+					},
+				},
+			},
+		},
+	}
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{
+			LegacyMetrics: true,
+		},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   device.NewPodManager(),
+		},
+	}
+
+	want := `
+# HELP hami_gpu_core_limit_ratio Device core limit for a certain GPU
+# TYPE hami_gpu_core_limit_ratio gauge
+hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 2
+# HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
+# TYPE hami_node_gpu_memory_allocated_ratio gauge
+hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node="node-1"} 0.25
+# HELP nodeGPUMemoryPercentage GPU Memory Allocated Percentage on a certain GPU
+# TYPE nodeGPUMemoryPercentage gauge
+nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"} 0.25
+`
+
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_gpu_core_limit_ratio",
+		"hami_node_gpu_memory_allocated_ratio",
+		"nodeGPUMemoryPercentage",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
