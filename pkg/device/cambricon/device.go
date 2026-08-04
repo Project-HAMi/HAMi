@@ -54,6 +54,9 @@ const (
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
 	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. One cambricon.com/mlu.smlu.vmemory is 256 MiB.
+	MemoryFactor = 256
 )
 
 var (
@@ -198,7 +201,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Index:        uint(i),
 			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * 256 * 100 / cards),
+			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
 			Devcore:      100,
 			Type:         CambriconMLUDevice,
 			Numa:         0,
@@ -251,7 +254,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				memnums, ok := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
-					memnum = int(memnums) * 256
+					memnum = int(memnums) * MemoryFactor
 				}
 			}
 			corenum := int32(100)

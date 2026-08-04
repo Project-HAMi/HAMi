@@ -41,6 +41,10 @@ const (
 	MetaxSGPUDevice     = "Metax-SGPU"
 
 	MetaxNodeLock = "hami.io/mutex.lock"
+
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. A bare vmemory value is read as Gi.
+	MemoryFactor = 1024
 )
 
 const (
@@ -246,7 +250,7 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			if hasUnit {
 				mem = v / 1024 / 1024
 			} else {
-				mem = v * 1024
+				mem = v * MemoryFactor
 			}
 		}
 	}

@@ -51,6 +51,9 @@ const (
 	MthreadsPredicateTime    = "mthreads.com/predicate-time"
 	coresPerMthreadsGPU      = 16
 	memoryPerMthreadsGPU     = 96
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. One mthreads vmemory unit is 512 MiB.
+	MemoryFactor = 512
 )
 
 var (
@@ -137,7 +140,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 			Index:        uint(i),
 			ID:           n.Name + "-mthreads-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
+			Devmem:       int32(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores),
 			Devcore:      coresPerMthreadsGPU,
 			Type:         MthreadsGPUDevice,
 			Numa:         0,
@@ -221,7 +224,7 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
-					memnum = int(memnums) * 512
+					memnum = int(memnums) * MemoryFactor
 					klog.InfoS("Memory allocation calculated",
 						"container", ctr.Name,
 						"requestedMem", memnums,
