@@ -1,4 +1,4 @@
-/*/*
+/*
 Copyright 2024 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -2013,6 +2013,60 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         0,
 			},
 		},
+		{
+			name: "gpu + mem in Requests only — falls back to Requests",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": *resource.NewQuantity(2048, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           2048,
+				MemPercentagereq:  101,
+				Coresreq:          0,
+			},
+		},
+		{
+			name: "gpu + cores in Requests only — falls back to Requests",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(30, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq:  100,
+				Coresreq:         30,
+			},
+		},
+		{
+			name: "gpu + mem-percentage in Requests only — falls back to Requests",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(2, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(25, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq:  25,
+				Coresreq:         0,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -3041,4 +3095,154 @@ func TestFit_TopologyNegativeScores(t *testing.T) {
 		assert.Assert(t, uuids["dev-1"])
 		assert.Assert(t, uuids["dev-2"])
 	})
+}
+
+func TestMutateContainerResource(t *testing.T) {
+	tests := []struct {
+		name           string
+		gpuNum         int32
+		limits         corev1.ResourceList
+		requests       corev1.ResourceList
+		wantGPUAdded   bool
+		expectedGPUNum int64
+	}{
+		{
+			name: "GPU count already in Limits — return true, no mutation",
+			gpuNum: 1,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(3, resource.BinarySI),
+			},
+			wantGPUAdded:   true,
+			expectedGPUNum: 3,
+		},
+		{
+			name:   "cores in Limits — injects default GPU count",
+			gpuNum: 1,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpucores": *resource.NewQuantity(50, resource.DecimalSI),
+			},
+			wantGPUAdded:   true,
+			expectedGPUNum: 1,
+		},
+		{
+			name:   "memory in Limits — injects default GPU count",
+			gpuNum: 2,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpumem": *resource.NewQuantity(4096, resource.DecimalSI),
+			},
+			wantGPUAdded:   true,
+			expectedGPUNum: 2,
+		},
+		{
+			name:   "mem percentage in Limits — injects default GPU count",
+			gpuNum: 1,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpumem-percentage": *resource.NewQuantity(50, resource.DecimalSI),
+			},
+			wantGPUAdded:   true,
+			expectedGPUNum: 1,
+		},
+		{
+			name:   "DefaultGPUNum=0 with cores in Limits — no injection",
+			gpuNum: 0,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpucores": *resource.NewQuantity(50, resource.DecimalSI),
+			},
+			wantGPUAdded: false,
+		},
+		{
+			name:   "cores in Requests only — not seen (mutateContainerResource reads Limits only)",
+			gpuNum: 1,
+			requests: corev1.ResourceList{
+				"nvidia.com/gpucores": *resource.NewQuantity(50, resource.DecimalSI),
+			},
+			wantGPUAdded: false,
+		},
+		{
+			name:   "GPU count in Requests only — not seen (mutateContainerResource reads Limits only)",
+			gpuNum: 1,
+			requests: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(4, resource.BinarySI),
+			},
+			wantGPUAdded: false,
+		},
+		{
+			name:   "GPU count in Limits as zero — returns true",
+			gpuNum: 1,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+			},
+			wantGPUAdded:   true,
+			expectedGPUNum: 0,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			dev := &NvidiaGPUDevices{
+				config: NvidiaConfig{
+					ResourceCountName:            "nvidia.com/gpu",
+					ResourceMemoryName:           "nvidia.com/gpumem",
+					ResourceCoreName:             "nvidia.com/gpucores",
+					ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+					DefaultGPUNum:                tt.gpuNum,
+				},
+			}
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   tt.limits,
+					Requests: tt.requests,
+				},
+			}
+			got := dev.mutateContainerResource(ctr)
+			assert.Equal(t, tt.wantGPUAdded, got)
+			if got {
+				gpuQty, ok := ctr.Resources.Limits["nvidia.com/gpu"]
+				assert.Assert(t, ok, "GPU limit should be present")
+				assert.Equal(t, tt.expectedGPUNum, gpuQty.Value())
+			}
+		})
+	}
+}
+
+func TestFit_MpsMode(t *testing.T) {
+	nv := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Mode: "mps"},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Mode: "mps"},
+	}
+
+	// MPS mode should allow allocation even when multiple containers share
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 1000, Coresreq: 20, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{AllocateMode: "mps"},
+	}}
+	fit, result, _ := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, true, fit)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+}
+
+func TestFit_NumaBindDifferentNumaFails(t *testing.T) {
+	nv := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 0},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true, Numa: 1},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{NumaBind: "true"},
+	}}
+	fit, _, reason := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, false, fit)
+	assert.Assert(t, strings.Contains(reason, "NumaNotFit"))
+	assert.Assert(t, strings.Contains(reason, "AllocatedCardsInsufficientRequest"))
 }
