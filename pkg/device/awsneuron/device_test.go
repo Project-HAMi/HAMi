@@ -705,6 +705,25 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
 		{
+			name: "fit fail: NumaNotFit with multiple devices",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 0, "trn", true),
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             2,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/2 NumaNotFit",
+		},
+		{
 			name: "fit fail: CardNotHealth",
 			devices: []*device.DeviceUsage{
 				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", false),

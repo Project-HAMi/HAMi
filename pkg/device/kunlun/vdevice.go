@@ -255,7 +255,7 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums)
 		}
-		return false, tmpDevs, common.GenReason(reason, len(reason))
+		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	for _, dev := range alloc {
 		for _, val := range devices {
