@@ -25,6 +25,7 @@ import (
 	"net/http/pprof"
 	"os"
 	"os/signal"
+	"sync"
 	"syscall"
 	"time"
 
@@ -156,8 +157,12 @@ func start() error {
 
 	// start monitor metrics
 	serveErrCh := make(chan error, 2)
-	// start monitor metrics
-	go initMetrics(ctx, config.MetricsBindAddress, sher, legacyMetrics, serveErrCh)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		initMetrics(ctx, config.MetricsBindAddress, sher, legacyMetrics, serveErrCh)
+	}()
 
 	// start http server
 	router := httprouter.New()
@@ -227,6 +232,9 @@ func start() error {
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		klog.ErrorS(err, "HTTP server shutdown did not complete cleanly")
 	}
+	// Wait for the metrics server to finish draining before exiting.
+	cancel()
+	wg.Wait()
 	if serveErr != nil {
 		return serveErr
 	}
