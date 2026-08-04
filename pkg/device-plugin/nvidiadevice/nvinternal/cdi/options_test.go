@@ -38,6 +38,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
+
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 )
 

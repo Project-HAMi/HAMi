@@ -36,6 +36,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 )
 
@@ -56,7 +57,7 @@ func TestImexChannelCDILib_GetSpec(t *testing.T) {
 
 	raw := spec.Raw()
 	require.Len(t, raw.Devices, 2)
-	
+
 	found1 := false
 	found2 := false
 	for _, dev := range raw.Devices {

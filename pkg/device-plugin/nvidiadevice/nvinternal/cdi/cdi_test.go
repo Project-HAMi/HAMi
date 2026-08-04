@@ -35,8 +35,8 @@ package cdi
 import (
 	"testing"
 
-	"github.com/stretchr/testify/require"
 	"github.com/NVIDIA/nvidia-container-toolkit/pkg/nvcdi"
+	"github.com/stretchr/testify/require"
 )
 
 func TestQualifiedName(t *testing.T) {
@@ -49,7 +49,7 @@ func TestQualifiedName(t *testing.T) {
 
 func TestAdditionalDevices(t *testing.T) {
 	handler := &cdiHandler{
-		vendor: "nvidia.com",
+		vendor:          "nvidia.com",
 		additionalModes: []string{"gdrcopy", "gds"},
 		cdilibs: map[string]nvcdi.SpecGenerator{
 			"gdrcopy": &imexChannelCDILib{},
