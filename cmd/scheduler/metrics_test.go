@@ -20,17 +20,40 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 )
 
-// fakeMetricsProvider satisfies the schedulerMetricsProvider interface
-// with empty data for testing.
 type fakeMetricsProvider struct{}
 
 func (f *fakeMetricsProvider) InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage {
-	m := make(map[string]*schedulerpkg.NodeUsage)
+	m := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-abc-123",
+							Index:     0,
+							Used:      2,
+							Count:     4,
+							Usedmem:   4096,
+							Totalmem:  8192,
+							Totalcore: 100,
+							Usedcores: 50,
+							Type:      "NVIDIA",
+							Mode:      "hami-core",
+						},
+					},
+				},
+			},
+		},
+	}
 	return &m
 }
 
@@ -41,6 +64,26 @@ func (f *fakeMetricsProvider) GetQuotaManager() *device.QuotaManager {
 
 func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 	pm := device.NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       k8stypes.UID("uid-123"),
+		},
+	}
+	podDevices := device.PodDevices{
+		"NVIDIA": device.PodSingleDevice{
+			device.ContainerDevices{
+				{
+					UUID:      "GPU-abc-123",
+					Type:      "NVIDIA",
+					Usedmem:   2048,
+					Usedcores: 25,
+				},
+			},
+		},
+	}
+	pm.AddPod(pod, "node-1", podDevices)
 	return pm
 }
 
