@@ -94,6 +94,7 @@ func TestCollectContainerMetrics(t *testing.T) {
 			t.Errorf("unexpected metric: %s", m.Desc())
 			continue
 		}
+		delete(want, m.Desc())
 		v, labels := gaugeValue(t, m)
 		if v != exp {
 			t.Errorf("%s = %v, want %v", m.Desc(), v, exp)
@@ -103,6 +104,9 @@ func TestCollectContainerMetrics(t *testing.T) {
 			labels["device_uuid"] != testUUID {
 			t.Errorf("%s has wrong labels: %v", m.Desc(), labels)
 		}
+	}
+	if len(want) != 0 {
+		t.Errorf("expected metrics not emitted: %v", want)
 	}
 }
 
