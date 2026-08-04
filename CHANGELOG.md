@@ -408,3 +408,8 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix initialization error when using tensor parallelism on vLLM above 0.18
 - Fix multiple device typos
 
+## v2.9.1 - 2026-08-05
+
+**Bug fixes**
+- Fix panic on asymmetric NVML GPU Link topologies by logging a warning and returning a fallback score of 0
+
