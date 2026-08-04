@@ -1940,6 +1940,79 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         0,
 			},
 		},
+		{
+			name: "gpu count + memory percentage of 0 — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "memory percentage of 0 in Requests — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "negative memory percentage — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "memory percentage of 0 + explicit memory — explicit memory wins",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem":            *resource.NewQuantity(2000, resource.DecimalSI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           2000,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1991,6 +2064,59 @@ func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 	result := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
+
+	// a percentage of 0 is unset, so it lands on defaultMemory just like nvidia.com/gpumem: 0
+	ctr.Resources.Limits["nvidia.com/gpumem-percentage"] = *resource.NewQuantity(0, resource.DecimalSI)
+	result = dev.GenerateResourceRequests(ctr)
+	assert.Equal(t, result.Memreq, int32(512))
+	assert.Equal(t, result.MemPercentagereq, int32(101))
+
+	delete(ctr.Resources.Limits, "nvidia.com/gpumem-percentage")
+	ctr.Resources.Limits["nvidia.com/gpumem"] = *resource.NewQuantity(0, resource.DecimalSI)
+	control := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, control)
+}
+
+// A gpumem-percentage of 0 used to reach Fit as memreq=0: the pod fitted any card and was booked
+// with 0 memory, so the device plugin injected CUDA_DEVICE_MEMORY_LIMIT=0m ("no limit").
+func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+	ctr := &corev1.Container{
+		Name: "test",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "zero-percentage", Namespace: "zero-percentage-ns"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{*ctr}},
+	}
+	newCard := func(usedmem int32) []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Used: 0, Count: 10,
+			Usedmem: usedmem, Totalmem: 11264, Totalcore: 100, Usedcores: 0,
+			Type: NvidiaGPUDevice, Health: true,
+		}}
+	}
+	req := dev.GenerateResourceRequests(ctr)
+
+	fit, result, reason := dev.Fit(newCard(0), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, fit, "empty card should fit, reason: %s", reason)
+	// must book the whole card, not 0
+	assert.Equal(t, int32(11264), result[NvidiaGPUDevice][0].Usedmem)
+
+	fit, _, reason = dev.Fit(newCard(11260), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, !fit, "an almost full card must not fit")
+	assert.Assert(t, strings.Contains(reason, "CardInsufficientMemory"), "reason: %s", reason)
 }
 
 func TestMigNeedsReset(t *testing.T) {
