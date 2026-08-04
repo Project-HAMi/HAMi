@@ -1135,3 +1135,29 @@ func Test_SetUtilizationSwitch(t *testing.T) {
 		})
 	}
 }
+
+func TestSpec_CorruptProcnumIsClamped(t *testing.T) {
+	tests := []struct {
+		name     string
+		procnum  int32
+		expected uint64
+	}{
+		// Negative procnum clamps to 0 active slots, so nothing is summed.
+		{name: "negative procnum", procnum: -5, expected: 0},
+		// procnum larger than the backing array clamps to its length; only the
+		// single populated slot contributes.
+		{name: "procnum over backing array", procnum: 2000, expected: 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := &sharedRegionT{num: 2, procnum: tt.procnum}
+			sr.procs[0].used[0].total = 100
+			sr.procs[0].deviceUtil[0].smUtil = 100
+			s := Spec{sr: sr}
+			// A corrupt procnum must never panic the slice bound.
+			assert.Equal(t, tt.expected, s.DeviceMemoryTotal(0))
+			assert.Equal(t, tt.expected, s.DeviceSmUtil(0))
+		})
+	}
+}
