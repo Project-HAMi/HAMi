@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log"
 	"math"
 	"net/http"
 	"strings"
@@ -424,7 +423,10 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 	return c
 }
 
-func initMetrics(ctx context.Context, bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
+// initMetrics serves Prometheus metrics until ctx is canceled, then drains the
+// server. A serve failure is reported on serveErrCh so main can shut down the
+// extender server too instead of exiting abruptly.
+func initMetrics(ctx context.Context, bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool, serveErrCh chan<- error) {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
@@ -441,7 +443,7 @@ func initMetrics(ctx context.Context, bindAddress string, metricsProvider schedu
 	}
 	go func() {
 		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal(err)
+			serveErrCh <- fmt.Errorf("metrics server error: %w", err)
 		}
 	}()
 

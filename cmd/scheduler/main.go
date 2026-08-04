@@ -147,12 +147,17 @@ func start() error {
 	}
 	defer sher.Stop()
 
-	// ctx is canceled on SIGINT/SIGTERM to trigger graceful shutdown.
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	// ctx is canceled on SIGINT/SIGTERM or on a fatal server error to
+	// trigger graceful shutdown of both servers.
+	signalCtx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
+	ctx, cancel := context.WithCancel(signalCtx)
+	defer cancel()
 
 	// start monitor metrics
-	go initMetrics(ctx, config.MetricsBindAddress, sher, legacyMetrics)
+	serveErrCh := make(chan error, 2)
+	// start monitor metrics
+	go initMetrics(ctx, config.MetricsBindAddress, sher, legacyMetrics, serveErrCh)
 
 	// start http server
 	router := httprouter.New()
@@ -175,7 +180,6 @@ func start() error {
 		ReadTimeout:       60 * time.Second,
 	}
 
-	serveErrCh := make(chan error, 1)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
 		go func() {
 			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
@@ -205,20 +209,26 @@ func start() error {
 		}()
 	}
 
+	var serveErr error
 	select {
-	case err := <-serveErrCh:
-		return err
+	case serveErr = <-serveErrCh:
+		klog.ErrorS(serveErr, "server failed, shutting down")
+		// Cancel ctx so the other server drains via its own ctx.Done path.
+		cancel()
 	case <-ctx.Done():
+		klog.Info("Received termination signal, draining in-flight requests")
 	}
 
-	klog.Info("Received termination signal, draining in-flight requests")
 	// Drain within the kubelet's default 30s termination grace period so
 	// in-flight /bind requests finish and release their node locks instead
 	// of leaving them held for the full node-lock timeout.
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
-	defer cancel()
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer shutdownCancel()
 	if err := server.Shutdown(shutdownCtx); err != nil {
 		klog.ErrorS(err, "HTTP server shutdown did not complete cleanly")
+	}
+	if serveErr != nil {
+		return serveErr
 	}
 	klog.Info("Scheduler shut down gracefully")
 	return nil
