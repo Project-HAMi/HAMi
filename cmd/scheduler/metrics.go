@@ -17,6 +17,8 @@ limitations under the License.
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -422,7 +424,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer, metricsProvider s
 	return c
 }
 
-func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
+func initMetrics(ctx context.Context, bindAddress string, metricsProvider schedulerMetricsProvider, legacyMetrics bool) {
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
@@ -437,5 +439,17 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 		ReadHeaderTimeout: 15 * time.Second,
 		ReadTimeout:       60 * time.Second,
 	}
-	log.Fatal(server.ListenAndServe())
+	go func() {
+		if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Fatal(err)
+		}
+	}()
+
+	// Graceful shutdown on context cancellation.
+	<-ctx.Done()
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		klog.ErrorS(err, "metrics server shutdown did not complete cleanly")
+	}
 }

@@ -19,10 +19,13 @@ package main
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/pprof"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/julienschmidt/httprouter"
@@ -42,6 +45,12 @@ import (
 )
 
 //var version string
+
+// gracefulShutdownTimeout bounds how long the servers wait for in-flight
+// requests to drain after SIGTERM. It must stay below the pod's
+// terminationGracePeriodSeconds (default 30s) so draining finishes before
+// the kubelet sends SIGKILL.
+const gracefulShutdownTimeout = 25 * time.Second
 
 var (
 	sher            *scheduler.Scheduler
@@ -138,8 +147,12 @@ func start() error {
 	}
 	defer sher.Stop()
 
+	// ctx is canceled on SIGINT/SIGTERM to trigger graceful shutdown.
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
 	// start monitor metrics
-	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
+	go initMetrics(ctx, config.MetricsBindAddress, sher, legacyMetrics)
 
 	// start http server
 	router := httprouter.New()
@@ -155,47 +168,59 @@ func start() error {
 		klog.Infof("Profiling enabled, visit %s/debug/pprof/ to view profiles", config.HTTPBind)
 	}
 
+	server := &http.Server{
+		Addr:              config.HTTPBind,
+		Handler:           router,
+		ReadHeaderTimeout: 15 * time.Second,
+		ReadTimeout:       60 * time.Second,
+	}
+
+	serveErrCh := make(chan error, 1)
 	if len(tlsCertFile) == 0 || len(tlsKeyFile) == 0 {
-		server := &http.Server{
-			Addr:              config.HTTPBind,
-			Handler:           router,
-			ReadHeaderTimeout: 15 * time.Second,
-			ReadTimeout:       60 * time.Second,
-		}
-		if err := server.ListenAndServe(); err != nil {
-			return fmt.Errorf("listen and Serve error, %v", err)
-		}
+		go func() {
+			if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErrCh <- fmt.Errorf("listen and Serve error, %v", err)
+			}
+		}()
 	} else {
 		certWatcher, err := certwatcher.New(tlsCertFile, tlsKeyFile)
 		if err != nil {
 			return fmt.Errorf("failed to create cert watcher: %w", err)
 		}
 
-		tlsCfg := &tls.Config{
+		server.TLSConfig = &tls.Config{
 			GetCertificate: certWatcher.GetCertificate,
 		}
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
 		go func() {
-			if err := certWatcher.Start(ctx); err != nil && err != context.Canceled {
+			if err := certWatcher.Start(ctx); err != nil && !errors.Is(err, context.Canceled) {
 				klog.ErrorS(err, "cert watcher error")
 			}
 		}()
 
-		addr := config.HTTPBind
-		handler := router
-		server := &http.Server{
-			Addr:              addr,
-			Handler:           handler,
-			TLSConfig:         tlsCfg,
-			ReadHeaderTimeout: 15 * time.Second,
-			ReadTimeout:       60 * time.Second,
-		}
-		klog.InfoS("Starting HTTPS server", "address", addr)
-		if err := server.ListenAndServeTLS("", ""); err != nil {
-			return fmt.Errorf("HTTPS server error: %w", err)
-		}
+		klog.InfoS("Starting HTTPS server", "address", config.HTTPBind)
+		go func() {
+			if err := server.ListenAndServeTLS("", ""); err != nil && !errors.Is(err, http.ErrServerClosed) {
+				serveErrCh <- fmt.Errorf("HTTPS server error: %w", err)
+			}
+		}()
 	}
+
+	select {
+	case err := <-serveErrCh:
+		return err
+	case <-ctx.Done():
+	}
+
+	klog.Info("Received termination signal, draining in-flight requests")
+	// Drain within the kubelet's default 30s termination grace period so
+	// in-flight /bind requests finish and release their node locks instead
+	// of leaving them held for the full node-lock timeout.
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), gracefulShutdownTimeout)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		klog.ErrorS(err, "HTTP server shutdown did not complete cleanly")
+	}
+	klog.Info("Scheduler shut down gracefully")
 	return nil
 }
 
