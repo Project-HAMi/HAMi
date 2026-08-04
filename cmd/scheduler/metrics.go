@@ -137,7 +137,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"node", "device_uuid", "device_index"}, nil,
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
 		"hami_node_gpu_mig_instance_info",
@@ -190,7 +190,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 		legacyMemoryPercentage = prometheus.NewDesc(
 			"nodeGPUMemoryPercentage",
 			"GPU Memory Allocated Percentage on a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
+			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
 		)
 		legacyMigInstance = prometheus.NewDesc(
 			"nodeGPUMigInstance",
@@ -261,7 +261,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 			}
 
 			if devs.Device.Totalmem > 0 {
-				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index)); err != nil {
+				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 					klog.V(4).Infof("Failed to send nodeGPUMemoryPercentage metric: %v", err)
 				}
 			}
@@ -274,7 +274,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 				sendLegacyMetric(ch, legacyCoreAllocatedDesc, prometheus.GaugeValue, float64(devs.Device.Usedcores), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
 				sendLegacyMetric(ch, legacyOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type)
 				if devs.Device.Totalmem > 0 {
-					sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index))
+					sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
 				}
 			}
 		}
