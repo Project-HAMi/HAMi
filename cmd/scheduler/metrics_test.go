@@ -45,8 +45,6 @@ func (f *fakeMetricsProvider) GetPodManager() *device.PodManager {
 }
 
 func TestSchedulerDescribeCollectSync(t *testing.T) {
-	// A pedantic registry is strict and validates that all metrics collected
-	// have been described in Describe(), and checks for duplicate descriptors.
 	reg := prometheus.NewPedanticRegistry()
 
 	c := &ClusterManager{
@@ -58,18 +56,14 @@ func TestSchedulerDescribeCollectSync(t *testing.T) {
 		metricsProvider: &fakeMetricsProvider{},
 	}
 
-	// Registering the collector calls Describe() and validates descriptors.
 	if err := reg.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
 
-	// Invoke Gather to trigger Collect. Even without data,
-	// this ensures the Collect execution path does not panic.
 	if _, err := reg.Gather(); err != nil {
 		t.Errorf("Gather failed (non-legacy): %v", err)
 	}
 
-	// Test the legacy metrics configuration.
 	regLegacy := prometheus.NewPedanticRegistry()
 	cLegacy := &ClusterManager{
 		Zone:          "test-zone-legacy",
