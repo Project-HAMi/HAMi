@@ -496,6 +496,17 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		t.Errorf("GetNode returned a live pointer instead of a deep copy: internal Devmem was mutated to %d", internalMem)
 	}
 
+	// Mutate the returned copy's Node field.
+	got.Node.Name = "mutated-name"
+
+	m.mutex.RLock()
+	internalNodeName := m.nodes["node-copy"].Node.Name
+	m.mutex.RUnlock()
+
+	if internalNodeName == "mutated-name" {
+		t.Errorf("GetNode returned a live Node pointer instead of a deep copy: internal Node.Name was mutated to %s", internalNodeName)
+	}
+
 	// Verify error path for missing node.
 	_, err = m.GetNode("nonexistent-node")
 	if err == nil {
