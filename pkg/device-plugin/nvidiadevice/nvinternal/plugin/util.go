@@ -169,7 +169,7 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 		num = strings.TrimSpace(num)
 		index, err := strconv.Atoi(num)
 		if err != nil {
-			klog.Fatal("atoi failed num=", num)
+			continue
 		}
 		if index == idx {
 			colonParts := strings.SplitN(val, ":", 3)

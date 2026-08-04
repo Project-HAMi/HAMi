@@ -996,6 +996,17 @@ func TestGetMigUUIDFromSmiOutput(t *testing.T) {
 			idx:  1,
 			want: "MIG-dev1",
 		},
+		{
+			name: "non-numeric device number does not panic and skips line",
+			output: strings.Join([]string{
+				"GPU 0: NVIDIA A100 (UUID: GPU-abc123)",
+				"  MIG 1g.5gb Device abc: (UUID: MIG-invalid)",
+				"  MIG 1g.5gb Device 1: (UUID: MIG-dev1)",
+			}, "\n"),
+			uuid: "GPU-abc123",
+			idx:  1,
+			want: "MIG-dev1",
+		},
 	}
 
 	for _, tc := range tests {
