@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -1254,6 +1255,46 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
 				}
 			}
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_MemoryOverflowClamped(t *testing.T) {
+	oldFactor := MemoryFactor
+	defer func() { MemoryFactor = oldFactor }()
+	MemoryFactor = 256
+
+	dev := DCUDevices{}
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+
+	tests := []struct {
+		name string
+		mem  string
+		want int32
+	}{
+		{
+			name: "16Gi scaled by factor 256 overflows int32 and is clamped",
+			mem:  "16Gi",
+			want: math.MaxInt32,
+		},
+		{
+			name: "in-range request scaled by factor 256 is preserved",
+			mem:  "1024",
+			want: int32(262144),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := dev.GenerateResourceRequests(&corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+						"hygon.com/dcumem": resource.MustParse(test.mem),
+					},
+				},
+			})
+			assert.Equal(t, result.Memreq, test.want)
 		})
 	}
 }

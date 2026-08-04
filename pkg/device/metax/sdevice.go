@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -247,6 +248,10 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 				mem = v / 1024 / 1024
 			} else {
 				mem = v * 1024
+			}
+			if mem > math.MaxInt32 || mem < 0 {
+				klog.ErrorS(nil, "metax memory request is out of int32 range, clamping to max int32", "container", ctr.Name, "request", mem)
+				mem = math.MaxInt32
 			}
 		}
 	}

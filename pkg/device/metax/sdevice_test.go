@@ -19,6 +19,7 @@ package metax
 import (
 	"flag"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -464,6 +465,44 @@ func TestGenerateResourceRequests(t *testing.T) {
 			if !reflect.DeepEqual(ts.expected, result) {
 				t.Errorf("GenerateResourceRequests failed: result %v, expected %v",
 					result, ts.expected)
+			}
+		})
+	}
+}
+
+func TestGenerateResourceRequests_MemoryOverflowClamped(t *testing.T) {
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+	metaxSDevice := &MetaxSDevices{}
+
+	tests := []struct {
+		name string
+		mem  string
+		want int32
+	}{
+		{
+			name: "plain number is interpreted as Gi and scaled by 1024, exceeding int32 range, so it is clamped",
+			mem:  "2097152",
+			want: math.MaxInt32,
+		},
+		{
+			name: "in-range request with unit is preserved",
+			mem:  "16Gi",
+			want: int32(16384),
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := metaxSDevice.GenerateResourceRequests(&corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":    resource.MustParse("1"),
+						"metax-tech.com/vmemory": resource.MustParse(test.mem),
+					},
+				},
+			})
+			if result.Memreq != test.want {
+				t.Errorf("GenerateResourceRequests: got Memreq %d, want %d", result.Memreq, test.want)
 			}
 		})
 	}

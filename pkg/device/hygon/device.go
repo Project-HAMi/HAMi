@@ -19,6 +19,7 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"math"
 	"slices"
 	"strings"
 
@@ -189,7 +190,12 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 						memnums = memnums * int64(MemoryFactor)
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
 					}
-					memnum = int(memnums)
+					if memnums > math.MaxInt32 || memnums < 0 {
+						klog.ErrorS(nil, "hygon memory request is out of int32 range, clamping to max int32", "container", ctr.Name, "request", memnums)
+						memnum = math.MaxInt32
+					} else {
+						memnum = int(memnums)
+					}
 				}
 			}
 			corenum := int32(100)

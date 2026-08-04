@@ -19,6 +19,7 @@ package ascend
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -1211,6 +1212,56 @@ func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 			assert.Equal(t, result.Memreq, test.want.Memreq)
 			assert.Equal(t, result.Coresreq, test.want.Coresreq)
 			assert.Equal(t, result.Type, test.want.Type)
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_VNPUCoreMemoryOverflowClamped(t *testing.T) {
+	tests := []struct {
+		name string
+		args corev1.Container
+		want int32
+	}{
+		{
+			name: "soft-partition memory request exceeding int32 range is clamped",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: math.MaxInt32,
+		},
+		{
+			name: "soft-partition in-range memory request is preserved",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("15360"),
+					},
+				},
+			},
+			want: int32(15360),
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+				},
+			}
+			result := dev.GenerateResourceRequests(&test.args)
+			assert.Equal(t, result.Memreq, test.want)
 		})
 	}
 }

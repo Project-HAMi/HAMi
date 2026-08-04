@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -331,7 +332,12 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 
 					if isCoreRequested {
 						// Soft-partitioning: Use the raw value directly.
-						memnum = int(memnums)
+						if memnums > math.MaxInt32 || memnums < 0 {
+							klog.ErrorS(nil, "ascend memory request is out of int32 range, clamping to max int32", "container", ctr.Name, "request", memnums)
+							memnum = math.MaxInt32
+						} else {
+							memnum = int(memnums)
+						}
 					} else {
 						m, _ := dev.trimMemory(memnums)
 						memnum = int(m)

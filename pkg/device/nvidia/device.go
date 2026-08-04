@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"sync"
@@ -550,7 +551,12 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 						memnums = memnums * int64(dev.config.MemoryFactor)
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
-					memnum = int(memnums)
+					if memnums > math.MaxInt32 || memnums < 0 {
+						klog.ErrorS(nil, "nvidia memory request is out of int32 range, clamping to max int32", "container", ctr.Name, "request", memnums)
+						memnum = math.MaxInt32
+					} else {
+						memnum = int(memnums)
+					}
 				}
 			}
 			mempnum := int32(101)
