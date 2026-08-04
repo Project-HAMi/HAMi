@@ -352,5 +352,6 @@ func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  HygonResourceCount,
 		ResourceMemoryName: HygonResourceMemory,
 		ResourceCoreName:   HygonResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

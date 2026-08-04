@@ -368,5 +368,6 @@ func (dev *IluvatarDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       MemoryFactor,
 	}
 }

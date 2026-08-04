@@ -893,6 +893,7 @@ func (dev *NvidiaGPUDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       dev.config.MemoryFactor,
 	}
 }
 

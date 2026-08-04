@@ -429,5 +429,6 @@ func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MLUResourceCount,
 		ResourceMemoryName: MLUResourceMemory,
 		ResourceCoreName:   MLUResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

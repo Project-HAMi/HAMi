@@ -480,6 +480,7 @@ func (dev *MetaxSDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MetaxResourceNameVCount,
 		ResourceMemoryName: MetaxResourceNameVMemory,
 		ResourceCoreName:   MetaxResourceNameVCore,
+		MemoryFactor:       MemoryFactor,
 	}
 }
 

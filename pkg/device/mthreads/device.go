@@ -403,5 +403,6 @@ func (dev *MthreadsDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MthreadsResourceCount,
 		ResourceMemoryName: MthreadsResourceMemory,
 		ResourceCoreName:   MthreadsResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

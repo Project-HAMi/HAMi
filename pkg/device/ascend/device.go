@@ -416,6 +416,7 @@ func (dev *Devices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       dev.config.MemoryFactor,
 	}
 }
 
