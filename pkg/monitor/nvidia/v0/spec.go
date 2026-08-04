@@ -138,10 +138,9 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceSmLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
 		s.sr.smLimit[idx] = l
-		idx += 1
 	}
 }
 
@@ -158,10 +157,9 @@ func (s Spec) DeviceMemoryLimit(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
 		s.sr.limit[idx] = l
-		idx += 1
 	}
 }
 
