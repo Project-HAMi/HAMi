@@ -313,7 +313,7 @@ func TestAddPod_UpdateExistingDevices(t *testing.T) {
 	added := podManager.AddPod(pod, "node1", PodDevices{"device1": {{}}})
 	assert.True(t, added, "AddPod should report true for a new pod")
 
-	updatedAgain := podManager.AddPod(pod, "node1", PodDevices{"device1": {{{UUID: "GPU-1"}}}})
+	updatedAgain := podManager.AddPod(pod, "node2", PodDevices{"device1": {{{UUID: "GPU-1"}}}})
 	assert.False(t, updatedAgain, "AddPod should report false when the pod already exists")
 
 	pi, ok := podManager.GetPod(pod)
