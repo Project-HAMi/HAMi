@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -97,12 +98,12 @@ func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *te
 	want := `
 # HELP hami_gpu_core_limit_ratio Device core limit for a certain GPU
 # TYPE hami_gpu_core_limit_ratio gauge
-hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 2
-hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 2
-hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node_name="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node_name="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node_name="node-1"} 2
 # HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
 # TYPE hami_node_gpu_memory_allocated_ratio gauge
-hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node="node-1"} 0.25
+hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node_name="node-1"} 0.25
 # HELP nodeGPUMemoryPercentage GPU Memory Allocated Percentage on a certain GPU
 # TYPE nodeGPUMemoryPercentage gauge
 nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"} 0.25
@@ -116,5 +117,97 @@ nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"
 		"nodeGPUMemoryPercentage",
 	); err != nil {
 		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}
+
+func newFakeMetricsProvider() *fakeSchedulerMetricsProvider {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "dev-1",
+							Index:     0,
+							Totalmem:  1024,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+						},
+					},
+				},
+			},
+		},
+	}
+	return &fakeSchedulerMetricsProvider{
+		nodeUsage:    nodeUsage,
+		quotaManager: device.NewQuotaManager(),
+		podManager:   device.NewPodManager(),
+	}
+}
+
+func TestSchedulerMetricDescriptors(t *testing.T) {
+	cm := &ClusterManager{
+		Zone:          "test-zone",
+		LegacyMetrics: false,
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  cm,
+		metricsProvider: newFakeMetricsProvider(),
+	}
+
+	ch := make(chan *prometheus.Desc, 50)
+	collector.Describe(ch)
+	close(ch)
+
+	foundDescriptors := 0
+	for desc := range ch {
+		foundDescriptors++
+		descStr := desc.String()
+		// Ensure standard GPU descriptors (excluding namespace-scoped quota metrics) contain node_name and do not contain old 'node'
+		if strings.Contains(descStr, "fqName: \"hami_") && !strings.Contains(descStr, "hami_resource_quota_used") {
+			if !strings.Contains(descStr, "node_name") {
+				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
+			}
+			if strings.Contains(descStr, "variableLabels: [node ") || strings.Contains(descStr, "variableLabels: [node,") {
+				t.Errorf("standard descriptor %s still contains old 'node' label", descStr)
+			}
+		}
+	}
+
+	if foundDescriptors == 0 {
+		t.Error("expected at least 1 descriptor from scheduler collector")
+	}
+}
+
+func TestSchedulerMetricDescriptorsLegacyMode(t *testing.T) {
+	cm := &ClusterManager{
+		Zone:          "test-zone",
+		LegacyMetrics: true,
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  cm,
+		metricsProvider: newFakeMetricsProvider(),
+	}
+
+	ch := make(chan *prometheus.Desc, 50)
+	collector.Describe(ch)
+	close(ch)
+
+	foundDescriptors := 0
+	for desc := range ch {
+		foundDescriptors++
+		descStr := desc.String()
+		if strings.Contains(descStr, "fqName: \"hami_") && !strings.Contains(descStr, "hami_resource_quota_used") {
+			if !strings.Contains(descStr, "node_name") {
+				t.Errorf("standard descriptor %s does not contain node_name label", descStr)
+			}
+			if strings.Contains(descStr, "variableLabels: [node ") || strings.Contains(descStr, "variableLabels: [node,") {
+				t.Errorf("standard descriptor %s still contains old 'node' label", descStr)
+			}
+		}
+	}
+
+	if foundDescriptors == 0 {
+		t.Error("expected at least 1 descriptor from scheduler collector in legacy mode")
 	}
 }
