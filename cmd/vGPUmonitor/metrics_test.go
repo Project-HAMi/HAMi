@@ -28,17 +28,13 @@ import (
 )
 
 func TestDescribeCollectSync(t *testing.T) {
-	// A pedantic registry is strict and validates that all metrics collected
-	// have been described in Describe(), and checks for duplicate descriptors.
 	reg := prometheus.NewPedanticRegistry()
 
-	// Set up basic mock environment to prevent panics in Collect()
 	t.Setenv(util.NodeNameEnvName, "test-node")
 	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	podLister := informerFactory.Core().V1().Pods().Lister()
 
-	// We use a dummy ClusterManager for this test.
 	c := &ClusterManager{
 		Zone:            "test-zone",
 		LegacyMetrics:   false,
@@ -47,18 +43,14 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 	cc := ClusterManagerCollector{ClusterManager: c}
 
-	// Registering the collector calls Describe() and validates descriptors.
 	if err := reg.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
 
-	// Invoke Gather to trigger Collect. Even without hardware/data to emit metrics,
-	// this ensures the Collect execution path does not panic.
 	if _, err := reg.Gather(); err != nil {
 		t.Errorf("Gather failed (non-legacy): %v", err)
 	}
 
-	// We can also test the legacy metrics configuration.
 	regLegacy := prometheus.NewPedanticRegistry()
 	cLegacy := &ClusterManager{
 		Zone:            "test-zone-legacy",
@@ -66,8 +58,6 @@ func TestDescribeCollectSync(t *testing.T) {
 		PodLister:       podLister,
 		containerLister: &nvidia.ContainerLister{},
 	}
-	// initLegacyDescriptors() is called by NewClusterManager typically,
-	// but we must call it manually here since we are constructing ClusterManager directly.
 	initLegacyDescriptors()
 	ccLegacy := ClusterManagerCollector{ClusterManager: cLegacy}
 
