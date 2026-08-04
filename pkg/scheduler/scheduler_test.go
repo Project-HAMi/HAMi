@@ -25,6 +25,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	"github.com/stretchr/testify/require"
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -2306,4 +2307,35 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "apiserver 500")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
+}
+
+func TestSchedulingMetricsRecording(t *testing.T) {
+	s := &Scheduler{
+		quotaManager: device.NewQuotaManager(),
+		podManager:   device.NewPodManager(),
+	}
+
+	podNoRes := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-no-res",
+			Namespace: "default",
+		},
+	}
+
+	nodes := []string{"node-1"}
+	args := extenderv1.ExtenderArgs{
+		Pod:       podNoRes,
+		NodeNames: &nodes,
+	}
+
+	beforeCount := testutil.ToFloat64(schedulingAttempts.WithLabelValues("failed", "no_resource_requested"))
+
+	_, err := s.Filter(args)
+	require.NoError(t, err)
+
+	afterCount := testutil.ToFloat64(schedulingAttempts.WithLabelValues("failed", "no_resource_requested"))
+	require.Equal(t, beforeCount+1, afterCount, "expected schedulingAttempts counter to increment by 1")
+
+	histCount := testutil.CollectAndCount(schedulingDuration)
+	require.Greater(t, histCount, 0, "expected schedulingDuration metric to be collected")
 }

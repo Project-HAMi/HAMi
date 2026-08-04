@@ -41,6 +41,8 @@ import (
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -55,6 +57,24 @@ const (
 	defaultResync    = 1 * time.Hour
 	syncedPollPeriod = 100 * time.Millisecond
 )
+
+var (
+	schedulingDuration = prometheus.NewHistogram(prometheus.HistogramOpts{
+		Name:    "hami_scheduler_scheduling_duration_seconds",
+		Help:    "Duration of pod scheduling filter and score execution in seconds",
+		Buckets: prometheus.DefBuckets,
+	})
+
+	schedulingAttempts = prometheus.NewCounterVec(prometheus.CounterOpts{
+		Name: "hami_scheduler_scheduling_attempts_total",
+		Help: "Total number of pod scheduling attempts by result and reason",
+	}, []string{"result", "reason"})
+)
+
+func init() {
+	_ = prometheus.Register(schedulingDuration)
+	_ = prometheus.Register(schedulingAttempts)
+}
 
 type Scheduler struct {
 	*nodeManager
@@ -900,6 +920,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 }
 
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
+	start := time.Now()
+	defer func() {
+		schedulingDuration.Observe(time.Since(start).Seconds())
+	}()
+
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
 	resourceReqTotal := 0
@@ -912,6 +937,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		klog.V(1).InfoS("Pod does not request any resources",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
+		schedulingAttempts.WithLabelValues("failed", "no_resource_requested").Inc()
 		if args.Nodes != nil {
 			return &extenderv1.ExtenderFilterResult{
 				Nodes:       args.Nodes,
@@ -943,6 +969,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		schedulingAttempts.WithLabelValues("failed", "get_nodes_usage_error").Inc()
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
@@ -953,12 +980,14 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		schedulingAttempts.WithLabelValues("failed", "calc_score_error").Inc()
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		schedulingAttempts.WithLabelValues("failed", "no_available_node").Inc()
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -987,6 +1016,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		schedulingAttempts.WithLabelValues("failed", "patch_annotations_error").Inc()
 		if added {
 			s.quotaManager.RmUsage(args.Pod, m.Devices)
 		}
@@ -995,6 +1025,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
+	schedulingAttempts.WithLabelValues("success", "scheduled").Inc()
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
 	return &res, nil
 }
