@@ -940,3 +940,71 @@ func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
 		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }
+
+func TestGetMigUUIDFromSmiOutput(t *testing.T) {
+	// validOutput simulates a real nvidia-smi -L section for a GPU with UUID
+	// GPU-abc123 containing two MIG devices at Device 0 and Device 1.
+	validOutput := strings.Join([]string{
+		"GPU 0: NVIDIA A100 (UUID: GPU-abc123)",
+		"  MIG 1g.5gb Device 0: (UUID: MIG-dev0)",
+		"  MIG 1g.5gb Device 1: (UUID: MIG-dev1)",
+	}, "\n")
+
+	tests := []struct {
+		name   string
+		output string
+		uuid   string
+		idx    int
+		want   string
+	}{
+		{
+			name:   "valid output returns UUID for idx 0",
+			output: validOutput,
+			uuid:   "GPU-abc123",
+			idx:    0,
+			want:   "MIG-dev0",
+		},
+		{
+			name:   "valid output returns UUID for idx 1",
+			output: validOutput,
+			uuid:   "GPU-abc123",
+			idx:    1,
+			want:   "MIG-dev1",
+		},
+		{
+			name:   "missing Device token does not panic",
+			output: "GPU 0: NVIDIA A100 (UUID: GPU-abc123)\n  MIG 1g.5gb MALFORMED_NO_DEVICE_TOKEN",
+			uuid:   "GPU-abc123",
+			idx:    0,
+			want:   "",
+		},
+		{
+			name:   "insufficient colon fields does not panic",
+			output: "GPU 0: NVIDIA A100 (UUID: GPU-abc123)\n  MIG 1g.5gb Device 0: no-second-colon",
+			uuid:   "GPU-abc123",
+			idx:    0,
+			want:   "",
+		},
+		{
+			name: "mixed valid and malformed lines, only malformed is skipped",
+			output: strings.Join([]string{
+				"GPU 0: NVIDIA A100 (UUID: GPU-abc123)",
+				"  MIG 1g.5gb MALFORMED_LINE",
+				"  MIG 1g.5gb Device 1: (UUID: MIG-dev1)",
+			}, "\n"),
+			uuid: "GPU-abc123",
+			idx:  1,
+			want: "MIG-dev1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := GetMigUUIDFromSmiOutput(tc.output, tc.uuid, tc.idx)
+			if got != tc.want {
+				t.Errorf("GetMigUUIDFromSmiOutput() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
