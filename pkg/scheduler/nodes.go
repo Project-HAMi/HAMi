@@ -117,9 +117,6 @@ func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 	if !ok {
 		return &device.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 	}
-	// Return a deep copy to prevent concurrent map read/write races between
-	// scoring goroutines (readers) and addNode/rmNodeDevices (writers).
-	// ListNodes() already follows this same pattern for the same reason.
 	nodeInfoCopy := &device.NodeInfo{
 		ID:      n.ID,
 		Devices: make(map[string][]device.DeviceInfo, len(n.Devices)),

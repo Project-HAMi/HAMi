@@ -459,9 +459,6 @@ func Test_rmNodeDevices(t *testing.T) {
 	}
 }
 
-// TestGetNode_DeepCopy verifies that GetNode returns an independent deep copy
-// of the internal NodeInfo so that concurrent writes via addNode/rmNodeDevices
-// cannot race with scoring goroutines that read the returned value.
 func TestGetNode_DeepCopy(t *testing.T) {
 	m := newNodeManager()
 	m.addNode("node-copy", &device.NodeInfo{
@@ -483,11 +480,8 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		t.Fatalf("GetNode returned unexpected error: %v", err)
 	}
 
-	// Mutate the returned copy's Devices slice.
 	got.Devices["NVIDIA"][0].Devmem = int32(9999)
 
-	// The internal entry must be unaffected — if GetNode handed out the live
-	// pointer, this read would see 9999 too.
 	m.mutex.RLock()
 	internalMem := m.nodes["node-copy"].Devices["NVIDIA"][0].Devmem
 	m.mutex.RUnlock()
@@ -496,7 +490,6 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		t.Errorf("GetNode returned a live pointer instead of a deep copy: internal Devmem was mutated to %d", internalMem)
 	}
 
-	// Mutate the returned copy's Node field.
 	got.Node.Name = "mutated-name"
 
 	m.mutex.RLock()
@@ -507,7 +500,6 @@ func TestGetNode_DeepCopy(t *testing.T) {
 		t.Errorf("GetNode returned a live Node pointer instead of a deep copy: internal Node.Name was mutated to %s", internalNodeName)
 	}
 
-	// Verify error path for missing node.
 	_, err = m.GetNode("nonexistent-node")
 	if err == nil {
 		t.Error("expected error for nonexistent node, got nil")
