@@ -2112,6 +2112,32 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
 		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
+		},
+		{
 			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",
 			devices: []*device.DeviceUsage{
 				{
