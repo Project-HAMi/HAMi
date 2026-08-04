@@ -134,10 +134,26 @@ func TestCheckBodyNil(t *testing.T) {
 	req.Body = nil
 	w := httptest.NewRecorder()
 
-	checkBody(w, req)
+	if checkBody(w, req) {
+		t.Error("expected checkBody to reject a nil body")
+	}
 
 	if w.Code != 400 {
 		t.Errorf("Expected status 400 for nil body, got %d", w.Code)
+	}
+}
+
+func TestPredicateRoute_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/predicate", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PredicateRoute(s)
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Errorf("expected 400 for nil body, got %d", w.Code)
 	}
 }
 
