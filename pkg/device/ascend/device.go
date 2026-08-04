@@ -233,6 +233,8 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 				} else {
 					_, temp := dev.trimMemory(int64(val.Usedmem))
 					info.Temp = temp
+					info.Memory = int64(val.Usedmem)
+					info.Core = val.Usedcores
 				}
 
 				rtInfo = append(rtInfo, info)
@@ -444,23 +446,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 	}
 
-	var totalMemPerCard int32 = 0
-	if len(devices) > 0 {
-		totalMemPerCard = devices[0].Totalmem
-	}
-
 	if isHAMiCore && !nodeSupportHamiCore {
 		reason[common.ModeNotFit]++
 		klog.V(4).InfoS("Node filtered: pod requests hami-core but node does not support it", "pod", klog.KObj(pod))
 		return false, nil, common.GenReason(reason, len(devices))
-	}
-
-	if request.Memreq > 0 && request.Memreq < totalMemPerCard && request.Nums > 0 {
-		if nodeSupportHamiCore && !isHAMiCore {
-			reason[common.ModeNotFit]++
-			klog.V(4).InfoS("Node filtered: node reserved for hami-core but pod is legacy vNPU", "pod", klog.KObj(pod))
-			return false, nil, common.GenReason(reason, len(devices))
-		}
 	}
 	klog.V(4).InfoS("Fit: vnpu-mode annotation", "pod", pod.Name, "vnpuMode", vnpuMode)
 
@@ -473,6 +462,11 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, numa := npu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -481,7 +475,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -588,9 +582,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 	}
 
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }

@@ -38,42 +38,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ClusterManager is an example for a system that might have been built without
-// Prometheus in mind. It models a central manager of jobs running in a
-// cluster. Thus, we implement a custom Collector called
-// ClusterManagerCollector, which collects information from a ClusterManager
-// using its provided methods and turns them into Prometheus Metrics for
-// collection.
-//
-// An additional challenge is that multiple instances of the ClusterManager are
-// run within the same binary, each in charge of a different zone. We need to
-// make use of wrapping Registerers to be able to register each
-// ClusterManagerCollector instance with Prometheus.
+// ClusterManager holds the state the vGPUMonitor's Prometheus collector reads
+// from: the pod and container listers used to gather per-container GPU usage,
+// and the zone label each ClusterManagerCollector is registered under via a
+// wrapping Registerer.
 type ClusterManager struct {
-	Zone string
-	// Contains many more fields not listed in this example.
+	Zone            string
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
-}
-
-// ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
-// real cluster manager would have to do. Since it may actually be really
-// expensive, it must only be called once per collection. This implementation,
-// obviously, only returns some made-up data.
-func (c *ClusterManager) ReallyExpensiveAssessmentOfTheSystemState() (
-	oomCountByHost map[string]int, ramUsageByHost map[string]float64,
-) {
-	// Just example fake data.
-	oomCountByHost = map[string]int{
-		"foo.example.org": 42,
-		"bar.example.org": 2001,
-	}
-	ramUsageByHost = map[string]float64{
-		"foo.example.org": 6.023e23,
-		"bar.example.org": 3.14,
-	}
-	return
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -237,52 +210,9 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
-//func parseidstr(podusage string) (string, string, error) {
-//	tmp := strings.Split(podusage, "_")
-//	if len(tmp) > 1 {
-//		return tmp[0], tmp[1], nil
-//	} else {
-//		return "", "", errors.New("parse error")
-//	}
-//}
-//
-//func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
-//	added := deviceMemory{
-//		bufferSize:  0,
-//		contextSize: 0,
-//		moduleSize:  0,
-//		offset:      0,
-//		total:       0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.bufferSize += val.used[vidx].bufferSize
-//		added.contextSize += val.used[vidx].contextSize
-//		added.moduleSize += val.used[vidx].moduleSize
-//		added.offset += val.used[vidx].offset
-//		added.total += val.used[vidx].total
-//	}
-//	return added, nil
-//}
-//
-//func getTotalUtilization(usage podusage, vidx int) deviceUtilization {
-//	added := deviceUtilization{
-//		decUtil: 0,
-//		encUtil: 0,
-//		smUtil:  0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.decUtil += val.deviceUtil[vidx].decUtil
-//		added.encUtil += val.deviceUtil[vidx].encUtil
-//		added.smUtil += val.deviceUtil[vidx].smUtil
-//	}
-//	return added
-//}
-
-// Collect first triggers the ReallyExpensiveAssessmentOfTheSystemState. Then it
-// creates constant metrics for each host on the fly based on the returned data.
-//
-// Note that Collect could be called concurrently, so we depend on
-// ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
+// Collect gathers GPU, pod, and container metrics on each scrape and sends them
+// to the provided channel. It may be called concurrently, so the collection
+// helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 
@@ -439,6 +369,15 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 		klog.Errorf("Failed to list pods for node %s: %v", nodeName, err)
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
+
+	// Update() can run concurrently on its own resync timer and munmap a
+	// container's backing memory while removing it from the map. c.Info is
+	// backed by that same mmap'd memory, so holding the lister's lock for
+	// the whole read-and-scrape below keeps it alive for as long as we
+	// dereference it - the same use-after-unmap hazard loadCache's error
+	// path guards against, just on the read side instead of the write side.
+	cc.ClusterManager.containerLister.Lock()
+	defer cc.ClusterManager.containerLister.UnLock()
 
 	containers := cc.ClusterManager.containerLister.ListContainers()
 	containerMap := make(map[string][]*nvidia.ContainerUsage) // podUID -> containers
@@ -621,11 +560,9 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 	return nil
 }
 
-// NewClusterManager first creates a Prometheus-ignorant ClusterManager
-// instance. Then, it creates a ClusterManagerCollector for the just created
-// ClusterManager. Finally, it registers the ClusterManagerCollector with a
-// wrapping Registerer that adds the zone as a label. In this way, the metrics
-// collected by different ClusterManagerCollectors do not collide.
+// NewClusterManager creates a ClusterManager for the given zone, backs its pod
+// lookups with a shared informer, and registers its collector with reg through
+// a wrapping Registerer that adds the zone as a label.
 func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
