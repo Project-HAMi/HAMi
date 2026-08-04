@@ -61,11 +61,12 @@ func createMigApplyLock(file string) error {
 		klog.Infof("MIG apply lock file already exists: %s", MigApplyLockFile)
 		return nil
 	}
-	_, err := os.Create(file)
+	f, err := os.Create(file)
 	if err != nil {
 		klog.Errorf("Failed to create MIG apply lock file: %v", err)
 		return err
 	}
+	defer f.Close()
 	return nil
 }
 
