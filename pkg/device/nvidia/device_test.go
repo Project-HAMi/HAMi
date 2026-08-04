@@ -2691,6 +2691,7 @@ func TestAddResourceUsage_MigNonResetNoSlot(t *testing.T) {
 	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
 	assert.Assert(t, err != nil)
 	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+	assert.Equal(t, usage.Used, int32(0))
 }
 
 func TestAddResourceUsage_MigResetNoFit(t *testing.T) {
@@ -2709,6 +2710,7 @@ func TestAddResourceUsage_MigResetNoFit(t *testing.T) {
 	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
 	// No template fit: usage counters must not reflect a phantom allocation.
 	assert.Equal(t, usage.Usedmem, int32(0))
+	assert.Equal(t, usage.Used, int32(0))
 	assert.Assert(t, !strings.Contains(ctr.UUID, "["))
 }
 

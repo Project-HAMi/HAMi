@@ -678,7 +678,6 @@ func (dev *NvidiaGPUDevices) migNeedsReset(n *device.DeviceUsage) bool {
 }
 
 func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
 			found := false
@@ -728,6 +727,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 			}
 		}
 	}
+	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
