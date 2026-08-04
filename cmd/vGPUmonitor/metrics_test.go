@@ -53,7 +53,7 @@ func TestAllMetricDescriptorsIncludeNodeName(t *testing.T) {
 		}
 	}
 
-	expectedCount := 17 // 9 standard + 8 legacy descriptors
+	expectedCount := 19 // 11 standard + 8 legacy descriptors
 	if descCount != expectedCount {
 		t.Errorf("expected exactly %d descriptors, got %d", expectedCount, descCount)
 	}

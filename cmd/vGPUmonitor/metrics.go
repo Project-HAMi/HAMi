@@ -221,6 +221,8 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUUtilizationdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
+	ch <- ctrDeviceLastKernelDesc
+	ch <- ctrDeviceMigInfo
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
@@ -308,6 +310,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {
+	nodeName := getNodeName()
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	if err := cc.initNVML(); err != nil {
 		return err
 	}
@@ -319,7 +326,7 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 	}
 
 	for ii := range devnum {
-		if err := cc.collectGPUDeviceMetrics(ch, ii); err != nil {
+		if err := cc.collectGPUDeviceMetrics(ch, nodeName, ii); err != nil {
 			klog.Error("Failed to collect metrics for GPU device ", ii, ": ", err)
 		}
 	}
@@ -343,17 +350,17 @@ func (cc ClusterManagerCollector) getDeviceCount() (int, error) {
 	return devnum, nil
 }
 
-func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, index int) error {
+func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, nodeName string, index int) error {
 	hdev, nvret := nvml.DeviceGetHandleByIndex(index)
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml DeviceGetHandleByIndex err: %s", nvml.ErrorString(nvret))
 	}
 
-	if err := cc.collectGPUMemoryMetrics(ch, hdev, index); err != nil {
+	if err := cc.collectGPUMemoryMetrics(ch, nodeName, hdev, index); err != nil {
 		return err
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, hdev, index); err != nil {
+	if err := cc.collectGPUUtilizationMetrics(ch, nodeName, hdev, index); err != nil {
 		return err
 	}
 
@@ -364,12 +371,7 @@ func getNodeName() string {
 	return os.Getenv(util.NodeNameEnvName)
 }
 
-func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
-	nodeName := getNodeName()
-	if nodeName == "" {
-		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
-	}
-
+func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, nodeName string, hdev nvml.Device, index int) error {
 	memory, ret := hdev.GetMemoryInfo()
 	if ret == nvml.ERROR_NOT_SUPPORTED {
 		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
@@ -405,12 +407,7 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
-	nodeName := getNodeName()
-	if nodeName == "" {
-		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
-	}
-
+func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, nodeName string, hdev nvml.Device, index int) error {
 	util, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
