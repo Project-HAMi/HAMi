@@ -33,6 +33,10 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+// HAMi accounts internally. One iluvatar vmemory unit is 256 MiB.
+const MemoryFactor = 256
+
 var (
 	enableIluvatar bool
 )
@@ -213,7 +217,7 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
-					memnum = int(memnums) * 256
+					memnum = int(memnums) * MemoryFactor
 				}
 			}
 			corenum := int32(0)
@@ -364,5 +368,6 @@ func (dev *IluvatarDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       MemoryFactor,
 	}
 }
