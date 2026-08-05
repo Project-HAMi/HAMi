@@ -542,6 +542,40 @@ legacyMetrics: false
 
 prometheus:
   enabled: false
+  # Install a PrometheusRule with a starter set of HAMi GPU alerts. This requires
+  # prometheus.enabled=true and the monitoring.coreos.com/v1 PrometheusRule CRD
+  # (Prometheus Operator). All thresholds are percentages (0-100) to match HAMi's
+  # *_ratio metrics.
+  alerts:
+    enabled: false
+    # Extra labels added to the PrometheusRule so your Prometheus Operator's
+    # ruleSelector picks it up (for example: release: kube-prometheus-stack).
+    labels: {}
+    rules:
+      # Scheduler-allocated GPU memory on a node is close to capacity.
+      gpuMemoryNearlyExhausted:
+        enabled: true
+        threshold: 90
+        for: 10m
+        severity: warning
+      # Scheduler-allocated GPU compute cores on a device are close to capacity.
+      gpuCoresNearlyExhausted:
+        enabled: true
+        threshold: 90
+        for: 10m
+        severity: warning
+      # A container is using nearly all of its vGPU memory limit and may hit an OOM.
+      vgpuMemoryNearLimit:
+        enabled: true
+        threshold: 95
+        for: 5m
+        severity: warning
+      # The scheduler has stopped exposing device metrics (possible outage). Off by
+      # default because absent() also fires on clusters that simply have no GPUs.
+      schedulerMetricsAbsent:
+        enabled: false
+        for: 15m
+        severity: critical
 
 # Device config overrides
 # If content is set under device-config.content, it will be used as the device-config.yaml

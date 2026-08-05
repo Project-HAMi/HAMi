@@ -1,0 +1,69 @@
+{{- if and .Values.prometheus.enabled .Values.prometheus.alerts.enabled (.Capabilities.APIVersions.Has "monitoring.coreos.com/v1/PrometheusRule") }}
+# Prometheus alerting rules for HAMi GPU metrics.
+# Opt in with prometheus.enabled=true and prometheus.alerts.enabled=true.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: {{ include "hami-vgpu.fullname" . }}-alerts
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.prometheus.alerts.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  groups:
+    - name: hami-gpu.rules
+      rules:
+        {{- with .Values.prometheus.alerts.rules.gpuMemoryNearlyExhausted }}
+        {{- if .enabled }}
+        - alert: HAMiGPUMemoryNearlyExhausted
+          expr: hami_node_gpu_memory_allocated_ratio > {{ .threshold }}
+          for: {{ .for | quote }}
+          labels:
+            severity: {{ .severity | quote }}
+          annotations:
+            summary: 'GPU memory on node {{`{{ $labels.node }}`}} is nearly exhausted'
+            description: 'Node {{`{{ $labels.node }}`}} device {{`{{ $labels.device_index }}`}} ({{`{{ $labels.device_uuid }}`}}) has {{`{{ printf "%.1f" $value }}`}}% of GPU memory allocated by the scheduler (threshold {{ .threshold }}%).'
+        {{- end }}
+        {{- end }}
+        {{- with .Values.prometheus.alerts.rules.gpuCoresNearlyExhausted }}
+        {{- if .enabled }}
+        - alert: HAMiGPUCoresNearlyExhausted
+          expr: hami_gpu_core_allocated_ratio > {{ .threshold }}
+          for: {{ .for | quote }}
+          labels:
+            severity: {{ .severity | quote }}
+          annotations:
+            summary: 'GPU cores on node {{`{{ $labels.node }}`}} are nearly exhausted'
+            description: 'Node {{`{{ $labels.node }}`}} device {{`{{ $labels.device_index }}`}} ({{`{{ $labels.device_uuid }}`}}) has {{`{{ printf "%.1f" $value }}`}}% of GPU cores allocated by the scheduler (threshold {{ .threshold }}%).'
+        {{- end }}
+        {{- end }}
+        {{- with .Values.prometheus.alerts.rules.vgpuMemoryNearLimit }}
+        {{- if .enabled }}
+        - alert: HAMivGPUMemoryNearLimit
+          expr: 100 * hami_vgpu_memory_used_bytes / (hami_vgpu_memory_limit_bytes > 0) > {{ .threshold }}
+          for: {{ .for | quote }}
+          labels:
+            severity: {{ .severity | quote }}
+          annotations:
+            summary: 'Container {{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}} is near its vGPU memory limit'
+            description: 'Container {{`{{ $labels.container }}`}} in pod {{`{{ $labels.namespace }}`}}/{{`{{ $labels.pod }}`}} is using {{`{{ printf "%.1f" $value }}`}}% of its vGPU memory limit (threshold {{ .threshold }}%) and may be OOM-killed.'
+        {{- end }}
+        {{- end }}
+        {{- with .Values.prometheus.alerts.rules.schedulerMetricsAbsent }}
+        {{- if .enabled }}
+        - alert: HAMiSchedulerMetricsAbsent
+          expr: absent(hami_gpu_memory_limit_bytes)
+          for: {{ .for | quote }}
+          labels:
+            severity: {{ .severity | quote }}
+          annotations:
+            summary: 'HAMi scheduler is not exposing GPU metrics'
+            description: 'No hami_gpu_memory_limit_bytes samples have been scraped for {{ .for }}. The HAMi scheduler may be down or its metrics endpoint unreachable. (This also fires on clusters that have no GPUs.)'
+        {{- end }}
+        {{- end }}
+{{- end }}

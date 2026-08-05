@@ -196,6 +196,26 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
 | `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |
 
+## Monitoring and Alerting Configuration
+
+HAMi exposes GPU metrics from the scheduler and the in-container monitor. When you
+run the [Prometheus Operator](https://github.com/prometheus-operator/prometheus-operator),
+set `prometheus.enabled=true` and `prometheus.alerts.enabled=true` to install a
+`PrometheusRule` with a starter set of GPU alerts. The rule is only rendered when
+the `monitoring.coreos.com/v1` `PrometheusRule` CRD is present. All thresholds are
+percentages (0-100) to match HAMi's `*_ratio` metrics.
+
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `legacyMetrics` | Also expose the legacy (pre-`hami_`) metric names | `false` |
+| `prometheus.enabled` | Enable Prometheus integration (ServiceMonitor and alerts) | `false` |
+| `prometheus.alerts.enabled` | Install a `PrometheusRule` with HAMi GPU alerts | `false` |
+| `prometheus.alerts.labels` | Extra labels on the `PrometheusRule` so the Operator's `ruleSelector` picks it up | `{}` |
+| `prometheus.alerts.rules.gpuMemoryNearlyExhausted` | Scheduler-allocated GPU memory on a node is near capacity | `{enabled: true, threshold: 90, for: 10m, severity: warning}` |
+| `prometheus.alerts.rules.gpuCoresNearlyExhausted` | Scheduler-allocated GPU cores on a device are near capacity | `{enabled: true, threshold: 90, for: 10m, severity: warning}` |
+| `prometheus.alerts.rules.vgpuMemoryNearLimit` | A container is near its vGPU memory limit and may be OOM-killed | `{enabled: true, threshold: 95, for: 5m, severity: warning}` |
+| `prometheus.alerts.rules.schedulerMetricsAbsent` | Scheduler has stopped exposing device metrics (off by default; also fires on GPU-less clusters) | `{enabled: false, for: 15m, severity: critical}` |
+
 ## Device Configuration
 
 ### AWS Neuron
