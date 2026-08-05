@@ -176,7 +176,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		if !isMigMode {
 			devcore = int32(*plugin.schedulerConfig.DeviceCoreScaling * 100)
 		}
-		res = append(res, &device.DeviceInfo{
+		info := &device.DeviceInfo{
 			ID:      UUID,
 			Index:   uint(idx),
 			Count:   int32(*plugin.schedulerConfig.DeviceSplitCount),
@@ -186,10 +186,71 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			Numa:    numa,
 			Mode:    plugin.operatingMode,
 			Health:  health,
-		})
+		}
+		if isMigMode {
+			info.MIGProfiles = plugin.discoverMigProfiles(ndev, Model)
+			info.Count = 0
+			for _, profile := range info.MIGProfiles {
+				if int32(profile.InstanceCount) > info.Count {
+					info.Count = int32(profile.InstanceCount)
+				}
+			}
+		}
+		res = append(res, info)
 		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
 	return &res
+}
+
+func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model string) []device.MigProfile {
+	out := make([]device.MigProfile, 0)
+	var fullGPUMultiprocessors uint32
+	for _, profileID := range profileNameToGIProfileID {
+		profileInfo, ret := dev.GetGpuInstanceProfileInfo(profileID)
+		if ret == nvml.SUCCESS && profileInfo.MultiprocessorCount > fullGPUMultiprocessors {
+			fullGPUMultiprocessors = profileInfo.MultiprocessorCount
+		}
+	}
+	for _, allowed := range plugin.schedulerConfig.MigProfileAllowlist {
+		if !containsModel(model, allowed.Models) {
+			continue
+		}
+		klog.InfoS("discovering MIG profile capabilities", "model", model, "profiles", allowed.Profiles)
+		for _, profileName := range allowed.Profiles {
+			profileID, ok := profileNameToGIProfileID[profileSliceKey(profileName)]
+			if !ok {
+				continue
+			}
+			profileInfo, ret := dev.GetGpuInstanceProfileInfo(profileID)
+			if ret != nvml.SUCCESS {
+				klog.InfoS("skip MIG profile placement discovery", "profile", profileName, "step", "profile-info", "err", nvml.ErrorString(ret))
+				continue
+			}
+			placements, ret := dev.GetGpuInstancePossiblePlacements(&profileInfo)
+			if ret != nvml.SUCCESS {
+				klog.InfoS("skip MIG profile placement discovery", "profile", profileName, "step", "possible-placements", "err", nvml.ErrorString(ret))
+				continue
+			}
+			profile := device.MigProfile{
+				Name: profileName, GIProfileID: profileInfo.Id, MemoryMB: int32(profileInfo.MemorySizeMB),
+				SliceCount: profileInfo.SliceCount, InstanceCount: profileInfo.InstanceCount,
+				MultiprocessorCount: profileInfo.MultiprocessorCount,
+				P2PSupported:        profileInfo.IsP2pSupported != 0,
+				CopyEngineCount:     profileInfo.CopyEngineCount, DecoderCount: profileInfo.DecoderCount,
+				EncoderCount: profileInfo.EncoderCount, JPEGCount: profileInfo.JpegCount, OFACount: profileInfo.OfaCount,
+			}
+			if fullGPUMultiprocessors > 0 {
+				profile.Core = int32((profileInfo.MultiprocessorCount*100 + fullGPUMultiprocessors - 1) / fullGPUMultiprocessors)
+			}
+			for _, placement := range placements {
+				profile.Placements = append(profile.Placements, device.MigPlacement{Start: placement.Start, Size: placement.Size})
+			}
+			out = append(out, profile)
+		}
+		break
+	}
+	klog.InfoS("discovered MIG profile capabilities", "model", model, "profiles", out)
+	return out
 }
 
 // RegisterInAnnotation scans devices and patches node annotations.

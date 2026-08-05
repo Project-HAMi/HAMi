@@ -585,19 +585,15 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 			nodeUsage.Devices.DeviceLists = append(nodeUsage.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &device.DeviceUsage{
-					ID:        d.ID,
-					Index:     d.Index,
-					Used:      0,
-					Count:     d.Count,
-					Usedmem:   0,
-					Totalmem:  d.Devmem,
-					Totalcore: d.Devcore,
-					Usedcores: 0,
-					MigUsage: device.MigInUse{
-						Index:     0,
-						UsageList: make(device.MIGS, 0),
-					},
-					MigTemplate: d.MIGTemplate,
+					ID:          d.ID,
+					Index:       d.Index,
+					Used:        0,
+					Count:       d.Count,
+					Usedmem:     0,
+					Totalmem:    d.Devmem,
+					Totalcore:   d.Devcore,
+					Usedcores:   0,
+					MigProfiles: d.MIGProfiles,
 					Mode:        d.Mode,
 					Type:        d.Type,
 					Numa:        d.Numa,
@@ -663,6 +659,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
+		allocationsByGPU := map[string][]nvidia.MigAllocation{}
+		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
+			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
+				for _, allocation := range allocations {
+					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
+				}
+			}
+		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			klog.V(5).InfoS("pod allocated unknown node resources",
@@ -674,42 +678,28 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				for _, udevice := range ctrdevs {
 					for _, d := range node.Devices.DeviceLists {
 						deviceID := udevice.UUID
-						if strings.Contains(deviceID, "[") {
-							deviceID = strings.Split(deviceID, "[")[0]
-						}
 						if d.Device.ID == deviceID {
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
-							if strings.Contains(udevice.UUID, "[") {
+							if allocations := allocationsByGPU[udevice.UUID]; len(allocations) > 0 {
 								if strings.Compare(d.Device.Mode, "hami-core") == 0 {
 									klog.Errorf("found a mig task running on a hami-core GPU\n")
 									d.Device.Health = false
 									continue
 								}
-								tmpIdx, instanceIdx, err := device.ExtractMigTemplatesFromUUID(udevice.UUID)
-								if err != nil {
-									klog.Errorf("failed to extract mig templates from uuid %s: %v", udevice.UUID, err)
-									continue
-								}
-								if tmpIdx < 0 || tmpIdx >= len(d.Device.MigTemplate) {
-									klog.Errorf("invalid mig template index %d in uuid %s (templates length: %d)", tmpIdx, udevice.UUID, len(d.Device.MigTemplate))
-									continue
-								}
-								if len(d.Device.MigUsage.UsageList) == 0 {
-									device.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
-								} else if tmpIdx != int(d.Device.MigUsage.Index) {
-									klog.Errorf("mig template index mismatch in uuid %s: expected %d, got %d", udevice.UUID, d.Device.MigUsage.Index, tmpIdx)
-									continue
-								}
-								if instanceIdx < 0 || instanceIdx >= len(d.Device.MigUsage.UsageList) {
-									klog.Errorf("invalid mig instance in uuid %s", udevice.UUID)
-									continue
-								}
-								d.Device.MigUsage.UsageList[instanceIdx].InUse = true
-								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
+								allocation := allocations[0]
+								allocationsByGPU[udevice.UUID] = allocations[1:]
+								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, device.MigAllocation{
+									Profile: allocation.Profile, Placement: allocation.Placement,
+								})
+								continue
+							}
+							if d.Device.Mode == nvidia.MigMode {
+								klog.ErrorS(nil, "MIG Pod lacks a matching profile/placement reservation", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", udevice.UUID)
+								d.Device.Health = false
 							}
 						}
 					}

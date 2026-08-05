@@ -778,15 +778,13 @@ func TestGetPreferredAllocationSkipsEmptyAnnotations(t *testing.T) {
 	}, response.ContainerResponses[0].DeviceIDs)
 }
 
-func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
+func TestPhysicalDeviceIDHandlesVirtualFormats(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
 	}{
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-10", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[1-2]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a::replica-1", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb123", "GPU-03f69c50-207a-2038-9b45-23cac89cb123"},
@@ -800,7 +798,7 @@ func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
 	}
 }
 
-func TestSelectPreferredDeviceIDsWithMIGUUIDs(t *testing.T) {
+func TestSelectPreferredDeviceIDsWithPhysicalMIGReservations(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
 	available := []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
@@ -808,9 +806,9 @@ func TestSelectPreferredDeviceIDsWithMIGUUIDs(t *testing.T) {
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
 	}
 	desired := device.ContainerDevices{
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c[1-2]"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"},
 	}
 
 	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, 3)
