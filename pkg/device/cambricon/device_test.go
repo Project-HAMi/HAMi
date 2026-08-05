@@ -30,6 +30,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -1162,5 +1163,81 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Fit() is the second gate on quota. Admission alone cannot hold a namespace
+// to its limit, because usage is only recorded at Filter time, so pods created
+// together all pass admission against the same figure. Until now only nvidia
+// re-checked here.
+func TestDevices_FitResourceQuota(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+
+	prevDevices := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = prevDevices })
+
+	usable := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     100,
+			Usedmem:   0,
+			Totalmem:  100000,
+			Totalcore: 100,
+			Usedcores: 0,
+			Type:      CambriconMLUDevice,
+			Health:    true,
+		}}
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:             1,
+		Memreq:           2560,
+		MemPercentagereq: 0,
+		Coresreq:         50,
+		Type:             CambriconMLUDevice,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "mlu-quota"}}
+
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "mlu-quota") })
+
+	qm.Quotas["mlu-quota"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 20, LimitSet: true},
+	}
+	fit, _, _ := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if !fit {
+		t.Fatal("Fit() = false, want true: the request is inside the namespace quota")
+	}
+
+	qm.Quotas["mlu-quota"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 4864, Limit: 20, LimitSet: true},
+	}
+	fit, _, reason := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the namespace quota is exhausted")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
+	}
+
+	qm.Quotas["mlu-quota"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 80, Limit: 100, LimitSet: true},
+	}
+	fit, _, reason = dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the namespace core quota is exhausted")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
+	}
+
+	delete(qm.Quotas, "mlu-quota")
+	if fit, _, _ = dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{}); !fit {
+		t.Error("Fit() = false, want true: no quota is set for this namespace")
 	}
 }

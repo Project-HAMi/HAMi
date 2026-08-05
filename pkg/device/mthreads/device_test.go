@@ -18,9 +18,11 @@ package mthreads
 
 import (
 	"flag"
+	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -1179,5 +1181,61 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Fit() is the second gate on namespace quota, after admission. One vmemory
+// unit is 512 MiB, so the limit has to be scaled by the same factor the request
+// already carries.
+func TestDevices_FitResourceQuota(t *testing.T) {
+	dev := InitMthreadsDevice(MthreadsConfig{
+		ResourceCountName:  "mthreads.com/vgpu",
+		ResourceMemoryName: "mthreads.com/sgpu-memory",
+		ResourceCoreName:   "mthreads.com/sgpu-core",
+	})
+
+	prevDevices := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{MthreadsGPUDevice: dev}
+	t.Cleanup(func() { device.DevicesMap = prevDevices })
+
+	usable := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     100,
+			Totalmem:  100000,
+			Totalcore: 100,
+			Type:      MthreadsGPUDevice,
+			Health:    true,
+		}}
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:             1,
+		Memreq:           1024,
+		MemPercentagereq: 0,
+		Coresreq:         8,
+		Type:             MthreadsGPUDevice,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "mth-quota"}}
+
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "mth-quota") })
+
+	qm.Quotas["mth-quota"] = &device.DeviceQuota{
+		"mthreads.com/sgpu-memory": &device.Quota{Used: 0, Limit: 10, LimitSet: true},
+	}
+	if fit, _, _ := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{}); !fit {
+		t.Fatal("Fit() = false, want true: the request is inside the scaled namespace quota")
+	}
+
+	qm.Quotas["mth-quota"] = &device.DeviceQuota{
+		"mthreads.com/sgpu-memory": &device.Quota{Used: 4500, Limit: 10, LimitSet: true},
+	}
+	fit, _, reason := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the namespace quota is exhausted")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
 	}
 }

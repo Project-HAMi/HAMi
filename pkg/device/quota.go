@@ -94,6 +94,35 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 	return true
 }
 
+// FitQuotaWithPodDevices reports whether charging one more deviceName device to
+// the namespace keeps it inside its ResourceQuota. Devices already chosen for
+// this pod count too, both the ones picked so far in tmpDevs and the ones
+// recorded in allocated, so a pod asking for several cards is weighed as a
+// whole rather than one card at a time.
+//
+// Backends call this from Fit(). The admission webhook checks the same quota,
+// but namespace usage is only recorded at Filter time, so pods created together
+// all pass admission against the same figure. This is the check that catches
+// them.
+func FitQuotaWithPodDevices(tmpDevs map[string]ContainerDevices, allocated *PodDevices, ns, deviceName string, memreq, coresreq int64, memoryFactor int32) bool {
+	mem := memreq
+	core := coresreq
+	for _, val := range tmpDevs[deviceName] {
+		mem += int64(val.Usedmem)
+		core += int64(val.Usedcores)
+	}
+	if allocated != nil {
+		for _, containerDevices := range (*allocated)[deviceName] {
+			for _, val := range containerDevices {
+				mem += int64(val.Usedmem)
+				core += int64(val.Usedcores)
+			}
+		}
+	}
+	klog.V(4).Infoln("Allocating...", mem, "cores", core)
+	return GetLocalCache().FitQuota(ns, mem, memoryFactor, core, deviceName)
+}
+
 func countPodDevices(podDev PodDevices) map[string]int64 {
 	res := make(map[string]int64)
 	for deviceName, podSingle := range podDev {
