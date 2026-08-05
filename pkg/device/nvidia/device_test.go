@@ -19,6 +19,7 @@ package nvidia
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
