@@ -71,48 +71,51 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 // Collect creates constant metrics for each host on the fly based on the returned data.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
+	if cc.ClusterManager == nil || cc.metricsProvider == nil {
+		return
+	}
 	legacy := cc.ClusterManager.LegacyMetrics
 
 	// New metric descriptors
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"hami_gpu_memory_limit_bytes",
 		"Device memory limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodevGPUCoreLimitDesc := prometheus.NewDesc(
 		"hami_gpu_core_limit_ratio",
 		"Device core limit for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"hami_gpu_memory_allocated_bytes",
 		"Device memory allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"hami_gpu_shared_count",
 		"Number of containers sharing this GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUCoreAllocatedDesc := prometheus.NewDesc(
 		"hami_gpu_core_allocated_ratio",
 		"Device core allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUOverview := prometheus.NewDesc(
 		"hami_node_gpu_overview",
 		"GPU overview on a certain node",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "device_cores", "shared_containers", "device_memory_limit", "device_type"}, nil,
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"node", "device_uuid", "device_index"}, nil,
+		[]string{"node_name", "device_uuid", "device_index"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
 		"hami_node_gpu_mig_instance_info",
 		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
-		[]string{"node", "device_uuid", "device_index", "mig_name"}, nil,
+		[]string{"node_name", "device_uuid", "device_index", "mig_name"}, nil,
 	)
 
 	// Legacy metric descriptors (only created when legacy mode is enabled)
@@ -188,6 +191,9 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	}
 
 	nu := cc.metricsProvider.InspectAllNodesUsage()
+	if nu == nil {
+		return
+	}
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
@@ -249,7 +255,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 				nodeGPUOverview,
 				prometheus.GaugeValue,
 				float64(devs.Device.Usedmem)*float64(1024)*float64(1024),
-				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
+				nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Used), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type,
 			)
 
 			if devs.Device.Totalmem > 0 {
@@ -313,95 +319,99 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"hami_vgpu_memory_allocated_bytes",
 		"vGPU memory allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		[]string{"namespace", "node_name", "pod", "container_index", "device_uuid"}, nil,
 	)
 	ctrvGPUdeviceAllocatedCoreDesc := prometheus.NewDesc(
 		"hami_vgpu_core_allocated_ratio",
 		"vGPU core allocated from a container",
-		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
+		[]string{"namespace", "node_name", "pod", "container_index", "device_uuid"}, nil,
 	)
 	quotaUsedDesc := prometheus.NewDesc(
 		"hami_resource_quota_used",
 		"resourcequota usage for a certain device",
 		[]string{"namespace", "quota_name", "limit"}, nil,
 	)
-	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
-		for quotaname, q := range *val {
-			ch <- prometheus.MustNewConstMetric(
-				quotaUsedDesc,
-				prometheus.GaugeValue,
-				float64(q.Used),
-				ns, quotaname, fmt.Sprint(q.Limit),
-			)
-			if legacy {
+	if cc.metricsProvider.GetQuotaManager() != nil {
+		for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
+			for quotaname, q := range *val {
 				ch <- prometheus.MustNewConstMetric(
-					legacyQuotaUsed,
+					quotaUsedDesc,
 					prometheus.GaugeValue,
 					float64(q.Used),
 					ns, quotaname, fmt.Sprint(q.Limit),
 				)
+				if legacy {
+					ch <- prometheus.MustNewConstMetric(
+						legacyQuotaUsed,
+						prometheus.GaugeValue,
+						float64(q.Used),
+						ns, quotaname, fmt.Sprint(q.Limit),
+					)
+				}
 			}
 		}
 	}
-	schedpods, _ := cc.metricsProvider.GetPodManager().GetScheduledPods()
-	for _, val := range schedpods {
-		for _, podSingleDevice := range val.Devices {
-			for ctridx, ctrdevs := range podSingleDevice {
-				for _, ctrdevval := range ctrdevs {
-					klog.V(4).InfoS("Collecting metrics",
-						"namespace", val.Namespace,
-						"podName", val.Name,
-						"deviceUUID", ctrdevval.UUID,
-						"usedCores", ctrdevval.Usedcores,
-						"usedMem", ctrdevval.Usedmem,
-						"nodeID", val.NodeID,
-					)
-					if len(ctrdevval.UUID) == 0 {
-						klog.Warningf("Device UUID is empty, omitting metric collection for namespace=%s, podName=%s, ctridx=%d, nodeID=%s",
-							val.Namespace, val.Name, ctridx, val.NodeID)
-						continue
-					}
-					ch <- prometheus.MustNewConstMetric(
-						ctrvGPUdeviceAllocatedMemoryDesc,
-						prometheus.GaugeValue,
-						float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
-						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-					ch <- prometheus.MustNewConstMetric(
-						ctrvGPUdeviceAllocatedCoreDesc,
-						prometheus.GaugeValue,
-						float64(ctrdevval.Usedcores),
-						val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-					if legacy {
+	if cc.metricsProvider.GetPodManager() != nil {
+		schedpods, _ := cc.metricsProvider.GetPodManager().GetScheduledPods()
+		for _, val := range schedpods {
+			for _, podSingleDevice := range val.Devices {
+				for ctridx, ctrdevs := range podSingleDevice {
+					for _, ctrdevval := range ctrdevs {
+						klog.V(4).InfoS("Collecting metrics",
+							"namespace", val.Namespace,
+							"podName", val.Name,
+							"deviceUUID", ctrdevval.UUID,
+							"usedCores", ctrdevval.Usedcores,
+							"usedMem", ctrdevval.Usedmem,
+							"nodeID", val.NodeID,
+						)
+						if len(ctrdevval.UUID) == 0 {
+							klog.Warningf("Device UUID is empty, omitting metric collection for namespace=%s, podName=%s, ctridx=%d, nodeID=%s",
+								val.Namespace, val.Name, ctridx, val.NodeID)
+							continue
+						}
 						ch <- prometheus.MustNewConstMetric(
-							legacyAllocatedMemory,
+							ctrvGPUdeviceAllocatedMemoryDesc,
 							prometheus.GaugeValue,
 							float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
 							val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 						ch <- prometheus.MustNewConstMetric(
-							legacyAllocatedCore,
+							ctrvGPUdeviceAllocatedCoreDesc,
 							prometheus.GaugeValue,
 							float64(ctrdevval.Usedcores),
 							val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-					}
-					var totaldev int32
-					found := false
-					for _, ni := range *nu {
-						for _, nodedev := range ni.Devices.DeviceLists {
-							if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
-								totaldev = nodedev.Device.Totalmem
-								found = true
+						if legacy {
+							ch <- prometheus.MustNewConstMetric(
+								legacyAllocatedMemory,
+								prometheus.GaugeValue,
+								float64(ctrdevval.Usedmem)*float64(1024)*float64(1024),
+								val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+							ch <- prometheus.MustNewConstMetric(
+								legacyAllocatedCore,
+								prometheus.GaugeValue,
+								float64(ctrdevval.Usedcores),
+								val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+						}
+						var totaldev int32
+						found := false
+						for _, ni := range *nu {
+							for _, nodedev := range ni.Devices.DeviceLists {
+								if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
+									totaldev = nodedev.Device.Totalmem
+									found = true
+									break
+								}
+							}
+							if found {
 								break
 							}
 						}
-						if found {
-							break
-						}
+						klog.V(4).InfoS("Total memory for device",
+							"deviceUUID", ctrdevval.UUID,
+							"totalMemory", totaldev,
+							"nodeID", val.NodeID,
+						)
 					}
-					klog.V(4).InfoS("Total memory for device",
-						"deviceUUID", ctrdevval.UUID,
-						"totalMemory", totaldev,
-						"nodeID", val.NodeID,
-					)
 				}
 			}
 		}
