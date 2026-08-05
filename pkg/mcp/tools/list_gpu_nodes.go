@@ -25,7 +25,6 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/mcp/client"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // GPUNodeInfo summarizes one GPU-bearing node for list_gpu_nodes.
@@ -35,7 +34,10 @@ type GPUNodeInfo struct {
 	GPUCount           int32   `json:"gpuCount"`
 	AllocatedMemoryMiB float64 `json:"allocatedMemoryMiB"`
 	TotalMemoryMiB     float64 `json:"totalMemoryMiB"`
-	AllocatedCoresPct  float64 `json:"allocatedCoresPct,omitempty"`
+	// AllocatedCoresPct is the average core allocation across the node's
+	// GPUs, 0-100. It is the sum of each device's Usedcores percentage
+	// divided by GPUCount, not a per-device value.
+	AllocatedCoresPct float64 `json:"allocatedCoresPct,omitempty"`
 }
 
 type listGPUNodesInput struct {
@@ -69,7 +71,13 @@ func RegisterListGPUNodes(s *mcp.Server, k8sClient *client.K8sClient) {
 			info := extractGPUNodeInfo(n)
 			if alloc, ok := allocByNode[n.Name]; ok {
 				info.AllocatedMemoryMiB = alloc.memMiB
-				info.AllocatedCoresPct = alloc.coresPct
+				// alloc.coresPct is a sum of per-device core percentages
+				// (e.g. two GPUs at 80% each sums to 160). Normalize by GPU
+				// count so this field represents average node-level core
+				// utilization (0-100), not a device-count-dependent total.
+				if info.GPUCount > 0 {
+					info.AllocatedCoresPct = alloc.coresPct / float64(info.GPUCount)
+				}
 			}
 			infos = append(infos, info)
 		}
@@ -100,10 +108,12 @@ func aggregateAllocationsByNode(pods []*corev1.Pod) map[string]nodeAllocation {
 		if isTerminalPhase(pod.Status.Phase) {
 			continue
 		}
+		// Only pod.Spec.NodeName is authoritative for "this pod is running on
+		// this node" — it's set by the API server on bind. The
+		// hami.io/vgpu-node annotation can be written by the extender before
+		// the actual bind completes (or left stale from a prior attempt), so
+		// it must not be trusted for usage totals.
 		nodeName := pod.Spec.NodeName
-		if nodeName == "" {
-			nodeName = pod.Annotations[util.AssignedNodeAnnotations]
-		}
 		if nodeName == "" {
 			continue
 		}
