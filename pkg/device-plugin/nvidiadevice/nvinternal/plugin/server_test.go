@@ -51,7 +51,10 @@ import (
 	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func ptr[T any](x T) *T {
@@ -572,7 +575,6 @@ func TestGetPreferredAllocationAlignsWithAnnotatedDevices(t *testing.T) {
 			Containers: []corev1.Container{{Name: "main"}},
 		},
 	}
-
 	plugin := &NvidiaDevicePlugin{}
 	t.Setenv(util.NodeNameEnvName, "node-a")
 	previousGetPendingPod := getPendingPod
@@ -1163,6 +1165,10 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
 	}
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	previousKubeClient := client.KubeClient
+	client.KubeClient = fakeClient
+	defer func() { client.KubeClient = previousKubeClient }()
 
 	previousGetPendingPod := getPendingPod
 	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
@@ -1171,7 +1177,8 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
 	eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 		pod.Annotations["hami.io/vgpu-devices-to-allocate"] = ";GPU-annotated-b,NVIDIA,4000,60:;"
-		return nil
+		_, err := fakeClient.CoreV1().Pods(pod.Namespace).Update(context.Background(), pod.DeepCopy(), metav1.UpdateOptions{})
+		return err
 	}
 	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
 

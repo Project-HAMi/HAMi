@@ -61,7 +61,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/podresources"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -321,11 +320,11 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	if plugin.operatingMode == "mig" {
 		plugin.migMgr = NewMigInstanceManager()
 		if deviceSupportMig {
-			inUse, detectErr := collectInUseGPUs(plugin.ctx, string(plugin.rm.Resource()), os.Getenv(util.NodeNameEnvName))
+			inUse, detectErr := collectInUseGPUs(plugin.ctx, os.Getenv(util.NodeNameEnvName))
 			if detectErr != nil {
 				// Startup reset is destructive. If Kubernetes allocation state
-				// cannot be read reliably, preserve every GPU and retry cleanup
-				// later through the normal reclaim watcher.
+				// cannot be read reliably, preserve every GPU rather than risk
+				// removing an allocation that is still active.
 				klog.InfoS("mig init: allocation detection failed; preserving all GPUs", "err", detectErr)
 				for i := 0; i < deviceNumbers; i++ {
 					inUse[i] = struct{}{}
@@ -342,20 +341,9 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 				klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
 			}
 		}
-		// New allocations are realized lazily from the scheduler's exact
-		// profile and placement reservation. The watcher's release callback
-		// tolerates an unknown MIG UUID during early kubelet startup.
-		watcher := podresources.NewWatcher("", 0, []string{string(plugin.rm.Resource())}, func(_ string, deviceID string) {
-			if strings.HasPrefix(deviceID, "MIG-") {
-				if err := plugin.migMgr.Release(deviceID); err != nil {
-					klog.InfoS("failed to release MIG instance on reclaim", "deviceID", deviceID, "err", err)
-				}
-			}
-			if err := plugin.reconcileActiveMigAllocations(); err != nil {
-				klog.InfoS("failed to reconcile MIG allocations on reclaim", "deviceID", deviceID, "err", err)
-			}
-		})
-		go watcher.Run(plugin.ctx)
+		// Pod annotations are the allocation source of truth. Periodically
+		// reconcile the manager with live Pods so completed or deleted Pods
+		// release their exact profile+placement allocation.
 		go plugin.runMigAnnotationReconciler(5 * time.Second)
 	}
 
