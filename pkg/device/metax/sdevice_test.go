@@ -453,6 +453,19 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         60,
 			},
 		},
+		{
+			name: "oversized memory request exceeds int32 range",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":    resource.MustParse("1"),
+						"metax-tech.com/vmemory": resource.MustParse("2100001"),
+					},
+				},
+			},
+
+			expected: device.ContainerDeviceRequest{},
+		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
 			metaxSDevice := &MetaxSDevices{}
