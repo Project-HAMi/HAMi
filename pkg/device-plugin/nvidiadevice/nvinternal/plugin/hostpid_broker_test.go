@@ -15,7 +15,7 @@ import (
 )
 
 func TestConfigureHostPIDBrokerDisabled(t *testing.T) {
-	for _, value := range []string{"", "0"} {
+	for _, value := range []string{"", "0", "true", "false", "01", " 1"} {
 		t.Run(value, func(t *testing.T) {
 			t.Setenv(hostpid.EnvironmentVariable, value)
 			response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
@@ -50,4 +50,38 @@ func TestConfigureHostPIDBrokerEnabled(t *testing.T) {
 		HostPath:      hostpid.ServerDirectory,
 		ReadOnly:      true,
 	}, response.Mounts[1])
+}
+
+func TestConfigureHostPIDBrokerIsIdempotent(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{}
+
+	configureHostPIDBroker(response)
+	configureHostPIDBroker(response)
+
+	require.Equal(t, "1", response.Envs[hostpid.EnvironmentVariable])
+	require.Len(t, response.Mounts, 1)
+	require.Equal(t, &kubeletdevicepluginv1beta1.Mount{
+		ContainerPath: hostpid.ContainerDirectory,
+		HostPath:      hostpid.ServerDirectory,
+		ReadOnly:      true,
+	}, response.Mounts[0])
+}
+
+func TestConfigureHostPIDBrokerReplacesConflictingMount(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	response := &kubeletdevicepluginv1beta1.ContainerAllocateResponse{
+		Mounts: []*kubeletdevicepluginv1beta1.Mount{{
+			ContainerPath: hostpid.ContainerDirectory,
+			HostPath:      "/untrusted",
+			ReadOnly:      false,
+		}},
+	}
+
+	configureHostPIDBroker(response)
+
+	require.Len(t, response.Mounts, 1)
+	require.Equal(t, hostpid.ServerDirectory,
+		response.Mounts[0].HostPath)
+	require.True(t, response.Mounts[0].ReadOnly)
 }

@@ -58,6 +58,14 @@ func ListenDefault() (*Broker, error) {
 }
 
 func listen(socketPath string, ownerUID int) (*Broker, error) {
+	return listenWithHandlerLimit(socketPath, ownerUID, maxHandlers)
+}
+
+func listenWithHandlerLimit(socketPath string, ownerUID int,
+	handlerLimit int) (*Broker, error) {
+	if handlerLimit <= 0 {
+		return nil, errors.New("host PID broker handler limit must be positive")
+	}
 	directory := filepath.Dir(socketPath)
 	if err := prepareDirectory(directory, ownerUID); err != nil {
 		return nil, err
@@ -107,7 +115,7 @@ func listen(socketPath string, ownerUID int) (*Broker, error) {
 		socketPath:   socketPath,
 		socket:       identity,
 		lockFile:     lockFile,
-		handlerSlots: make(chan struct{}, maxHandlers),
+		handlerSlots: make(chan struct{}, handlerLimit),
 	}, nil
 }
 

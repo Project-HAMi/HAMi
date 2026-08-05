@@ -13,15 +13,13 @@ import (
 )
 
 func TestStartHostPIDBrokerDisabled(t *testing.T) {
-	t.Setenv(hostpid.EnvironmentVariable, "")
-	running, err := startHostPIDBroker()
-	if err != nil || running != nil {
-		t.Fatalf("running=%v err=%v", running, err)
-	}
-
-	t.Setenv(hostpid.EnvironmentVariable, "0")
-	running, err = startHostPIDBroker()
-	if err != nil || running != nil {
-		t.Fatalf("running=%v err=%v", running, err)
+	for _, value := range []string{"", "0", "true", "false", "01", " 1"} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(hostpid.EnvironmentVariable, value)
+			running, err := startHostPIDBroker()
+			if err != nil || running != nil {
+				t.Fatalf("running=%v err=%v", running, err)
+			}
+		})
 	}
 }

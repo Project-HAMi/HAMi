@@ -18,6 +18,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"sync"
 	"syscall"
 	"testing"
@@ -25,6 +26,10 @@ import (
 )
 
 const subprocessHelperEnvironment = "HAMI_HOSTPID_BROKER_HELPER"
+
+const externalCClientEnvironment = "HAMI_HOSTPID_C_CLIENT"
+
+const externalCStormEnvironment = "HAMI_HOSTPID_C_STORM"
 
 func startTestBroker(t *testing.T) (*Broker, string) {
 	t.Helper()
@@ -98,6 +103,36 @@ func TestBrokerReturnsSubprocessPID(t *testing.T) {
 	}
 }
 
+func TestBrokerExternalCClient(t *testing.T) {
+	clientPath := os.Getenv(externalCClientEnvironment)
+	if clientPath == "" {
+		t.Skip("HAMI_HOSTPID_C_CLIENT is not set")
+	}
+	_, socketPath := startTestBroker(t)
+	command := exec.Command(clientPath, socketPath)
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("external C client failed: %v\n%s", err, output)
+	}
+}
+
+func TestBrokerExternalCClientStorm(t *testing.T) {
+	clientPath := os.Getenv(externalCStormEnvironment)
+	if clientPath == "" {
+		t.Skip("HAMI_HOSTPID_C_STORM is not set")
+	}
+	_, socketPath := startTestBroker(t)
+	command := exec.Command(clientPath, socketPath, "300")
+	output, err := command.CombinedOutput()
+	if err != nil {
+		t.Fatalf("external C client storm failed: %v\n%s", err, output)
+	}
+	if !strings.Contains(string(output),
+		"clients=300 successful=300 failed=0") {
+		t.Fatalf("unexpected C client storm output: %s", output)
+	}
+}
+
 func TestBrokerSubprocessHelper(t *testing.T) {
 	socketPath := os.Getenv(subprocessHelperEnvironment)
 	if socketPath == "" {
@@ -115,24 +150,49 @@ func TestBrokerSubprocessHelper(t *testing.T) {
 
 func TestBrokerRejectsInvalidRequest(t *testing.T) {
 	_, socketPath := startTestBroker(t)
+	tests := map[string][]byte{
+		"magic":   {'B', 'A', 'D', '!', 0, 1, 0, 1},
+		"version": {'H', 'P', 'I', 'D', 0, 2, 0, 1},
+		"command": {'H', 'P', 'I', 'D', 0, 1, 0, 2},
+	}
+	for name, request := range tests {
+		t.Run(name, func(t *testing.T) {
+			connection, err := net.Dial("unix", socketPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer connection.Close()
+			if _, err := connection.Write(request); err != nil {
+				t.Fatal(err)
+			}
+			response := make([]byte, responseSize)
+			if _, err := io.ReadFull(connection, response); err != nil {
+				t.Fatal(err)
+			}
+			if status := binary.BigEndian.Uint16(response[6:8]); status != statusInvalidRequest {
+				t.Fatalf("got status %d", status)
+			}
+			if pid := binary.BigEndian.Uint32(response[8:12]); pid != 0 {
+				t.Fatalf("got PID %d", pid)
+			}
+		})
+	}
+}
+
+func TestBrokerRecoversFromEarlyClose(t *testing.T) {
+	_, socketPath := startTestBroker(t)
 	connection, err := net.Dial("unix", socketPath)
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer connection.Close()
-	if _, err := connection.Write(
-		[]byte{'B', 'A', 'D', '!', 0, 1, 0, 1}); err != nil {
+	if err := connection.Close(); err != nil {
 		t.Fatal(err)
 	}
-	response := make([]byte, responseSize)
-	if _, err := io.ReadFull(connection, response); err != nil {
-		t.Fatal(err)
-	}
-	if status := binary.BigEndian.Uint16(response[6:8]); status != statusInvalidRequest {
-		t.Fatalf("got status %d", status)
-	}
-	if pid := binary.BigEndian.Uint32(response[8:12]); pid != 0 {
-		t.Fatalf("got PID %d", pid)
+
+	status, pid, err := queryBroker(socketPath)
+	if err != nil || status != statusOK || pid != uint32(os.Getpid()) {
+		t.Fatalf("broker did not recover: status=%d pid=%d err=%v",
+			status, pid, err)
 	}
 }
 
@@ -184,6 +244,134 @@ func TestBrokerHandlesConcurrentClients(t *testing.T) {
 	close(errorsChannel)
 	for err := range errorsChannel {
 		t.Error(err)
+	}
+}
+
+func TestBrokerBoundsSlowClientsAndRecovers(t *testing.T) {
+	directory := t.TempDir()
+	socketPath := filepath.Join(directory, "broker.sock")
+	const handlerLimit = 4
+	broker, err := listenWithHandlerLimit(socketPath, os.Geteuid(),
+		handlerLimit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- broker.Serve() }()
+	t.Cleanup(func() {
+		if err := broker.Close(); err != nil {
+			t.Errorf("close broker: %v", err)
+		}
+		if err := <-serveResult; err != nil {
+			t.Errorf("serve broker: %v", err)
+		}
+	})
+
+	connections := make([]net.Conn, 0, handlerLimit)
+	for range handlerLimit {
+		connection, err := net.Dial("unix", socketPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		connections = append(connections, connection)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(broker.handlerSlots) != handlerLimit && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+	if got := len(broker.handlerSlots); got != handlerLimit {
+		t.Fatalf("active handlers=%d, want %d", got, handlerLimit)
+	}
+
+	overflow, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := overflow.SetDeadline(time.Now().Add(transactionTimeout)); err != nil {
+		t.Fatal(err)
+	}
+	request := []byte{'H', 'P', 'I', 'D', 0, 1, 0, 1}
+	_, _ = overflow.Write(request)
+	response := make([]byte, responseSize)
+	if _, err := io.ReadFull(overflow, response); err == nil {
+		t.Fatal("overflow client received a response")
+	}
+	_ = overflow.Close()
+
+	for _, connection := range connections {
+		_ = connection.Close()
+	}
+	deadline = time.Now().Add(2 * transactionTimeout)
+	for {
+		status, pid, queryErr := queryBroker(socketPath)
+		if queryErr == nil && status == statusOK && pid == uint32(os.Getpid()) {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("broker did not recover: status=%d pid=%d err=%v",
+				status, pid, queryErr)
+		}
+		time.Sleep(time.Millisecond)
+	}
+}
+
+func TestBrokerCloseBoundsPartialClient(t *testing.T) {
+	directory := t.TempDir()
+	socketPath := filepath.Join(directory, "broker.sock")
+	broker, err := listenWithHandlerLimit(socketPath, os.Geteuid(), 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serveResult := make(chan error, 1)
+	go func() { serveResult <- broker.Serve() }()
+
+	connection, err := net.Dial("unix", socketPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.Write([]byte{'H'}); err != nil {
+		t.Fatal(err)
+	}
+	deadline := time.Now().Add(time.Second)
+	for len(broker.handlerSlots) != 1 && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
+	}
+
+	begin := time.Now()
+	if err := broker.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if elapsed := time.Since(begin); elapsed > 2*transactionTimeout {
+		t.Fatalf("close took %s", elapsed)
+	}
+	if err := <-serveResult; err != nil {
+		t.Fatal(err)
+	}
+	_ = connection.Close()
+}
+
+func TestBrokerRestartsAfterClose(t *testing.T) {
+	directory := t.TempDir()
+	socketPath := filepath.Join(directory, "broker.sock")
+
+	for attempt := range 2 {
+		broker, err := listen(socketPath, os.Geteuid())
+		if err != nil {
+			t.Fatalf("listen attempt %d: %v", attempt, err)
+		}
+		serveResult := make(chan error, 1)
+		go func() { serveResult <- broker.Serve() }()
+		status, pid, err := queryBroker(socketPath)
+		if err != nil || status != statusOK || pid != uint32(os.Getpid()) {
+			t.Fatalf("query attempt %d: status=%d pid=%d err=%v",
+				attempt, status, pid, err)
+		}
+		if err := broker.Close(); err != nil {
+			t.Fatalf("close attempt %d: %v", attempt, err)
+		}
+		if err := <-serveResult; err != nil {
+			t.Fatalf("serve attempt %d: %v", attempt, err)
+		}
 	}
 }
 
@@ -361,8 +549,10 @@ func TestEnabled(t *testing.T) {
 		"":      false,
 		"0":     false,
 		"1":     true,
-		"true":  true,
-		"false": true,
+		"true":  false,
+		"false": false,
+		"01":    false,
+		" 1":    false,
 	}
 	for value, expected := range tests {
 		t.Run(strconv.Quote(value), func(t *testing.T) {

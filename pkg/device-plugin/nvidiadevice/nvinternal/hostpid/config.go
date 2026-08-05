@@ -17,5 +17,5 @@ const (
 )
 
 func Enabled(value string) bool {
-	return value != "" && value != "0"
+	return value == "1"
 }
