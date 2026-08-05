@@ -232,12 +232,8 @@ func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model str
 				continue
 			}
 			profile := device.MigProfile{
-				Name: profileName, GIProfileID: profileInfo.Id, MemoryMB: int32(profileInfo.MemorySizeMB),
+				Name: profileName, MemoryMB: int32(profileInfo.MemorySizeMB),
 				SliceCount: profileInfo.SliceCount, InstanceCount: profileInfo.InstanceCount,
-				MultiprocessorCount: profileInfo.MultiprocessorCount,
-				P2PSupported:        profileInfo.IsP2pSupported != 0,
-				CopyEngineCount:     profileInfo.CopyEngineCount, DecoderCount: profileInfo.DecoderCount,
-				EncoderCount: profileInfo.EncoderCount, JPEGCount: profileInfo.JpegCount, OFACount: profileInfo.OfaCount,
 			}
 			if fullGPUMultiprocessors > 0 {
 				profile.Core = int32((profileInfo.MultiprocessorCount*100 + fullGPUMultiprocessors - 1) / fullGPUMultiprocessors)

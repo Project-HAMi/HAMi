@@ -77,20 +77,16 @@ type MigInUse struct {
 }
 
 type MigProfile struct {
-	Name                string         `json:"name"`
-	GIProfileID         uint32         `json:"giProfileID"`
-	MemoryMB            int32          `json:"memoryMB"`
-	Core                int32          `json:"core"`
-	SliceCount          uint32         `json:"sliceCount"`
-	InstanceCount       uint32         `json:"instanceCount"`
-	MultiprocessorCount uint32         `json:"multiprocessorCount"`
-	P2PSupported        bool           `json:"p2pSupported"`
-	CopyEngineCount     uint32         `json:"copyEngineCount"`
-	DecoderCount        uint32         `json:"decoderCount"`
-	EncoderCount        uint32         `json:"encoderCount"`
-	JPEGCount           uint32         `json:"jpegCount"`
-	OFACount            uint32         `json:"ofaCount"`
-	Placements          []MigPlacement `json:"placements"`
+	Name       string         `json:"name"`
+	MemoryMB   int32          `json:"memoryMB"`
+	Core       int32          `json:"core"`
+	SliceCount uint32         `json:"sliceCount"`
+	Placements []MigPlacement `json:"placements"`
+
+	// InstanceCount is only used by the device plugin to derive the physical
+	// GPU's advertised replica count. It is not part of the scheduler wire
+	// format because placements already describe schedulable MIG capacity.
+	InstanceCount uint32 `json:"-"`
 }
 
 type MigAllocation struct {
@@ -125,20 +121,22 @@ type DeviceUsage struct {
 }
 
 type DeviceInfo struct {
-	ID              string          `json:"id,omitempty"`
-	Index           uint            `json:"index,omitempty"`
-	Count           int32           `json:"count,omitempty"`
-	Devmem          int32           `json:"devmem,omitempty"`
-	Devcore         int32           `json:"devcore,omitempty"`
-	Type            string          `json:"type,omitempty"`
-	Numa            int             `json:"numa,omitempty"`
-	Mode            string          `json:"mode,omitempty"`
-	MIGProfiles     []MigProfile    `json:"migProfiles,omitempty"`
-	MIGTemplate     []Geometry      `json:"migtemplate,omitempty"` // Deprecated.
-	Health          bool            `json:"health,omitempty"`
-	DeviceVendor    string          `json:"devicevendor,omitempty"`
-	CustomInfo      map[string]any  `json:"custominfo,omitempty"`
-	DevicePairScore DevicePairScore `json:"devicepairscore,omitempty"`
+	ID           string         `json:"id,omitempty"`
+	Index        uint           `json:"index,omitempty"`
+	Count        int32          `json:"count,omitempty"`
+	Devmem       int32          `json:"devmem,omitempty"`
+	Devcore      int32          `json:"devcore,omitempty"`
+	Type         string         `json:"type,omitempty"`
+	Numa         int            `json:"numa,omitempty"`
+	Mode         string         `json:"mode,omitempty"`
+	MIGProfiles  []MigProfile   `json:"migProfiles,omitempty"`
+	MIGTemplate  []Geometry     `json:"migtemplate,omitempty"` // Deprecated.
+	Health       bool           `json:"health,omitempty"`
+	DeviceVendor string         `json:"devicevendor,omitempty"`
+	CustomInfo   map[string]any `json:"custominfo,omitempty"`
+	// Device pair scores use a dedicated node annotation and must not inflate
+	// the per-device registration payload.
+	DevicePairScore DevicePairScore `json:"-"`
 }
 
 type DevicePairScores []DevicePairScore
