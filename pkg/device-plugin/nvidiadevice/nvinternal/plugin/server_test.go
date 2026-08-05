@@ -51,8 +51,8 @@ import (
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	"k8s.io/client-go/kubernetes/fake"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
 func TestCDIAllocateResponse(t *testing.T) {
@@ -494,7 +494,6 @@ func TestGetPreferredAllocationAlignsWithAnnotatedDevices(t *testing.T) {
 			Containers: []corev1.Container{{Name: "main"}},
 		},
 	}
-
 	plugin := &NvidiaDevicePlugin{}
 	t.Setenv(util.NodeNameEnvName, "node-a")
 	previousGetPendingPod := getPendingPod
@@ -1012,6 +1011,10 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 		},
 		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
 	}
+	fakeClient := fake.NewSimpleClientset(pod.DeepCopy())
+	previousKubeClient := client.KubeClient
+	client.KubeClient = fakeClient
+	defer func() { client.KubeClient = previousKubeClient }()
 
 	previousGetPendingPod := getPendingPod
 	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }

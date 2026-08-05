@@ -134,9 +134,6 @@ spec:
           volumeMounts:
             - name: device-plugin
               mountPath: /var/lib/kubelet/device-plugins
-            - name: pod-resources
-              mountPath: /var/lib/kubelet/pod-resources
-              readOnly: true
             - name: lib
               mountPath: {{ printf "%s%s" .Values.global.gpuHookPath "/vgpu" }}
             - name: usrbin
@@ -223,10 +220,6 @@ spec:
         - name: device-plugin
           hostPath:
             path: {{ .Values.devicePlugin.pluginPath }}
-        - name: pod-resources
-          hostPath:
-            path: /var/lib/kubelet/pod-resources
-            type: Directory
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}

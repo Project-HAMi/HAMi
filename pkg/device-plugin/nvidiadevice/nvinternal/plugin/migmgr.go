@@ -270,9 +270,7 @@ func destroyAllMigInstances(dev nvml.Device) error {
 	return nil
 }
 
-// Release destroys the GI+CI bound to the given MIG UUID and marks the slot
-// absent (preserving its profile and placement). Invoked by the podresources
-// watcher when kubelet reports the device is no longer in use.
+// Release destroys the GI+CI bound to the given MIG UUID.
 func (m *MigInstanceManager) Release(migUUID string) error {
 	m.mu.Lock()
 	key, ok := m.byAllocationMigUUID[migUUID]
