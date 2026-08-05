@@ -253,6 +253,107 @@ func TestAddQuotaAndDelQuota(t *testing.T) {
 	}
 }
 
+func TestUpdateQuotaAtomicity(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	deviceName := "NVIDIA"
+	memName := "nvidia.com/gpumem"
+
+	// Set up initial quota with limit 1000
+	qm.Quotas[ns] = &DeviceQuota{
+		memName: &Quota{Used: 1000, Limit: 1000},
+	}
+
+	oldQuota := &corev1.ResourceQuota{}
+	oldQuota.Namespace = ns
+	oldQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName): *resource.NewQuantity(1000, resource.DecimalSI),
+	}
+
+	newQuota := &corev1.ResourceQuota{}
+	newQuota.Namespace = ns
+	newQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName): *resource.NewQuantity(1000, resource.DecimalSI),
+	}
+
+	// Drive UpdateQuota in a loop while calling FitQuota concurrently.
+	// FitQuota must NEVER succeed because the namespace is at its limit.
+	var wrongAdmits int64
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	// Updater goroutine: repeatedly apply the same update
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				qm.UpdateQuota(oldQuota, newQuota)
+			}
+		}
+	}()
+
+	// Reader goroutine: FitQuota must always return false (at limit)
+	for i := 0; i < 200000; i++ {
+		if qm.FitQuota(ns, 1, 1, 0, deviceName) {
+			wrongAdmits++
+		}
+	}
+
+	close(stop)
+	wg.Wait()
+
+	if wrongAdmits > 0 {
+		t.Errorf("FitQuota admitted %d times out of 200000 while quota was at limit — UpdateQuota is not atomic", wrongAdmits)
+	}
+}
+
+func TestUpdateQuotaBasic(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	// Set up initial quota
+	qm.Quotas[ns] = &DeviceQuota{
+		memName:  &Quota{Used: 0, Limit: 100},
+		coreName: &Quota{Used: 0, Limit: 10},
+	}
+
+	oldQuota := &corev1.ResourceQuota{}
+	oldQuota.Namespace = ns
+	oldQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(10, resource.DecimalSI),
+	}
+
+	// Update to new limits
+	newQuota := &corev1.ResourceQuota{}
+	newQuota.Namespace = ns
+	newQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(200, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(20, resource.DecimalSI),
+	}
+
+	qm.UpdateQuota(oldQuota, newQuota)
+
+	if (*qm.Quotas[ns])[memName].Limit != 200 {
+		t.Errorf("UpdateQuota: expected memory limit 200, got %d", (*qm.Quotas[ns])[memName].Limit)
+	}
+	if (*qm.Quotas[ns])[coreName].Limit != 20 {
+		t.Errorf("UpdateQuota: expected core limit 20, got %d", (*qm.Quotas[ns])[coreName].Limit)
+	}
+	// Used should be preserved
+	if (*qm.Quotas[ns])[memName].Used != 0 {
+		t.Errorf("UpdateQuota: expected Used 0, got %d", (*qm.Quotas[ns])[memName].Used)
+	}
+}
+
 func TestDelQuotaNonLimitsKey(t *testing.T) {
 	initTest()
 	qm := NewQuotaManager()

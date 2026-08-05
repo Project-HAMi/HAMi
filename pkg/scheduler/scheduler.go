@@ -251,8 +251,21 @@ func (s *Scheduler) onAddQuota(obj any) {
 }
 
 func (s *Scheduler) onUpdateQuota(oldObj, newObj any) {
-	s.onDelQuota(oldObj)
-	s.onAddQuota(newObj)
+	oldQuota, _ := oldObj.(*corev1.ResourceQuota)
+	newQuota, _ := newObj.(*corev1.ResourceQuota)
+
+	// Handle tombstone for old object
+	if t, ok := oldObj.(cache.DeletedFinalStateUnknown); ok {
+		oldQuota, _ = t.Obj.(*corev1.ResourceQuota)
+	}
+
+	// Validate new object
+	if newQuota == nil {
+		s.onDelQuota(oldObj)
+		return
+	}
+
+	s.quotaManager.UpdateQuota(oldQuota, newQuota)
 }
 
 func (s *Scheduler) onDelQuota(obj any) {

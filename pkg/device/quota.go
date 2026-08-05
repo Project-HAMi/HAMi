@@ -253,6 +253,74 @@ func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
 	}
 }
 
+// UpdateQuota atomically removes old quota limits and applies new ones under
+// a single lock acquisition. This prevents a window where FitQuota sees zeroed
+// limits (treated as "no limit") between a DelQuota and AddQuota pair.
+func (q *QuotaManager) UpdateQuota(oldQuota, newQuota *corev1.ResourceQuota) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+
+	// Remove old limits
+	if oldQuota != nil {
+		for idx, val := range oldQuota.Spec.Hard {
+			_, ok := val.AsInt64()
+			if !ok {
+				continue
+			}
+			if !strings.HasPrefix(idx.String(), "limits.") {
+				continue
+			}
+			dn := strings.TrimPrefix(idx.String(), "limits.")
+			if !IsManagedQuota(dn) {
+				continue
+			}
+			if dq, ok := q.Quotas[oldQuota.Namespace]; ok {
+				if quotaInfo, ok := (*dq)[dn]; ok {
+					quotaInfo.Limit = 0
+				}
+			}
+		}
+	}
+
+	// Apply new limits
+	if newQuota != nil {
+		for idx, val := range newQuota.Spec.Hard {
+			value, ok := val.AsInt64()
+			if !ok {
+				continue
+			}
+			if !strings.HasPrefix(idx.String(), "limits.") {
+				continue
+			}
+			dn := strings.TrimPrefix(idx.String(), "limits.")
+			if !IsManagedQuota(dn) {
+				continue
+			}
+			if q.Quotas[newQuota.Namespace] == nil {
+				q.Quotas[newQuota.Namespace] = &DeviceQuota{}
+			}
+			dp := q.Quotas[newQuota.Namespace]
+			_, ok := (*dp)[dn]
+			if !ok {
+				(*dp)[dn] = &Quota{
+					Used:  0,
+					Limit: value,
+				}
+			}
+			(*dp)[dn].Limit = value
+			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
+		}
+	}
+
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
+		}
+	}
+}
+
 func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
 	quotasCopy := make(map[string]*DeviceQuota)
 	q.mutex.RLock()
