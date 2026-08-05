@@ -18,6 +18,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"os"
 	"testing"
 
@@ -31,6 +32,7 @@ import (
 	clienttesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -566,4 +568,234 @@ func TestAllocate_SingleContainer(t *testing.T) {
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 	require.True(t, hasLdSoPreloadMount(response.ContainerResponses[0].Mounts))
+}
+
+// ---------------------------------------------------------------------------
+// Allocate — MIG branch coverage
+// ---------------------------------------------------------------------------
+
+// newTestPluginWithRM returns a test plugin with a mocked ResourceManager
+// so that MIG device lookups (plugin.rm.Devices().Contains) can be controlled.
+func newTestPluginWithRM(t *testing.T, devices map[string]*rm.Device) *NvidiaDevicePlugin {
+	t.Helper()
+	plugin := newTestPlugin(t)
+	plugin.rm = &rm.ResourceManagerMock{
+		ResourceFunc: func() v1.ResourceName { return "nvidia.com/gpu" },
+		DevicesFunc:  func() rm.Devices { return rm.Devices(devices) },
+	}
+	return plugin
+}
+
+func TestAllocate_MIG_Success(t *testing.T) {
+	setupInRequestDevices(t)
+
+	migDevice := &rm.Device{}
+	migDevice.ID = "MIG-aaa-0"
+	plugin := newTestPluginWithRM(t, map[string]*rm.Device{"MIG-aaa-0": migDevice})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mig-pod", Namespace: "default", UID: "mig-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "MIG-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"MIG-aaa-0"}},
+		},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+}
+
+func TestAllocate_MIG_FailRequestsGreaterThanOne(t *testing.T) {
+	setupInRequestDevices(t)
+
+	// Both device IDs must be in the device map so we pass the Contains check.
+	// The IDs contain "::" so AnyHasAnnotations() returns true (shared replicas).
+	dev1 := &rm.Device{}
+	dev1.ID = "MIG-gpu-uuid::0"
+	dev2 := &rm.Device{}
+	dev2.ID = "MIG-gpu-uuid::1"
+	plugin := newTestPluginWithRM(t, map[string]*rm.Device{
+		"MIG-gpu-uuid::0": dev1,
+		"MIG-gpu-uuid::1": dev2,
+	})
+	// Enable FailRequestsGreaterThanOne — requesting >1 annotated shared device errors.
+	plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne = true
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mig-pod", Namespace: "default", UID: "mig-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "MIG-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"MIG-gpu-uuid::0", "MIG-gpu-uuid::1"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "too large")
+}
+
+func TestAllocate_MIG_UnknownDevice(t *testing.T) {
+	setupInRequestDevices(t)
+
+	// Device map does NOT contain the requested ID
+	plugin := newTestPluginWithRM(t, map[string]*rm.Device{})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "mig-pod", Namespace: "default", UID: "mig-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "MIG-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"MIG-unknown-0"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unknown device")
+}
+
+// ---------------------------------------------------------------------------
+// Allocate — error path coverage
+// ---------------------------------------------------------------------------
+
+func TestAllocate_GetPendingPodError(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	// Override getPendingPod to return an error
+	prevGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) {
+		return nil, errors.New("pod not found")
+	}
+	t.Cleanup(func() { getPendingPod = prevGetPendingPod })
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pod not found")
+}
+
+func TestAllocate_DecodePodSingleDeviceError(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	// Annotation is empty → decodePodSingleDevice returns error
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "bad-pod", Namespace: "default", UID: "bad-uid",
+			Annotations: map[string]string{},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "device request not found")
+}
+
+func TestAllocate_PopNextContainerDevicesError_MoreContainersThanAnnotation(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	// Annotation has 1 container, but Allocate receives 2 ContainerRequests.
+	// After popping the first container, the second pop finds an empty
+	// (all-erased) podSingleDev → error.
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pop-err-pod", Namespace: "default", UID: "pop-err-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}, {Name: "c1"}}},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+			{DevicesIds: []string{"GPU-bbb-0"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no pending device allocation found")
+}
+
+func TestAllocate_PatchErasedAnnotationError(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "patch-err-pod", Namespace: "default", UID: "patch-err-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,3000,50:;",
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "c0"}}},
+	}
+
+	// Use a fake client that fails Patch on pods
+	fc := setupFakeClient(t, pod)
+	fc.PrependReactor("patch", "pods", func(action clienttesting.Action) (bool, runtime.Object, error) {
+		return true, nil, errors.New("patch not allowed")
+	})
+
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	_, err := plugin.Allocate(context.Background(), request)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "patch not allowed")
 }
