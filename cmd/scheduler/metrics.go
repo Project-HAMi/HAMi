@@ -141,8 +141,8 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
 		"hami_node_gpu_mig_instance_info",
-		"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
-		[]string{"node", "device_uuid", "device_index", "mig_name"}, nil,
+		"Realized MIG instance identity and scheduler placement",
+		[]string{"node", "device_uuid", "device_index", "mig_uuid", "profile", "gpu_instance_id", "compute_instance_id", "placement_start", "placement_size"}, nil,
 	)
 
 	// Legacy metric descriptors (only created when legacy mode is enabled)
@@ -203,17 +203,40 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 		for _, devs := range val.Devices.DeviceLists {
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
 			if devs.Device.Mode == "mig" {
-				for idx, migs := range devs.Device.MigUsage.UsageList {
-					klog.V(3).Infoln("mig instances=", devs.Device.MigUsage)
-					inuse := 0
-					if migs.InUse {
-						inuse = 1
+				for _, allocation := range devs.Device.MigAllocationsInUse {
+					if !allocation.RuntimeReady {
+						continue
 					}
-					if err := sendMetric(ch, nodeGPUMigInstance, prometheus.GaugeValue, float64(inuse), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), migs.Name+"-"+fmt.Sprint(idx)); err != nil {
+					klog.V(3).InfoS("MIG instance allocation",
+						"profile", allocation.Profile,
+						"gpuInstanceID", allocation.GPUInstanceID,
+						"computeInstanceID", allocation.ComputeInstanceID,
+						"migUUID", allocation.MigUUID)
+					if err := sendMetric(
+						ch,
+						nodeGPUMigInstance,
+						prometheus.GaugeValue,
+						1,
+						nodeID,
+						devs.Device.ID,
+						fmt.Sprint(devs.Device.Index),
+						allocation.MigUUID,
+						allocation.Profile,
+						fmt.Sprint(allocation.GPUInstanceID),
+						fmt.Sprint(allocation.ComputeInstanceID),
+						fmt.Sprint(allocation.Placement.Start),
+						fmt.Sprint(allocation.Placement.Size),
+					); err != nil {
 						klog.V(4).Infof("Failed to send nodeGPUMigInstance metric: %v", err)
 					}
 					if legacy {
-						sendLegacyMetric(ch, legacyMigInstance, prometheus.GaugeValue, float64(inuse), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), migs.Name+"-"+fmt.Sprint(idx))
+						sendLegacyMetric(
+							ch,
+							legacyMigInstance,
+							prometheus.GaugeValue,
+							1,
+							nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), allocation.Profile+"-"+fmt.Sprint(allocation.GPUInstanceID),
+						)
 					}
 				}
 			}

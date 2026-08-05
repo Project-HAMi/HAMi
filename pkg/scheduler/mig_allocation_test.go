@@ -22,7 +22,7 @@ func TestGetNodesUsageRestoresMigAllocationByProfileAndPlacement(t *testing.T) {
 	pods := device.NewPodManager()
 	pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 		UID: "pod-1", Name: "pod-1", Namespace: "default",
-		Annotations: map[string]string{nvidia.MigAllocationsAnnotation: `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-a","profile":"1g.5gb","placement":{"start":6,"size":1},"migUUID":"MIG-a"}]`},
+		Annotations: map[string]string{nvidia.MigAllocationsAnnotation: `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-a","profile":"1g.5gb","placement":{"start":6,"size":1},"migUUID":"MIG-a","gpuInstanceID":7,"computeInstanceID":0}]`},
 	}}, "node1", device.PodDevices{nvidia.NvidiaGPUDevice: {{{UUID: "GPU-a", Usedmem: 5120, Usedcores: 14}}}})
 	s := Scheduler{nodeManager: nodes, podManager: pods}
 	nodeNames := []string{"node1"}
@@ -31,7 +31,7 @@ func TestGetNodesUsageRestoresMigAllocationByProfileAndPlacement(t *testing.T) {
 		t.Fatal(err)
 	}
 	allocations := (*usage)["node1"].Devices.DeviceLists[0].Device.MigAllocationsInUse
-	if len(allocations) != 1 || allocations[0].Profile != "1g.5gb" || allocations[0].Placement != (device.MigPlacement{Start: 6, Size: 1}) {
+	if len(allocations) != 1 || allocations[0].Profile != "1g.5gb" || allocations[0].Placement != (device.MigPlacement{Start: 6, Size: 1}) || !allocations[0].RuntimeReady || allocations[0].GPUInstanceID != 7 || allocations[0].ComputeInstanceID != 0 || allocations[0].MigUUID != "MIG-a" {
 		t.Fatalf("restored allocations: %+v", allocations)
 	}
 }

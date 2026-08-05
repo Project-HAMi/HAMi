@@ -377,3 +377,34 @@ nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"
 		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
+
+func TestClusterManagerCollectorExposesDynamicMigRuntimeIdentity(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{DeviceLists: []*policy.DeviceListsScore{{
+				Device: &device.DeviceUsage{
+					ID: "GPU-parent", Index: 0, Mode: "mig", Type: "NVIDIA",
+					MigAllocationsInUse: []device.MigAllocation{{
+						Profile: "2g.10gb", Placement: device.MigPlacement{Start: 0, Size: 2},
+						MigUUID: "MIG-runtime", GPUInstanceID: 4, ComputeInstanceID: 0, RuntimeReady: true,
+					}},
+				},
+			}}},
+		},
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage: nodeUsage, quotaManager: device.NewQuotaManager(), podManager: device.NewPodManager(),
+		},
+	}
+
+	want := `
+# HELP hami_node_gpu_mig_instance_info Realized MIG instance identity and scheduler placement
+# TYPE hami_node_gpu_mig_instance_info gauge
+hami_node_gpu_mig_instance_info{compute_instance_id="0",device_index="0",device_uuid="GPU-parent",gpu_instance_id="4",mig_uuid="MIG-runtime",node="node-1",placement_size="2",placement_start="0",profile="2g.10gb"} 1
+`
+	if err := promtestutil.CollectAndCompare(collector, strings.NewReader(want), "hami_node_gpu_mig_instance_info"); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}

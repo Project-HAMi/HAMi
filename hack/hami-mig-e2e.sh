@@ -87,7 +87,7 @@ assert_uuid() {
 assert_runtime_annotation() {
   local pod=$1 raw
   raw=$(kubectl get pod -n "$NS" "$pod" -o json | jq -r '.metadata.annotations["hami.io/vgpu-mig-allocations"]')
-  jq -e 'length > 0 and all(.[]; (.migUUID | startswith("MIG-")) and (.profile | length > 0) and (.placement.size > 0))' <<<"$raw" >/dev/null || fail "$pod lacks concrete MIG runtime placement annotation"
+  jq -e 'length > 0 and all(.[]; (.migUUID | startswith("MIG-")) and (.profile | length > 0) and (.placement.size > 0) and (.gpuInstanceID | type == "number") and (.computeInstanceID | type == "number"))' <<<"$raw" >/dev/null || fail "$pod lacks concrete MIG runtime identity annotation"
 }
 
 assert_pending_unbound() {

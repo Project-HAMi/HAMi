@@ -388,6 +388,8 @@ func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error 
 			continue // A later Allocate call may own another container's allocation.
 		}
 		allocations[i].MigUUID = info.MigUUID
+		allocations[i].GPUInstanceID = uint32Ptr(info.GIID)
+		allocations[i].ComputeInstanceID = uint32Ptr(info.CIID)
 		updated = true
 	}
 	if !updated {
@@ -402,6 +404,10 @@ func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error 
 	}
 	pod.Annotations[nvidia.MigAllocationsAnnotation] = string(raw)
 	return nil
+}
+
+func uint32Ptr(value uint32) *uint32 {
+	return &value
 }
 
 func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
@@ -439,14 +445,21 @@ func (plugin *NvidiaDevicePlugin) primeMigManagerFromAnnotations(_ []string) err
 			return err
 		}
 		for _, allocation := range allocations {
-			if allocation.MigUUID == "" {
-				return fmt.Errorf("active pod %s/%s MIG allocation lacks runtime UUID", pod.Namespace, pod.Name)
+			if allocation.MigUUID == "" || allocation.GPUInstanceID == nil || allocation.ComputeInstanceID == nil {
+				return fmt.Errorf("active pod %s/%s MIG allocation lacks runtime identity", pod.Namespace, pod.Name)
 			}
 			gpuIndex, ok := gpuUUIDToIndex(allocation.GPUUUID)
 			if !ok {
 				return fmt.Errorf("resolve active MIG parent GPU %q", allocation.GPUUUID)
 			}
-			if err := plugin.migMgr.AdoptAllocation(gpuIndex, allocation.Profile, allocation.MigUUID, nvml.GpuInstancePlacement{Start: allocation.Placement.Start, Size: allocation.Placement.Size}); err != nil {
+			if err := plugin.migMgr.AdoptAllocation(
+				gpuIndex,
+				allocation.Profile,
+				allocation.MigUUID,
+				nvml.GpuInstancePlacement{Start: allocation.Placement.Start, Size: allocation.Placement.Size},
+				*allocation.GPUInstanceID,
+				*allocation.ComputeInstanceID,
+			); err != nil {
 				return fmt.Errorf("adopt pod %s/%s MIG allocation: %w", pod.Namespace, pod.Name, err)
 			}
 		}
