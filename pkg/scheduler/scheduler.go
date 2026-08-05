@@ -692,9 +692,18 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 								}
 								allocation := allocations[0]
 								allocationsByGPU[udevice.UUID] = allocations[1:]
-								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, device.MigAllocation{
+								migAllocation := device.MigAllocation{
 									Profile: allocation.Profile, Placement: allocation.Placement,
-								})
+									MigUUID:      allocation.MigUUID,
+									RuntimeReady: allocation.MigUUID != "" && allocation.GPUInstanceID != nil && allocation.ComputeInstanceID != nil,
+								}
+								if allocation.GPUInstanceID != nil {
+									migAllocation.GPUInstanceID = *allocation.GPUInstanceID
+								}
+								if allocation.ComputeInstanceID != nil {
+									migAllocation.ComputeInstanceID = *allocation.ComputeInstanceID
+								}
+								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocation)
 								continue
 							}
 							if d.Device.Mode == nvidia.MigMode {

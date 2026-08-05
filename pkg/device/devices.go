@@ -90,8 +90,12 @@ type MigProfile struct {
 }
 
 type MigAllocation struct {
-	Profile   string       `json:"profile"`
-	Placement MigPlacement `json:"placement"`
+	Profile           string
+	Placement         MigPlacement
+	MigUUID           string
+	GPUInstanceID     uint32
+	ComputeInstanceID uint32
+	RuntimeReady      bool
 }
 
 type AllowedMigProfiles struct {

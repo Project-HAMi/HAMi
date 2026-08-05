@@ -15,16 +15,18 @@ const (
 )
 
 // MigAllocation is the complete scheduler reservation for one MIG device.
-// The device plugin only realizes this exact hardware placement and fills in
-// MigUUID. ContainerIndex and DeviceIndex make repeated allocations on the
-// same physical GPU unambiguous without synthesizing logical device IDs.
+// The device plugin realizes this exact hardware placement and fills in its
+// MIG UUID plus GI/CI runtime identity. ContainerIndex and DeviceIndex make
+// repeated allocations on the same physical GPU unambiguous.
 type MigAllocation struct {
-	ContainerIndex int                 `json:"containerIndex"`
-	DeviceIndex    int                 `json:"deviceIndex"`
-	GPUUUID        string              `json:"gpuUUID"`
-	Profile        string              `json:"profile"`
-	Placement      device.MigPlacement `json:"placement"`
-	MigUUID        string              `json:"migUUID,omitempty"`
+	ContainerIndex    int                 `json:"containerIndex"`
+	DeviceIndex       int                 `json:"deviceIndex"`
+	GPUUUID           string              `json:"gpuUUID"`
+	Profile           string              `json:"profile"`
+	Placement         device.MigPlacement `json:"placement"`
+	MigUUID           string              `json:"migUUID,omitempty"`
+	GPUInstanceID     *uint32             `json:"gpuInstanceID,omitempty"`
+	ComputeInstanceID *uint32             `json:"computeInstanceID,omitempty"`
 }
 
 func EncodeMigAllocations(pd device.PodSingleDevice) (string, bool) {
@@ -70,6 +72,19 @@ func DecodeMigAllocations(raw string) ([]MigAllocation, error) {
 	for i, allocation := range out {
 		if allocation.ContainerIndex < 0 || allocation.DeviceIndex < 0 || allocation.GPUUUID == "" || allocation.Profile == "" || allocation.Placement.Size == 0 {
 			return nil, fmt.Errorf("MIG allocation %d is incomplete", i)
+		}
+		runtimeFields := 0
+		if allocation.MigUUID != "" {
+			runtimeFields++
+		}
+		if allocation.GPUInstanceID != nil {
+			runtimeFields++
+		}
+		if allocation.ComputeInstanceID != nil {
+			runtimeFields++
+		}
+		if runtimeFields != 0 && runtimeFields != 3 {
+			return nil, fmt.Errorf("MIG allocation %d has partial runtime identity", i)
 		}
 		key := [2]int{allocation.ContainerIndex, allocation.DeviceIndex}
 		if _, ok := seen[key]; ok {

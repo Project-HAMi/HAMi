@@ -388,7 +388,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	m.byAllocation[key] = inst
 	m.byAllocationMigUUID[migUUID] = key
 	m.mu.Unlock()
-	klog.InfoS("created scheduler-reserved MIG allocation", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", placement.Start, "size", placement.Size)
+	klog.InfoS("created scheduler-reserved MIG allocation", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", placement.Start, "size", placement.Size, "gpuInstanceID", giData.Id, "computeInstanceID", ciData.Id)
 	return migUUID, nil
 }
 
@@ -400,10 +400,16 @@ func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string,
 	if inst == nil || !inst.Present {
 		return migAllocationRuntimeInfo{}, false
 	}
-	return migAllocationRuntimeInfo{MigUUID: inst.MigUUID, Profile: inst.Profile, Placement: inst.Placement}, true
+	return migAllocationRuntimeInfo{
+		MigUUID:   inst.MigUUID,
+		Profile:   inst.Profile,
+		Placement: inst.Placement,
+		GIID:      inst.GIID,
+		CIID:      inst.CIID,
+	}, true
 }
 
-func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID string, placement nvml.GpuInstancePlacement) error {
+func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID string, placement nvml.GpuInstancePlacement, gpuInstanceID, computeInstanceID uint32) error {
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
 	defer lk.Unlock()
@@ -426,7 +432,7 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	ciProfileID := profileIDToCIProfileID(giProfileID)
 	for _, gi := range instances {
 		giInfo, r := gi.GetInfo()
-		if r != nvml.SUCCESS || giInfo.Placement != placement {
+		if r != nvml.SUCCESS || giInfo.Placement != placement || giInfo.Id != gpuInstanceID {
 			continue
 		}
 		actualUUID, findErr := findMigUUIDForGI(dev, giInfo.Id)
@@ -442,7 +448,7 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 			continue
 		}
 		ciData, r := cis[0].GetInfo()
-		if r != nvml.SUCCESS {
+		if r != nvml.SUCCESS || ciData.Id != computeInstanceID {
 			continue
 		}
 		key := allocationKey(gpuIndex, profile, placement)
@@ -493,6 +499,8 @@ type migAllocationRuntimeInfo struct {
 	MigUUID   string
 	Profile   string
 	Placement nvml.GpuInstancePlacement
+	GIID      uint32
+	CIID      uint32
 }
 
 func findMigUUIDForGI(dev nvml.Device, giID uint32) (string, error) {

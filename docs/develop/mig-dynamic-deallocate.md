@@ -118,11 +118,13 @@ The scheduler stores reservations in `hami.io/vgpu-mig-allocations`:
   "gpuUUID": "GPU-xxxxxxxx",
   "profile": "2g.10gb",
   "placement": {"start": 2, "size": 2},
-  "migUUID": "MIG-xxxxxxxx"
+  "migUUID": "MIG-xxxxxxxx",
+  "gpuInstanceID": 4,
+  "computeInstanceID": 0
 }
 ```
 
-The scheduler writes container identity, parent GPU, profile, and placement. The device plugin adds the MIG UUID after realization. These fields form one allocation identity across control-plane and node lifecycle operations.
+The scheduler writes container identity, parent GPU, profile, and placement. The device plugin adds the MIG UUID, GPU Instance ID, and Compute Instance ID after realization. These fields form one allocation identity across control-plane and node lifecycle operations. The parent GPU UUID and GPU Instance ID provide a direct correlation key for DCGM metrics carrying `UUID` and `GPU_I_ID` labels.
 
 ## Core Workflows
 
@@ -136,7 +138,7 @@ The scheduler rebuilds occupancy from active Pod reservations. Each placement oc
 
 ### Runtime realization
 
-During kubelet allocation, the device plugin resolves the reservation and verifies it against current NVML capability. The MIG instance manager serializes mutation per physical GPU, creates the GI and CI at the selected placement, resolves the MIG UUID, and enriches the Pod allocation record.
+During kubelet allocation, the device plugin resolves the reservation and verifies it against current NVML capability. The MIG instance manager serializes mutation per physical GPU, creates the GI and CI at the selected placement, resolves their runtime IDs, and enriches the Pod allocation record.
 
 The reservation key combines physical GPU, profile, and placement. Repeated allocation requests converge on the same managed instance.
 
@@ -172,7 +174,7 @@ Operational visibility centers on:
 
 - discovered profiles and placements per GPU;
 - scheduler reservation decisions and capacity pressure;
-- GI/CI realization and runtime UUID assignment;
+- GI/CI realization and runtime identity assignment;
 - reconciliation activity and capacity reuse;
 - startup adoption results;
 - workload GPU progress across lifecycle events.

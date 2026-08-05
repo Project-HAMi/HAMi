@@ -48,3 +48,24 @@ func TestDecodeMigAllocationsRejectsDuplicateDeviceIndex(t *testing.T) {
 		t.Fatal("duplicate container/device allocation index should fail")
 	}
 }
+
+func TestDecodeMigAllocationsPreservesZeroRuntimeInstanceIDs(t *testing.T) {
+	raw := `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-a","profile":"2g.10gb","placement":{"start":0,"size":2},"migUUID":"MIG-a","gpuInstanceID":4,"computeInstanceID":0}]`
+	allocations, err := DecodeMigAllocations(raw)
+	if err != nil {
+		t.Fatalf("decode allocation: %v", err)
+	}
+	if len(allocations) != 1 || allocations[0].GPUInstanceID == nil || allocations[0].ComputeInstanceID == nil {
+		t.Fatalf("runtime identity missing: %+v", allocations)
+	}
+	if *allocations[0].GPUInstanceID != 4 || *allocations[0].ComputeInstanceID != 0 {
+		t.Fatalf("runtime identity mismatch: %+v", allocations[0])
+	}
+}
+
+func TestDecodeMigAllocationsRejectsPartialRuntimeIdentity(t *testing.T) {
+	raw := `[{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-a","profile":"2g.10gb","placement":{"start":0,"size":2},"migUUID":"MIG-a"}]`
+	if _, err := DecodeMigAllocations(raw); err == nil {
+		t.Fatal("partial runtime identity should fail")
+	}
+}
