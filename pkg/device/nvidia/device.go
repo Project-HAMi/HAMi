@@ -561,11 +561,17 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				mempnums, ok := mem.AsInt64()
 				if ok {
-					if mempnums < 0 || mempnums > 100 {
+					if mempnums > 100 {
 						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
 						mempnums = 100
 					}
-					mempnum = int32(mempnums)
+					if mempnums > 0 {
+						mempnum = int32(mempnums)
+					} else {
+						// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
+						klog.ErrorS(nil, "memory percentage request is not positive, ignoring it", "container", ctr.Name, "requested", mempnums)
+						mempnum = 101
+					}
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
@@ -749,7 +755,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -855,9 +861,9 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
@@ -867,6 +873,7 @@ func (dev *NvidiaGPUDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       dev.config.MemoryFactor,
 	}
 }
 
@@ -911,8 +918,9 @@ func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DeviceP
 }
 
 func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerDeviceRequest, tmpDevs map[string]device.ContainerDevices) device.ContainerDevices {
-	worstScore := -1
+	worstScore := 0
 	worstDevices := device.ContainerDevices{}
+	found := false
 	deviceScoreMap := getDevicePairScoreMap(nodeInfo)
 	// Iterate through all devices to find the one with the lowest score
 	devices := tmpDevs[request.Type]
@@ -926,7 +934,8 @@ func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerD
 			}
 			totalScore += scoreMapDev1.Scores[dev2.UUID]
 		}
-		if totalScore < worstScore || worstScore == -1 {
+		if !found || totalScore < worstScore {
+			found = true
 			worstScore = totalScore
 			worstDevices = device.ContainerDevices{dev1}
 		}
@@ -935,8 +944,9 @@ func computeWorstSingleCard(nodeInfo *device.NodeInfo, request device.ContainerD
 }
 
 func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.ContainerDevices) device.ContainerDevices {
-	bestScore := 0
+	bestScore := -1
 	bestCombination := device.ContainerDevices{}
+	found := false
 	deviceScoreMap := getDevicePairScoreMap(nodeInfo)
 	// Iterate through all combinations to find the one with the highest score
 	for _, partition := range combinations {
@@ -951,7 +961,8 @@ func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.Con
 			}
 		}
 
-		if totalScore > bestScore {
+		if !found || totalScore > bestScore {
+			found = true
 			bestScore = totalScore
 			bestCombination = partition
 		}

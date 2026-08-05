@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"flag"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -30,6 +31,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/ascend"
+	"github.com/Project-HAMi/HAMi/pkg/device/cambricon"
+	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
@@ -507,6 +511,261 @@ func TestFitResourceQuota(t *testing.T) {
 				t.Errorf("Expected %v, but got %v", tc.fit, result)
 			}
 		})
+	}
+}
+
+// mluPod builds a pod requesting one MLU with the given vmemory and vcore.
+func mluPod(ns string, vmemory, vcore string) *corev1.Pod {
+	limits := corev1.ResourceList{
+		"cambricon.com/mlu":              resource.MustParse("1"),
+		"cambricon.com/mlu.smlu.vmemory": resource.MustParse(vmemory),
+	}
+	if vcore != "" {
+		limits["cambricon.com/mlu.smlu.vcore"] = resource.MustParse(vcore)
+	}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlu-pod", Namespace: ns},
+		Spec: corev1.PodSpec{
+			SchedulerName: "hami-scheduler",
+			Containers: []corev1.Container{{
+				Name:      "container1",
+				Resources: corev1.ResourceRequirements{Limits: limits},
+			}},
+		},
+	}
+}
+
+// Quota used to be checked for NVIDIA only, so a namespace limit on any other
+// vendor's memory or cores was silently ignored.
+func TestFitResourceQuotaNonNvidia(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+		CambriconConfig: cambricon.CambriconConfig{
+			ResourceCountName:  "cambricon.com/mlu",
+			ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+			ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+		},
+		HygonConfig: hygon.HygonConfig{
+			ResourceCountName:  "hygon.com/dcunum",
+			ResourceMemoryName: "hygon.com/dcumem",
+			ResourceCoreName:   "hygon.com/dcucores",
+			// Hygon scales the requested memory by this before recording it.
+			MemoryFactor: 2,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	qm := device.NewQuotaManager()
+
+	// One MLU vmemory unit is 256 MiB, so a limit of 100 units leaves room for
+	// 25600 MiB. Comparing the request against the raw 100 would deny every pod.
+	qm.Quotas["mlu-mem"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100},
+	}
+	qm.Quotas["mlu-core"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50},
+	}
+	qm.Quotas["dcu-mem"] = &device.DeviceQuota{
+		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000},
+	}
+	t.Cleanup(func() {
+		for _, ns := range []string{"mlu-mem", "mlu-core", "dcu-mem"} {
+			delete(qm.Quotas, ns)
+		}
+	})
+
+	dcuPod := func(ns, dcumem string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "dcu-pod", Namespace: ns},
+			Spec: corev1.PodSpec{
+				SchedulerName: "hami-scheduler",
+				Containers: []corev1.Container{{
+					Name: "container1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("1"),
+							"hygon.com/dcumem": resource.MustParse(dcumem),
+						},
+					},
+				}},
+			},
+		}
+	}
+
+	testCases := []struct {
+		name string
+		pod  *corev1.Pod
+		fit  bool
+	}{
+		{
+			name: "mlu memory within quota",
+			pod:  mluPod("mlu-mem", "50", ""),
+			fit:  true,
+		},
+		{
+			name: "mlu memory over quota",
+			pod:  mluPod("mlu-mem", "200", ""),
+			fit:  false,
+		},
+		{
+			name: "mlu cores over quota",
+			pod:  mluPod("mlu-core", "1", "60"),
+			fit:  false,
+		},
+		{
+			name: "mlu in a namespace with no quota",
+			pod:  mluPod("unquotaed", "10000", ""),
+			fit:  true,
+		},
+		{
+			name: "dcu memory within quota once the factor is applied",
+			pod:  dcuPod("dcu-mem", "800"),
+			fit:  true,
+		},
+		{
+			name: "dcu memory over quota",
+			pod:  dcuPod("dcu-mem", "1200"),
+			fit:  false,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := fitResourceQuota(tc.pod); got != tc.fit {
+				t.Errorf("fitResourceQuota() = %v, want %v", got, tc.fit)
+			}
+		})
+	}
+}
+
+// A pod asking for two MLUs consumes twice the per-device memory.
+func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+		CambriconConfig: cambricon.CambriconConfig{
+			ResourceCountName:  "cambricon.com/mlu",
+			ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+			ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+
+	qm := device.NewQuotaManager()
+	// 60 units is 15360 MiB of headroom.
+	qm.Quotas["mlu-multi"] = &device.DeviceQuota{
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "mlu-multi") })
+
+	pod := mluPod("mlu-multi", "40", "")
+	pod.Spec.Containers[0].Resources.Limits["cambricon.com/mlu"] = resource.MustParse("2")
+
+	// 2 x 40 units is 80, past the 60 unit limit, even though one device fits.
+	if fitResourceQuota(pod) {
+		t.Error("fitResourceQuota() = true, want false: two devices should each count against the quota")
+	}
+}
+
+// Ascend applies a configurable factor to the memory it records, so the limit
+// has to be raised by the same factor or pods that are within quota get denied.
+func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+
+	fs := flag.NewFlagSet("ascend-quota-test", flag.ContinueOnError)
+	ascend.ParseConfig(fs)
+	if err := fs.Parse([]string{"--enable-ascend=true"}); err != nil {
+		t.Fatalf("failed to enable the ascend backend: %v", err)
+	}
+	t.Cleanup(func() {
+		restore := flag.NewFlagSet("ascend-quota-restore", flag.ContinueOnError)
+		ascend.ParseConfig(restore)
+		_ = restore.Parse([]string{"--enable-ascend=false"})
+	})
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                1,
+			MemoryFactor:                 1,
+		},
+		VNPUs: ascend.VNPUs{
+			Configs: []ascend.VNPUConfig{{
+				CommonWord:         "Ascend910B",
+				ResourceName:       "huawei.com/Ascend910B",
+				ResourceMemoryName: "huawei.com/Ascend910B-memory",
+				ResourceCoreName:   "huawei.com/Ascend910B-core",
+				MemoryCapacity:     65536,
+				MemoryAllocatable:  65536,
+				MemoryFactor:       4,
+			}},
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("failed to initialize devices: %v", err)
+	}
+	if _, ok := device.GetDevices()["Ascend910B"]; !ok {
+		t.Fatal("the ascend backend was not registered, the test would pass vacuously")
+	}
+
+	qm := device.NewQuotaManager()
+	qm.Quotas["ascend"] = &device.DeviceQuota{
+		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "ascend") })
+
+	// Requesting -core keeps the raw scaled value instead of rounding to a
+	// template, which makes the arithmetic here easy to follow.
+	ascendPod := func(mem string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "ascend-pod", Namespace: "ascend"},
+			Spec: corev1.PodSpec{
+				SchedulerName: "hami-scheduler",
+				Containers: []corev1.Container{{
+					Name: "container1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910B":        resource.MustParse("1"),
+							"huawei.com/Ascend910B-memory": resource.MustParse(mem),
+							"huawei.com/Ascend910B-core":   resource.MustParse("1"),
+						},
+					},
+				}},
+			},
+		}
+	}
+
+	// 4096 x factor 4 is 16384, against a limit of 8192 x 4 = 32768.
+	if !fitResourceQuota(ascendPod("4096")) {
+		t.Error("fitResourceQuota() = false, want true: the limit must be scaled by the same factor as the request")
+	}
+	// 8192 x 4 is 32768 used against 32768 available, and 8193 pushes it over.
+	if fitResourceQuota(ascendPod("8193")) {
+		t.Error("fitResourceQuota() = true, want false: the request exceeds the scaled limit")
 	}
 }
 

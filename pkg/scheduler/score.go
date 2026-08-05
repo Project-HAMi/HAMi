@@ -41,8 +41,9 @@ func viewStatus(usage NodeUsage) {
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
+	targetType := strings.ToLower(t)
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(val.Device.Type, t) {
+		if strings.Contains(strings.ToLower(val.Device.Type), targetType) {
 			l = append(l, val.Device)
 		}
 	}

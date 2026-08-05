@@ -252,3 +252,33 @@ func TestAddQuotaAndDelQuota(t *testing.T) {
 		t.Errorf("DelQuota: expected core limit 0, got %d", (*qm.Quotas[ns])[coreName].Limit)
 	}
 }
+
+func TestDelQuotaNonLimitsKey(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	rq := &corev1.ResourceQuota{}
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(10, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+
+	// Quota with non-limits keys (including 7-character prefix key).
+	unrelatedQuota := &corev1.ResourceQuota{}
+	unrelatedQuota.Namespace = ns
+	unrelatedQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("requests." + memName): *resource.NewQuantity(50, resource.DecimalSI),
+		corev1.ResourceName("0123456" + memName):   *resource.NewQuantity(50, resource.DecimalSI),
+	}
+
+	// DelQuota on non-limits keys should NOT reset active quota limits.
+	qm.DelQuota(unrelatedQuota)
+	if (*qm.Quotas[ns])[memName].Limit != 100 {
+		t.Errorf("DelQuota: expected memory limit 100 after deleting non-limits quota, got %d", (*qm.Quotas[ns])[memName].Limit)
+	}
+}

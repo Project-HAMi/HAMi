@@ -8,7 +8,9 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   device-config.yaml: |-
-  {{- if .Files.Glob "files/device-config.yaml" }}
+  {{- if and (index .Values "device-config") (index .Values "device-config" "content") }}
+  {{- (index .Values "device-config" "content") | nindent 4 }}
+  {{- else if .Files.Glob "files/device-config.yaml" }}
   {{- .Files.Get "files/device-config.yaml" | nindent 4}}
   {{- else }}
     nvidia:
@@ -301,6 +303,8 @@ data:
       resourceCoreName: "aws.amazon.com/neuroncore"
     amd:
       resourceCountName: "amd.com/gpu"
+      resourceCoreName: "amd.com/gpucores"
+      resourceMemoryName: "amd.com/gpumem"
     vastai:
       resourceCountName: {{ .Values.vastaiResourceName }}
     biren:
