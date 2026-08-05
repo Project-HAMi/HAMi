@@ -25,6 +25,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/mcp/client"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 // GPUNodeInfo summarizes one GPU-bearing node for list_gpu_nodes.
@@ -53,9 +54,24 @@ func RegisterListGPUNodes(s *mcp.Server, k8sClient *client.K8sClient) {
 			return errorResult("list_gpu_nodes: %v", err), nil, nil
 		}
 
+		// Allocated memory/cores can't be read off node Capacity/Allocatable
+		// for device-plugin resources — plugins advertise the same value in
+		// both, so that subtraction is always zero. Derive it from live pod
+		// allocations instead, aggregated per node.
+		pods, err := k8sClient.ListGPUPods(ctx, "", "")
+		if err != nil {
+			return errorResult("list_gpu_nodes: listing pods: %v", err), nil, nil
+		}
+		allocByNode := aggregateAllocationsByNode(pods)
+
 		infos := make([]GPUNodeInfo, 0, len(nodes))
 		for _, n := range nodes {
-			infos = append(infos, extractGPUNodeInfo(n))
+			info := extractGPUNodeInfo(n)
+			if alloc, ok := allocByNode[n.Name]; ok {
+				info.AllocatedMemoryMiB = alloc.memMiB
+				info.AllocatedCoresPct = alloc.coresPct
+			}
+			infos = append(infos, info)
 		}
 
 		data, err := json.Marshal(infos)
@@ -66,6 +82,39 @@ func RegisterListGPUNodes(s *mcp.Server, k8sClient *client.K8sClient) {
 			Content: []mcp.Content{&mcp.TextContent{Text: string(data)}},
 		}, nil, nil
 	})
+}
+
+// nodeAllocation is the summed live GPU usage for one node.
+type nodeAllocation struct {
+	memMiB   float64
+	coresPct float64
+}
+
+// aggregateAllocationsByNode sums each pod's allocated devices (from
+// podAllocations, see list_gpu_pods.go) onto the node it's bound to.
+// Terminal-phase pods are excluded, matching the accounting used by
+// get_quota_usage.
+func aggregateAllocationsByNode(pods []*corev1.Pod) map[string]nodeAllocation {
+	out := make(map[string]nodeAllocation)
+	for _, pod := range pods {
+		if isTerminalPhase(pod.Status.Phase) {
+			continue
+		}
+		nodeName := pod.Spec.NodeName
+		if nodeName == "" {
+			nodeName = pod.Annotations[util.AssignedNodeAnnotations]
+		}
+		if nodeName == "" {
+			continue
+		}
+		agg := out[nodeName]
+		for _, ad := range podAllocations(pod) {
+			agg.memMiB += float64(ad.UsedMemMiB)
+			agg.coresPct += float64(ad.UsedCoresPct)
+		}
+		out[nodeName] = agg
+	}
+	return out
 }
 
 // extractGPUNodeInfo asks every registered device backend to decode this
@@ -89,21 +138,5 @@ func extractGPUNodeInfo(node *corev1.Node) GPUNodeInfo {
 		// the first that did.
 		break
 	}
-
-	// Allocated memory/cores come from the resource-name pair the matching
-	// backend was configured with, read off node capacity vs. allocatable.
-	for _, dev := range device.GetDevices() {
-		if dev.CommonWord() != info.GPUVendor {
-			continue
-		}
-		rn := dev.GetResourceNames()
-		if rn.ResourceMemoryName != "" {
-			cap := node.Status.Capacity[corev1.ResourceName(rn.ResourceMemoryName)]
-			alloc := node.Status.Allocatable[corev1.ResourceName(rn.ResourceMemoryName)]
-			info.AllocatedMemoryMiB = float64(cap.Value() - alloc.Value())
-		}
-		break
-	}
-
 	return info
 }

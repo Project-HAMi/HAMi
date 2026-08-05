@@ -94,12 +94,39 @@ func extractGPUPodInfo(pod *corev1.Pod) GPUPodInfo {
 	}
 
 	info.AllocatedDevices = podAllocations(pod)
-	for _, ad := range info.AllocatedDevices {
-		if ad.ContainerIndex == 0 {
-			info.RequestedGPU++
+	info.RequestedGPU = requestedGPUCount(pod)
+	return info
+}
+
+// requestedGPUCount sums each vendor's count resource (e.g. nvidia.com/gpu)
+// across every container's resource requests/limits. Unlike reading
+// allocation annotations, this works for Pending pods too, since it reflects
+// what was asked for, not what's been bound.
+func requestedGPUCount(pod *corev1.Pod) int64 {
+	countNames := make(map[corev1.ResourceName]struct{})
+	for _, dev := range device.GetDevices() {
+		if n := dev.GetResourceNames().ResourceCountName; n != "" {
+			countNames[corev1.ResourceName(n)] = struct{}{}
 		}
 	}
-	return info
+
+	var total int64
+	sum := func(ctrs []corev1.Container) {
+		for _, c := range ctrs {
+			for name := range countNames {
+				if q, ok := c.Resources.Limits[name]; ok {
+					total += q.Value()
+					continue // avoid double-counting if Requests is also set
+				}
+				if q, ok := c.Resources.Requests[name]; ok {
+					total += q.Value()
+				}
+			}
+		}
+	}
+	sum(pod.Spec.Containers)
+	sum(pod.Spec.InitContainers)
+	return total
 }
 
 // podAllocations decodes every vendor's post-bind allocation annotation

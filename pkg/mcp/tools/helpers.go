@@ -23,6 +23,7 @@ import (
 	"fmt"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+	corev1 "k8s.io/api/core/v1"
 )
 
 // errorResult builds a CallToolResult that reports a tool-level failure to
@@ -35,4 +36,12 @@ func errorResult(format string, args ...any) *mcp.CallToolResult {
 		IsError: true,
 		Content: []mcp.Content{&mcp.TextContent{Text: fmt.Sprintf(format, args...)}},
 	}
+}
+
+// isTerminalPhase reports whether a pod is in a phase Kubernetes itself
+// excludes from ResourceQuota accounting. Tools that sum live usage from
+// pod annotations must apply the same filter, or their numbers won't match
+// what a ResourceQuota reports.
+func isTerminalPhase(phase corev1.PodPhase) bool {
+	return phase == corev1.PodSucceeded || phase == corev1.PodFailed
 }

@@ -32,7 +32,7 @@ import (
 // for HAMi's own metrics. It is read-only: only the /api/v1/query endpoint
 // is used.
 type PrometheusClient struct {
-	baseURL string
+	baseURL *url.URL
 	http    *http.Client
 }
 
@@ -54,8 +54,12 @@ func NewPrometheusClient(rawURL string) (*PrometheusClient, error) {
 	if u.Host == "" {
 		return nil, fmt.Errorf("prometheus URL must include a host, got %q", rawURL)
 	}
+	if u.RawQuery != "" || u.Fragment != "" {
+		return nil, fmt.Errorf("prometheus URL must not include a query or fragment, got %q", rawURL)
+	}
+	u.Path = strings.TrimSuffix(u.Path, "/")
 	return &PrometheusClient{
-		baseURL: strings.TrimSuffix(rawURL, "/"),
+		baseURL: u,
 		http:    &http.Client{Timeout: 30 * time.Second},
 	}, nil
 }
@@ -83,10 +87,11 @@ type promQueryResponse struct {
 // against an allowlist before calling this (see tools.allowedMetrics) —
 // this client does not restrict what it will run.
 func (c *PrometheusClient) Query(ctx context.Context, promQL string) ([]MetricValue, error) {
-	q := url.Values{"query": []string{promQL}}
-	reqURL := c.baseURL + "/api/v1/query?" + q.Encode()
+	reqURL := *c.baseURL
+	reqURL.Path = reqURL.Path + "/api/v1/query"
+	reqURL.RawQuery = url.Values{"query": []string{promQL}}.Encode()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL.String(), nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}

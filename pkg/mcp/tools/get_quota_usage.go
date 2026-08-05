@@ -70,6 +70,9 @@ func RegisterGetQuotaUsage(s *mcp.Server, k8sClient *client.K8sClient) {
 
 		used := make(map[string]int64)
 		for _, pod := range pods {
+			if isTerminalPhase(pod.Status.Phase) {
+				continue
+			}
 			for _, ad := range podAllocations(pod) {
 				used[nvidiaMemResourceNameFor(ad.DeviceName)] += int64(ad.UsedMemMiB)
 				used[nvidiaCoreResourceNameFor(ad.DeviceName)] += int64(ad.UsedCoresPct)

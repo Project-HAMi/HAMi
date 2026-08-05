@@ -48,9 +48,13 @@ func main() {
 		os.Exit(0)
 	}
 
-	if err := setupLogging(klogFlags, flags.LogLevel); err != nil {
-		fmt.Fprintf(os.Stderr, "Failed to setup logging: %v\n", err)
-		os.Exit(1)
+	// Only translate --log-level into klog's -v verbosity when the user
+	// did not explicitly pass -v; an explicit -v always wins.
+	if !pflag.CommandLine.Changed("v") {
+		if err := setupLogging(klogFlags, flags.LogLevel); err != nil {
+			fmt.Fprintf(os.Stderr, "Failed to setup logging: %v\n", err)
+			os.Exit(1)
+		}
 	}
 
 	// Register HAMi's device backends so DevicesMap is populated. Without
