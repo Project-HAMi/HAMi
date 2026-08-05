@@ -454,7 +454,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "oversized memory request exceeds int32 range",
+			name: "oversized memory request exceeds int32 range (no unit, pre-multiply guard)",
 			container: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -463,7 +463,29 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-
+			expected: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized sgpu count exceeds int32 range",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized vcore exceeds int32 range",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("2200000000"),
+					},
+				},
+			},
 			expected: device.ContainerDeviceRequest{},
 		},
 	} {
