@@ -117,6 +117,9 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm repo update
 ```
 
+> **Note:** This URL is the Helm chart repository hosted on GitHub Pages.
+> For documentation, visit [project-hami.io](https://project-hami.io).
+
 Install HAMi:
 
 ```bash

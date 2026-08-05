@@ -117,6 +117,9 @@ helm repo add hami-charts https://project-hami.github.io/HAMi/
 helm repo update
 ```
 
+> **注意：** この URL は GitHub Pages でホストされている Helm チャートリポジトリです。
+> ドキュメントは [project-hami.io](https://project-hami.io) をご覧ください。
+
 HAMi をインストールします：
 
 ```bash
