@@ -1,14 +1,5 @@
 # Dynamic MIG Architecture
 
-## Document Status
-
-| Item | Value |
-| --- | --- |
-| Status | Active design |
-| Scope | NVIDIA Dynamic MIG in HAMi |
-| Audience | Maintainers, reviewers, operators, and contributors |
-| Source branch | `feat/mig-dynamic-deallocate` |
-
 ## Context
 
 NVIDIA MIG divides a physical GPU into hardware-isolated compute instances. GPU models expose profile capacity and placement rules through NVML, while Kubernetes schedules workloads through declarative resources.
