@@ -75,6 +75,7 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	} else {
 		pi := m.pods[pod.UID]
 		pi.Pod = pod
+		pi.NodeID = nodeID
 		if pi.InitContainerResourceReleased {
 			// Usage was already shrunk after init containers finished; a re-add
 			// (e.g. an informer resync decoding the full annotation) must not
@@ -86,6 +87,8 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			pi.Devices = devices
 			klog.V(5).InfoS("Pod already exists; devices updated",
 				"pod", klog.KRef(pod.Namespace, pod.Name),
+				"nodeID", nodeID,
+				"devices", devices,
 			)
 		}
 	}

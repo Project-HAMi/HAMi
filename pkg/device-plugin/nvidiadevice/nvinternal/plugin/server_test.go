@@ -697,9 +697,7 @@ func TestGetPreferredAllocationSkipsEmptyAnnotations(t *testing.T) {
 	require.ElementsMatch(t, []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0"}, response.ContainerResponses[0].DeviceIDs)
 }
 
-func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
-	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx (5 dashes)
-	// Virtual devices have 6 dashes: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx-N
+func TestPhysicalDeviceIDHandlesVirtualFormats(t *testing.T) {
 	tests := []struct {
 		input    string
 		expected string
@@ -707,10 +705,6 @@ func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
 		// Virtual device format (6 dashes)
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-10", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// MIG format with template index
-		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a[1-2]", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
-		// Replica format
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a::replica-1", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		// Plain UUID (5 dashes, should not be modified)
 		{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
@@ -726,18 +720,17 @@ func TestPhysicalDeviceIDHandlesMIGFormat(t *testing.T) {
 	}
 }
 
-func TestSelectPreferredDeviceIDsWithMIGUUIDs(t *testing.T) {
+func TestSelectPreferredDeviceIDsWithPhysicalMIGReservations(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
-	// Use real NVIDIA GPU UUID format
 	available := []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
 	}
 	desired := device.ContainerDevices{
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a[0-1]"}, // MIG format
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
 		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
-		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c[1-2]"}, // MIG format with different index
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"},
 	}
 
 	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, 3)

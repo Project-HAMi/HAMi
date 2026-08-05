@@ -33,6 +33,7 @@ const (
 	NumaNotFit                        = "NumaNotFit"
 	ExclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
+	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"
 	NodeInsufficientDevice            = "NodeInsufficientDevice"
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"

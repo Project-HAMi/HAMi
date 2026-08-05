@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -113,8 +114,8 @@ type NvidiaConfig struct {
 	DefaultGPUNum                int32  `yaml:"defaultGPUNum"`
 	MemoryFactor                 int32  `yaml:"memoryFactor"`
 	// TODO Whether these should be removed
-	DisableCoreLimit  bool                          `yaml:"disableCoreLimit"`
-	MigGeometriesList []device.AllowedMigGeometries `yaml:"knownMigGeometries"`
+	DisableCoreLimit    bool                        `yaml:"disableCoreLimit"`
+	MigProfileAllowlist []device.AllowedMigProfiles `yaml:"migProfileAllowlist"`
 	// GPUCorePolicy through webhook automatic injected to container env
 	GPUCorePolicy GPUCoreUtilizationPolicy `yaml:"gpuCorePolicy"`
 	// RuntimeClassName is the name of the runtime class to be added to pod.spec.runtimeClassName
@@ -175,6 +176,9 @@ func InitNvidiaDevice(nvconfig NvidiaConfig) *NvidiaGPUDevices {
 		device.InRequestDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
 		device.SupportDevices[NvidiaGPUDevice] = "hami.io/vgpu-devices-allocated"
 		util.HandshakeAnnos[NvidiaGPUDevice] = HandshakeAnnos
+	}
+	if err := ValidateMigProfileAllowlist(nvconfig.MigProfileAllowlist); err != nil {
+		klog.Fatalf("invalid MIG profile allowlist: %v", err)
 	}
 	MemoryFactor = nvconfig.MemoryFactor
 	return &NvidiaGPUDevices{
@@ -309,25 +313,6 @@ func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	for idx := range nodedevices {
 		nodedevices[idx].DeviceVendor = dev.CommonWord()
 	}
-	for _, val := range nodedevices {
-		if val.Mode == MigMode {
-			val.MIGTemplate = make([]device.Geometry, 0)
-			for _, migTemplates := range dev.config.MigGeometriesList {
-				found := false
-				for _, migDevices := range migTemplates.Models {
-					if strings.Contains(val.Type, migDevices) {
-						found = true
-						break
-					}
-				}
-				if found {
-					val.MIGTemplate = append(val.MIGTemplate, migTemplates.Geometries...)
-					break
-				}
-			}
-		}
-	}
-
 	pairScores, ok := n.Annotations[RegisterGPUPairScore]
 	if !ok {
 		klog.V(5).InfoS("no topology score found", "node", n.Name)
@@ -520,6 +505,9 @@ func (dev *NvidiaGPUDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 		deviceStr := device.EncodePodSingleDevice(devlist)
 		(*annoinput)[device.InRequestDevices[NvidiaGPUDevice]] = deviceStr
 		(*annoinput)[device.SupportDevices[NvidiaGPUDevice]] = deviceStr
+		if allocationData, hasAllocations := EncodeMigAllocations(devlist); hasAllocations {
+			(*annoinput)[MigAllocationsAnnotation] = allocationData
+		}
 		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.InRequestDevices[NvidiaGPUDevice], deviceStr)
 		klog.V(5).Infof("pod add notation key [%s], values is [%s]", device.SupportDevices[NvidiaGPUDevice], deviceStr)
 	}
@@ -605,127 +593,59 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 }
 
 func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage) bool {
-	//memreq := request.Memreq
-	deviceUsageSnapshot := devusage.MigUsage
-	deviceUsageCurrent := device.MigInUse{
-		UsageList: make(device.MIGS, 0),
-	}
-	deviceUsageCurrent.UsageList = append(deviceUsageCurrent.UsageList, deviceUsageSnapshot.UsageList...)
 	if devusage.Mode == MigMode {
-		// The same logic as in AddResourceUsage
-		if len(deviceUsageCurrent.UsageList) == 0 {
-			tmpfound := false
-			for tidx, templates := range devusage.MigTemplate {
-				for _, template := range templates {
-					if template.Memory < request.Memreq {
-						continue
-					} else {
-						device.PlatternMIG(&deviceUsageCurrent, devusage.MigTemplate, tidx)
-						tmpfound = true
-						break
-					}
-				}
-				if tmpfound {
-					break
-				}
-			}
-			if !tmpfound {
-				klog.Infoln("MIG entry no template fit", deviceUsageCurrent.UsageList, "request=", request)
-			}
-		}
-		for _, val := range toAllocate {
-			found := false
-			for idx := range deviceUsageCurrent.UsageList {
-				if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory >= val.Usedmem {
-					deviceUsageCurrent.UsageList[idx].InUse = true
-					found = true
-					break
-				}
-			}
-			if !found {
-				klog.Infoln("MIG entry not found", deviceUsageCurrent.UsageList)
+		occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
+		for _, existing := range toAllocate {
+			_, placement, ok := selectMigCandidate(devusage.MigProfiles, occupied, existing.Usedmem)
+			if !ok {
 				return false
 			}
+			occupied = append(occupied, placement)
 		}
-		for idx := range deviceUsageCurrent.UsageList {
-			if !deviceUsageCurrent.UsageList[idx].InUse && deviceUsageCurrent.UsageList[idx].Memory >= request.Memreq {
-				deviceUsageCurrent.UsageList[idx].InUse = true
-				klog.Infoln("MIG entry device usage true=", deviceUsageCurrent.UsageList, "request", request, "toAllocate", toAllocate)
-				return true
-			}
-		}
-		klog.Infoln("MIG entry device usage false=", deviceUsageCurrent.UsageList)
-		return false
+		_, _, ok := selectMigCandidate(devusage.MigProfiles, occupied, request.Memreq)
+		return ok
 	}
 	return true
+}
+
+func selectMigCandidate(profiles []device.MigProfile, occupied []device.MigPlacement, memory int32) (device.MigProfile, device.MigPlacement, bool) {
+	candidates := append([]device.MigProfile(nil), profiles...)
+	sort.SliceStable(candidates, func(i, j int) bool {
+		if candidates[i].MemoryMB != candidates[j].MemoryMB {
+			return candidates[i].MemoryMB < candidates[j].MemoryMB
+		}
+		return candidates[i].SliceCount < candidates[j].SliceCount
+	})
+	for _, profile := range candidates {
+		if profile.MemoryMB < memory {
+			continue
+		}
+		placement, ok := selectMigPlacement(profiles, occupied, profile.Name)
+		if ok {
+			return profile, placement, true
+		}
+	}
+	return device.MigProfile{}, device.MigPlacement{}, false
 }
 
 func (dev *NvidiaGPUDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	return 0
 }
 
-func (dev *NvidiaGPUDevices) migNeedsReset(n *device.DeviceUsage) bool {
-	if len(n.MigUsage.UsageList) == 0 {
-		return true
-	}
-	for _, val := range n.MigUsage.UsageList {
-		if val.InUse {
-			return false
-		}
-	}
-	n.MigUsage.UsageList = make(device.MIGS, 0)
-	return true
-}
-
 func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	if n.Mode == MigMode {
-		if dev.migNeedsReset(n) {
-			found := false
-		OuterLoop:
-			for tidx, templates := range n.MigTemplate {
-				for idx, template := range templates {
-					if template.Memory < ctr.Usedmem {
-						continue
-					} else {
-						device.PlatternMIG(&n.MigUsage, n.MigTemplate, tidx)
-						// Calculate the correct UsageList index by summing Count of all templates before idx
-						usageListIdx := 0
-						for i := range idx {
-							usageListIdx += int(templates[i].Count)
-						}
-						ctr.Usedmem = n.MigUsage.UsageList[usageListIdx].Memory
-						ctr.Usedcores = n.MigUsage.UsageList[usageListIdx].Core
-						if !strings.Contains(ctr.UUID, "[") {
-							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(idx) + "]"
-						}
-						n.MigUsage.Index = int32(tidx)
-						n.MigUsage.UsageList[usageListIdx].InUse = true
-						found = true
-						break OuterLoop
-					}
-				}
-			}
-			if !found {
-				return errors.New("mig template allocate resource fail")
-			}
-		} else {
-			found := false
-			for idx, val := range n.MigUsage.UsageList {
-				if !val.InUse && val.Memory >= ctr.Usedmem {
-					n.MigUsage.UsageList[idx].InUse = true
-					ctr.Usedmem = n.MigUsage.UsageList[idx].Memory
-					ctr.Usedcores = n.MigUsage.UsageList[idx].Core
-					if !strings.Contains(ctr.UUID, "[") {
-						ctr.UUID = ctr.UUID + "[" + fmt.Sprint(n.MigUsage.Index) + "-" + fmt.Sprint(idx) + "]"
-					}
-					found = true
-					break
-				}
-			}
-			if !found {
-				return errors.New("mig template allocate resource fail")
-			}
+		profile, placement, ok := selectMigCandidate(n.MigProfiles, occupiedMigPlacements(n.MigAllocationsInUse), ctr.Usedmem)
+		if !ok {
+			return errors.New("MIG profile and placement allocation failed")
 		}
+		ctr.Usedmem = profile.MemoryMB
+		ctr.Usedcores = profile.Core
+		if ctr.CustomInfo == nil {
+			ctr.CustomInfo = make(map[string]any)
+		}
+		ctr.CustomInfo[MigProfileCustomInfo] = profile.Name
+		ctr.CustomInfo[MigPlacementCustomInfo] = placement
+		n.MigAllocationsInUse = append(n.MigAllocationsInUse, device.MigAllocation{Profile: profile.Name, Placement: placement})
 	}
 	n.Used++
 	n.Usedcores += ctr.Usedcores
@@ -854,6 +774,15 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		resolvedReq := request
 		resolvedReq.Memreq = memreq
 		if !nv.CustomFilterRule(allocated, resolvedReq, tmpDevs[k.Type], dev) {
+			// In MIG mode, CustomFilterRule rejects when the requested memory
+			// does not fit an allowed profile with a free placement on this
+			// device. Surface this as a distinct reason so users can tell
+			// placement infeasibility apart from generic filter failure.
+			if dev.Mode == MigMode {
+				reason[common.CardMigTopologyInfeasible]++
+				klog.V(5).InfoS(common.CardMigTopologyInfeasible, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "allocations", dev.MigAllocationsInUse)
+				continue
+			}
 			reason[common.CardNotFoundCustomFilterRule]++
 			klog.V(5).InfoS(common.CardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue

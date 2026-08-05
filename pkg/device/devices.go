@@ -25,8 +25,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ccoveille/go-safecast/v2"
-
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 
@@ -49,6 +47,14 @@ type Devices interface {
 	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
 }
 
+type MigPlacement struct {
+	Start uint32 `json:"start"`
+	Size  uint32 `json:"size"`
+}
+
+// Deprecated scheduler-template types are retained for source compatibility
+// with non-NVIDIA device implementations and tests. Dynamic NVIDIA MIG does
+// not populate or consume them.
 type MigTemplate struct {
 	Name   string `yaml:"name"`
 	Core   int32  `yaml:"core"`
@@ -57,43 +63,65 @@ type MigTemplate struct {
 }
 
 type MigTemplateUsage struct {
-	Name   string `json:"name,omitempty"`
-	Core   int32  `json:"core,omitempty"`
-	Memory int32  `json:"memory,omitempty"`
-	InUse  bool   `json:"inuse,omitempty"`
+	Name   string
+	Core   int32
+	Memory int32
+	InUse  bool
 }
 
 type Geometry []MigTemplate
-
 type MIGS []MigTemplateUsage
-
 type MigInUse struct {
 	Index     int32
 	UsageList MIGS
 }
 
-type AllowedMigGeometries struct {
-	Models     []string   `yaml:"models"`
-	Geometries []Geometry `yaml:"allowedGeometries"`
+type MigProfile struct {
+	Name                string         `json:"name"`
+	GIProfileID         uint32         `json:"giProfileID"`
+	MemoryMB            int32          `json:"memoryMB"`
+	Core                int32          `json:"core"`
+	SliceCount          uint32         `json:"sliceCount"`
+	InstanceCount       uint32         `json:"instanceCount"`
+	MultiprocessorCount uint32         `json:"multiprocessorCount"`
+	P2PSupported        bool           `json:"p2pSupported"`
+	CopyEngineCount     uint32         `json:"copyEngineCount"`
+	DecoderCount        uint32         `json:"decoderCount"`
+	EncoderCount        uint32         `json:"encoderCount"`
+	JPEGCount           uint32         `json:"jpegCount"`
+	OFACount            uint32         `json:"ofaCount"`
+	Placements          []MigPlacement `json:"placements"`
+}
+
+type MigAllocation struct {
+	Profile   string       `json:"profile"`
+	Placement MigPlacement `json:"placement"`
+}
+
+type AllowedMigProfiles struct {
+	Models   []string `yaml:"models"`
+	Profiles []string `yaml:"profiles"`
 }
 
 type DeviceUsage struct {
-	ID          string
-	Index       uint
-	Used        int32
-	Count       int32
-	Usedmem     int32
-	Totalmem    int32
-	Totalcore   int32
-	Usedcores   int32
-	Mode        string
-	MigTemplate []Geometry
-	MigUsage    MigInUse
-	Numa        int
-	Type        string
-	Health      bool
-	PodInfos    []*PodInfo
-	CustomInfo  map[string]any
+	ID                  string
+	Index               uint
+	Used                int32
+	Count               int32
+	Usedmem             int32
+	Totalmem            int32
+	Totalcore           int32
+	Usedcores           int32
+	Mode                string
+	MigProfiles         []MigProfile
+	MigAllocationsInUse []MigAllocation
+	MigTemplate         []Geometry // Deprecated: unused by dynamic NVIDIA MIG.
+	MigUsage            MigInUse   // Deprecated: unused by dynamic NVIDIA MIG.
+	Numa                int
+	Type                string
+	Health              bool
+	PodInfos            []*PodInfo
+	CustomInfo          map[string]any
 }
 
 type DeviceInfo struct {
@@ -105,7 +133,8 @@ type DeviceInfo struct {
 	Type            string          `json:"type,omitempty"`
 	Numa            int             `json:"numa,omitempty"`
 	Mode            string          `json:"mode,omitempty"`
-	MIGTemplate     []Geometry      `json:"migtemplate,omitempty"`
+	MIGProfiles     []MigProfile    `json:"migProfiles,omitempty"`
+	MIGTemplate     []Geometry      `json:"migtemplate,omitempty"` // Deprecated.
 	Health          bool            `json:"health,omitempty"`
 	DeviceVendor    string          `json:"devicevendor,omitempty"`
 	CustomInfo      map[string]any  `json:"custominfo,omitempty"`
@@ -121,10 +150,17 @@ type DevicePairScore struct {
 func (d DeviceInfo) DeepCopy() DeviceInfo {
 	dup := d
 
+	if d.MIGProfiles != nil {
+		dup.MIGProfiles = make([]MigProfile, len(d.MIGProfiles))
+		copy(dup.MIGProfiles, d.MIGProfiles)
+		for i := range dup.MIGProfiles {
+			dup.MIGProfiles[i].Placements = slices.Clone(d.MIGProfiles[i].Placements)
+		}
+	}
 	if d.MIGTemplate != nil {
 		dup.MIGTemplate = make([]Geometry, len(d.MIGTemplate))
-		for i, g := range d.MIGTemplate {
-			dup.MIGTemplate[i] = slices.Clone(g)
+		for i, geometry := range d.MIGTemplate {
+			dup.MIGTemplate[i] = slices.Clone(geometry)
 		}
 	}
 
@@ -234,14 +270,20 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 		Health:    d.Health,
 	}
 
-	if d.MigTemplate != nil {
-		dup.MigTemplate = make([]Geometry, len(d.MigTemplate))
-		for i, g := range d.MigTemplate {
-			dup.MigTemplate[i] = make(Geometry, len(g))
-			copy(dup.MigTemplate[i], g)
+	if d.MigProfiles != nil {
+		dup.MigProfiles = make([]MigProfile, len(d.MigProfiles))
+		copy(dup.MigProfiles, d.MigProfiles)
+		for i := range dup.MigProfiles {
+			dup.MigProfiles[i].Placements = slices.Clone(d.MigProfiles[i].Placements)
 		}
 	}
-
+	dup.MigAllocationsInUse = slices.Clone(d.MigAllocationsInUse)
+	if d.MigTemplate != nil {
+		dup.MigTemplate = make([]Geometry, len(d.MigTemplate))
+		for i, geometry := range d.MigTemplate {
+			dup.MigTemplate[i] = slices.Clone(geometry)
+		}
+	}
 	dup.MigUsage = d.MigUsage.DeepCopy()
 
 	if d.PodInfos != nil {
@@ -260,15 +302,7 @@ func (d *DeviceUsage) DeepCopy() *DeviceUsage {
 }
 
 func (m MigInUse) DeepCopy() MigInUse {
-	var usageList MIGS
-	if m.UsageList != nil {
-		usageList = make(MIGS, len(m.UsageList))
-		copy(usageList, m.UsageList)
-	}
-	return MigInUse{
-		Index:     m.Index,
-		UsageList: usageList,
-	}
+	return MigInUse{Index: m.Index, UsageList: slices.Clone(m.UsageList)}
 }
 
 func GetDevices() map[string]Devices {
@@ -377,20 +411,23 @@ func EncodeNodeDevices(dlist []*DeviceInfo) string {
 	return tmp
 }
 
-// MarshalNodeDevices will only marshal general information, customInfo is neglected.
+// MarshalNodeDevices marshals scheduler-visible device information. Arbitrary
+// customInfo is deliberately excluded; MIG placement capabilities are part of
+// the scheduling contract and must be preserved.
 func MarshalNodeDevices(dlist []*DeviceInfo) string {
 	devAnnos := []*DeviceInfo{}
 	for _, val := range dlist {
 		devAnnos = append(devAnnos, &DeviceInfo{
-			ID:      val.ID,
-			Count:   val.Count,
-			Devmem:  val.Devmem,
-			Devcore: val.Devcore,
-			Type:    val.Type,
-			Numa:    val.Numa,
-			Health:  val.Health,
-			Index:   val.Index,
-			Mode:    val.Mode,
+			ID:          val.ID,
+			Count:       val.Count,
+			Devmem:      val.Devmem,
+			Devcore:     val.Devcore,
+			Type:        val.Type,
+			Numa:        val.Numa,
+			Health:      val.Health,
+			Index:       val.Index,
+			Mode:        val.Mode,
+			MIGProfiles: val.MIGProfiles,
 		})
 	}
 	data, err := json.Marshal(devAnnos)
@@ -513,32 +550,22 @@ func DecodePodDevices(checklist map[string]string, annos map[string]string) (Pod
 	return pd, nil
 }
 
-func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
-	var err error
-	for _, val := range templates[templateIdx] {
-		count := 0
-		for count < int(val.Count) {
-			n.Index, err = safecast.Convert[int32](templateIdx)
-			if err != nil {
-				continue
-			}
-			n.UsageList = append(n.UsageList, MigTemplateUsage{
-				Name:   val.Name,
-				Memory: val.Memory,
-				Core:   val.Core,
-				InUse:  false,
-			})
-			count++
-		}
-	}
-}
-
 func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 	uuids := make([]string, 0)
 	for _, info := range infos {
 		uuids = append(uuids, info.ID)
 	}
 	return uuids
+}
+
+// Deprecated: dynamic NVIDIA MIG constructs candidates from MigProfiles.
+func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
+	for _, value := range templates[templateIdx] {
+		for count := int32(0); count < value.Count; count++ {
+			n.Index = int32(templateIdx)
+			n.UsageList = append(n.UsageList, MigTemplateUsage{Name: value.Name, Memory: value.Memory, Core: value.Core})
+		}
+	}
 }
 
 func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
@@ -582,36 +609,26 @@ func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (b
 	}
 }
 
-// Enhanced ExtractMigTemplatesFromUUID with error handling.
+// Deprecated: new MIG allocations never encode template/slot indexes in UUIDs.
 func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
-	parts := strings.Split(uuid, "[")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing '[' delimiter")
+	left := strings.Index(uuid, "[")
+	right := strings.Index(uuid, "]")
+	if left < 0 || right <= left {
+		return -1, -1, fmt.Errorf("invalid legacy MIG UUID %q", uuid)
 	}
-
-	tmp := parts[1]
-	parts = strings.Split(tmp, "]")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing ']' delimiter")
+	parts := strings.Split(uuid[left+1:right], "-")
+	if len(parts) != 2 {
+		return -1, -1, fmt.Errorf("invalid legacy MIG UUID %q", uuid)
 	}
-
-	tmp = parts[0]
-	parts = strings.Split(tmp, "-")
-	if len(parts) < 2 {
-		return -1, -1, fmt.Errorf("invalid UUID format: missing '-' delimiter")
-	}
-
 	templateIdx, err := strconv.Atoi(parts[0])
 	if err != nil {
-		return -1, -1, fmt.Errorf("invalid template index: %v", err)
+		return -1, -1, err
 	}
-
-	pos, err := strconv.Atoi(parts[1])
+	slotIdx, err := strconv.Atoi(parts[1])
 	if err != nil {
-		return -1, -1, fmt.Errorf("invalid position: %v", err)
+		return -1, -1, err
 	}
-
-	return templateIdx, pos, nil
+	return templateIdx, slotIdx, nil
 }
 
 func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
