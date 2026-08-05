@@ -273,7 +273,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_memory_used_bytes",
+          "expr": "hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
@@ -319,7 +319,7 @@
         {
           "datasource": { "type": "prometheus", "uid": "${datasource}" },
           "editorMode": "code",
-          "expr": "hami_host_gpu_utilization_ratio",
+          "expr": "hami_host_gpu_utilization_ratio and on (device_uuid) hami_gpu_memory_limit_bytes{node=~\"$node\"}",
           "legendFormat": "{{device_type}} idx{{device_index}} ({{device_uuid}})",
           "refId": "A"
         }
