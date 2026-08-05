@@ -259,12 +259,20 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	quotaUsedDesc := prometheus.NewDesc(
 		"hami_resource_quota_used",
 		"resourcequota usage for a certain device",
-		[]string{"namespace", "quota_name", "limit"}, nil,
+		[]string{"namespace", "quota_name"}, nil,
+	)
+	quotaLimitDesc := prometheus.NewDesc(
+		"hami_resource_quota_limit",
+		"Configured hard limit for a resource quota",
+		[]string{"namespace", "quota_name"}, nil,
 	)
 	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
 		for quotaname, q := range *val {
-			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
+			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname); err != nil {
 				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
+			}
+			if err := sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
+				klog.V(4).Infof("Failed to send quotaLimitDesc metric: %v", err)
 			}
 			if legacy {
 				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))

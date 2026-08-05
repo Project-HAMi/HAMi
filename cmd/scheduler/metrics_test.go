@@ -215,3 +215,42 @@ nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"
 		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
+
+func TestQuotaMetricHasNoLimitLabel(t *testing.T) {
+	qm := device.NewQuotaManager()
+	qm.Quotas["test-namespace"] = &device.DeviceQuota{
+		"test-quota": &device.Quota{
+			Limit: 10,
+			Used:  3,
+		},
+	}
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{
+			LegacyMetrics: false,
+		},
+		metricsProvider: &fakeSchedulerMetricsProvider{
+			nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+			quotaManager: qm,
+			podManager:   device.NewPodManager(),
+		},
+	}
+
+	want := `
+# HELP hami_resource_quota_limit Configured hard limit for a resource quota
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="test-namespace",quota_name="test-quota"} 10
+# HELP hami_resource_quota_used resourcequota usage for a certain device
+# TYPE hami_resource_quota_used gauge
+hami_resource_quota_used{namespace="test-namespace",quota_name="test-quota"} 3
+`
+
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_resource_quota_limit",
+		"hami_resource_quota_used",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}
