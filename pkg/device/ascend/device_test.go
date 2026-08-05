@@ -32,6 +32,7 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
@@ -2455,5 +2456,151 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// Fit() is the second gate on namespace quota, after admission. Usage is only
+// recorded at Filter time, so pods created together all clear admission against
+// the same figure and this is what stops them.
+func TestDevices_FitResourceQuota(t *testing.T) {
+	dev := &Devices{
+		config: VNPUConfig{
+			CommonWord:         "Ascend910A",
+			ChipName:           "910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  32768,
+			MemoryCapacity:     32768,
+			AICore:             30,
+		},
+	}
+
+	prevDevices := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"Ascend910A": dev}
+	t.Cleanup(func() { device.DevicesMap = prevDevices })
+
+	usable := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     100,
+			Totalmem:  32768,
+			Totalcore: 30,
+			Type:      "Ascend910A",
+			Health:    true,
+		}}
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:             1,
+		Memreq:           2184,
+		MemPercentagereq: 0,
+		Coresreq:         0,
+		Type:             "Ascend910A",
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ascend-quota"}}
+
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "ascend-quota") })
+
+	qm.Quotas["ascend-quota"] = &device.DeviceQuota{
+		"huawei.com/Ascend910A-memory": &device.Quota{Used: 0, Limit: 32768, LimitSet: true},
+	}
+	if fit, _, _ := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{}); !fit {
+		t.Fatal("Fit() = false, want true: the request is inside the namespace quota")
+	}
+
+	qm.Quotas["ascend-quota"] = &device.DeviceQuota{
+		"huawei.com/Ascend910A-memory": &device.Quota{Used: 31000, Limit: 32768, LimitSet: true},
+	}
+	fit, _, reason := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the namespace quota is exhausted")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
+	}
+}
+
+// In topology mode the loop gathers every candidate card and picks the best
+// originReq subset afterwards, so quota has to be charged for the selection
+// rather than for each candidate. Charging per candidate would refuse cards the
+// final combination never uses and starve computeBestCombination.
+func TestDevices_FitResourceQuotaTopology(t *testing.T) {
+	dev := &Devices{
+		config: VNPUConfig{
+			CommonWord:         "Ascend910B2",
+			ChipName:           "910B2",
+			ResourceName:       "huawei.com/Ascend910B2",
+			ResourceMemoryName: "huawei.com/Ascend910B2-memory",
+			MemoryAllocatable:  65536,
+			MemoryCapacity:     65536,
+			AICore:             24,
+		},
+	}
+
+	prevDevices := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"Ascend910B2": dev}
+	t.Cleanup(func() { device.DevicesMap = prevDevices })
+
+	usable := func() []*device.DeviceUsage {
+		devs := make([]*device.DeviceUsage, 0, 4)
+		for i := range 4 {
+			devs = append(devs, &device.DeviceUsage{
+				ID:        fmt.Sprintf("dev-%d", i),
+				Index:     uint(i),
+				Count:     100,
+				Totalmem:  65536,
+				Totalcore: 24,
+				Type:      "Ascend910B2",
+				Health:    true,
+				CustomInfo: map[string]any{
+					"NetworkID": float64(1),
+				},
+			})
+		}
+		return devs
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:             2,
+		Memreq:           16384,
+		MemPercentagereq: 0,
+		Coresreq:         0,
+		Type:             "Ascend910B2",
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ascend-topo"}}
+
+	nodeInfo := &device.NodeInfo{ID: "node1", Devices: map[string][]device.DeviceInfo{}}
+	for i := range 4 {
+		nodeInfo.Devices["Ascend910B2"] = append(nodeInfo.Devices["Ascend910B2"], device.DeviceInfo{
+			ID:         fmt.Sprintf("dev-%d", i),
+			Index:      uint(i),
+			Health:     true,
+			CustomInfo: map[string]any{"NetworkID": float64(1)},
+		})
+	}
+
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "ascend-topo") })
+
+	qm.Quotas["ascend-topo"] = &device.DeviceQuota{
+		"huawei.com/Ascend910B2-memory": &device.Quota{Used: 0, Limit: 40000, LimitSet: true},
+	}
+	fit, res, reason := dev.Fit(usable(), request, pod, nodeInfo, &device.PodDevices{})
+	if !fit {
+		t.Fatalf("Fit() = false (reason %q), want true: the chosen pair is inside quota even though the candidate pool is not", reason)
+	}
+	if got := len(res["Ascend910B2"]); got != 2 {
+		t.Errorf("selected %d cards, want 2", got)
+	}
+
+	qm.Quotas["ascend-topo"] = &device.DeviceQuota{
+		"huawei.com/Ascend910B2-memory": &device.Quota{Used: 0, Limit: 20000, LimitSet: true},
+	}
+	fit, _, reason = dev.Fit(usable(), request, pod, nodeInfo, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the selected cards exceed the namespace quota")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
 	}
 }

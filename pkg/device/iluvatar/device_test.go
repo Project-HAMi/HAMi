@@ -21,9 +21,11 @@ import (
 	"flag"
 	"fmt"
 	"maps"
+	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -705,5 +707,65 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 				assert.NilError(t, err)
 			}
 		})
+	}
+}
+
+// Fit() is the second gate on namespace quota, after admission. One vmemory
+// unit is 256 MiB, so the limit has to be scaled by the same factor the request
+// already carries.
+func Test_FitResourceQuota(t *testing.T) {
+	dev := &IluvatarDevices{
+		config: IluvatarConfig{
+			CommonWord:         "MR-V100",
+			ChipName:           "MR-V100",
+			ResourceCountName:  "iluvatar.ai/MR-V100-vgpu",
+			ResourceMemoryName: "iluvatar.ai/MR-V100.vMem",
+			ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
+		},
+	}
+
+	prevDevices := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"MR-V100": dev}
+	t.Cleanup(func() { device.DevicesMap = prevDevices })
+
+	usable := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID:        "dev-0",
+			Index:     0,
+			Count:     100,
+			Totalmem:  100000,
+			Totalcore: 100,
+			Type:      "MR-V100",
+			Health:    true,
+		}}
+	}
+	request := device.ContainerDeviceRequest{
+		Nums:             1,
+		Memreq:           512,
+		MemPercentagereq: 0,
+		Coresreq:         50,
+		Type:             "MR-V100",
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: "ilu-quota"}}
+
+	qm := device.NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, "ilu-quota") })
+
+	qm.Quotas["ilu-quota"] = &device.DeviceQuota{
+		"iluvatar.ai/MR-V100.vMem": &device.Quota{Used: 0, Limit: 10, LimitSet: true},
+	}
+	if fit, _, _ := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{}); !fit {
+		t.Fatal("Fit() = false, want true: the request is inside the scaled namespace quota")
+	}
+
+	qm.Quotas["ilu-quota"] = &device.DeviceQuota{
+		"iluvatar.ai/MR-V100.vMem": &device.Quota{Used: 2200, Limit: 10, LimitSet: true},
+	}
+	fit, _, reason := dev.Fit(usable(), request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Error("Fit() = true, want false: the namespace quota is exhausted")
+	}
+	if !strings.Contains(reason, common.ResourceQuotaNotFit) {
+		t.Errorf("reason = %q, want it to mention %s", reason, common.ResourceQuotaNotFit)
 	}
 }
