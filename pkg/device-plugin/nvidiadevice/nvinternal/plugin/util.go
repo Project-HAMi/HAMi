@@ -92,33 +92,59 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	return corev1.Container{}, res, errors.New("device request not found")
 }
 
-var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
+// decodePodSingleDevice decodes the pod's device allocation annotation for the
+// given device type into a PodSingleDevice slice. Each element corresponds to
+// one container (init containers first, then regular containers).
+func decodePodSingleDevice(dtype string, p *corev1.Pod) (device.PodSingleDevice, error) {
 	pdevices, err := device.DecodePodDevices(device.InRequestDevices, p.Annotations)
 	if err != nil {
-		return err
+		return nil, err
 	}
-	res := device.PodSingleDevice{}
 	pd, ok := pdevices[dtype]
 	if !ok {
-		return errors.New("erase device annotation not found")
+		return nil, errors.New("device request not found")
 	}
-	found := false
-	for _, val := range pd {
-		if found {
-			res = append(res, val)
-		} else {
-			if len(val) > 0 {
-				found = true
-				res = append(res, device.ContainerDevices{})
-			} else {
-				res = append(res, val)
+	return pd, nil
+}
+
+// popNextContainerDevices finds and erases the first non-empty ContainerDevices
+// from podSingleDev in place, returning the corresponding pod container and the
+// popped devices. The container resolution uses the same init-then-regular
+// ordering convention as the annotation encoder. It does NOT touch the API
+// server — the caller is responsible for patching the annotation once after the
+// loop completes.
+func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevice) (corev1.Container, device.ContainerDevices, error) {
+	initContainerCount := len(pod.Spec.InitContainers)
+	for i, ctrDevs := range podSingleDev {
+		if len(ctrDevs) > 0 {
+			podSingleDev[i] = device.ContainerDevices{}
+			if i < initContainerCount {
+				return pod.Spec.InitContainers[i], ctrDevs, nil
 			}
+			regularIdx := i - initContainerCount
+			if regularIdx >= len(pod.Spec.Containers) {
+				return corev1.Container{}, nil, fmt.Errorf("container index %d out of range (init=%d, regular=%d)", i, initContainerCount, len(pod.Spec.Containers))
+			}
+			return pod.Spec.Containers[regularIdx], ctrDevs, nil
 		}
 	}
-	klog.Infoln("After erase res=", res)
-	newannos := make(map[string]string)
-	newannos[device.InRequestDevices[dtype]] = device.EncodePodSingleDevice(res)
-	return util.PatchPodAnnotations(&p, newannos)
+	return corev1.Container{}, nil, errors.New("no pending device allocation found")
+}
+
+// patchErasedAnnotation patches the pod's device annotation with the given
+// podSingleDev (which has had some containers popped). It also updates
+// pod.Annotations in place so that subsequent Allocate calls within the same
+// kubelet invocation see the erased state.
+func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.PodSingleDevice) error {
+	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
+	encoded := device.EncodePodSingleDevice(podSingleDev)
+	annoKey := device.InRequestDevices[dtype]
+	newAnnos := map[string]string{annoKey: encoded}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		return err
+	}
+	pod.Annotations[annoKey] = encoded
+	return nil
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
