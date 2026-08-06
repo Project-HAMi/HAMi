@@ -102,6 +102,9 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 	return func(w http.ResponseWriter, r *http.Request, ps httprouter.Params) {
 		klog.V(5).Infoln("Entering Bind handler")
 		var buf bytes.Buffer
+		if !checkBody(w, r) {
+			return
+		}
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)
 		body := io.TeeReader(limitedReader, &buf)

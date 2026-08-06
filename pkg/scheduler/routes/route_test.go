@@ -143,6 +143,20 @@ func TestCheckBodyNil(t *testing.T) {
 	}
 }
 
+func TestCheckBody_ValidBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/test", strings.NewReader("some-body"))
+	w := httptest.NewRecorder()
+
+	valid := checkBody(w, req)
+
+	if !valid {
+		t.Error("Expected checkBody to return true for valid body, got false")
+	}
+	if w.Code != 200 {
+		t.Errorf("Expected status 200 (default) for valid body, got %d", w.Code)
+	}
+}
+
 func TestPredicateRoute_NilBody(t *testing.T) {
 	req := httptest.NewRequest("POST", "/predicate", nil)
 	req.Body = nil
@@ -154,6 +168,22 @@ func TestPredicateRoute_NilBody(t *testing.T) {
 
 	if w.Code != 400 {
 		t.Errorf("expected 400 for nil body, got %d", w.Code)
+	}
+}
+
+func TestBind_NilBody(t *testing.T) {
+	req := httptest.NewRequest("POST", "/bind", nil)
+	req.Body = nil
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := Bind(s)
+
+	// This should not panic
+	handler(w, req, nil)
+
+	if w.Code != 400 {
+		t.Errorf("Expected status 400 for nil body in Bind, got %d", w.Code)
 	}
 }
 
