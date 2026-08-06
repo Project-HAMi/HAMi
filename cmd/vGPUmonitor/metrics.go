@@ -184,9 +184,8 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 	}
 }
 
-// Describe is implemented with DescribeByCollect. That's possible because the
-// Collect method will always return the same two metrics with the same two
-// descriptors.
+// Describe sends all the metrics descriptors that the collector might use.
+// These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
@@ -194,6 +193,8 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUUtilizationdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
+	ch <- ctrDeviceLastKernelDesc
+	ch <- ctrDeviceMigInfo
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
@@ -429,8 +430,8 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 	for i := range c.Info.DeviceNum() {
 		uuid := c.Info.DeviceUUID(i)
 		if len(uuid) < 40 {
-			klog.Errorf("Invalid UUID length for device %d in Pod %s/%s, Container %s", i, pod.Namespace, pod.Name, ctr.Name)
-			return fmt.Errorf("invalid UUID length for device %d", i)
+			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UUID length %d (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name, len(uuid))
+			continue
 		}
 		uuid = uuid[0:40] // Ensure UUID is truncated to 40 characters
 		if !utf8.ValidString(uuid) {

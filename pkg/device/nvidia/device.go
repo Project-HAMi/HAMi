@@ -561,11 +561,17 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				mempnums, ok := mem.AsInt64()
 				if ok {
-					if mempnums < 0 || mempnums > 100 {
+					if mempnums > 100 {
 						klog.ErrorS(nil, "memory percentage request out of range, clamping to 100", "container", ctr.Name, "requested", mempnums)
 						mempnums = 100
 					}
-					mempnum = int32(mempnums)
+					if mempnums > 0 {
+						mempnum = int32(mempnums)
+					} else {
+						// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
+						klog.ErrorS(nil, "memory percentage request is not positive, ignoring it", "container", ctr.Name, "requested", mempnums)
+						mempnum = 101
+					}
 				}
 			}
 			if mempnum == 101 && memnum == 0 {
@@ -893,6 +899,7 @@ func (dev *NvidiaGPUDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       dev.config.MemoryFactor,
 	}
 }
 

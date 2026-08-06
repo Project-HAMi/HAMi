@@ -22,6 +22,7 @@ import (
 
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"k8s.io/klog/v2"
 )
 
 // Device represents a GPU device as reported by NVML, including all of its
@@ -170,49 +171,60 @@ type DeviceScore struct {
 	Score map[string]int `json:"score"`
 }
 
-func CalculateGPUScore(available []string) (ListDeviceScore, error) {
+// CalculateGPUScore returns topology scores for the requested GPUs.
+// The bool return is true if any GPU pair had asymmetric P2P link data, indicating a
+// possible NVLink hardware or driver issue on this node.
+func CalculateGPUScore(available []string) (ListDeviceScore, bool, error) {
 	linkedDevices, err := NewDevices()
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	requiredDevices, err := linkedDevices.Filter(available)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	score := calculateGPUScore(requiredDevices)
-	return score, nil
+	score, anyAsymmetric := calculateGPUScore(requiredDevices)
+	return score, anyAsymmetric, nil
 }
 
-func calculateGPUScore(devices []*Device) ListDeviceScore {
+func calculateGPUScore(devices []*Device) (ListDeviceScore, bool) {
 	ds := make(ListDeviceScore, len(devices))
+	anyAsymmetric := false
 	for indexI, gpuI := range devices {
 		score := make(map[string]int)
 		for indexJ, gpuJ := range devices {
 			if indexI == indexJ {
 				continue
 			}
-			score[gpuJ.UUID] = calculateGPUPairScore(gpuI, gpuJ)
+			s, asymmetric := calculateGPUPairScore(gpuI, gpuJ)
+			score[gpuJ.UUID] = s
+			anyAsymmetric = anyAsymmetric || asymmetric
 		}
 		ds[indexI] = DeviceScore{
 			Score: score,
 			UUID:  gpuI.UUID,
 		}
 	}
-	return ds
+	return ds, anyAsymmetric
 }
 
-func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) int {
+func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) (int, bool) {
 	if gpu0 == nil || gpu1 == nil {
-		return 0
+		return 0, false
 	}
 
 	if gpu0 == gpu1 {
-		return 0
+		return 0, false
 	}
 
 	if len(gpu0.Links[gpu1.Index]) != len(gpu1.Links[gpu0.Index]) {
-		err := fmt.Errorf("internal error in bestEffort GPU allocator: all P2PLinks between 2 GPUs should be bidirectional")
-		panic(err)
+		klog.Warningf("asymmetric P2P link data for GPU pair (index=%d uuid=%s) <-> (index=%d uuid=%s): "+
+			"%d link(s) from GPU %d to GPU %d, %d link(s) from GPU %d to GPU %d; "+
+			"scoring pair as 0 (possible NVLink hardware or driver issue)",
+			gpu0.Index, gpu0.UUID, gpu1.Index, gpu1.UUID,
+			len(gpu0.Links[gpu1.Index]), gpu0.Index, gpu1.Index,
+			len(gpu1.Links[gpu0.Index]), gpu1.Index, gpu0.Index)
+		return 0, true
 	}
 
 	score := 0
@@ -270,5 +282,5 @@ func calculateGPUPairScore(gpu0 *Device, gpu1 *Device) int {
 		}
 	}
 
-	return score
+	return score, false
 }

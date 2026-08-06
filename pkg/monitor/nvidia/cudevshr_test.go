@@ -432,4 +432,34 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.Equal(t, got.ContainerName, "mycontainer")
 		defer func() { _ = syscall.Munmap(got.data) }()
 	})
+
+	t.Run("dir without underscore in name is skipped", func(t *testing.T) {
+		dir := t.TempDir()
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "nodashes"}}
+		ctrDir := filepath.Join(dir, "nodashes")
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{},
+			podLister:     newTestPodLister(pod),
+		}
+		assert.NilError(t, l.Update())
+		assert.Equal(t, len(l.containers), 0)
+	})
+
+	t.Run("dir with trailing underscore is skipped", func(t *testing.T) {
+		dir := t.TempDir()
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uid"}}
+		ctrDir := filepath.Join(dir, "uid_")
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		writeCacheFile(t, ctrDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{},
+			podLister:     newTestPodLister(pod),
+		}
+		assert.NilError(t, l.Update())
+		assert.Equal(t, len(l.containers), 0)
+	})
 }
