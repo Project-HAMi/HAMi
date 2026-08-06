@@ -542,7 +542,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			if !needTopology {
+			if !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
 				k.Nums--
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
@@ -554,10 +554,23 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 && !needTopology {
+		if k.Nums == 0 && !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
+	}
+
+	if k.Type == Ascend910CType && originReq > 1 {
+		// Ascend 910C requires full module-pair allocation (2 NPUs per physical card).
+		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
+		if len(combination) != int(originReq) {
+			reason[common.AllocatedCardsInsufficientRequest] = len(combination)
+			klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
+			return false, tmpDevs, common.GenReason(reason, int(originReq))
+		}
+		tmpDevs[k.Type] = combination
+		klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
+		return true, tmpDevs, ""
 	}
 
 	if needTopology {
@@ -569,13 +582,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				tmpDevs[k.Type] = device.ContainerDevices{tmpDevs[k.Type][0]}
 			} else {
 				// If requesting multiple devices, select the best combination of cards.
-				var combination device.ContainerDevices
-				if k.Type == Ascend910CType {
-					// Use topology-aware allocation for Ascend910C: only select full modules (2 NPUs per card).
-					combination = npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
-				} else {
-					combination = npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
-				}
+				combination := npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
 				tmpDevs[k.Type] = combination
 			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
@@ -649,7 +656,6 @@ func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum 
 }
 
 func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
-	// Build a mapping from NPU index to device object for quick lookup.
 	indexToDevice := make(map[int]device.ContainerDevice)
 	var npuIndices []int
 	for _, dev := range containerDevices {
@@ -661,22 +667,19 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	// Each physical card hosts exactly 2 NPUs (Ascend 910C module design).
 	const MaxCardNPUNum = 2
 
-	// Group NPU indices by the module and Sort
 	cardTopology := make(map[int][]int)
 	for _, idx := range npuIndices {
 		cardId := idx / MaxCardNPUNum
 		cardTopology[cardId] = append(cardTopology[cardId], idx)
 	}
 
-	// Convert the card topology map into a slice for sorting.
 	cardTopSlice := make([][]int, 0, len(cardTopology))
 	for _, card := range cardTopology {
 		cardTopSlice = append(cardTopSlice, card)
 	}
 
-	// Sort cards by the number of available NPUs in ascending order.
 	sort.Slice(cardTopSlice, func(i, j int) bool {
-		return len(cardTopSlice[i]) < len(cardTopSlice[j])
+		return len(cardTopSlice[i]) > len(cardTopSlice[j])
 	})
 
 	// Select NPUs card by card, preferring full cards.
