@@ -21,7 +21,7 @@ spec:
         {{- with .Values.prometheus.alerts.rules.gpuMemoryNearlyExhausted }}
         {{- if .enabled }}
         - alert: HAMiGPUMemoryNearlyExhausted
-          expr: hami_node_gpu_memory_allocated_ratio > {{ .threshold }}
+          expr: 100 * hami_node_gpu_memory_allocated_ratio > {{ .threshold }}
           for: {{ .for | quote }}
           labels:
             severity: {{ .severity | quote }}
