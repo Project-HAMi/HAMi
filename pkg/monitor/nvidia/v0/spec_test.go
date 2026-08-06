@@ -469,6 +469,15 @@ func TestSpec_SetDeviceSmLimit(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999}}
+		s.SetDeviceSmLimit(500)
+		want := [16]uint64{500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500}
+		if s.sr.smLimit != want {
+			t.Errorf("SetDeviceSmLimit with oversized num: got %v, want %v", s.sr.smLimit, want)
+		}
+	})
 }
 
 func TestSpec_IsValidUUID(t *testing.T) {
@@ -649,10 +658,8 @@ func TestSpec_SetDeviceMemoryLimit(t *testing.T) {
 					},
 				},
 			},
-			input: 500,
-			expected: []uint64{
-				500, 500, 500,
-			},
+			input:    500,
+			expected: []uint64{500, 500, 500},
 		},
 	}
 
@@ -665,6 +672,15 @@ func TestSpec_SetDeviceMemoryLimit(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999}}
+		s.SetDeviceMemoryLimit(750)
+		want := [16]uint64{750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750}
+		if s.sr.limit != want {
+			t.Errorf("SetDeviceMemoryLimit with oversized num: got %v, want %v", s.sr.limit, want)
+		}
+	})
 }
 
 func TestSpec_LastKernelTime(t *testing.T) {
