@@ -256,6 +256,19 @@ func TestDevicepick(t *testing.T) {
 	}
 }
 
+// TestDevicepick_FewerThanEightDevices guards against a regression where the
+// scan loop was hard-coded to `t < 8` and indexed devices[t] directly,
+// panicking with index out of range on nodes that report fewer than 8 XPUs.
+func TestDevicepick_FewerThanEightDevices(t *testing.T) {
+	devices := newDevices(0, 1, 2, 3, 4, 5, 6, 7)[:4] // node with only 4 XPUs, all busy
+
+	got := devicepick(devices, 0, req(2), fitAvailable)
+	want := []int{}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("devicepick(start=0, count=2) = %v, want %v", got, want)
+	}
+}
+
 func TestGraghSelect_AllEightAvailable(t *testing.T) {
 	devices := newDevices() // none used
 	got := graghSelect(devices, req(8), fitAvailable)
