@@ -1453,6 +1453,251 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 	}
 }
 
+func TestFitQuota(t *testing.T) {
+	NvidiaGPUDevice := "NVIDIA"
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+	device.DevicesMap = make(map[string]device.Devices)
+	device.DevicesMap[NvidiaGPUDevice] = dev
+
+	qm := device.NewQuotaManager()
+	qm.AddQuota(&corev1.ResourceQuota{
+		TypeMeta: metav1.TypeMeta{
+			APIVersion: "v1",
+			Kind:       "ResourceQuota",
+		},
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "basic-quota",
+			Namespace: "default",
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.nvidia.com/gpumem"): resource.MustParse("2048"),
+			},
+		},
+	})
+
+	makeTestPod := func(numInit, numApp int) *corev1.Pod {
+		initContainers := make([]corev1.Container, numInit)
+		for i := range initContainers {
+			initContainers[i] = corev1.Container{Name: "init"}
+		}
+		appContainers := make([]corev1.Container, numApp)
+		for i := range appContainers {
+			appContainers[i] = corev1.Container{Name: "app"}
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: initContainers,
+				Containers:     appContainers,
+			},
+		}
+	}
+
+	tests := []struct {
+		name           string
+		pod            *corev1.Pod
+		tmpDevs        map[string]device.ContainerDevices
+		allocated      *device.PodDevices
+		ns             string
+		memreq         int64
+		coresreq       int64
+		expectedResult bool
+	}{
+		{
+			name:           "no tmp and no allocated",
+			pod:            makeTestPod(0, 1),
+			tmpDevs:        map[string]device.ContainerDevices{},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:           "request exceed quota",
+			pod:            makeTestPod(0, 1),
+			tmpDevs:        map[string]device.ContainerDevices{},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         3000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "tmpdev",
+			pod:  makeTestPod(0, 2),
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name: "tmpdev exceed quota",
+			pod:  makeTestPod(0, 2),
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated:      nil,
+			ns:             "default",
+			memreq:         2000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name:    "allocated devs",
+			pod:     makeTestPod(0, 2),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "allocated devs exceed quota",
+			pod:     makeTestPod(0, 2),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         2000,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "exceed quota",
+			pod:  makeTestPod(0, 3),
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
+				},
+			},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name: "fit",
+			pod:  makeTestPod(0, 3),
+			tmpDevs: map[string]device.ContainerDevices{
+				NvidiaGPUDevice: {
+					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 1},
+				},
+			},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "sequential init containers counted as peak not sum",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "collapsed init peak still enforces quota",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1500, Usedcores: 2},
+					},
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 300, Usedcores: 1},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         600,
+			coresreq:       1,
+			expectedResult: false,
+		},
+		{
+			name:    "init peak plus app sum fits",
+			pod:     makeTestPod(1, 2),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 800, Usedcores: 2},
+					},
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 700, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			memreq:         500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := fitQuota(tt.pod, tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
+			assert.Equal(t, tt.expectedResult, result, tt.name)
+		})
+	}
+}
+
 func TestParseConfig(t *testing.T) {
 	// ParseConfig is intentionally a no-op; just verify it is callable.
 	ParseConfig(nil)

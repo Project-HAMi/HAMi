@@ -1620,8 +1620,9 @@ func Test_ResourceQuota(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames:   &[]string{"node1"},
-				FailedNodes: nil,
+				FailedNodes: map[string]string{
+					"node1": "1/4 AllocatedCardsInsufficientRequest, 3/4 ResourceQuotaNotFit",
+				},
 			},
 		},
 		{
@@ -1707,8 +1708,9 @@ func Test_ResourceQuota(t *testing.T) {
 			},
 			wantErr: nil,
 			want: &extenderv1.ExtenderFilterResult{
-				NodeNames:   &[]string{"node1"},
-				FailedNodes: nil,
+				FailedNodes: map[string]string{
+					"node1": "4/4 ResourceQuotaNotFit",
+				},
 			},
 		},
 	}
