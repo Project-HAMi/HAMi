@@ -2027,8 +2027,8 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Nums:             1,
 				Type:             NvidiaGPUDevice,
 				Memreq:           2048,
-				MemPercentagereq:  101,
-				Coresreq:          0,
+				MemPercentagereq: 101,
+				Coresreq:         0,
 			},
 		},
 		{
@@ -2045,7 +2045,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Nums:             1,
 				Type:             NvidiaGPUDevice,
 				Memreq:           0,
-				MemPercentagereq:  100,
+				MemPercentagereq: 100,
 				Coresreq:         30,
 			},
 		},
@@ -2063,7 +2063,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Nums:             2,
 				Type:             NvidiaGPUDevice,
 				Memreq:           0,
-				MemPercentagereq:  25,
+				MemPercentagereq: 25,
 				Coresreq:         0,
 			},
 		},
@@ -3107,7 +3107,7 @@ func TestMutateContainerResource(t *testing.T) {
 		expectedGPUNum int64
 	}{
 		{
-			name: "GPU count already in Limits — return true, no mutation",
+			name:   "GPU count already in Limits — return true, no mutation",
 			gpuNum: 1,
 			limits: corev1.ResourceList{
 				"nvidia.com/gpu": *resource.NewQuantity(3, resource.BinarySI),
