@@ -17,9 +17,13 @@ limitations under the License.
 package plugin
 
 import (
+	"errors"
 	"testing"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
@@ -279,3 +283,80 @@ func timeAfter(d time.Duration) <-chan struct{} {
 	}()
 	return ch
 }
+
+func TestRegisterInAnnotation_DeviceCacheOrder(t *testing.T) {
+	previousGetAPIDevices := getAPIDevices
+	defer func() { getAPIDevices = previousGetAPIDevices }()
+
+	previousGetNode := getNode
+	defer func() { getNode = previousGetNode }()
+
+	previousPatchNodeAnnotations := patchNodeAnnotations
+	defer func() { patchNodeAnnotations = previousPatchNodeAnnotations }()
+
+	dummyDevices := []*device.DeviceInfo{
+		{
+			ID:     "GPU-12345",
+			Index:  0,
+			Count:  10,
+			Devmem: 8192,
+			Type:   "NVIDIA-Tesla T4",
+		},
+	}
+
+	getAPIDevices = func(p *NvidiaDevicePlugin) *[]*device.DeviceInfo {
+		return &dummyDevices
+	}
+
+	getNode = func(name string) (*corev1.Node, error) {
+		return &corev1.Node{}, nil
+	}
+
+	plugin := &NvidiaDevicePlugin{
+		deviceCache: "",
+	}
+
+	// 1. When patchNodeAnnotations fails, deviceCache should NOT be updated.
+	patchErr := errors.New("transient API server error")
+	patchNodeAnnotations = func(node *corev1.Node, annotations map[string]string) error {
+		return patchErr
+	}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if !changed {
+		t.Error("expected changed to be true on patch attempt")
+	}
+	if err != patchErr {
+		t.Errorf("expected error %v, got %v", patchErr, err)
+	}
+	if plugin.deviceCache != "" {
+		t.Errorf("expected deviceCache to remain empty on failure, got %q", plugin.deviceCache)
+	}
+
+	// 2. When patchNodeAnnotations succeeds, deviceCache SHOULD be updated.
+	patchNodeAnnotations = func(node *corev1.Node, annotations map[string]string) error {
+		return nil
+	}
+
+	changed, err = plugin.RegisterInAnnotation()
+	if !changed {
+		t.Error("expected changed to be true on successful patch")
+	}
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+	expectedCache := device.MarshalNodeDevices(dummyDevices)
+	if plugin.deviceCache != expectedCache {
+		t.Errorf("expected deviceCache to be %q, got %q", expectedCache, plugin.deviceCache)
+	}
+
+	// 3. Next call with unchanged devices returns (false, nil) due to matching cache.
+	changed, err = plugin.RegisterInAnnotation()
+	if changed {
+		t.Error("expected changed to be false on second attempt with unchanged devices")
+	}
+	if err != nil {
+		t.Errorf("expected nil error, got %v", err)
+	}
+}
+
