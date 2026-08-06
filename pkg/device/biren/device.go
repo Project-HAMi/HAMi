@@ -219,6 +219,11 @@ func (br *BirenDevices) Fit(devices []*device.DeviceUsage, request device.Contai
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(k.Memreq), int64(k.Coresreq), BirenDevice, br.GetResourceNames()) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", k.Memreq, "coresreq", k.Coresreq)
+			continue
+		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--

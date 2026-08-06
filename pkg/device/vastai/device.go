@@ -281,6 +281,11 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 				continue
 			}
 		}
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(k.Memreq), int64(k.Coresreq), VastaiDevice, va.GetResourceNames()) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", k.Memreq, "coresreq", k.Coresreq)
+			continue
+		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			if !dieMode {

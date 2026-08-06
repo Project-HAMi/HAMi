@@ -163,6 +163,12 @@ func (gcuDev *GCUDevices) Fit(devices []*device.DeviceUsage, request device.Cont
 			continue
 		}
 
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(k.Memreq), int64(k.Coresreq), EnflameGCUDevice, gcuDev.GetResourceNames()) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", k.Memreq, "coresreq", k.Coresreq)
+			continue
+		}
+
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Nums--

@@ -271,6 +271,11 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			}
 		}
 	}
+	if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(request.Memreq), int64(request.Coresreq), request.Type, dev.GetResourceNames()) {
+		reason[common.ResourceQuotaNotFit]++
+		klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", request.Memreq, "coresreq", request.Coresreq)
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
 	return true, tmpDevs, ""
 }
 

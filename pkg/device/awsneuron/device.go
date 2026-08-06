@@ -428,6 +428,12 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			continue
 		}
 
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(k.Memreq), int64(k.Coresreq), AWSNeuronDevice, neuron.GetResourceNames()) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", k.Memreq, "coresreq", k.Coresreq)
+			continue
+		}
+
 		if countMaskAvailable(dev.Totalcore)-countMaskAvailable(dev.Usedcores) < k.Coresreq {
 			reason[common.CardInsufficientCore]++
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", k.Coresreq)

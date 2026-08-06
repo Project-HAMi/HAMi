@@ -282,3 +282,81 @@ func TestDelQuotaNonLimitsKey(t *testing.T) {
 		t.Errorf("DelQuota: expected memory limit 100 after deleting non-limits quota, got %d", (*qm.Quotas[ns])[memName].Limit)
 	}
 }
+
+func TestFitQuotaForDevice(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	deviceName := "NVIDIA"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+	rns := ResourceNames{
+		ResourceMemoryName: memName,
+		ResourceCoreName:   coreName,
+		MemoryFactor:       1,
+	}
+
+	// Set up quota: limit 1000 mem, 100 cores
+	qm.Quotas[ns] = &DeviceQuota{
+		memName:  &Quota{Used: 800, Limit: 1000},
+		coreName: &Quota{Used: 50, Limit: 100},
+	}
+
+	// Should fit: 800 used + 100 requested = 900 <= 1000
+	tmpDevs := map[string]ContainerDevices{}
+	if !FitQuotaForDevice(tmpDevs, nil, ns, 100, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return true when within limits")
+	}
+
+	// Should not fit: 800 used + 300 requested = 1100 > 1000
+	if FitQuotaForDevice(tmpDevs, nil, ns, 300, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return false when memory exceeds limit")
+	}
+
+	// Should not fit cores: 50 used + 60 requested = 110 > 100
+	if FitQuotaForDevice(tmpDevs, nil, ns, 10, 60, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return false when cores exceed limit")
+	}
+
+	// Should account for devices in tmpDevs
+	tmpDevs2 := map[string]ContainerDevices{
+		deviceName: {
+			{Usedmem: 100, Usedcores: 20},
+		},
+	}
+	// 800 + 100 (tmpDevs) + 50 (request) = 950 <= 1000
+	if !FitQuotaForDevice(tmpDevs2, nil, ns, 50, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return true accounting for tmpDevs")
+	}
+	// 800 + 100 (tmpDevs) + 200 (request) = 1100 > 1000
+	if FitQuotaForDevice(tmpDevs2, nil, ns, 200, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return false accounting for tmpDevs")
+	}
+
+	// Should account for allocated devices
+	allocated := PodDevices{
+		deviceName: PodSingleDevice{
+			{
+				{Usedmem: 50, Usedcores: 5},
+			},
+		},
+	}
+	// 800 + 50 (allocated) + 50 (request) = 900 <= 1000
+	if !FitQuotaForDevice(tmpDevs, &allocated, ns, 50, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return true accounting for allocated")
+	}
+	// 800 + 50 (allocated) + 200 (request) = 1050 > 1000
+	if FitQuotaForDevice(tmpDevs, &allocated, ns, 200, 10, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return false accounting for allocated")
+	}
+
+	// Should fit if namespace not present
+	if !FitQuotaForDevice(tmpDevs, nil, "otherns", 5000, 100, deviceName, rns) {
+		t.Error("FitQuotaForDevice should return true if namespace not present")
+	}
+
+	// Should fit if device not in quota
+	if !FitQuotaForDevice(tmpDevs, nil, ns, 5000, 100, "unknown-device", rns) {
+		t.Error("FitQuotaForDevice should return true if device not in quota")
+	}
+}

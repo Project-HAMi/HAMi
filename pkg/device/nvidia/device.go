@@ -728,27 +728,6 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
-func fitQuota(tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, memreq int64, coresreq int64) bool {
-	mem := memreq
-	core := coresreq
-	for _, val := range tmpDevs[NvidiaGPUDevice] {
-		mem += int64(val.Usedmem)
-		core += int64(val.Usedcores)
-	}
-	if allocated != nil {
-		if podSingleDevice, exists := (*allocated)[NvidiaGPUDevice]; exists {
-			for _, containerDevices := range podSingleDevice {
-				for _, val := range containerDevices {
-					mem += int64(val.Usedmem)
-					core += int64(val.Usedcores)
-				}
-			}
-		}
-	}
-	klog.V(4).Infoln("Allocating...", mem, "cores", core)
-	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
-}
-
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -812,7 +791,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
-		if !fitQuota(tmpDevs, allocated, pod.Namespace, int64(memreq), int64(k.Coresreq)) {
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(memreq), int64(k.Coresreq), NvidiaGPUDevice, nv.GetResourceNames()) {
 			reason[common.ResourceQuotaNotFit]++
 			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
 			continue

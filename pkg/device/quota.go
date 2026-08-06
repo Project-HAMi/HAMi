@@ -88,6 +88,31 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 	return true
 }
 
+// FitQuotaForDevice checks whether a pod's total device request (current round
+// plus previously allocated containers) fits the namespace ResourceQuota for the
+// given device type. Every backend should call this from its Fit() method to
+// enforce quota at scheduling time.
+func FitQuotaForDevice(tmpDevs map[string]ContainerDevices, allocated *PodDevices, ns string, memreq int64, coresreq int64, deviceName string, resourceNames ResourceNames) bool {
+	mem := memreq
+	core := coresreq
+	for _, val := range tmpDevs[deviceName] {
+		mem += int64(val.Usedmem)
+		core += int64(val.Usedcores)
+	}
+	if allocated != nil {
+		if podSingleDevice, exists := (*allocated)[deviceName]; exists {
+			for _, containerDevices := range podSingleDevice {
+				for _, val := range containerDevices {
+					mem += int64(val.Usedmem)
+					core += int64(val.Usedcores)
+				}
+			}
+		}
+	}
+	klog.V(4).Infoln("FitQuotaForDevice: device", deviceName, "mem", mem, "cores", core)
+	return GetLocalCache().FitQuota(ns, mem, resourceNames.MemoryFactor, core, deviceName)
+}
+
 func countPodDevices(podDev PodDevices) map[string]int64 {
 	res := make(map[string]int64)
 	for deviceName, podSingle := range podDev {

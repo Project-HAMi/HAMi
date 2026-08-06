@@ -312,6 +312,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if memReq <= 0 && dev.Totalmem > 0 {
 			memReq = dev.Totalmem
 		}
+		if !device.FitQuotaForDevice(tmpDevs, allocated, pod.Namespace, int64(memReq), int64(k.Coresreq), AMDDevice, amddevice.GetResourceNames()) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memReq, "coresreq", k.Coresreq)
+			continue
+		}
 		if dev.Totalmem-dev.Usedmem < memReq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memReq)
