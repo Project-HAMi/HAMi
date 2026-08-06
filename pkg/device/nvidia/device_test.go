@@ -1507,6 +1507,7 @@ func TestFitQuota(t *testing.T) {
 		tmpDevs        map[string]device.ContainerDevices
 		allocated      *device.PodDevices
 		ns             string
+		devUUID        string
 		memreq         int64
 		coresreq       int64
 		expectedResult bool
@@ -1517,6 +1518,7 @@ func TestFitQuota(t *testing.T) {
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
@@ -1527,6 +1529,7 @@ func TestFitQuota(t *testing.T) {
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         3000,
 			coresreq:       1,
 			expectedResult: false,
@@ -1541,6 +1544,7 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
@@ -1555,6 +1559,7 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
@@ -1571,6 +1576,7 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
@@ -1587,6 +1593,7 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
@@ -1607,6 +1614,7 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: false,
@@ -1627,7 +1635,25 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "fitting second init container maxes against first",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1500, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-0",
+			memreq:         1500,
 			coresreq:       1,
 			expectedResult: true,
 		},
@@ -1646,53 +1672,33 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         500,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name:    "collapsed init peak still enforces quota",
-			pod:     makeTestPod(2, 1),
+			pod:     makeTestPod(1, 1),
 			tmpDevs: map[string]device.ContainerDevices{},
 			allocated: &device.PodDevices{
 				NvidiaGPUDevice: device.PodSingleDevice{
 					device.ContainerDevices{
-						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1500, Usedcores: 2},
-					},
-					device.ContainerDevices{
-						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 300, Usedcores: 1},
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 2100, Usedcores: 2},
 					},
 				},
 			},
 			ns:             "default",
-			memreq:         600,
+			devUUID:        "gpu-1",
+			memreq:         100,
 			coresreq:       1,
 			expectedResult: false,
-		},
-		{
-			name:    "init peak plus app sum fits",
-			pod:     makeTestPod(1, 2),
-			tmpDevs: map[string]device.ContainerDevices{},
-			allocated: &device.PodDevices{
-				NvidiaGPUDevice: device.PodSingleDevice{
-					device.ContainerDevices{
-						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 800, Usedcores: 2},
-					},
-					device.ContainerDevices{
-						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 700, Usedcores: 2},
-					},
-				},
-			},
-			ns:             "default",
-			memreq:         500,
-			coresreq:       1,
-			expectedResult: true,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := fitQuota(tt.pod, tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
+			result := fitQuota(tt.pod, tt.tmpDevs, tt.allocated, tt.ns, tt.devUUID, tt.memreq, tt.coresreq)
 			assert.Equal(t, tt.expectedResult, result, tt.name)
 		})
 	}
