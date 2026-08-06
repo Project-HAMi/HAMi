@@ -92,7 +92,7 @@ func (s Spec) DeviceMax() int {
 }
 
 func (s Spec) DeviceNum() int {
-	return int(s.sr.num)
+	return int(min(s.sr.num, uint64(maxDevices)))
 }
 
 // activeProcs returns the process slots currently in use. procnum is read from
