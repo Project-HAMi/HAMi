@@ -575,6 +575,19 @@ func Test_graphSelect(t *testing.T) {
 	}
 }
 
+func Test_CheckHealth(t *testing.T) {
+	dev := AWSNeuronDevices{}
+	ok, needRestart := dev.CheckHealth(AWSNeuronDevice, &corev1.Node{})
+	assert.Equal(t, ok, true)
+	assert.Equal(t, needRestart, true)
+}
+
+func Test_ScoreNode(t *testing.T) {
+	dev := AWSNeuronDevices{}
+	score := dev.ScoreNode(&corev1.Node{}, device.PodSingleDevice{}, nil, "")
+	assert.Equal(t, score, float32(0))
+}
+
 func TestDevices_Fit(t *testing.T) {
 	config := AWSNeuronConfig{
 		ResourceCountName: "aws.amazon.com/neuron",
