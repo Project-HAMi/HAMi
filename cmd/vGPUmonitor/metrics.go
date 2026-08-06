@@ -61,13 +61,13 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_utilization_ratio",
 		"GPU core utilization ratio (0-100)",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
@@ -136,12 +136,12 @@ func initLegacyDescriptors() {
 	legacyHostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyHostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyCtrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
@@ -239,6 +239,12 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		klog.Warningf("NODE_NAME env var not set, using 'unknown' for node label")
+		nodeName = "unknown"
+	}
+
 	if err := cc.initNVML(); err != nil {
 		return err
 	}
@@ -250,7 +256,7 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 	}
 
 	for ii := range devnum {
-		if err := cc.collectGPUDeviceMetrics(ch, ii); err != nil {
+		if err := cc.collectGPUDeviceMetrics(ch, nodeName, ii); err != nil {
 			klog.Error("Failed to collect metrics for GPU device ", ii, ": ", err)
 		}
 	}
@@ -274,24 +280,24 @@ func (cc ClusterManagerCollector) getDeviceCount() (int, error) {
 	return devnum, nil
 }
 
-func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, index int) error {
+func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, nodeName string, index int) error {
 	hdev, nvret := nvml.DeviceGetHandleByIndex(index)
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml DeviceGetHandleByIndex err: %s", nvml.ErrorString(nvret))
 	}
 
-	if err := cc.collectGPUMemoryMetrics(ch, hdev, index); err != nil {
+	if err := cc.collectGPUMemoryMetrics(ch, nodeName, hdev, index); err != nil {
 		return err
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, hdev, index); err != nil {
+	if err := cc.collectGPUUtilizationMetrics(ch, nodeName, hdev, index); err != nil {
 		return err
 	}
 
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, nodeName string, hdev nvml.Device, index int) error {
 	memory, ret := hdev.GetMemoryInfo()
 	if ret == nvml.ERROR_NOT_SUPPORTED {
 		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
@@ -317,17 +323,17 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		hostGPUdesc,
 		prometheus.GaugeValue,
 		float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
 }
 
-func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, nodeName string, hdev nvml.Device, index int) error {
 	util, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
@@ -349,11 +355,11 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		hostGPUUtilizationdesc,
 		prometheus.GaugeValue,
 		float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
