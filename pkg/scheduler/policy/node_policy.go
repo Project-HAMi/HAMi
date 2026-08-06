@@ -61,7 +61,23 @@ func (ns *NodeScore) OverrideScore(previous []*device.DeviceUsage, policy string
 			klog.V(4).Infof("Skip scoring for device type %s: not registered", idx)
 			continue
 		}
-		devScore += dev.ScoreNode(ns.Node, val, previous, policy)
+
+		score := dev.ScoreNode(ns.Node, val, previous, policy)
+
+		// Backends implementing PolicyNeutralScorer return policy-independent
+		// "higher is better" scores. For the Spread policy (which selects the
+		// lowest score), we invert the score to preserve the ranking.
+		// We also apply a weight of 10000 to ensure device scores dominate
+		// the base node score.
+		if _, ok := dev.(device.PolicyNeutralScorer); ok {
+			weight := float32(10000)
+			if policy == util.NodeSchedulerPolicySpread.String() {
+				weight = -10000
+			}
+			score = weight * score
+		}
+
+		devScore += score
 	}
 	ns.Score += devScore
 	klog.V(2).Infof("node %s default score is %f, computer override score is %f", ns.NodeID, ns.Score-devScore, ns.Score)
