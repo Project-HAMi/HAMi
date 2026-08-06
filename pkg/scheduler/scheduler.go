@@ -250,30 +250,46 @@ func (s *Scheduler) onAddQuota(obj any) {
 	s.quotaManager.AddQuota(quota)
 }
 
+// onUpdateQuota applies both halves of the change under a single lock. Doing
+// this as a delete followed by an add leaves the limits zeroed in between, and
+// FitQuota reads a zero limit as no limit, so quota goes unenforced for the gap.
 func (s *Scheduler) onUpdateQuota(oldObj, newObj any) {
-	s.onDelQuota(oldObj)
-	s.onAddQuota(newObj)
+	oldQuota, ok := asResourceQuota(oldObj)
+	if !ok {
+		return
+	}
+	newQuota, ok := asResourceQuota(newObj)
+	if !ok {
+		return
+	}
+	s.quotaManager.UpdateQuota(oldQuota, newQuota)
 }
 
 func (s *Scheduler) onDelQuota(obj any) {
-	var quota *corev1.ResourceQuota
-
-	switch t := obj.(type) {
-	case *corev1.ResourceQuota:
-		quota = t
-	case cache.DeletedFinalStateUnknown:
-		var ok bool
-		quota, ok = t.Obj.(*corev1.ResourceQuota)
-		if !ok {
-			klog.Errorf("resource quota tombstone contained object of type %T", t.Obj)
-			return
-		}
-	default:
-		klog.Errorf("unknown resource quota delete object type %T", obj)
+	quota, ok := asResourceQuota(obj)
+	if !ok {
 		return
 	}
-
 	s.quotaManager.DelQuota(quota)
+}
+
+// asResourceQuota unwraps an informer object, including the tombstone a delete
+// carries when the watch missed the event.
+func asResourceQuota(obj any) (*corev1.ResourceQuota, bool) {
+	switch t := obj.(type) {
+	case *corev1.ResourceQuota:
+		return t, true
+	case cache.DeletedFinalStateUnknown:
+		quota, ok := t.Obj.(*corev1.ResourceQuota)
+		if !ok {
+			klog.Errorf("resource quota tombstone contained object of type %T", t.Obj)
+			return nil, false
+		}
+		return quota, true
+	default:
+		klog.Errorf("unknown resource quota object type %T", obj)
+		return nil, false
+	}
 }
 
 func (s *Scheduler) Start() error {
