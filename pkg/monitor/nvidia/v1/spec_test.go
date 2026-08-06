@@ -134,6 +134,24 @@ func Test_DeviceNum(t *testing.T) {
 			},
 			want: int(4),
 		},
+		{
+			name: "num larger than maxDevices is clamped",
+			args: &Spec{
+				sr: &sharedRegionT{
+					num: 9999,
+				},
+			},
+			want: maxDevices,
+		},
+		{
+			name: "high-bit uint64 num is clamped not negative",
+			args: &Spec{
+				sr: &sharedRegionT{
+					num: 0x8000000000000001,
+				},
+			},
+			want: maxDevices,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
