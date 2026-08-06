@@ -16,10 +16,7 @@ limitations under the License.
 
 package metax
 
-import (
-	"strings"
-	"testing"
-)
+import "testing"
 
 func TestLinkDeviceScore(t *testing.T) {
 	for _, ts := range []struct {
@@ -68,7 +65,7 @@ func TestLinkDeviceScore(t *testing.T) {
 		t.Run(ts.name, func(t *testing.T) {
 			result := ts.from.score(ts.to)
 			if result != ts.expected {
-				t.Errorf("score() failed: result %v, expected %v", result, ts.expected)
+				t.Fatalf("score() failed: result %v, expected %v", result, ts.expected)
 			}
 		})
 	}
@@ -158,26 +155,18 @@ func TestLinkDevicesString(t *testing.T) {
 			expected: "[]",
 		},
 		{
-			name: "non-empty devices produce bracketed output",
+			name: "non-empty devices produce expected output",
 			devs: LinkDevices{
 				{uuid: "GPU-0", linkZone: 1},
 				{uuid: "GPU-1", linkZone: 2},
 			},
-			expected: "",
+			expected: "[{GPU-0 1}{GPU-1 2}]",
 		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
 			result := ts.devs.String()
-			if !strings.HasPrefix(result, "[") || !strings.HasSuffix(result, "]") {
-				t.Errorf("String() failed: result %q is not bracketed", result)
-			}
-			if ts.name == "empty devices" && result != ts.expected {
-				t.Errorf("String() failed: result %v, expected %v", result, ts.expected)
-			}
-			if ts.name == "non-empty devices produce bracketed output" {
-				if !strings.Contains(result, "GPU-0") || !strings.Contains(result, "GPU-1") {
-					t.Errorf("String() failed: result %q does not contain expected uuids", result)
-				}
+			if result != ts.expected {
+				t.Errorf("String() = %q, expected %q", result, ts.expected)
 			}
 		})
 	}
