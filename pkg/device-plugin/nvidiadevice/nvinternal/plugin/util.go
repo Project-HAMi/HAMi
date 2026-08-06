@@ -262,22 +262,6 @@ func containsModel(target string, models []string) bool {
 	return false
 }
 
-// Helper function to deepcopy new mig spec
-func deepCopyMigConfig(src nvidia.MigConfigSpec) nvidia.MigConfigSpec {
-	dst := src
-	if src.Devices != nil {
-		dst.Devices = make([]int32, len(src.Devices))
-		copy(dst.Devices, src.Devices)
-	}
-	if src.MigDevices != nil {
-		dst.MigDevices = make(map[string]int32)
-		for k, v := range src.MigDevices {
-			dst.MigDevices[k] = v
-		}
-	}
-	return dst
-}
-
 func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevices, pod *corev1.Pod, containerName string) ([]string, error) {
 	if nv.operatingMode != "mig" {
 		out := make([]string, 0, len(c))

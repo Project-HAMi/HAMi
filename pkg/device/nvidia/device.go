@@ -66,22 +66,6 @@ var (
 	MemoryFactor             int32 = 1
 )
 
-type MigPartedSpec struct {
-	Version    string                        `json:"version"               yaml:"version"`
-	MigConfigs map[string]MigConfigSpecSlice `json:"mig-configs,omitempty" yaml:"mig-configs,omitempty"`
-}
-
-// MigConfigSpec defines the spec to declare the desired MIG configuration for a set of GPUs.
-type MigConfigSpec struct {
-	DeviceFilter any              `json:"device-filter,omitempty" yaml:"device-filter,flow,omitempty"`
-	Devices      []int32          `json:"devices"                 yaml:"devices,flow"`
-	MigEnabled   bool             `json:"mig-enabled"             yaml:"mig-enabled"`
-	MigDevices   map[string]int32 `json:"mig-devices"             yaml:"mig-devices"`
-}
-
-// MigConfigSpecSlice represents a slice of 'MigConfigSpec'.
-type MigConfigSpecSlice []MigConfigSpec
-
 // GPUCoreUtilizationPolicy is set nvidia gpu core isolation policy.
 type GPUCoreUtilizationPolicy string
 

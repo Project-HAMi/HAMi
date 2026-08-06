@@ -110,7 +110,6 @@ type NvidiaDevicePlugin struct {
 	cdiAnnotationPrefix string
 
 	operatingMode string
-	migCurrent    nvidia.MigPartedSpec
 	deviceCache   string
 
 	// migMgr tracks live MIG GI+CI instances so we can destroy and recreate
@@ -206,7 +205,6 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:            sConfig.NvidiaConfig,
 		operatingMode:              mode,
-		migCurrent:                 nvidia.MigPartedSpec{},
 		deviceCache:                "",
 
 		// These will be reinitialized every
@@ -241,17 +239,6 @@ func (plugin *NvidiaDevicePlugin) cleanup() {
 // Devices returns the full set of devices associated with the plugin.
 func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 	return plugin.rm.Devices()
-}
-
-// BuildFallbackMigConfig - fallback to non-MIG mode
-func (plugin *NvidiaDevicePlugin) buildFallbackMigConfig(deviceNumbers int) {
-	plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-	configSlice := nvidia.MigConfigSpecSlice{}
-	for i := 0; i < deviceNumbers; i++ {
-		conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-		configSlice = append(configSlice, conf)
-	}
-	plugin.migCurrent.MigConfigs["current"] = configSlice
 }
 
 // Start starts the gRPC server, registers the device plugin with the Kubelet,and starts the device healthchecks.
@@ -1118,48 +1105,4 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
 	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
-}
-
-func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {
-	if migConfigs == nil {
-		return nil, fmt.Errorf("migConfigs cannot be nil")
-	}
-	if deviceCount <= 0 {
-		return nil, fmt.Errorf("deviceCount must be positive")
-	}
-
-	transformConfigs := func() (nvidia.MigConfigSpecSlice, error) {
-		var result nvidia.MigConfigSpecSlice
-
-		if len(migConfigs["current"]) == 1 && len(migConfigs["current"][0].Devices) == 0 {
-			for i := 0; i < deviceCount; i++ {
-				config := deepCopyMigConfig(migConfigs["current"][0])
-				config.Devices = []int32{int32(i)}
-				result = append(result, config)
-			}
-			return result, nil
-		}
-
-		deviceToConfig := make(map[int32]*nvidia.MigConfigSpec)
-		for i := range migConfigs["current"] {
-			for _, device := range migConfigs["current"][i].Devices {
-				deviceToConfig[device] = &migConfigs["current"][i]
-			}
-		}
-
-		for i := 0; i < deviceCount; i++ {
-			deviceIndex := int32(i)
-			config, exists := deviceToConfig[deviceIndex]
-			if !exists {
-				return nil, fmt.Errorf("device %d does not match any MIG configuration", i)
-			}
-			newConfig := deepCopyMigConfig(*config)
-			newConfig.Devices = []int32{deviceIndex}
-			result = append(result, newConfig)
-
-		}
-		return result, nil
-	}
-
-	return transformConfigs()
 }

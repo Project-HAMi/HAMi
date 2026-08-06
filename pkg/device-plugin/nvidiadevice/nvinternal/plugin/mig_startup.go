@@ -36,32 +36,6 @@ func sortedIntSetKeys(s map[int]struct{}) []int {
 	return out
 }
 
-// resetIdleMigGPUs edits the per-device MIG spec in place: GPUs that show no
-// sign of in-use compute are returned to "MIG-on with no partitions" so the
-// on-demand migMgr path can reshape them per request without destroying live
-// GIs on busy cards. Returns the set of GPU indexes that were reset.
-//
-// cfg is expected to already be in per-device form (one MigConfigSpec per
-// Devices=[i]); this is how processMigConfigs arranges it.
-func resetIdleMigGPUs(cfg nvidia.MigConfigSpecSlice, inUse map[int]struct{}) []int {
-	reset := []int{}
-	for i := range cfg {
-		devs := cfg[i].Devices
-		if len(devs) == 0 {
-			continue
-		}
-		gpu := int(devs[0])
-		if _, busy := inUse[gpu]; busy {
-			continue
-		}
-		cfg[i].MigEnabled = true
-		cfg[i].MigDevices = map[string]int32{}
-		reset = append(reset, gpu)
-	}
-	sort.Ints(reset)
-	return reset
-}
-
 // collectInUseGPUs returns the set of GPU indexes that have at least one
 // in-use MIG instance, unioned from two sources:
 //   - live Pod allocation annotations (authoritative for HAMi allocations).
