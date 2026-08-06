@@ -31,8 +31,22 @@ const stubDeviceMax = 16
 // count and the trailing slots read back invalid, so the check functions walk the
 // same 16 slots they do in production.
 type stubInfo struct {
-	priority int
-	uuids    []string
+	priority   int
+	uuids      []string
+	total      []uint64
+	limit      []uint64
+	ctxSize    []uint64
+	modSize    []uint64
+	bufSize    []uint64
+	smUtil     []uint64
+	lastKernel int64
+}
+
+func slot(v []uint64, i int) uint64 {
+	if i >= 0 && i < len(v) {
+		return v[i]
+	}
+	return 0
 }
 
 func (s *stubInfo) DeviceMax() int { return stubDeviceMax }
@@ -43,22 +57,22 @@ func (s *stubInfo) DeviceUUID(i int) string {
 	}
 	return ""
 }
-func (s *stubInfo) DeviceMemoryContextSize(int) uint64 { return 0 }
-func (s *stubInfo) DeviceMemoryModuleSize(int) uint64  { return 0 }
-func (s *stubInfo) DeviceMemoryBufferSize(int) uint64  { return 0 }
-func (s *stubInfo) DeviceMemoryOffset(int) uint64      { return 0 }
-func (s *stubInfo) DeviceMemoryTotal(int) uint64       { return 0 }
-func (s *stubInfo) DeviceSmUtil(int) uint64            { return 0 }
-func (s *stubInfo) SetDeviceSmLimit(uint64)            {}
-func (s *stubInfo) IsValidUUID(i int) bool             { return i < len(s.uuids) }
-func (s *stubInfo) DeviceMemoryLimit(int) uint64       { return 0 }
-func (s *stubInfo) SetDeviceMemoryLimit(uint64)        {}
-func (s *stubInfo) LastKernelTime() int64              { return 0 }
-func (s *stubInfo) GetPriority() int                   { return s.priority }
-func (s *stubInfo) GetRecentKernel() int32             { return 1 }
-func (s *stubInfo) SetRecentKernel(int32)              {}
-func (s *stubInfo) GetUtilizationSwitch() int32        { return 0 }
-func (s *stubInfo) SetUtilizationSwitch(int32)         {}
+func (s *stubInfo) DeviceMemoryContextSize(i int) uint64 { return slot(s.ctxSize, i) }
+func (s *stubInfo) DeviceMemoryModuleSize(i int) uint64  { return slot(s.modSize, i) }
+func (s *stubInfo) DeviceMemoryBufferSize(i int) uint64  { return slot(s.bufSize, i) }
+func (s *stubInfo) DeviceMemoryOffset(int) uint64        { return 0 }
+func (s *stubInfo) DeviceMemoryTotal(i int) uint64       { return slot(s.total, i) }
+func (s *stubInfo) DeviceSmUtil(i int) uint64            { return slot(s.smUtil, i) }
+func (s *stubInfo) SetDeviceSmLimit(uint64)              {}
+func (s *stubInfo) IsValidUUID(i int) bool               { return i < len(s.uuids) }
+func (s *stubInfo) DeviceMemoryLimit(i int) uint64       { return slot(s.limit, i) }
+func (s *stubInfo) SetDeviceMemoryLimit(uint64)          {}
+func (s *stubInfo) LastKernelTime() int64                { return s.lastKernel }
+func (s *stubInfo) GetPriority() int                     { return s.priority }
+func (s *stubInfo) GetRecentKernel() int32               { return 1 }
+func (s *stubInfo) SetRecentKernel(int32)                {}
+func (s *stubInfo) GetUtilizationSwitch() int32          { return 0 }
+func (s *stubInfo) SetUtilizationSwitch(int32)           {}
 
 func TestCheckFunctionsHighPriority(t *testing.T) {
 	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 1}}
