@@ -134,8 +134,12 @@ func TestCollectContainerMetricsBadInput(t *testing.T) {
 		t.Error("nil ContainerUsage.Info should return an error")
 	}
 	short := &nvidia.ContainerUsage{Info: &stubInfo{uuids: []string{"gpu-short"}}}
-	if _, err := collectContainer(t, short, 0); err == nil {
-		t.Error("a UUID shorter than 40 chars should return an error")
+	metrics, err := collectContainer(t, short, 0)
+	if err != nil {
+		t.Fatalf("a UUID shorter than 40 chars should be skipped, not error: %v", err)
+	}
+	if len(metrics) != 0 {
+		t.Errorf("got %d metrics for a short UUID, want 0", len(metrics))
 	}
 }
 
