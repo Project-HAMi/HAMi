@@ -459,3 +459,27 @@ func TestDevices_Fit(t *testing.T) {
 		assert.Assert(t, strings.Contains(reason, common.CardTimeSlicingExhausted))
 	})
 }
+
+func TestCheckAMDType(t *testing.T) {
+	tests := []struct {
+		name     string
+		annos    map[string]string
+		cardType string
+		want     bool
+	}{
+		{"no annotations", map[string]string{}, "MI300X", true},
+		{"matching use type", map[string]string{AMDInUse: "MI300"}, "MI300X", true},
+		{"non-matching use type", map[string]string{AMDInUse: "MI250"}, "MI300X", false},
+		{"matching nouse type excludes card", map[string]string{AMDNoUse: "MI300"}, "MI300X", false},
+		{"non-matching nouse type keeps card", map[string]string{AMDNoUse: "MI250"}, "MI300X", true},
+		// Regression: an empty nouse-gputype annotation must not exclude every card.
+		{"empty nouse annotation keeps card", map[string]string{AMDNoUse: ""}, "MI300X", true},
+		{"empty use annotation keeps card", map[string]string{AMDInUse: ""}, "MI300X", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkAMDType(tt.annos, tt.cardType)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
