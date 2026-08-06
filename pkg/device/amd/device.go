@@ -164,7 +164,7 @@ func (dev *AMDDevices) NodeCleanUp(nn string) error {
 
 func checkAMDType(annos map[string]string, cardType string) bool {
 	cardType = strings.ToUpper(cardType)
-	if inuse, ok := annos[AMDInUse]; ok {
+	if inuse, ok := annos[AMDInUse]; ok && strings.TrimSpace(inuse) != "" {
 		useTypes := strings.Split(inuse, ",")
 		if !slices.ContainsFunc(useTypes, func(useType string) bool {
 			return strings.Contains(cardType, strings.ToUpper(strings.TrimSpace(useType)))
@@ -172,7 +172,7 @@ func checkAMDType(annos map[string]string, cardType string) bool {
 			return false
 		}
 	}
-	if noUse, ok := annos[AMDNoUse]; ok {
+	if noUse, ok := annos[AMDNoUse]; ok && strings.TrimSpace(noUse) != "" {
 		noUseTypes := strings.Split(noUse, ",")
 		if slices.ContainsFunc(noUseTypes, func(noUseType string) bool {
 			return strings.Contains(cardType, strings.ToUpper(strings.TrimSpace(noUseType)))
