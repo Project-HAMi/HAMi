@@ -450,6 +450,26 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 		})
 	})
 
+	ginkgo.Context("When holder identity has no underscore separator", func() {
+		ginkgo.It("isHolderOf should compare the identity exactly", func() {
+			exact := hostname
+			lease := &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: coordinationv1.LeaseSpec{
+					HolderIdentity: &exact,
+				},
+			}
+			g.Expect(lm.isHolderOf(lease)).Should(g.BeTrue())
+
+			other := hostname + "-2"
+			lease.Spec.HolderIdentity = &other
+			g.Expect(lm.isHolderOf(lease)).Should(g.BeFalse())
+		})
+	})
+
 	ginkgo.Context("When observedLease is nil", func() {
 		ginkgo.It("isLeaseValid should return false", func() {
 			lm.observedLease = nil
