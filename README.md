@@ -161,7 +161,7 @@ The default monitor port is `31993`. You can change it with Helm values such as 
 HAMi also provides:
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) for visual cluster and device management.
-- Grafana dashboard examples for accelerator monitoring.
+- [Grafana dashboards](dashboards/) for accelerator monitoring.
 - Benchmark material for evaluating workload behavior and scheduling effects.
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)
