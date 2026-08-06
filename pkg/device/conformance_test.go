@@ -25,15 +25,10 @@ limitations under the License.
 // It lives in the external device_test package on purpose: the backend
 // sub-packages import github.com/Project-HAMi/HAMi/pkg/device, so an internal
 // (package device) test that imported them back would create an import cycle.
-//
-// The invariants asserted here are intentionally the ones that should hold for
-// every backend today. The int32-overflow invariant for GenerateResourceRequests
-// is deliberately left out of this first pass because the underlying fixes are
-// still open for several backends (#2278, #2284); it is tracked as follow-up
-// work so this suite stays green while those land.
 package device_test
 
 import (
+	"math"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -253,6 +248,108 @@ func TestConformanceMutateAdmissionNoPanic(t *testing.T) {
 			mustNotPanic(t, "MutateAdmission", func() {
 				_, _ = c.dev.MutateAdmission(&pod.Spec.Containers[0], pod)
 			})
+		})
+	}
+}
+
+// overflowSkipList holds backends that currently violate the overflow invariant
+// and have open tracking issues. Each entry must be paired with a linked issue
+// number; backends remain here only until their fix merges. Only backends that
+// are in conformanceCases() belong here — iluvatar is affected by the same bug
+// (#2284) but is not yet in the registry (see the conformanceCases comment), so
+// it is not listed.
+var overflowSkipList = map[string]string{
+	"cambricon": "#2278", // unchecked int32(memnum) at cambricon/device.go:257
+	"mthreads":  "#2284", // unchecked int32(memnum) at mthreads/device.go:227
+}
+
+// TestConformanceNoNegativeResourceRequestOnOverflow asserts that
+// GenerateResourceRequests never returns a negative Nums, Memreq, or Coresreq
+// for a container request whose values are in range before any backend-specific
+// scale factor is applied. This guards the int32 overflow family of bugs tracked
+// in #2278, #2284, and #2336: when a request × MemoryFactor exceeds math.MaxInt32,
+// the unchecked conversion silently wraps to a negative value, which the scheduler
+// and ResourceQuota machinery then treat as zero, allowing oversubscription.
+//
+// The invariant is: for a request that fits in int32 _after_ scaling, the result
+// fields must be non-negative. Backends that legitimately reject an out-of-range
+// request can return Nums == 0; they must not return negative fields.
+func TestConformanceNoNegativeResourceRequestOnOverflow(t *testing.T) {
+	for _, c := range conformanceCases() {
+		t.Run(c.name, func(t *testing.T) {
+			if issue, skip := overflowSkipList[c.name]; skip {
+				t.Skipf("overflow invariant not yet enforced: open issue %s", issue)
+			}
+
+			rn := c.dev.GetResourceNames()
+			if rn.ResourceCountName == "" {
+				t.Skip("backend has no count resource; overflow test not applicable")
+			}
+
+			// Test case 1: request 1 device with a memory value that, when multiplied
+			// by a typical MemoryFactor (256 or 512), stays well within int32 range.
+			ctr := &corev1.Container{
+				Name: "small-request",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(rn.ResourceCountName): resource.MustParse("1"),
+					},
+				},
+			}
+			if rn.ResourceMemoryName != "" {
+				// 1000 MiB × 512 = 512000, well under math.MaxInt32
+				ctr.Resources.Limits[corev1.ResourceName(rn.ResourceMemoryName)] = resource.MustParse("1000")
+			}
+			if rn.ResourceCoreName != "" {
+				ctr.Resources.Limits[corev1.ResourceName(rn.ResourceCoreName)] = resource.MustParse("50")
+			}
+
+			var req device.ContainerDeviceRequest
+			mustNotPanic(t, "GenerateResourceRequests", func() {
+				req = c.dev.GenerateResourceRequests(ctr)
+			})
+
+			if req.Nums < 0 {
+				t.Errorf("GenerateResourceRequests() returned Nums = %d (negative); want >= 0", req.Nums)
+			}
+			if req.Memreq < 0 {
+				t.Errorf("GenerateResourceRequests() returned Memreq = %d (negative); want >= 0", req.Memreq)
+			}
+			if req.Coresreq < 0 {
+				t.Errorf("GenerateResourceRequests() returned Coresreq = %d (negative); want >= 0", req.Coresreq)
+			}
+
+			// Test case 2: a larger memory request that would overflow with an unchecked
+			// int(largeValue) × factor conversion. A correct implementation either clamps
+			// or rejects; an incorrect one wraps negative.
+			if rn.ResourceMemoryName != "" && rn.MemoryFactor > 0 {
+				// Pick a value that overflows when scaled: (math.MaxInt32 / factor) + 1000
+				overflowThreshold := int64(math.MaxInt32/rn.MemoryFactor) + 1000
+				largeCtr := &corev1.Container{
+					Name: "overflow-candidate",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							corev1.ResourceName(rn.ResourceCountName):  resource.MustParse("1"),
+							corev1.ResourceName(rn.ResourceMemoryName): *resource.NewQuantity(overflowThreshold, resource.DecimalSI),
+						},
+					},
+				}
+
+				var largeReq device.ContainerDeviceRequest
+				mustNotPanic(t, "GenerateResourceRequests (overflow case)", func() {
+					largeReq = c.dev.GenerateResourceRequests(largeCtr)
+				})
+
+				// The backend may reject the request (Nums == 0) or clamp Memreq; it must
+				// not return a negative value.
+				if largeReq.Memreq < 0 {
+					t.Errorf("GenerateResourceRequests() for overflow-range memory (%d MiB) returned Memreq = %d (negative); "+
+						"want >= 0 or Nums == 0 rejection", overflowThreshold, largeReq.Memreq)
+				}
+				if largeReq.Nums < 0 {
+					t.Errorf("GenerateResourceRequests() for overflow-range memory returned Nums = %d (negative); want >= 0", largeReq.Nums)
+				}
+			}
 		})
 	}
 }

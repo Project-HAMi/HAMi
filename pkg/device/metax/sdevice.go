@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -253,6 +254,14 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 				mem = v * MemoryFactor
 			}
 		}
+	}
+
+	// Reject out-of-range memory requests that would overflow int32.
+	// MemoryFactor is 1024, so a Gi request without a unit multiplies by that;
+	// a request above math.MaxInt32 wraps negative on the unchecked cast below.
+	if mem < 0 || mem > math.MaxInt32 {
+		klog.Errorf("container<%s> metax-sgpu memory request %d MiB is out of range", ctr.Name, mem)
+		return device.ContainerDeviceRequest{}
 	}
 
 	memPercent := 0
