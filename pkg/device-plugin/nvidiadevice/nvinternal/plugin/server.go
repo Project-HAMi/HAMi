@@ -602,6 +602,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
 	for idx, req := range reqs.ContainerRequests {
+		if len(req.DevicesIds) == 0 {
+			PodAllocationFailed(nodename, current, NodeLockNvidia)
+			return nil, fmt.Errorf("invalid allocation request: container request %d has no DevicesIds", idx)
+		}
+
 		// If the devices being allocated are replicas, then (conditionally)
 		// error out if more than one resource is being allocated.
 

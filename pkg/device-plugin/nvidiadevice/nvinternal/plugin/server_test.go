@@ -1308,3 +1308,152 @@ func TestMigCurrentConfigsNeverNil(t *testing.T) {
 		require.False(t, cfg.MigEnabled)
 	}
 }
+
+func TestAllocate_EmptyDevicesIdsAndRegression(t *testing.T) {
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	memScale := 1.0
+	logLevel := nvidia.Error
+	expectedNodeName := "node-a"
+	t.Setenv(util.NodeNameEnvName, expectedNodeName)
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				"MIG-12345": &rm.Device{},
+			}
+		},
+		ResourceFunc: func() v1.ResourceName {
+			return v1.ResourceName("nvidia.com/mig-1g.5gb")
+		},
+	}
+
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &memScale,
+				LogLevel:            &logLevel,
+			},
+		},
+	}
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	previousGetPendingPod := getPendingPod
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
+	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	testCases := []struct {
+		name               string
+		containerRequests  []*kubeletdevicepluginv1beta1.ContainerAllocateRequest
+		podAnnotation      string
+		expectError        bool
+		expectErrorMessage string
+		expectFailedCalled bool
+		expectSuccess      bool
+	}{
+		{
+			name: "Empty DevicesIds returns error and invokes PodAllocationFailed",
+			containerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+				{DevicesIds: []string{}},
+			},
+			expectError:        true,
+			expectErrorMessage: "has no DevicesIds",
+			expectFailedCalled: true,
+			expectSuccess:      false,
+		},
+		{
+			name: "Non-MIG allocation succeeds",
+			containerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+				{DevicesIds: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0"}},
+			},
+			podAnnotation:      "GPU-annotated-a,NVIDIA,3000,50:;",
+			expectError:        false,
+			expectFailedCalled: false,
+			expectSuccess:      true,
+		},
+		{
+			name: "MIG allocation succeeds",
+			containerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+				{DevicesIds: []string{"MIG-12345"}},
+			},
+			expectError:        false,
+			expectFailedCalled: false,
+			expectSuccess:      true,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-pod",
+					Namespace: "default",
+					UID:       "pod-uid",
+					Annotations: map[string]string{
+						"hami.io/vgpu-devices-to-allocate": tc.podAnnotation,
+					},
+				},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+			}
+
+			getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+			eraseNextDeviceTypeFromAnnotation = func(string, corev1.Pod) error { return nil }
+
+			failedCalled := false
+			podAllocationFailed = func(nodeName string, failedPod *corev1.Pod, lockName string) {
+				failedCalled = true
+				require.Equal(t, expectedNodeName, nodeName)
+				require.Equal(t, pod, failedPod)
+				require.Equal(t, NodeLockNvidia, lockName)
+			}
+
+			successCalled := false
+			podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {
+				successCalled = true
+			}
+
+			request := &kubeletdevicepluginv1beta1.AllocateRequest{
+				ContainerRequests: tc.containerRequests,
+			}
+
+			response, err := plugin.Allocate(context.Background(), request)
+			if tc.expectError {
+				require.Error(t, err)
+				require.Nil(t, response)
+				if tc.expectErrorMessage != "" {
+					require.Contains(t, err.Error(), tc.expectErrorMessage)
+				}
+			} else {
+				require.NoError(t, err)
+				require.NotNil(t, response)
+			}
+			require.Equal(t, tc.expectFailedCalled, failedCalled, "PodAllocationFailed invoked mismatch")
+			require.Equal(t, tc.expectSuccess, successCalled, "PodAllocationTrySuccess invoked mismatch")
+		})
+	}
+}
+
