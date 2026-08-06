@@ -212,10 +212,16 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
-		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
+		gpuScore, hasAsymmetry, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
 			return false, err
+		}
+		if hasAsymmetry {
+			util.EmitNodeWarningEvent(node, "AsymmetricGPUP2PLink",
+				"One or more GPU pairs on this node have asymmetric P2P link data; "+
+					"affected pairs scored 0 (possible NVLink hardware or driver issue)",
+				time.Hour)
 		}
 		data, err = json.Marshal(gpuScore)
 		if err != nil {
