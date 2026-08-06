@@ -208,7 +208,7 @@ func delta(have, want []int) []int {
 func devicepick(devices []*device.DeviceUsage, start int, request device.ContainerDeviceRequest, fitFn FitFn) []int {
 	count := int(request.Nums)
 	res := []int{}
-	for t := start; t < 8; t++ {
+	for t := start; t < len(devices); t++ {
 		if fitFn(devices[t], request) {
 			res = append(res, int(devices[t].Index))
 			if len(res) == count {
