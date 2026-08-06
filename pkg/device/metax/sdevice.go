@@ -259,9 +259,6 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			if hasUnit {
 				mem = v / 1024 / 1024
 			} else {
-				// Guard the multiplication itself: v * MemoryFactor can overflow
-				// int64 and wrap to a small value that slips past the range check
-				// below, so reject before multiplying.
 				if v < 0 || v > int64(math.MaxInt32)/int64(MemoryFactor) {
 					klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
 					return device.ContainerDeviceRequest{}
