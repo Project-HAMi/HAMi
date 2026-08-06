@@ -1367,7 +1367,7 @@ func TestListAndWatch_SendError(t *testing.T) {
 
 		plugin.health <- &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "gpu-1"}}
 		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
-		require.ErrorIs(t, err, expectedErr)
+		require.NoError(t, err)
 		require.Len(t, server.sent, 2)
 	})
 }

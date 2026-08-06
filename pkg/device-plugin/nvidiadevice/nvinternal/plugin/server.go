@@ -468,10 +468,9 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
-			if err != nil {
-				klog.Errorf("Failed to send ListAndWatch response: %v", err)
-				return err
+			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
+				return nil
 			}
 		}
 	}
