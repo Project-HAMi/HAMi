@@ -65,6 +65,65 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "count over one without pod annotations",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+		},
+		{
+			name: "count over one requested without limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "count one requested without limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "don't set to count limit",
 			args: struct {
 				ctr *corev1.Container
@@ -520,6 +579,22 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"mthreads.com/vgpu":        resource.MustParse("1"),
 						"mthreads.com/sgpu-memory": resource.MustParse("16Gi"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// A decimal-form quantity such as 16.0Gi can't be read as an int64
+			// (AsInt64 returns false), so it must be rejected rather than
+			// silently treated as zero.
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("1"),
+						"mthreads.com/sgpu-memory": resource.MustParse("16.0Gi"),
 						"mthreads.com/sgpu-core":   resource.MustParse("1"),
 					},
 				},
@@ -1013,6 +1088,49 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      MthreadsGPUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     1,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      MthreadsGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             3,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+				Type:             MthreadsGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "2/2 AllocatedCardsInsufficientRequest",
 		},
 	}
 

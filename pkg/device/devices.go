@@ -160,6 +160,12 @@ type ResourceNames struct {
 	ResourceCountName  string
 	ResourceMemoryName string
 	ResourceCoreName   string
+	// MemoryFactor is the scale GenerateResourceRequests applies to the memory
+	// value read off the container spec. Recorded usage is in scaled units
+	// while a ResourceQuota limit is written in unscaled ones, so a quota check
+	// has to bring the limit up by the same factor. Backends that do not scale
+	// leave this zero.
+	MemoryFactor int32
 }
 
 type ContainerDevice struct {

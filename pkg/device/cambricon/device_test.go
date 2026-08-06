@@ -302,6 +302,21 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			// A decimal-form quantity such as 16.0Gi can't be read as an int64
+			// (AsInt64 returns false), so it must be rejected rather than
+			// silently treated as zero.
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1053,6 +1068,49 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      CambriconMLUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     1,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      CambriconMLUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             3,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "2/2 AllocatedCardsInsufficientRequest",
 		},
 	}
 

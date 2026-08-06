@@ -389,6 +389,21 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			// A decimal-form quantity such as 16.0Gi can't be read as an int64
+			// (AsInt64 returns false), so it must be rejected rather than
+			// silently treated as zero.
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1"),
+						"iluvatar.ai/MR-V100.vMem": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

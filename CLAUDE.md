@@ -13,7 +13,7 @@ make build              # Build all binaries (scheduler, vGPUmonitor, nvidia-dev
 make docker             # Build Docker image
 make tidy               # Run go mod tidy
 make test               # Run unit tests with coverage (output in _output/coverage/)
-make lint               # Run golangci-lint v2.8.0 (via hack/verify-staticcheck.sh)
+make lint               # Run golangci-lint (version pinned in hack/verify-staticcheck.sh)
 make verify             # Run all verification checks (license, lint, import aliases)
 ```
 
@@ -64,7 +64,7 @@ Each device backend provides an `Init*Device(config)` function returning a `devi
 
 - License headers on all `.go` files (`hack/verify-license.sh`, uses `addlicense`)
 - Import aliases must match `hack/.import-aliases` (e.g., `corev1` for `k8s.io/api/core/v1`)
-- golangci-lint v2.8.0 with config in `.golangci.yaml`
+- golangci-lint with config in `.golangci.yaml` (version pinned in `hack/verify-staticcheck.sh`)
 - `goimports` with local prefix `github.com/Project-HAMi/HAMi`
 - Unit tests with race detector
 
