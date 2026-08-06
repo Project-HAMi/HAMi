@@ -575,6 +575,75 @@ func Test_graphSelect(t *testing.T) {
 	}
 }
 
+func Test_CheckHealth(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  struct {
+			devType string
+			n       *corev1.Node
+		}
+		want1 bool
+		want2 bool
+	}{
+		{
+			name: "always return true",
+			args: struct {
+				devType string
+				n       *corev1.Node
+			}{
+				devType: "",
+				n:       nil,
+			},
+			want1: true,
+			want2: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &AWSNeuronDevices{}
+			result1, result2 := dev.CheckHealth(test.args.devType, test.args.n)
+			assert.Equal(t, result1, test.want1)
+			assert.Equal(t, result2, test.want2)
+		})
+	}
+}
+
+func Test_ScoreNode(t *testing.T) {
+	tests := []struct {
+		name  string
+		args  struct {
+			node       *corev1.Node
+			podDevices device.PodSingleDevice
+			previous   []*device.DeviceUsage
+			policy     string
+		}
+		want  float32
+	}{
+		{
+			name: "always return 0",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				previous   []*device.DeviceUsage
+				policy     string
+			}{
+				node:       nil,
+				podDevices: nil,
+				previous:   nil,
+				policy:     "",
+			},
+			want: 0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &AWSNeuronDevices{}
+			result := dev.ScoreNode(test.args.node, test.args.podDevices, test.args.previous, test.args.policy)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
 func TestDevices_Fit(t *testing.T) {
 	config := AWSNeuronConfig{
 		ResourceCountName: "aws.amazon.com/neuron",
