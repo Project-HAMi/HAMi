@@ -42,15 +42,10 @@ spec:
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
-      {{- if .Values.platform.openshift }}
-      securityContext:
-        seLinuxOptions:
-          type: spc_t
-      {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
-      {{- if or (and .Values.platform.openshift .Values.openshift.selinux.enabled) .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+      {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
-        {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+        {{- if .Values.selinux.enabled }}
         - name: selinux-relabel
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
@@ -73,9 +68,9 @@ spec:
               {{- end }}
           env:
             - name: SELINUX_TYPE
-              value: {{ .Values.openshift.selinux.type | quote }}
+              value: {{ .Values.selinux.type | quote }}
             - name: SELINUX_LEVEL
-              value: {{ .Values.openshift.selinux.level | quote }}
+              value: {{ .Values.selinux.level | quote }}
           volumeMounts:
             - name: lib
               mountPath: /host/hami/vgpu
@@ -227,6 +222,10 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- end }}
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -249,11 +248,17 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
       volumes:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}
-            {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+            {{- if .Values.selinux.enabled }}
             type: DirectoryOrCreate
             {{- end }}
         - name: hosttmp
@@ -271,7 +276,7 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
-            {{- if and .Values.platform.openshift .Values.openshift.selinux.enabled }}
+            {{- if .Values.selinux.enabled }}
             type: DirectoryOrCreate
             {{- end }}
         {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}

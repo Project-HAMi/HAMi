@@ -44,6 +44,12 @@ spec:
           image: {{ include "hami.scheduler.patch.image" . }}
           imagePullPolicy: {{ .Values.scheduler.patch.image.pullPolicy }}
           {{- end }}
+          {{- if .Values.platform.openshift }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          {{- end }}
           args:
             - patch
             - --webhook-name={{ include "hami-vgpu.scheduler.webhook" . }}
@@ -60,7 +66,11 @@ spec:
       {{- end }}
       securityContext:
         runAsNonRoot: true
-        {{- if not .Values.platform.openshift }}
+        {{- if .Values.platform.openshift }}
+        seccompProfile:
+          type: RuntimeDefault
+        {{- end }}
+        {{- if .Values.scheduler.patch.runAsUser }}
         runAsUser: {{ .Values.scheduler.patch.runAsUser }}
         {{- end }}
 {{- end }}

@@ -18,11 +18,6 @@ spec:
         {{- include "hami-vgpu.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: {{ include "hami-vgpu.mock-device-plugin" . }}
-      {{- if .Values.platform.openshift }}
-      securityContext:
-        seLinuxOptions:
-          type: spc_t
-      {{- end }}
       tolerations:
       - key: CriticalAddonsOnly
         operator: Exists

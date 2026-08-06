@@ -11,13 +11,17 @@ After the pods start, verify their assigned SCC:
 {{- if .Values.openshift.securityContextConstraints.name }}
 The chart grants the `{{ .Values.openshift.securityContextConstraints.name }}`
 SecurityContextConstraints resource to the enabled device plugin service accounts
-in this namespace and to the scheduler service account cluster-wide.
+in this namespace. The scheduler and admission service accounts are not granted
+this SCC and are expected to run under the platform's restricted SCC.
 {{- else }}
-No SCC RoleBinding or scheduler SCC ClusterRoleBinding is created by default.
-Grant a suitable SCC to the enabled device plugin and scheduler service accounts,
-or explicitly set `openshift.securityContextConstraints.name`.
+No SCC RoleBinding is created by default. Grant a suitable SCC only to the enabled
+device plugin service accounts, or explicitly set
+`openshift.securityContextConstraints.name`.
 {{- end }}
-{{- if .Values.openshift.selinux.enabled }}
+{{- end }}
+{{- if .Values.selinux.enabled }}
+
+SELinux relabeling is enabled.
 The device plugin relabels shared vGPU host directories under
 {{ .Values.devicePlugin.libPath }}, {{ .Values.devicePlugin.monitor.ctrPath }}, and
 /tmp/vgpulock for SELinux access. These operations also create or update host
@@ -26,6 +30,5 @@ SELinux labels or directory permissions; restore them manually if required.
 {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
 The NVIDIA driver root {{ .Values.devicePlugin.nvidiaDriverRoot }} is also recursively
 relabelled. Uninstalling this Helm release does not restore those host SELinux labels.
-{{- end }}
 {{- end }}
 {{- end }}
