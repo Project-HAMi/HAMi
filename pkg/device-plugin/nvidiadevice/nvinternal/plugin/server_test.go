@@ -43,6 +43,7 @@ import (
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -250,7 +251,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 
 	for i := range testCases {
-		tc := testCases[i]
+		tc := &testCases[i]
 		t.Run(tc.description, func(t *testing.T) {
 			deviceListStrategies, _ := v1.NewDeviceListStrategies(tc.deviceListStrategies)
 			plugin := NvidiaDevicePlugin{
@@ -963,7 +964,13 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 	require.Contains(t, err.Error(), "device number not matched")
 }
 
-func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
+func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() {
+		enableGetPreferredAllocation = previousEnableGetPreferredAllocation
+	}()
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
@@ -1033,6 +1040,16 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
+	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.EnvironmentVariable])
+	brokerMountFound := false
+	for _, mount := range response.ContainerResponses[0].Mounts {
+		if mount.ContainerPath == hostpid.ContainerDirectory {
+			require.Equal(t, hostpid.ServerDirectory, mount.HostPath)
+			require.True(t, mount.ReadOnly)
+			brokerMountFound = true
+		}
+	}
+	require.True(t, brokerMountFound)
 }
 
 func TestAllocateReleasesNodeLockWhenNonMIGAllocateResponseFails(t *testing.T) {
