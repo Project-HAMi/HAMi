@@ -96,7 +96,7 @@ func profileSliceKey(profile string) string {
 }
 
 // ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand slot creation
-// without calling nvidia-mig-parted. Busy GPUs are left untouched; idle GPUs
+// through NVML. Busy GPUs are left untouched; idle GPUs
 // have MIG mode enabled and all existing GI/CI instances destroyed.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
 	reset := []int{}
