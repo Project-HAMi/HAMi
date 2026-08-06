@@ -608,10 +608,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
-	// Decode the pod's device annotation once into memory. We mutate this slice
-	// in-place as we process each container, then patch the API server exactly
-	// once after the loop. This avoids the stale-annotation bug where each
-	// iteration re-reads the original (un-erased) annotation.
 	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, current)
 	if err != nil {
 		PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -740,10 +736,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		}
 	}
 
-	// Patch the annotation with the in-memory erased podSingleDev exactly once.
-	// Note: mid-loop error returns skip this patch, leaving the API-server
-	// annotation unchanged. This is safe — a kubelet retry re-processes from
-	// scratch, and getAllocateResponse / os.MkdirAll are idempotent.
 	if err := patchErasedAnnotation(current, nvidia.NvidiaGPUDevice, podSingleDev); err != nil {
 		klog.Errorf("erase allocated containers annotation error: %v", err)
 		PodAllocationFailed(nodename, current, NodeLockNvidia)
