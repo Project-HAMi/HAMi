@@ -560,15 +560,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	}
 
 	if k.Type == Ascend910CType && originReq > 1 {
-		// Ascend 910C requires full module-pair allocation (2 NPUs per
-		// physical card). Always run the pairing filter here, even when
-		// NetworkID is absent or needTopology is false, because
-		// candidates satisfying the count alone may still be spread
-		// across incomplete/partial modules rather than full pairs.
+		// Ascend 910C requires full module-pair allocation (2 NPUs per physical card).
 		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
 		if len(combination) != int(originReq) {
-			// Never report success on a short allocation: doing so silently
-			// under-allocates NPUs relative to what the pod requested.
 			reason[common.AllocatedCardsInsufficientRequest] = len(combination)
 			klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(combination))
 			return false, tmpDevs, common.GenReason(reason, int(originReq))
@@ -661,7 +655,6 @@ func (npudev *Devices) computeBestCombination(nodeInfo *device.NodeInfo, reqNum 
 }
 
 func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, reqNum int, containerDevices device.ContainerDevices) device.ContainerDevices {
-	// Build a mapping from NPU index to device object for quick lookup.
 	indexToDevice := make(map[int]device.ContainerDevice)
 	var npuIndices []int
 	for _, dev := range containerDevices {
@@ -673,25 +666,17 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	// Each physical card hosts exactly 2 NPUs (Ascend 910C module design).
 	const MaxCardNPUNum = 2
 
-	// Group NPU indices by the module and Sort
 	cardTopology := make(map[int][]int)
 	for _, idx := range npuIndices {
 		cardId := idx / MaxCardNPUNum
 		cardTopology[cardId] = append(cardTopology[cardId], idx)
 	}
 
-	// Convert the card topology map into a slice for sorting.
 	cardTopSlice := make([][]int, 0, len(cardTopology))
 	for _, card := range cardTopology {
 		cardTopSlice = append(cardTopSlice, card)
 	}
 
-	// Sort cards by the number of available NPUs in descending order, so that
-	// full cards are considered before partial ones. Note: partial cards are
-	// still excluded outright below via the MaxCardNPUNum equality check, so
-	// this ordering only affects which full cards get picked first when more
-	// full cards are available than requested — it does not by itself change
-	// whether a request succeeds or fails.
 	sort.Slice(cardTopSlice, func(i, j int) bool {
 		return len(cardTopSlice[i]) > len(cardTopSlice[j])
 	})

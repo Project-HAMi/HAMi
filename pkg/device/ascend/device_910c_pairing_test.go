@@ -27,10 +27,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
-// TestAscend910C_FitPartialAllocationBug reproduces the case where a pod
-// requests 4 NPUs but the node only has 1 full module (2 NPUs) plus 3
-// partial modules (1 NPU each). Before the fix, Fit() would incorrectly
-// report success while allocating only 2 devices.
+// TestAscend910C_FitPartialAllocationBug tests rejection when partial cards cannot fulfill the request.
 func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
 	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
 	nodeInfo := &device.NodeInfo{
@@ -66,19 +63,13 @@ func TestAscend910C_FitPartialAllocationBug(t *testing.T) {
 	}
 }
 
-// TestAscend910C_FitExactCountBypassBug reproduces the L568-571 bypass: a
-// pod requests 2 NPUs, and exactly 2 candidate NPUs exist on the node, but
-// they sit on two different partial modules rather than one full pair.
-// Before the fix, Fit() returned true without ever validating module
-// pairing, because the candidate count already matched originReq.
+// TestAscend910C_FitExactCountBypassBug tests pairing validation when candidate count matches originReq.
 func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
 	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
 			Ascend910CType: {
-				// dev-0 (module 0) and dev-2 (module 1) are each the sole
-				// occupied NPU of their respective module - no full pair.
 				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 				{ID: "dev-2", Index: 2, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 			},
@@ -102,16 +93,13 @@ func TestAscend910C_FitExactCountBypassBug(t *testing.T) {
 	}
 }
 
-// TestAscend910C_FitFullPairSucceeds is the positive-path sanity check:
-// a request for 2 NPUs against one genuinely full module (2 NPUs, same
-// card) should still succeed after the fix.
+// TestAscend910C_FitFullPairSucceeds tests successful allocation for full module pairs.
 func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
 	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
 			Ascend910CType: {
-				// Index 0 and 1 belong to the same module (idx/2 == 0 for both).
 				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 				{ID: "dev-1", Index: 1, CustomInfo: map[string]any{"NetworkID": float64(0)}},
 			},
@@ -132,16 +120,13 @@ func TestAscend910C_FitFullPairSucceeds(t *testing.T) {
 	}
 }
 
-// TestAscend910C_FitWithoutNetworkID_ValidatesPairing ensures that Ascend 910C
-// full-pair validation runs for multi-device requests even when CustomInfo["NetworkID"]
-// is absent on devices (needTopology=false).
+// TestAscend910C_FitWithoutNetworkID_ValidatesPairing tests pairing validation when NetworkID is missing.
 func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
 			Ascend910CType: {
-				// dev-0 (module 0) and dev-2 (module 1) without NetworkID in CustomInfo.
 				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
 				{ID: "dev-2", Index: 2, CustomInfo: map[string]any{}},
 			},
@@ -161,7 +146,6 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 			len(tmpDevs[Ascend910CType]), reason)
 	}
 
-	// Positive check without NetworkID when candidate devices form a full module pair (indices 0 and 1).
 	nodeInfo.Devices[Ascend910CType] = []device.DeviceInfo{
 		{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
 		{ID: "dev-1", Index: 1, CustomInfo: map[string]any{}},
@@ -177,23 +161,13 @@ func TestAscend910C_FitWithoutNetworkID_ValidatesPairing(t *testing.T) {
 	}
 }
 
-// TestComputeBestCombination910C_NoFullPairsReturnsEmpty directly answers
-// whether computeBestCombination910C returns an empty combination (rather
-// than panicking or fabricating a partial/incorrect pairing) when none of
-// the candidate NPUs share a full physical module and no NetworkID is set
-// anywhere in CustomInfo. It also verifies that Fit() turns that empty
-// combination into a clean fit=false rejection, so such pods are correctly
-// left unschedulable rather than crashing the scheduler or being silently
-// under-allocated.
+// TestComputeBestCombination910C_NoFullPairsReturnsEmpty tests empty combination when no candidate NPUs form a full module.
 func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
 	dev := &Devices{config: VNPUConfig{CommonWord: Ascend910CType}}
 	nodeInfo := &device.NodeInfo{
 		Node: &corev1.Node{},
 		Devices: map[string][]device.DeviceInfo{
 			Ascend910CType: {
-				// Four singleton NPUs, each alone on its own module
-				// (indices 0, 2, 4, 6 -> module IDs 0, 1, 2, 3), no
-				// NetworkID present anywhere in CustomInfo.
 				{ID: "dev-0", Index: 0, CustomInfo: map[string]any{}},
 				{ID: "dev-2", Index: 2, CustomInfo: map[string]any{}},
 				{ID: "dev-4", Index: 4, CustomInfo: map[string]any{}},
@@ -202,8 +176,6 @@ func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
 		},
 	}
 
-	// Unit-level check: computeBestCombination910C itself must return an
-	// empty slice here, not panic and not fabricate a mismatched pairing.
 	candidates := device.ContainerDevices{
 		{Idx: 0, UUID: "dev-0"},
 		{Idx: 2, UUID: "dev-2"},
@@ -215,8 +187,6 @@ func TestComputeBestCombination910C_NoFullPairsReturnsEmpty(t *testing.T) {
 		t.Errorf("expected computeBestCombination910C to return an empty combination when no candidates share a full module, got %d devices", len(combination))
 	}
 
-	// End-to-end check: Fit() must turn that empty combination into a clean
-	// rejection, not a panic and not a false "success".
 	devices := []*device.DeviceUsage{
 		{ID: "dev-0", Index: 0, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
 		{ID: "dev-2", Index: 2, Count: 1, Used: 0, Totalmem: 32000, Health: true, CustomInfo: map[string]any{}},
