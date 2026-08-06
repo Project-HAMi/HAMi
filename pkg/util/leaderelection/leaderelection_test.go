@@ -429,6 +429,27 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 		})
 	})
 
+	ginkgo.Context("When another hostname has this hostname as a string prefix", func() {
+		ginkgo.It("isHolderOf should return false, not match on prefix", func() {
+			// Regression: hostname "dev" must not match a lease held by a
+			// different replica whose hostname happens to start with "dev",
+			// e.g. "dev-2", which would previously cause both replicas to
+			// believe they hold the lease.
+			otherHolder := "dev-2_" + string(uuid.NewUUID())
+			lease := &coordinationv1.Lease{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      name,
+					Namespace: namespace,
+				},
+				Spec: coordinationv1.LeaseSpec{
+					HolderIdentity: &otherHolder,
+				},
+			}
+			result := lm.isHolderOf(lease)
+			g.Expect(result).Should(g.BeFalse())
+		})
+	})
+
 	ginkgo.Context("When observedLease is nil", func() {
 		ginkgo.It("isLeaseValid should return false", func() {
 			lm.observedLease = nil
