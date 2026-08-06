@@ -177,10 +177,10 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 			}
 
 			if ctrfit {
+				score.OverrideScore(snapshot, userNodePolicy)
 				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, &score)
 				fitNodesMutex.Unlock()
-				score.OverrideScore(snapshot, userNodePolicy)
 				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
