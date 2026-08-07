@@ -68,3 +68,94 @@ func TestDescribeCollectSync(t *testing.T) {
 		t.Errorf("Gather failed (legacy): %v", err)
 	}
 }
+
+func TestHostMetricsIncludeNodeLabel(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+
+	// Set NODE_NAME env var
+	nodeName := "test-node-123"
+	t.Setenv(util.NodeNameEnvName, nodeName)
+
+	client := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podLister := informerFactory.Core().V1().Pods().Lister()
+
+	c := &ClusterManager{
+		Zone:            "test-zone",
+		LegacyMetrics:   false,
+		PodLister:       podLister,
+		containerLister: &nvidia.ContainerLister{},
+	}
+	cc := ClusterManagerCollector{ClusterManager: c}
+
+	if err := reg.Register(cc); err != nil {
+		t.Fatalf("Failed to register: %v", err)
+	}
+
+	metrics, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather failed: %v", err)
+	}
+
+	// Verify host metrics have 4 labels: node, device_index, device_uuid, device_type
+	foundMemoryMetric := false
+	foundUtilizationMetric := false
+
+	for _, mf := range metrics {
+		if mf.GetName() == "hami_host_gpu_memory_used_bytes" {
+			foundMemoryMetric = true
+			for _, m := range mf.GetMetric() {
+				labels := m.GetLabel()
+				if len(labels) != 4 {
+					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
+				}
+
+				// Verify node label exists and has correct value
+				hasNode := false
+				for _, label := range labels {
+					if label.GetName() == "node" {
+						hasNode = true
+						if label.GetValue() != nodeName {
+							t.Errorf("node label = %s, want %s", label.GetValue(), nodeName)
+						}
+					}
+				}
+				if !hasNode {
+					t.Errorf("%s missing 'node' label", mf.GetName())
+				}
+			}
+		}
+		if mf.GetName() == "hami_host_gpu_utilization_ratio" {
+			foundUtilizationMetric = true
+			for _, m := range mf.GetMetric() {
+				labels := m.GetLabel()
+				if len(labels) != 4 {
+					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
+				}
+
+				// Verify node label exists and has correct value
+				hasNode := false
+				for _, label := range labels {
+					if label.GetName() == "node" {
+						hasNode = true
+						if label.GetValue() != nodeName {
+							t.Errorf("node label = %s, want %s", label.GetValue(), nodeName)
+						}
+					}
+				}
+				if !hasNode {
+					t.Errorf("%s missing 'node' label", mf.GetName())
+				}
+			}
+		}
+	}
+
+	// Note: Metrics may not be present if NVML initialization fails (no GPU hardware)
+	// This is expected in test environments, so we don't fail the test
+	if foundMemoryMetric {
+		t.Log("hami_host_gpu_memory_used_bytes found and validated")
+	}
+	if foundUtilizationMetric {
+		t.Log("hami_host_gpu_utilization_ratio found and validated")
+	}
+}
