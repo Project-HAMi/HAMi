@@ -85,6 +85,11 @@ const (
 	NodeSchedulerPolicyAnnotationKey = "hami.io/node-scheduler-policy"
 	// GPUSchedulerPolicyAnnotationKey is user set Pod annotation to change this default GPU policy.
 	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
+
+	// SchedulingFailureReasonsAnnotation is set on a pod when no node fits,
+	// recording the aggregated per-reason failure breakdown so operators can
+	// diagnose why a pod is stuck Pending without reading scheduler logs.
+	SchedulingFailureReasonsAnnotation = "hami.io/scheduling-failure-reasons"
 )
 
 func (s SchedulerPolicyName) String() string {

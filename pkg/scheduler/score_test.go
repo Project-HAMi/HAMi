@@ -2634,7 +2634,7 @@ func Test_calcScore(t *testing.T) {
 				s.addNode(nodeName, &device.NodeInfo{ID: nodeName, Node: nodeUsage.Node, Devices: devices})
 			}
 			failedNodes := map[string]string{}
-			got, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.task, failedNodes)
+			got, _, gotErr := s.calcScore(test.args.nodes, test.args.nums, test.args.task, failedNodes)
 			assert.DeepEqual(t, test.wants.err, gotErr)
 			wantMap := make(map[string]*policy.NodeScore)
 			for index, node := range (*(test.wants.want)).NodeList {
@@ -3658,4 +3658,196 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 	assert.Equal(t, (*devinput)["mockA"][0][0].UUID, "uuid-a")
 	assert.Equal(t, len((*devinput)["mockB"][0]), 1)
 	assert.Equal(t, (*devinput)["mockB"][0][0].UUID, "uuid-b")
+}
+
+func Test_formatFailureReasons(t *testing.T) {
+	tests := []struct {
+		name     string
+		reasons  map[string][]string
+		expected string
+	}{
+		{
+			name:     "nil map returns empty string",
+			reasons:  nil,
+			expected: "",
+		},
+		{
+			name:     "empty map returns empty string",
+			reasons:  map[string][]string{},
+			expected: "",
+		},
+		{
+			name: "single reason type",
+			reasons: map[string][]string{
+				"CardInsufficientMemory": {"node3", "node1", "node2"},
+			},
+			expected: "3 nodes CardInsufficientMemory(node1,node2,node3)",
+		},
+		{
+			name: "multiple reason types sorted alphabetically",
+			reasons: map[string][]string{
+				"CardTypeMismatch":      {"node4"},
+				"CardInsufficientMemory": {"node2", "node1", "node3"},
+			},
+			expected: "3 nodes CardInsufficientMemory(node1,node2,node3); 1 nodes CardTypeMismatch(node4)",
+		},
+		{
+			name: "node names sorted within each reason",
+			reasons: map[string][]string{
+				"NumaNotFit": {"node-c", "node-a", "node-b"},
+			},
+			expected: "3 nodes NumaNotFit(node-a,node-b,node-c)",
+		},
+		{
+			name: "single node single reason",
+			reasons: map[string][]string{
+				"CardNotHealth": {"node1"},
+			},
+			expected: "1 nodes CardNotHealth(node1)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := formatFailureReasons(tt.reasons)
+			assert.Equal(t, result, tt.expected)
+		})
+	}
+}
+
+func Test_calcScore_returnsFailureReasons(t *testing.T) {
+	s := &Scheduler{}
+
+	// Create a node with insufficient memory (Totalmem=50, Memreq=1000)
+	nodes := map[string]*NodeUsage{
+		"node1": {
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			NodeInfo: &device.NodeInfo{},
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceInfo{
+					{
+						Device: device.DeviceUsage{
+							ID:        "gpu-0",
+							Used:      0,
+							Count:     8,
+							Usedcore:  0,
+							Usedmem:   0,
+							Totalmem:  50,
+							Totalcore: 8,
+							Type:      "nvidia.com/gpu",
+							Health:    true,
+						},
+						Scorer: func(score *float32) {},
+					},
+				},
+			},
+		},
+	}
+
+	resourceReqs := device.PodDeviceRequests{
+		"test-container": {
+			"nvidia": {Nums: 1, Type: "nvidia.com/gpu", Memreq: 1000, MemPercentagereq: 0, Coresreq: 0},
+		},
+	}
+
+	failedNodes := map[string]string{}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+	}
+
+	nodeScores, failureReason, err := s.calcScore(&nodes, resourceReqs, pod, failedNodes)
+
+	assert.Equal(t, err, nil)
+	assert.Equal(t, len(nodeScores.NodeList), 0)
+	assert.Equal(t, len(failedNodes), 1)
+	assert.Equal(t, failedNodes["node1"], common.NodeUnfitPod)
+
+	// failureReason should be populated even though all nodes failed
+	assert.Assert(t, failureReason != nil)
+	_, hasInsufficientMemory := failureReason[common.CardInsufficientMemory]
+	assert.Assert(t, hasInsufficientMemory, "expected CardInsufficientMemory in failureReason")
+	assert.Equal(t, len(failureReason[common.CardInsufficientMemory]), 1)
+	assert.Equal(t, failureReason[common.CardInsufficientMemory][0], "node1")
+}
+
+func Test_calcScore_returnsFailureReasonsWhenSomeNodesFit(t *testing.T) {
+	s := &Scheduler{}
+
+	nodes := map[string]*NodeUsage{
+		"node1": {
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			NodeInfo: &device.NodeInfo{},
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceInfo{
+					{
+						Device: device.DeviceUsage{
+							ID:        "gpu-0",
+							Used:      0,
+							Count:     8,
+							Usedcore:  0,
+							Usedmem:   0,
+							Totalmem:  100000,
+							Totalcore: 8,
+							Type:      "nvidia.com/gpu",
+							Health:    true,
+						},
+						Scorer: func(score *float32) {},
+					},
+				},
+			},
+		},
+		"node2": {
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node2"},
+			},
+			NodeInfo: &device.NodeInfo{},
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceInfo{
+					{
+						Device: device.DeviceUsage{
+							ID:        "gpu-1",
+							Used:      0,
+							Count:     8,
+							Usedcore:  0,
+							Usedmem:   0,
+							Totalmem:  50,
+							Totalcore: 8,
+							Type:      "nvidia.com/gpu",
+							Health:    true,
+						},
+						Scorer: func(score *float32) {},
+					},
+				},
+			},
+		},
+	}
+
+	resourceReqs := device.PodDeviceRequests{
+		"test-container": {
+			"nvidia": {Nums: 1, Type: "nvidia.com/gpu", Memreq: 1000, MemPercentagereq: 0, Coresreq: 0},
+		},
+	}
+
+	failedNodes := map[string]string{}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "test-pod", Namespace: "default"},
+	}
+
+	nodeScores, failureReason, err := s.calcScore(&nodes, resourceReqs, pod, failedNodes)
+
+	assert.Equal(t, err, nil)
+	// node1 fits, node2 fails
+	assert.Equal(t, len(nodeScores.NodeList), 1)
+	assert.Equal(t, nodeScores.NodeList[0].NodeID, "node1")
+
+	// failureReason should still be populated with the failing node
+	assert.Assert(t, failureReason != nil)
+	_, hasInsufficientMemory := failureReason[common.CardInsufficientMemory]
+	assert.Assert(t, hasInsufficientMemory, "expected CardInsufficientMemory in failureReason even when some nodes fit")
+	assert.Equal(t, len(failureReason[common.CardInsufficientMemory]), 1)
+	assert.Equal(t, failureReason[common.CardInsufficientMemory][0], "node2")
 }
