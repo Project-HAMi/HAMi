@@ -93,8 +93,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
+			"Failed to initialize NVML, returning empty device list for graceful degradation", 
+			"returnCode", nvret)
+		emptyRes := make([]*device.DeviceInfo, 0)
+		return &emptyRes
 	}
 	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
 	defer nvml.Shutdown()
