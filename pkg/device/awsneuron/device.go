@@ -135,8 +135,12 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 		value := ""
 		for ctridx, dp := range devlist {
 			if len(dp) > 0 {
+				ctr := getContainerByIndex(pod, ctridx)
+				if ctr == nil {
+					continue
+				}
 				for _, val := range dp {
-					devValue, ok := pod.Spec.Containers[ctridx].Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
+					devValue, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 					if ok {
 						c, _ := devValue.AsInt64()
 						if c > 0 {
@@ -167,6 +171,17 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	}
 	klog.V(4).InfoS("annos", "input", (*annoinput))
 	return *annoinput
+}
+
+func getContainerByIndex(pod *corev1.Pod, ctridx int) *corev1.Container {
+	if ctridx < len(pod.Spec.InitContainers) {
+		return &pod.Spec.InitContainers[ctridx]
+	}
+	ctridx -= len(pod.Spec.InitContainers)
+	if ctridx < len(pod.Spec.Containers) {
+		return &pod.Spec.Containers[ctridx]
+	}
+	return nil
 }
 
 func (dev *AWSNeuronDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
