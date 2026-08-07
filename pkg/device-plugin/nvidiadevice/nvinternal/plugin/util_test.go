@@ -940,3 +940,94 @@ func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
 		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }
+
+func Test_GetMigUUIDFromSmiOutput(t *testing.T) {
+	tests := []struct {
+		name   string
+		output string
+		uuid   string
+		idx    int
+		want   string
+	}{
+		{
+			name: "valid MIG output",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: (Device 0, Name: MIG 3g.20gb, UUID: MIG-uuid-0)
+  MIG 3g.20gb, Instance ID    1: (Device 1, Name: MIG 3g.20gb, UUID: MIG-uuid-1)`,
+			uuid: "GPU-abc123",
+			idx:  0,
+			want: "MIG-uuid-0",
+		},
+		{
+			name: "valid MIG output, second instance",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: (Device 0, Name: MIG 3g.20gb, UUID: MIG-uuid-0)
+  MIG 3g.20gb, Instance ID    1: (Device 1, Name: MIG 3g.20gb, UUID: MIG-uuid-1)`,
+			uuid: "GPU-abc123",
+			idx:  1,
+			want: "MIG-uuid-1",
+		},
+		{
+			name:   "empty output",
+			output: "",
+			uuid:   "GPU-abc123",
+			idx:    0,
+			want:   "",
+		},
+		{
+			name:   "no MIG lines",
+			output: "GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)\n",
+			uuid:   "GPU-abc123",
+			idx:    0,
+			want:   "",
+		},
+		{
+			name: "MIG line without Device delimiter",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: malformed line without Device`,
+			uuid: "GPU-abc123",
+			idx:  0,
+			want: "",
+		},
+		{
+			name: "MIG line without enough colons",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Device 0 only two colons`,
+			uuid: "GPU-abc123",
+			idx:  0,
+			want: "",
+		},
+		{
+			name: "MIG line with non-numeric index",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: (Device abc, Name: MIG 3g.20gb, UUID: MIG-uuid-0)`,
+			uuid: "GPU-abc123",
+			idx:  0,
+			want: "",
+		},
+		{
+			name: "uuid mismatch skips lines",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: (Device 0, Name: MIG 3g.20gb, UUID: MIG-uuid-0)`,
+			uuid: "GPU-other",
+			idx:  0,
+			want: "",
+		},
+		{
+			name: "target index not found",
+			output: `GPU 0: NVIDIA A100-PCIE-40GB (UUID: GPU-abc123)
+  MIG 3g.20gb, Instance ID    0: (Device 0, Name: MIG 3g.20gb, UUID: MIG-uuid-0)`,
+			uuid: "GPU-abc123",
+			idx:  5,
+			want: "",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := GetMigUUIDFromSmiOutput(test.output, test.uuid, test.idx)
+			if got != test.want {
+				t.Errorf("GetMigUUIDFromSmiOutput() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
