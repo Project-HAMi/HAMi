@@ -215,3 +215,112 @@ nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"
 		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
+
+func TestNormalizeAMDCoreMetrics(t *testing.T) {
+	tests := []struct {
+		name          string
+		deviceType    string
+		total         int32
+		allocated     int32
+		wantTotal     float64
+		wantAllocated float64
+	}{
+		{
+			name:          "non-AMD device is passed through unchanged",
+			deviceType:    "NVIDIA",
+			total:         4,
+			allocated:     3,
+			wantTotal:     4,
+			wantAllocated: 3,
+		},
+		{
+			name:          "AMD device with non-positive total is passed through unchanged",
+			deviceType:    "AMD",
+			total:         0,
+			allocated:     0,
+			wantTotal:     0,
+			wantAllocated: 0,
+		},
+		{
+			name:          "AMD device is normalized to a 0-100 percentage",
+			deviceType:    "AMD",
+			total:         64,
+			allocated:     32,
+			wantTotal:     normalizedCoreLimit,
+			wantAllocated: 50,
+		},
+		{
+			name:          "AMD device type matching is case-insensitive and normalization rounds up",
+			deviceType:    "amd-instinct",
+			total:         3,
+			allocated:     1,
+			wantTotal:     normalizedCoreLimit,
+			wantAllocated: 34,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotTotal, gotAllocated := normalizeAMDCoreMetrics(tt.deviceType, tt.total, tt.allocated)
+			if gotTotal != tt.wantTotal || gotAllocated != tt.wantAllocated {
+				t.Errorf("normalizeAMDCoreMetrics(%q, %d, %d) = (%v, %v), want (%v, %v)",
+					tt.deviceType, tt.total, tt.allocated, gotTotal, gotAllocated, tt.wantTotal, tt.wantAllocated)
+			}
+		})
+	}
+}
+
+func TestSendMetric(t *testing.T) {
+	desc := prometheus.NewDesc("hami_test_metric", "test metric", []string{"label"}, nil)
+	ch := make(chan prometheus.Metric, 1)
+
+	if err := sendMetric(ch, desc, prometheus.GaugeValue, 1, "value"); err != nil {
+		t.Fatalf("sendMetric returned unexpected error: %v", err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected a metric to be sent on the channel")
+	}
+
+	// Supplying the wrong number of label values makes NewConstMetric fail,
+	// and sendMetric must surface that error instead of sending on the channel.
+	if err := sendMetric(ch, desc, prometheus.GaugeValue, 1); err == nil {
+		t.Fatal("expected sendMetric to return an error for mismatched labels")
+	}
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent on error")
+	default:
+	}
+}
+
+func TestSendLegacyMetric(t *testing.T) {
+	ch := make(chan prometheus.Metric, 1)
+
+	// A nil descriptor means the legacy metric is disabled; sendLegacyMetric
+	// must no-op rather than panic or send a metric.
+	sendLegacyMetric(ch, nil, prometheus.GaugeValue, 1, "value")
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent for a nil descriptor")
+	default:
+	}
+
+	desc := prometheus.NewDesc("hami_test_legacy_metric", "test legacy metric", []string{"label"}, nil)
+
+	// sendLegacyMetric logs and swallows errors from sendMetric rather than panicking.
+	sendLegacyMetric(ch, desc, prometheus.GaugeValue, 1)
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent when sendMetric errors")
+	default:
+	}
+
+	sendLegacyMetric(ch, desc, prometheus.GaugeValue, 1, "value")
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected a metric to be sent on the channel")
+	}
+}
