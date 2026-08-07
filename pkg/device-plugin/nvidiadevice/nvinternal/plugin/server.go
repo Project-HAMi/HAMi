@@ -652,7 +652,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				devreq = alignedDevreq
 			}
-			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
+			containerDevices, err := plugin.GetContainerDeviceStrArray(devreq)
+			if err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				return nil, fmt.Errorf("failed to resolve container devices: %w", err)
+			}
+			response, err := plugin.getAllocateResponse(containerDevices)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)

@@ -161,24 +161,34 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 			continue
 		}
 		klog.Infoln("inspecting", val)
-		num := strings.Split(val, "Device")[1]
-		num = strings.Split(num, ":")[0]
+		deviceParts := strings.Split(val, "Device")
+		if len(deviceParts) < 2 {
+			continue
+		}
+		num := strings.Split(deviceParts[1], ":")[0]
 		num = strings.TrimSpace(num)
 		index, err := strconv.Atoi(num)
 		if err != nil {
-			klog.Fatal("atoi failed num=", num)
+			klog.Errorf("failed to parse device index from smi output line %q: %v", val, err)
+			continue
 		}
 		if index == idx {
-			outputStr := strings.Split(val, ":")[2]
-			outputStr = strings.TrimSpace(outputStr)
+			colonParts := strings.Split(val, ":")
+			if len(colonParts) < 3 || !strings.Contains(colonParts[1], "UUID") {
+				continue
+			}
+			outputStr := strings.TrimSpace(colonParts[2])
 			outputStr = strings.TrimRight(outputStr, ")")
+			if !strings.HasPrefix(outputStr, "MIG-") {
+				continue
+			}
 			return outputStr
 		}
 	}
 	return ""
 }
 
-func GetMigUUIDFromIndex(uuid string, idx int) string {
+func GetMigUUIDFromIndex(uuid string, idx int) (string, error) {
 	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
@@ -202,15 +212,18 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 			klog.Fatalf("nvidia-smi -L failed with %s\n", err)
 		}
 		outStr := stdout.String()
-		uuid := GetMigUUIDFromSmiOutput(outStr, originuuid, idx)
-		return uuid
+		migUUID := GetMigUUIDFromSmiOutput(outStr, originuuid, idx)
+		if migUUID == "" {
+			return "", fmt.Errorf("failed to resolve MIG UUID for device %s at index %d via nvidia-smi fallback", originuuid, idx)
+		}
+		return migUUID, nil
 	}
 	res, ret := migdev.GetUUID()
 	if ret != nvml.SUCCESS {
 		klog.Error(`nvml get mig uuid error ret=`, ret)
 		panic(0)
 	}
-	return res
+	return res, nil
 }
 
 func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
@@ -457,7 +470,7 @@ func deepCopyMigConfig(src nvidia.MigConfigSpec) nvidia.MigConfigSpec {
 	return dst
 }
 
-func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevices) []string {
+func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevices) ([]string, error) {
 	tmp := []string{}
 	needsreset := false
 	position := 0
@@ -500,11 +513,15 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 					}
 				}
 			}
-			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
+			migUUID, err := GetMigUUIDFromIndex(val.UUID, position)
+			if err != nil {
+				return nil, fmt.Errorf("failed to resolve MIG UUID for %s at position %d: %w", val.UUID, position, err)
+			}
+			tmp = append(tmp, migUUID)
 		}
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)
-	return tmp
+	return tmp, nil
 }
 
 var podAllocationTrySuccess = func(nodeName string, devName string, lockName string, pod *corev1.Pod) {
