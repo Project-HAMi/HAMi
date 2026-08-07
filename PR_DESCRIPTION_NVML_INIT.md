@@ -21,7 +21,7 @@ Replace `panic(0)` with graceful degradation when NVML initialization fails in `
 ## Problem Statement
 When NVML initialization fails (driver not loaded, permission issues, hardware problems), the device plugin crashes with `panic(0)`, making **all GPUs on the node unavailable** until manual intervention.
 
-**Current code** (`register.go:97`):
+**Before this fix** (`register.go:97`):
 ```go
 if nvret := nvmlInit(); nvret != nvml.SUCCESS {
     klog.Errorln("nvml Init err: ", nvret)
@@ -32,6 +32,7 @@ if nvret := nvmlInit(); nvret != nvml.SUCCESS {
 ## Solution
 This PR implements **graceful degradation** by returning an empty device list instead of crashing:
 
+**After this fix** (`register.go:96-100`):
 ```go
 if nvret := nvmlInit(); nvret != nvml.SUCCESS {
     klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
@@ -44,8 +45,13 @@ if nvret := nvmlInit(); nvret != nvml.SUCCESS {
 
 ## Why This Fix?
 
-### Scope: Single, Focused Change
-This PR fixes **only** the NVML initialization panic. Other panic calls in device query operations will be addressed in **separate PRs** to keep changes focused and reviewable.
+### Scope: Two Focused Changes
+This PR contains two closely related fixes for graceful error handling:
+
+1. **NVML Init Panic** - Return empty device list instead of crashing when NVML initialization fails
+2. **deviceCache Timing** - Only update cache after successful node annotation patch (ensures retries work correctly)
+
+Both changes improve fault tolerance without changing the happy path. Other panic calls in device query operations will be addressed in **separate PRs** to keep changes focused and reviewable.
 
 ### No Overlap with #2246
 This PR does **not** touch MIG UUID parsing, which is already being handled by #2246. The fix is isolated to NVML initialization failure handling.
@@ -60,22 +66,34 @@ Unlike #2246 which uses fail-closed semantics for MIG parsing (return error, sto
 ## Reproduction Steps
 See [`REPRODUCTION_NVML_INIT.md`](./REPRODUCTION_NVML_INIT.md) for detailed reproduction steps.
 
-**Quick reproduction:**
+**Quick reproduction (to test the fix):**
 ```bash
 # Unload NVIDIA driver
 sudo rmmod nvidia_uvm && sudo rmmod nvidia
 
-# Device plugin will crash with panic(0)
+# Before fix: Device plugin would crash with panic(0)
+# After fix: Device plugin logs error and returns empty device list
 kubectl logs -n kube-system nvidia-device-plugin-xxx
+
+# Expected: Error log + "Discovered 0 device(s)" + continues running
 ```
 
 ## Impact
 
-| Metric | Before | After | Improvement |
-|--------|--------|-------|-------------|
-| **Fault Tolerance** | 0% (crash on failure) | 100% (self-healing) | +100% |
-| **MTTR** | 5-30 minutes (manual) | ~30 seconds (automatic) | ~20x faster |
-| **Availability** | Single point of failure | Graceful degradation | Multi-9s |
+### Behavior Comparison
+
+| Aspect | Before Fix | After Fix |
+|--------|-----------|-----------|
+| **NVML Init Failure** | Entire process crashes (panic) | Returns empty device list, continues running |
+| **GPU Availability** | All GPUs unavailable until manual pod restart | Empty until NVML succeeds, then auto-discovers |
+| **Recovery** | Manual intervention required | Automatic retry every 30 seconds |
+| **Annotation Updates** | Cache updated before patch (retries fail) | Cache updated after patch success (retries work) |
+
+### Expected Recovery Pattern
+1. NVML init fails → Empty device list registered → Node shows 0 GPUs
+2. After 30 seconds → Retry registration cycle
+3. When driver/NVML fixed → GPUs automatically discovered and registered
+4. No manual intervention needed
 
 ## Testing
 
@@ -91,10 +109,11 @@ kubectl logs -n kube-system nvidia-device-plugin-xxx
 ```
 
 ### Code Change
-- **Files modified**: 1 (`register.go`)
-- **Lines changed**: +5 insertions, -2 deletions
+- **Files modified**: 2 (`register.go`, `REPRODUCTION_NVML_INIT.md`)
+- **Core logic changes**: +7 insertions, -3 deletions in register.go
 - **Panics removed**: 1
 - **Error handlers added**: 1 (with structured logging)
+- **Bug fixes**: 1 (deviceCache timing)
 
 ### Hardware Validation Note
 **Hardware validation is not required** for this change per CONTRIBUTING.md section 2:
@@ -166,7 +185,7 @@ Related: #982, #2043, #1964
 This is the **first** in a series of focused panic-removal PRs. Keeping each PR small makes review easier and reduces merge conflicts.
 
 ## Does this PR introduce a user-facing change?
-```
+```text
 Device plugin now gracefully handles NVML initialization failures instead of crashing, 
 improving cluster stability when NVIDIA driver issues occur.
 ```

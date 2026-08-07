@@ -83,8 +83,10 @@ func TestGetAPIDevices_NVMLInitFailure(t *testing.T) {
 ### Behavior After Fix
 - NVML failure → Returns empty device list
 - Plugin stays running
-- Retries on next cycle (30s)
-- Self-healing
+- Retries on next registration cycle:
+  - Success: 30 seconds wait
+  - Annotation patch failure: 5 seconds wait
+- Self-healing when driver is fixed
 
 ## Current Behavior (After This Fix)
 ```text
