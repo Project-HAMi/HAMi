@@ -102,13 +102,7 @@ func TestGetNumaNode(t *testing.T) {
 	})
 
 	t.Run("numa_node file not present for this bus ID", func(t *testing.T) {
-		// PciInfo.BusId is populated in NVML's modern 8-digit-domain format
-		// (NVML_DEVICE_PCI_BUS_ID_FMT = "%08X:%02X:%02X.0", e.g.
-		// "00000000:02:00.0"), and trimming the "0000" prefix from that
-		// yields a valid, domain-prefixed sysfs path ("0000:02:00.0").
-		// This test still deterministically fails because no such PCI
-		// device exists on the machine running the test, not because of
-		// the domain-trimming logic.
+		// GetPciInfo succeeds but no /sys/bus/pci/devices entry exists for this bus ID on the test host.
 		d := &mock.Device{
 			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
 				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
@@ -124,13 +118,7 @@ func TestGetNumaNode(t *testing.T) {
 	})
 }
 
-// TestGetAPIDevices_PanicsOnNVMLInitFailure locks in existing behavior:
-// getAPIDevices panics rather than returning an error when nvml.Init fails.
-// It stubs the package-level nvmlInit seam instead of relying on the real
-// nvml.Init(), so the result doesn't depend on whether the host running the
-// test happens to have an NVIDIA driver installed - calling the real NVML
-// Shutdown() after a simulated failed Init would also crash the test binary
-// outright (the underlying library was never loaded), not just fail it.
+// TestGetAPIDevices_PanicsOnNVMLInitFailure verifies getAPIDevices panics when nvml.Init fails, using a stubbed nvmlInit so the test doesn't need a real NVIDIA driver.
 func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
 	origInit := nvmlInit
 	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
@@ -149,11 +137,7 @@ func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
 	plugin.getAPIDevices()
 }
 
-// TestGetAPIDevices_ShutsDownOnNVMLInitSuccess covers the success path:
-// getAPIDevices must defer nvml.Shutdown only after nvmlInit succeeds. Both
-// nvmlInit and nvml.Shutdown are stubbed (both are reassignable package
-// vars, same as the seam used above) so the test never touches the real
-// NVML library, which this test host doesn't have loaded.
+// TestGetAPIDevices_ShutsDownOnNVMLInitSuccess verifies nvml.Shutdown is deferred only after nvmlInit succeeds, using stubbed seams so the real NVML library is never touched.
 func TestGetAPIDevices_ShutsDownOnNVMLInitSuccess(t *testing.T) {
 	origInit := nvmlInit
 	origShutdown := nvml.Shutdown
