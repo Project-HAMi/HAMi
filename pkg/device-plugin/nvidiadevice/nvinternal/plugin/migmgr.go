@@ -47,14 +47,11 @@ type migAllocationKey struct {
 	Size     uint32
 }
 
-// migInstance tracks the nvml-level identity of a MIG GI+CI pair bound to a
-// slot. Absent means the slot's GI+CI have been destroyed (e.g. on task end)
-// but we remember the profile and placement so we can recreate the instance
-// at the same physical slice when the next task claims this slot.
+// migInstance tracks the NVML-level identity of a live MIG GI+CI pair bound to
+// a scheduler-reserved profile and physical placement.
 type migInstance struct {
 	Profile   string // slice group, e.g. "1g"
 	Placement nvml.GpuInstancePlacement
-	Present   bool
 	GIID      uint32
 	CIID      uint32
 	MigUUID   string
@@ -95,7 +92,7 @@ func profileSliceKey(profile string) string {
 	return profile
 }
 
-// ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand slot creation
+// ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand instance creation
 // through NVML. Busy GPUs are left untouched; idle GPUs
 // have MIG mode enabled and all existing GI/CI instances destroyed.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
@@ -201,10 +198,10 @@ func ensureMigModeEnabled(gpuIndex int) error {
 	return fmt.Errorf("gpu %d mig mode is not enabled after set (current=%d pending=%d)", gpuIndex, curMode, pendingMode)
 }
 
-// destroyPresentMigInstance destroys the tracked GI+CI on hardware. Returns
+// destroyMigInstance destroys the tracked GI+CI on hardware. Returns
 // nil when the instance is already gone or was destroyed successfully.
-func destroyPresentMigInstance(gpuIndex int, inst *migInstance) error {
-	if inst == nil || !inst.Present {
+func destroyMigInstance(gpuIndex int, inst *migInstance) error {
+	if inst == nil {
 		return nil
 	}
 	dev, err := deviceHandleByIndex(gpuIndex)
@@ -232,7 +229,7 @@ func destroyPresentMigInstance(gpuIndex int, inst *migInstance) error {
 }
 
 // destroyAllMigInstances enumerates and destroys every GI+CI on the device.
-// Used on template switches when no scheduler-allocated slot is in use.
+// It is used to reset idle GPUs before accepting scheduler allocations.
 func destroyAllMigInstances(dev nvml.Device) error {
 	for _, giProfileID := range []int{
 		nvml.GPU_INSTANCE_PROFILE_1_SLICE,
@@ -290,10 +287,10 @@ func (m *MigInstanceManager) Release(migUUID string) error {
 	m.mu.Lock()
 	inst := m.byAllocation[key]
 	m.mu.Unlock()
-	if inst == nil || !inst.Present {
+	if inst == nil {
 		return nil
 	}
-	if err := destroyPresentMigInstance(key.GPUIndex, inst); err != nil {
+	if err := destroyMigInstance(key.GPUIndex, inst); err != nil {
 		return err
 	}
 	m.mu.Lock()
@@ -318,7 +315,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	defer lk.Unlock()
 
 	m.mu.Lock()
-	if inst := m.byAllocation[key]; inst != nil && inst.Present {
+	if inst := m.byAllocation[key]; inst != nil {
 		uuid := inst.MigUUID
 		m.mu.Unlock()
 		return uuid, false, nil
@@ -390,7 +387,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 		gi.Destroy()
 		return "", false, err
 	}
-	inst := &migInstance{Profile: profile, Placement: placement, Present: true, GIID: giData.Id, CIID: ciData.Id, MigUUID: migUUID}
+	inst := &migInstance{Profile: profile, Placement: placement, GIID: giData.Id, CIID: ciData.Id, MigUUID: migUUID}
 	m.mu.Lock()
 	m.byAllocation[key] = inst
 	m.byAllocationMigUUID[migUUID] = key
@@ -404,7 +401,7 @@ func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string,
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	inst := m.byAllocation[key]
-	if inst == nil || !inst.Present {
+	if inst == nil {
 		return migAllocationRuntimeInfo{}, false
 	}
 	return migAllocationRuntimeInfo{
@@ -424,9 +421,14 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	if err != nil {
 		return err
 	}
-	giProfileID, ok := profileNameToGIProfileID[profileSliceKey(profile)]
+	profileKey := profileSliceKey(profile)
+	giProfileID, ok := profileNameToGIProfileID[profileKey]
 	if !ok {
 		return fmt.Errorf("unsupported MIG profile %q", profile)
+	}
+	ciProfileID, ok := profileNameToCIProfileID[profileKey]
+	if !ok {
+		return fmt.Errorf("unsupported MIG compute profile %q", profile)
 	}
 	profileInfo, ret := dev.GetGpuInstanceProfileInfo(giProfileID)
 	if ret != nvml.SUCCESS {
@@ -436,7 +438,6 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	if ret != nvml.SUCCESS {
 		return fmt.Errorf("list GI profile %s: %s", profile, nvml.ErrorString(ret))
 	}
-	ciProfileID := profileIDToCIProfileID(giProfileID)
 	for _, gi := range instances {
 		giInfo, r := gi.GetInfo()
 		if r != nvml.SUCCESS || giInfo.Placement != placement || giInfo.Id != gpuInstanceID {
@@ -460,7 +461,7 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 		}
 		key := allocationKey(gpuIndex, profile, placement)
 		m.mu.Lock()
-		m.byAllocation[key] = &migInstance{Profile: profile, Placement: placement, Present: true, GIID: giInfo.Id, CIID: ciData.Id, MigUUID: migUUID}
+		m.byAllocation[key] = &migInstance{Profile: profile, Placement: placement, GIID: giInfo.Id, CIID: ciData.Id, MigUUID: migUUID}
 		m.byAllocationMigUUID[migUUID] = key
 		m.mu.Unlock()
 		return nil
@@ -471,10 +472,8 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocationKey]struct{}) error {
 	m.mu.Lock()
 	keys := make([]migAllocationKey, 0, len(m.byAllocation))
-	for key, inst := range m.byAllocation {
-		if inst.Present {
-			keys = append(keys, key)
-		}
+	for key := range m.byAllocation {
+		keys = append(keys, key)
 	}
 	m.mu.Unlock()
 	for _, key := range keys {
@@ -486,9 +485,9 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 		m.mu.Lock()
 		inst := m.byAllocation[key]
 		m.mu.Unlock()
-		if inst != nil && inst.Present {
+		if inst != nil {
 			oldUUID := inst.MigUUID
-			if err := destroyPresentMigInstance(key.GPUIndex, inst); err != nil {
+			if err := destroyMigInstance(key.GPUIndex, inst); err != nil {
 				lk.Unlock()
 				return err
 			}
@@ -533,104 +532,4 @@ func findMigUUIDForGI(dev nvml.Device, giID uint32) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("no MIG device found for GI %d", giID)
-}
-
-// pickFreePlacement returns a placement for the given GI profile that does
-// not overlap with any of the placements already in use on this GPU.
-func pickFreePlacement(dev nvml.Device, info *nvml.GpuInstanceProfileInfo, inUse map[uint32]uint32) (nvml.GpuInstancePlacement, error) {
-	possible, ret := dev.GetGpuInstancePossiblePlacements(info)
-	if ret != nvml.SUCCESS {
-		return nvml.GpuInstancePlacement{}, fmt.Errorf("get possible placements: %s", nvml.ErrorString(ret))
-	}
-	return chooseFreePlacement(possible, inUse, preferHighPlacement(info.SliceCount))
-}
-
-func preferHighPlacement(sliceCount uint32) bool {
-	return sliceCount == 1 || sliceCount == 3
-}
-
-func sortPlacements(possible []nvml.GpuInstancePlacement, preferHigh bool) {
-	sort.SliceStable(possible, func(i, j int) bool {
-		if preferHigh {
-			return possible[i].Start > possible[j].Start
-		}
-		return possible[i].Start < possible[j].Start
-	})
-}
-
-func placementCandidates(previous nvml.GpuInstancePlacement, possible []nvml.GpuInstancePlacement) []nvml.GpuInstancePlacement {
-	candidates := make([]nvml.GpuInstancePlacement, 0, len(possible)+1)
-	if previous.Size != 0 {
-		candidates = append(candidates, previous)
-	}
-	for _, candidate := range possible {
-		if previous.Size != 0 && candidate == previous {
-			continue
-		}
-		candidates = append(candidates, candidate)
-	}
-	return candidates
-}
-
-// chooseFreePlacement packs 1g and 3g instances from high addresses while 2g
-// instances use low addresses. This matches NVIDIA's A100 balanced placement
-// (2g at 0:2, 1g at 2:1 and 3:1, 3g at 4:4) while retaining the canonical
-// 1x1g + 3x2g layout.
-func chooseFreePlacement(possible []nvml.GpuInstancePlacement, inUse map[uint32]uint32, preferHigh bool) (nvml.GpuInstancePlacement, error) {
-	sortPlacements(possible, preferHigh)
-	for _, p := range possible {
-		if !placementOverlaps(p, inUse) {
-			return p, nil
-		}
-	}
-	return nvml.GpuInstancePlacement{}, fmt.Errorf("no free placement for profile")
-}
-
-func placementOverlaps(p nvml.GpuInstancePlacement, inUse map[uint32]uint32) bool {
-	for start, size := range inUse {
-		if p.Start < start+size && start < p.Start+p.Size {
-			return true
-		}
-	}
-	return false
-}
-
-func profileIDToCIProfileID(giProfileID int) int {
-	switch giProfileID {
-	case nvml.GPU_INSTANCE_PROFILE_1_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_1_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_2_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_2_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_3_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_3_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_4_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_4_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_6_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_6_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_7_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_7_SLICE
-	case nvml.GPU_INSTANCE_PROFILE_8_SLICE:
-		return nvml.COMPUTE_INSTANCE_PROFILE_8_SLICE
-	}
-	return nvml.COMPUTE_INSTANCE_PROFILE_1_SLICE
-}
-
-func giProfileIDToSliceKey(giProfileID int) string {
-	switch giProfileID {
-	case nvml.GPU_INSTANCE_PROFILE_1_SLICE:
-		return "1g"
-	case nvml.GPU_INSTANCE_PROFILE_2_SLICE:
-		return "2g"
-	case nvml.GPU_INSTANCE_PROFILE_3_SLICE:
-		return "3g"
-	case nvml.GPU_INSTANCE_PROFILE_4_SLICE:
-		return "4g"
-	case nvml.GPU_INSTANCE_PROFILE_6_SLICE:
-		return "6g"
-	case nvml.GPU_INSTANCE_PROFILE_7_SLICE:
-		return "7g"
-	case nvml.GPU_INSTANCE_PROFILE_8_SLICE:
-		return "8g"
-	}
-	return ""
 }
