@@ -321,30 +321,58 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 	// Send disable signal before starting
 	disableCh <- true
 
-	// Create a minimal plugin - WatchAndRegister will read the disable signal
-	// and send an ack, then sleep. We verify the ack arrives.
-	plugin := &NvidiaDevicePlugin{}
+	// Construct plugin with registerInAnnotationFn stubbed to return (false, nil)
+	// immediately, avoiding real client calls and sleep delays in fallthrough.
+	plugin := &NvidiaDevicePlugin{
+		registerInAnnotationFn: func() (bool, error) {
+			return false, nil
+		},
+	}
 
-	done := make(chan struct{})
+	// Register cleanup handler to send resume signal so the goroutine unblocks
+	// and doesn't leak into subsequent tests under -race.
+	t.Cleanup(func() {
+		select {
+		case disableCh <- false:
+		case <-timeAfter(1 * time.Second):
+		}
+	})
+
 	go func() {
 		plugin.WatchAndRegister(disableCh, ackCh)
 	}()
 
-	go func() {
-		// Wait for the ack that confirms WatchAndRegister entered disabled state
-		ack := <-ackCh
+	// 1. Wait for initial disable ack with a 3s timeout
+	select {
+	case ack := <-ackCh:
 		if !ack {
 			t.Error("expected ack to be true")
 		}
-		close(done)
-	}()
-
-	// Use a select with timeout to avoid hanging forever
-	select {
-	case <-done:
-		// Success: received the ack
 	case <-timeAfter(3 * time.Second):
 		t.Fatal("timed out waiting for disable ack from WatchAndRegister")
+	}
+
+	// 2. Assert no duplicate ack is sent while remaining in disabled state.
+	// Since WatchAndRegister blocks deterministically on <-disableNVML, a non-blocking check is sufficient.
+	select {
+	case extraAck := <-ackCh:
+		t.Fatalf("received unexpected extra ack during disable period: %v", extraAck)
+	default:
+		// Success: no unconsumed ack present in channel buffer
+	}
+
+	// 3. Send resume signal, then immediately send disable signal again
+	disableCh <- false
+	disableCh <- true
+
+	// 4. Wait for second disable ack with a 3s timeout
+	select {
+	case ack := <-ackCh:
+		if !ack {
+			t.Error("expected second disable cycle ack to be true")
+		}
+	case <-timeAfter(3 * time.Second):
+		t.Fatal("timed out waiting for second disable ack from WatchAndRegister")
 	}
 }
 

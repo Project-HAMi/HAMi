@@ -248,6 +248,13 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	return true, err
 }
 
+func (plugin *NvidiaDevicePlugin) registerInAnnotation() (bool, error) {
+	if plugin.registerInAnnotationFn != nil {
+		return plugin.registerInAnnotationFn()
+	}
+	return plugin.RegisterInAnnotation()
+}
+
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
 	klog.Info("Starting WatchAndRegister")
 	errorSleepInterval := time.Second * 5
@@ -269,12 +276,12 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 		default:
 		}
 		if disableWatchAndRegister {
-			klog.V(3).Info("WatchAndRegister is disabled, sleeping")
+			klog.V(3).Info("WatchAndRegister is disabled, waiting for resume signal")
 			ackDisableWatchAndRegister <- true
-			time.Sleep(successSleepInterval)
+			disableWatchAndRegister = <-disableNVML
 			continue
 		}
-		changed, err := plugin.RegisterInAnnotation()
+		changed, err := plugin.registerInAnnotation()
 		if err != nil {
 			klog.Errorf("Failed to register annotation: %v. Retrying in %v...", err, errorSleepInterval)
 			time.Sleep(errorSleepInterval)
