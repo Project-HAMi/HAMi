@@ -22,6 +22,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/klog/v2"
@@ -71,11 +73,35 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 					Error: err.Error(),
 				}
 			} else {
-				extenderFilterResult, err = s.Filter(extenderArgs)
-				if err != nil {
-					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
+				startTime := time.Now()
+				var filterErr error
+				extenderFilterResult, filterErr = s.Filter(extenderArgs)
+				duration := time.Since(startTime).Seconds()
+				
+				if filterErr != nil {
+					klog.ErrorS(filterErr, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 					extenderFilterResult = &extenderv1.ExtenderFilterResult{
-						Error: err.Error(),
+						Error: filterErr.Error(),
+					}
+				}
+				
+				if extenderFilterResult != nil && extenderFilterResult.FailedNodes != nil {
+					for failedNode, rawReason := range extenderFilterResult.FailedNodes {
+						reasonCode := "hami.io/unknown"
+						if strings.Contains(rawReason, "Insufficient") {
+							reasonCode = "hami.io/insufficient-resources"
+						} else if strings.Contains(rawReason, "node(s) didn't match") {
+							reasonCode = "hami.io/node-affinity"
+						} else if strings.Contains(rawReason, "device") || strings.Contains(rawReason, "vgpu") || strings.Contains(rawReason, "nvidia") {
+							reasonCode = "hami.io/device-unavailable"
+						}
+						FilterDenials.WithLabelValues(failedNode, reasonCode).Inc()
+						FilterDuration.WithLabelValues(failedNode, "denied").Observe(duration)
+					}
+				}
+				if extenderFilterResult != nil && extenderFilterResult.Nodes != nil {
+					for _, allowedNode := range extenderFilterResult.Nodes.Items {
+						FilterDuration.WithLabelValues(allowedNode.Name, "allowed").Observe(duration)
 					}
 				}
 			}

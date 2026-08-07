@@ -31,6 +31,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/scheduler/routes"
 )
 
 type ClusterManager struct {
@@ -342,6 +343,7 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
+	routes.RegisterMetrics(reg)
 
 	NewClusterManager("vGPU", reg, metricsProvider, legacyMetrics)
 
