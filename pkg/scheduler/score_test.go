@@ -3004,16 +3004,10 @@ func Test_fitInCertainDevice(t *testing.T) {
 									Usedcores: int32(1),
 									Totalcore: int32(4),
 									Mode:      "mig",
-									MigUsage: device.MigInUse{
-										Index: int32(1),
-										UsageList: device.MIGS{
-											{
-												Name:   "test6",
-												Memory: int32(2048),
-												InUse:  false,
-											},
-										},
-									},
+									MigProfiles: []device.MigProfile{{
+										Name: "1g.test", MemoryMB: 2048, Core: 1,
+										Placements: []device.MigPlacement{{Start: 0, Size: 1}},
+									}},
 									Health: true,
 								},
 							},
@@ -3041,7 +3035,7 @@ func Test_fitInCertainDevice(t *testing.T) {
 					},
 				},
 			},
-			want3: map[string]int{common.CardNotFoundCustomFilterRule: 1, common.AllocatedCardsInsufficientRequest: 1},
+			want3: map[string]int{common.CardMigTopologyInfeasible: 1, common.AllocatedCardsInsufficientRequest: 1},
 		},
 		{
 			name: "card uuid don't match",

@@ -69,9 +69,13 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		m.pods[pod.UID].Devices = devices
-		klog.V(5).InfoS("Pod devices updated",
+		pi := m.pods[pod.UID]
+		pi.Pod = pod
+		pi.NodeID = nodeID
+		pi.Devices = devices
+		klog.V(5).InfoS("Pod cache entry updated",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
+			"nodeID", nodeID,
 			"devices", devices,
 		)
 	}

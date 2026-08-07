@@ -8,7 +8,6 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM $NVIDIA_IMAGE AS nvbuild
 RUN dnf install -y cmake git && dnf clean all
@@ -35,7 +34,6 @@ LABEL version="$VERSION"
 LABEL maintainer="info@dynamia.ai"
 COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=gobuild /k8s-vgpu/bin /k8s-vgpu/bin
-COPY --from=gobuild /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./lib /k8s-vgpu/lib
 COPY --from=nvbuild /libvgpu/build/libvgpu.so /k8s-vgpu/lib/nvidia/libvgpu.so."$VERSION"
