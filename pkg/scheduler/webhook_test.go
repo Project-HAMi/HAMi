@@ -269,14 +269,11 @@ func TestFitResourceQuota(t *testing.T) {
 	ns := "default"
 	memName := "nvidia.com/gpumem"
 	coreName := "nvidia.com/gpucores"
+	qm := device.NewQuotaManager()
 
-	cache := device.GetLocalCache()
-	if cache.Quotas == nil {
-		cache.Quotas = make(map[string]*device.DeviceQuota)
-	}
-	cache.Quotas[ns] = &device.DeviceQuota{
-		memName:  &device.Quota{Used: 1000, Limit: 2000},
-		coreName: &device.Quota{Used: 200, Limit: 400},
+	qm.Quotas[ns] = &device.DeviceQuota{
+		memName:  &device.Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &device.Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	testCases := []struct {
@@ -571,13 +568,13 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 	// One MLU vmemory unit is 256 MiB, so a limit of 100 units leaves room for
 	// 25600 MiB. Comparing the request against the raw 100 would deny every pod.
 	qm.Quotas["mlu-mem"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100},
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100, LimitSet: true},
 	}
 	qm.Quotas["mlu-core"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50},
+		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50, LimitSet: true},
 	}
 	qm.Quotas["dcu-mem"] = &device.DeviceQuota{
-		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000},
+		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
 	}
 	t.Cleanup(func() {
 		for _, ns := range []string{"mlu-mem", "mlu-core", "dcu-mem"} {
@@ -675,7 +672,7 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 	qm := device.NewQuotaManager()
 	// 60 units is 15360 MiB of headroom.
 	qm.Quotas["mlu-multi"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60},
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60, LimitSet: true},
 	}
 	t.Cleanup(func() { delete(qm.Quotas, "mlu-multi") })
 
@@ -734,7 +731,7 @@ func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
 
 	qm := device.NewQuotaManager()
 	qm.Quotas["ascend"] = &device.DeviceQuota{
-		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192},
+		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192, LimitSet: true},
 	}
 	t.Cleanup(func() { delete(qm.Quotas, "ascend") })
 
@@ -1007,16 +1004,14 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 	}
 
 	ns := "default"
-	cache := device.GetLocalCache()
-	if cache.Quotas == nil {
-		cache.Quotas = make(map[string]*device.DeviceQuota)
-	}
+	qm := device.NewQuotaManager()
 
 	// initial quota: 30000 limit, 0 used
-	cache.Quotas[ns] = &device.DeviceQuota{
-		"nvidia.com/gpumem":   &device.Quota{Used: 0, Limit: 30000},
+	qm.Quotas[ns] = &device.DeviceQuota{
+		"nvidia.com/gpumem":   &device.Quota{Used: 0, Limit: 30000, LimitSet: true},
 		"nvidia.com/gpucores": &device.Quota{Used: 0, Limit: 0},
 	}
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
 
 	makePod := func(name string, initMem, appMem int64) *corev1.Pod {
 		return &corev1.Pod{
@@ -1061,11 +1056,11 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 	}
 
 	// Simulate pod1 scheduled → record its peak usage (20000)
-	if dq, ok := cache.Quotas[ns]; ok {
+	if dq, ok := qm.Quotas[ns]; ok {
 		if q, ok := (*dq)["nvidia.com/gpumem"]; ok {
 			q.Used = 20000
 		} else {
-			(*dq)["nvidia.com/gpumem"] = &device.Quota{Used: 20000, Limit: 30000}
+			(*dq)["nvidia.com/gpumem"] = &device.Quota{Used: 20000, Limit: 30000, LimitSet: true}
 		}
 	}
 
@@ -1076,7 +1071,7 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 	}
 
 	// Step 3: Pod1 init finished → usage drops to app only (10000)
-	if dq, ok := cache.Quotas[ns]; ok {
+	if dq, ok := qm.Quotas[ns]; ok {
 		if q, ok := (*dq)["nvidia.com/gpumem"]; ok {
 			q.Used = 10000
 		}

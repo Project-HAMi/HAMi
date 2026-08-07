@@ -73,13 +73,21 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		// If the pod already exists (e.g., update), we only update the pod object
-		// and keep the existing devices, unless we are in a shrink path which is
-		// handled by ShrinkUsage.
-		m.pods[pod.UID].Pod = pod
-		klog.V(5).InfoS("Pod already exists; only pod object updated",
-			"pod", klog.KRef(pod.Namespace, pod.Name),
-		)
+		pi := m.pods[pod.UID]
+		pi.Pod = pod
+		if pi.InitContainerResourceReleased {
+			// Usage was already shrunk after init containers finished; a re-add
+			// (e.g. an informer resync decoding the full annotation) must not
+			// re-inflate it back to the peak value.
+			klog.V(5).InfoS("Pod already exists; keeping shrunk devices",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+			)
+		} else {
+			pi.Devices = devices
+			klog.V(5).InfoS("Pod already exists; devices updated",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+			)
+		}
 	}
 
 	return !exists

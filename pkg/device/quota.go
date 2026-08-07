@@ -27,6 +27,12 @@ import (
 type Quota struct {
 	Used  int64
 	Limit int64
+	// LimitSet distinguishes an explicitly configured limit (including an
+	// explicit 0, which blocks all usage) from an entry auto-created by usage
+	// tracking, which carries Limit 0 but means "no limit configured". FitQuota
+	// gates on this rather than Limit != 0 so that a ResourceQuota of "0" is
+	// honored as a hard block instead of being read as unlimited.
+	LimitSet bool
 }
 
 type DeviceQuota map[string]*Quota
@@ -75,13 +81,13 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 		if memoryFactor > 1 {
 			limit = limit * int64(memoryFactor)
 		}
-		if limit != 0 && memQuota.Used+memreq > limit {
+		if memQuota.LimitSet && memQuota.Used+memreq > limit {
 			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
 	coreQuota, ok := (*dq)[coreResourceName]
-	if ok && coreQuota.Limit != 0 && coreQuota.Used+coresreq > coreQuota.Limit {
+	if ok && coreQuota.LimitSet && coreQuota.Used+coresreq > coreQuota.Limit {
 		klog.V(4).InfoS("resourceCores quota not fitted", "limit", coreQuota.Limit, "used", coreQuota.Used, "alloc", coresreq)
 		return false
 	}
@@ -203,21 +209,49 @@ func IsManagedQuota(quotaName string) bool {
 func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
+	q.addQuotaLocked(quota)
+	q.logQuotasLocked()
+}
+
+func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.delQuotaLocked(quota)
+	q.logQuotasLocked()
+}
+
+// UpdateQuota swaps oldQuota's limits for newQuota's without releasing the lock
+// in between. Doing it as DelQuota followed by AddQuota would leave the limits
+// zeroed for the gap between the two, and FitQuota reads a zero limit as no
+// limit, so a check landing in that gap is waved through. The kube quota
+// controller rewrites status.used on every pod event, so updates arrive
+// constantly while pods are being scheduled.
+func (q *QuotaManager) UpdateQuota(oldQuota, newQuota *corev1.ResourceQuota) {
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	if oldQuota != nil {
+		q.delQuotaLocked(oldQuota)
+	}
+	if newQuota != nil {
+		q.addQuotaLocked(newQuota)
+	}
+	q.logQuotasLocked()
+}
+
+// addQuotaLocked requires q.mutex to be held.
+func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
 		if ok {
-			if !strings.HasPrefix(idx.String(), "limits.") {
-				continue
-			}
-			dn := strings.TrimPrefix(idx.String(), "limits.")
-			if !IsManagedQuota(dn) {
+			dn, ok := managedQuotaName(idx)
+			if !ok {
 				continue
 			}
 			if q.Quotas[quota.Namespace] == nil {
 				q.Quotas[quota.Namespace] = &DeviceQuota{}
 			}
 			dp := q.Quotas[quota.Namespace]
-			_, ok := (*dp)[dn]
+			_, ok = (*dp)[dn]
 			if !ok {
 				(*dp)[dn] = &Quota{
 					Used:  0,
@@ -225,45 +259,53 @@ func (q *QuotaManager) AddQuota(quota *corev1.ResourceQuota) {
 				}
 			}
 			(*dp)[dn].Limit = value
+			(*dp)[dn].LimitSet = true
 			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
-		}
-	}
-	if klog.V(4).Enabled() {
-		for _, val := range q.Quotas {
-			for idx, val1 := range *val {
-				klog.V(4).Infoln("after val=", idx, ":", val1)
-			}
 		}
 	}
 }
 
-func (q *QuotaManager) DelQuota(quota *corev1.ResourceQuota) {
-	q.mutex.Lock()
-	defer q.mutex.Unlock()
+// delQuotaLocked requires q.mutex to be held.
+func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
 	for idx, val := range quota.Spec.Hard {
 		value, ok := val.AsInt64()
 		if ok {
-			if !strings.HasPrefix(idx.String(), "limits.") {
-				continue
-			}
-			dn := strings.TrimPrefix(idx.String(), "limits.")
-			if !IsManagedQuota(dn) {
+			dn, ok := managedQuotaName(idx)
+			if !ok {
 				continue
 			}
 			klog.V(4).InfoS("quota remove:", "idx=", idx, "val", value)
 			if dq, ok := q.Quotas[quota.Namespace]; ok {
 				if quotaInfo, ok := (*dq)[dn]; ok {
 					quotaInfo.Limit = 0
+					quotaInfo.LimitSet = false
 				}
 			}
 		}
 	}
+}
 
-	if klog.V(4).Enabled() {
-		for _, val := range q.Quotas {
-			for idx, val1 := range *val {
-				klog.V(4).Infoln("after val=", idx, ":", val1)
-			}
+// managedQuotaName maps a ResourceQuota key to the device resource it limits,
+// reporting false for keys this manager does not track.
+func managedQuotaName(idx corev1.ResourceName) (string, bool) {
+	if !strings.HasPrefix(idx.String(), "limits.") {
+		return "", false
+	}
+	dn := strings.TrimPrefix(idx.String(), "limits.")
+	if !IsManagedQuota(dn) {
+		return "", false
+	}
+	return dn, true
+}
+
+// logQuotasLocked requires q.mutex to be held.
+func (q *QuotaManager) logQuotasLocked() {
+	if !klog.V(4).Enabled() {
+		return
+	}
+	for _, val := range q.Quotas {
+		for idx, val1 := range *val {
+			klog.V(4).Infoln("after val=", idx, ":", val1)
 		}
 	}
 }
@@ -276,8 +318,9 @@ func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
 		curDQ := &DeviceQuota{}
 		for name, quota := range *dq {
 			(*curDQ)[name] = &Quota{
-				Used:  quota.Used,
-				Limit: quota.Limit,
+				Used:     quota.Used,
+				Limit:    quota.Limit,
+				LimitSet: quota.LimitSet,
 			}
 		}
 		quotasCopy[ns] = curDQ

@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -290,6 +291,77 @@ func IsPodTerminating(pod *corev1.Pod) bool {
 
 func AllContainersCreated(pod *corev1.Pod) bool {
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
+}
+
+// EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.
+func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow time.Duration) {
+	c := client.GetClient()
+	if c == nil {
+		klog.Warningf("cannot emit node event for %s: Kubernetes client not initialized", node.Name)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	fieldSel := fmt.Sprintf(
+		"involvedObject.kind=Node,involvedObject.name=%s,involvedObject.uid=%s,reason=%s",
+		node.Name, string(node.UID), reason,
+	)
+	existing, err := c.CoreV1().Events(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{
+		FieldSelector: fieldSel,
+	})
+	if err != nil {
+		klog.Warningf("failed to list events for node %s: %v; will attempt create", node.Name, err)
+	}
+
+	now := metav1.Now()
+
+	if err == nil && len(existing.Items) > 0 {
+		// Client-side filter: the field selector is a server-side optimization; re-check
+		// here so the function is correct even against fake clients or non-compliant servers.
+		var latest *corev1.Event
+		for i := range existing.Items {
+			ev := &existing.Items[i]
+			if ev.InvolvedObject.UID != node.UID || ev.Reason != reason {
+				continue
+			}
+			if latest == nil || ev.LastTimestamp.After(latest.LastTimestamp.Time) {
+				latest = ev
+			}
+		}
+		if latest != nil && now.Sub(latest.LastTimestamp.Time) <= dedupWindow {
+			latest.Count++
+			latest.LastTimestamp = now
+			latest.Message = message
+			if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Update(ctx, latest, metav1.UpdateOptions{}); err != nil {
+				klog.Warningf("failed to update node event for %s: %v", node.Name, err)
+			}
+			return
+		}
+	}
+
+	event := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: node.Name + "-",
+			Namespace:    corev1.NamespaceDefault,
+		},
+		InvolvedObject: corev1.ObjectReference{
+			APIVersion: "v1",
+			Kind:       "Node",
+			Name:       node.Name,
+			UID:        node.UID,
+		},
+		Reason:         reason,
+		Message:        message,
+		Type:           corev1.EventTypeWarning,
+		Count:          1,
+		FirstTimestamp: now,
+		LastTimestamp:  now,
+		Source:         corev1.EventSource{Component: "hami-device-plugin"},
+	}
+	if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Create(ctx, event, metav1.CreateOptions{}); err != nil {
+		klog.Warningf("failed to create node event for %s: %v", node.Name, err)
+	}
 }
 
 func IsPodGroupMember(pod *corev1.Pod) bool {
