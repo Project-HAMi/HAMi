@@ -100,7 +100,8 @@ func TestHostMetricsIncludeNodeLabel(t *testing.T) {
 	// Verify host metrics have 4 labels: node, device_index, device_uuid, device_type
 	for _, mf := range metrics {
 		if mf.GetName() == "hami_host_gpu_memory_used_bytes" ||
-			mf.GetName() == "hami_host_gpu_utilization_ratio" {
+			mf.GetName() == "hami_host_gpu_utilization_ratio" ||
+			mf.GetName() == "hami_host_gpu_memory_total_bytes" {
 			for _, m := range mf.GetMetric() {
 				labels := m.GetLabel()
 				if len(labels) != 4 {
