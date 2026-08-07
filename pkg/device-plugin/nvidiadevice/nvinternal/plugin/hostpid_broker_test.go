@@ -9,9 +9,10 @@ package plugin
 import (
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/stretchr/testify/require"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 )
 
 func TestConfigureHostPIDBrokerDisabled(t *testing.T) {
