@@ -458,4 +458,20 @@ func TestDevices_Fit(t *testing.T) {
 		assert.Equal(t, false, ok)
 		assert.Assert(t, strings.Contains(reason, common.CardTimeSlicingExhausted))
 	})
+
+	t.Run("unhealthy device is rejected", func(t *testing.T) {
+		devices := []*device.DeviceUsage{
+			{
+				ID: "dev-0", Index: 0, Used: 0, Count: 2,
+				Usedmem: 0, Totalmem: 1000, Totalcore: 100, Usedcores: 0,
+				Type: AMDDevice, Health: false, CustomInfo: map[string]any{},
+			},
+		}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, MemPercentagereq: 0, Coresreq: 10}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+
+		ok, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.CardNotHealth))
+	})
 }

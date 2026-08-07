@@ -284,7 +284,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
 		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
