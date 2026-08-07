@@ -520,7 +520,7 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 		for count < int(val.Count) {
 			n.Index, err = safecast.Convert[int32](templateIdx)
 			if err != nil {
-				continue
+				break
 			}
 			n.UsageList = append(n.UsageList, MigTemplateUsage{
 				Name:   val.Name,
