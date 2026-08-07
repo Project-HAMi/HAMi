@@ -1456,6 +1456,8 @@ func TestAllocate_EmptyDevicesIdsAndRegression(t *testing.T) {
 			require.Equal(t, tc.expectSuccess, successCalled, "PodAllocationTrySuccess invoked mismatch")
 		})
 	}
+}
+
 type mockListAndWatchServer struct {
 	grpc.ServerStream
 	sendErrs []error
