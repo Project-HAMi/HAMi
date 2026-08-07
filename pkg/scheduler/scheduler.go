@@ -965,7 +965,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		klog.V(5).InfoS("Nodes failed during usage retrieval",
 			"nodes", failedNodes)
 	}
-	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
+	nodeScores, failureReason, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
 		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
@@ -975,6 +975,15 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		klog.V(4).InfoS("No available nodes meet the required scores",
 			"pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		failureAnnotation := formatFailureReasons(failureReason)
+		if failureAnnotation != "" {
+			annErr := util.PatchPodAnnotations(args.Pod, map[string]string{
+				util.SchedulingFailureReasonsAnnotation: failureAnnotation,
+			})
+			if annErr != nil {
+				klog.ErrorS(annErr, "Failed to patch scheduling failure reasons annotation", "pod", klog.KObj(args.Pod))
+			}
+		}
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
 		}, nil
@@ -1027,7 +1036,7 @@ func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs 
 		"pod", klog.KObj(args.Pod),
 		"candidateNodes", len(*nodeUsage),
 		"failedNodes", len(failedNodes))
-	nodeScores, err := s.calcScoreWithOptions(nodeUsage, resourceReqs, args.Pod, failedNodes, false, true)
+	nodeScores, _, err := s.calcScoreWithOptions(nodeUsage, resourceReqs, args.Pod, failedNodes, false, true)
 	if err != nil {
 		return nil, fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 	}

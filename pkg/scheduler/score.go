@@ -90,11 +90,11 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
-func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, map[string][]string, error) {
 	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
 }
 
-func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
+func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, map[string][]string, error) {
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -188,7 +188,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 	wg.Wait()
 	close(errCh)
 
-	// only pod scheduler failure will record failure event
+	// Record failure events for all-failed case (existing behavior)
 	if recordEvents && len(res.NodeList) == 0 {
 		for reasonType, failureNodes := range failureReason {
 			sort.Strings(failureNodes)
@@ -201,5 +201,24 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 	for e := range errCh {
 		errorsSlice = append(errorsSlice, e)
 	}
-	return &res, utilerrors.NewAggregate(errorsSlice)
+	return &res, failureReason, utilerrors.NewAggregate(errorsSlice)
+}
+
+// formatFailureReasons turns the per-reason failure map into a single
+// human-readable string suitable for a pod annotation. Each entry shows the
+// number of nodes that failed for a given reason and their names, sorted
+// alphabetically. Example output:
+//
+//	"3 nodes CardInsufficientMemory(node1,node2,node3), 1 nodes CardTypeMismatch(node4)"
+func formatFailureReasons(reasons map[string][]string) string {
+	if len(reasons) == 0 {
+		return ""
+	}
+	parts := make([]string, 0, len(reasons))
+	for reasonType, nodes := range reasons {
+		sort.Strings(nodes)
+		parts = append(parts, fmt.Sprintf("%d nodes %s(%s)", len(nodes), reasonType, strings.Join(nodes, ",")))
+	}
+	sort.Strings(parts)
+	return strings.Join(parts, "; ")
 }
