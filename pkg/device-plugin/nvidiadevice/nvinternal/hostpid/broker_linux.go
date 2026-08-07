@@ -26,6 +26,8 @@ import (
 const (
 	transactionTimeout  = 500 * time.Millisecond
 	activeProbeTimeout  = 50 * time.Millisecond
+	acceptRetryInitial  = 5 * time.Millisecond
+	acceptRetryMaximum  = time.Second
 	maxHandlers         = 512
 	serverDirectoryMode = 0o711
 	serverSocketMode    = 0o666
@@ -223,18 +225,43 @@ func readSocketIdentity(socketPath string, ownerUID int) (socketIdentity, error)
 }
 
 func (broker *Broker) Serve() error {
+	var backoff time.Duration
 	for {
 		connection, err := broker.listener.AcceptUnix()
 		if err != nil {
 			if broker.closing.Load() {
 				return nil
 			}
+			if isTemporaryAcceptError(err) {
+				backoff = nextAcceptBackoff(backoff)
+				time.Sleep(backoff)
+				continue
+			}
 			return fmt.Errorf("accept host PID broker connection: %w", err)
 		}
+		backoff = 0
 		if !broker.startHandler(connection) {
 			_ = connection.Close()
 		}
 	}
+}
+
+func isTemporaryAcceptError(err error) bool {
+	return errors.Is(err, syscall.EMFILE) ||
+		errors.Is(err, syscall.ENFILE) ||
+		errors.Is(err, syscall.ENOBUFS) ||
+		errors.Is(err, syscall.ENOMEM)
+}
+
+func nextAcceptBackoff(current time.Duration) time.Duration {
+	if current == 0 {
+		return acceptRetryInitial
+	}
+	next := current * 2
+	if next > acceptRetryMaximum {
+		return acceptRetryMaximum
+	}
+	return next
 }
 
 func (broker *Broker) startHandler(connection *net.UnixConn) bool {

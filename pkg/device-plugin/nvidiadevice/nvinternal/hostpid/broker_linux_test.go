@@ -196,6 +196,37 @@ func TestBrokerRecoversFromEarlyClose(t *testing.T) {
 	}
 }
 
+func TestTemporaryAcceptErrors(t *testing.T) {
+	for _, acceptErr := range []error{
+		syscall.EMFILE,
+		syscall.ENFILE,
+		syscall.ENOBUFS,
+		syscall.ENOMEM,
+		fmt.Errorf("wrapped: %w", syscall.EMFILE),
+	} {
+		if !isTemporaryAcceptError(acceptErr) {
+			t.Errorf("expected temporary accept error: %v", acceptErr)
+		}
+	}
+	if isTemporaryAcceptError(syscall.EINVAL) {
+		t.Fatal("EINVAL must remain a permanent accept error")
+	}
+}
+
+func TestAcceptBackoffIsBounded(t *testing.T) {
+	backoff := time.Duration(0)
+	for range 32 {
+		backoff = nextAcceptBackoff(backoff)
+		if backoff > acceptRetryMaximum {
+			t.Fatalf("backoff %v exceeds maximum %v", backoff,
+				acceptRetryMaximum)
+		}
+	}
+	if backoff != acceptRetryMaximum {
+		t.Fatalf("backoff=%v, want %v", backoff, acceptRetryMaximum)
+	}
+}
+
 func TestBrokerTimesOutPartialRequest(t *testing.T) {
 	_, socketPath := startTestBroker(t)
 	connection, err := net.Dial("unix", socketPath)
