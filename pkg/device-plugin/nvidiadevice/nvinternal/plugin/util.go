@@ -308,6 +308,18 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 	if err := nv.reconcileActiveMigAllocations(); err != nil {
 		return nil, fmt.Errorf("reconcile MIG allocations before allocation: %w", err)
 	}
+	createdMigUUIDs := make([]string, 0, len(c))
+	allocationCompleted := false
+	defer func() {
+		if allocationCompleted {
+			return
+		}
+		for i := len(createdMigUUIDs) - 1; i >= 0; i-- {
+			if err := nv.migMgr.Release(createdMigUUIDs[i]); err != nil {
+				klog.ErrorS(err, "failed to roll back partial MIG allocation", "uuid", createdMigUUIDs[i])
+			}
+		}
+	}()
 	out := make([]string, 0, len(c))
 	for i, reservation := range containerAllocations {
 		if reservation.GPUUUID != c[i].UUID {
@@ -317,12 +329,16 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 		if !ok {
 			return nil, fmt.Errorf("resolve parent GPU %s", reservation.GPUUUID)
 		}
-		migUUID, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
+		migUUID, created, err := nv.migMgr.EnsureAllocation(gpuIndex, reservation.Profile, nvml.GpuInstancePlacement{Start: reservation.Placement.Start, Size: reservation.Placement.Size})
 		if err != nil {
 			return nil, err
 		}
+		if created {
+			createdMigUUIDs = append(createdMigUUIDs, migUUID)
+		}
 		out = append(out, migUUID)
 	}
+	allocationCompleted = true
 	return out, nil
 }
 

@@ -15,8 +15,11 @@
 
 set -euo pipefail
 
-NS=hami-mig-final-e2e
-HAMI_NS=hami-system
+NS=${MIG_E2E_NAMESPACE:-hami-mig-final-e2e}
+HAMI_NS=${HAMI_NAMESPACE:-hami-system}
+TARGET_NODE=${TARGET_NODE:-}
+DEVICE_PLUGIN_DAEMONSET=${DEVICE_PLUGIN_DAEMONSET:-hami-device-plugin}
+DEVICE_PLUGIN_CONTAINER=${DEVICE_PLUGIN_CONTAINER:-device-plugin}
 IMAGE=${GPU_TEST_IMAGE:-nvcr.io/nvidia/k8s/cuda-sample:vectoradd-cuda12.5.0-ubuntu22.04}
 GPU_PROGRESS_WAIT=${GPU_PROGRESS_WAIT:-5}
 
@@ -29,17 +32,49 @@ cleanup() {
     kubectl get namespace "$NS" >/dev/null 2>&1 || return 0
     sleep 2
   done
-  fail "namespace cleanup timed out"
+  echo "FAIL: namespace cleanup timed out" >&2
+  return 1
+}
+
+trap 'status=$?; cleanup || true; exit "$status"' EXIT
+
+device_plugin_pod() {
+  kubectl get pods -n "$HAMI_NS" --field-selector "spec.nodeName=${TARGET_NODE}" -o json |
+    jq -r --arg daemonset "$DEVICE_PLUGIN_DAEMONSET" '.items[] | select([.metadata.ownerReferences[]? | select(.kind == "DaemonSet" and .name == $daemonset)] | length > 0) | .metadata.name' |
+    sed -n '1p'
+}
+
+node_nvidia_smi() {
+  local pod
+  pod=$(device_plugin_pod)
+  [[ -n "$pod" ]] || fail "no ${DEVICE_PLUGIN_DAEMONSET} Pod found on ${TARGET_NODE}"
+  kubectl exec -n "$HAMI_NS" "$pod" -c "$DEVICE_PLUGIN_CONTAINER" -- nvidia-smi "$@"
+}
+
+restart_target_device_plugin() {
+  local old_pod new_pod ready
+  old_pod=$(device_plugin_pod)
+  [[ -n "$old_pod" ]] || fail "no ${DEVICE_PLUGIN_DAEMONSET} Pod found on ${TARGET_NODE}"
+  kubectl delete pod -n "$HAMI_NS" "$old_pod" --wait=false
+  for _ in $(seq 1 90); do
+    new_pod=$(device_plugin_pod || true)
+    if [[ -n "$new_pod" && "$new_pod" != "$old_pod" ]]; then
+      ready=$(kubectl get pod -n "$HAMI_NS" "$new_pod" -o json 2>/dev/null | jq -r --arg container "$DEVICE_PLUGIN_CONTAINER" '.status.containerStatuses[]? | select(.name == $container) | .ready' || true)
+      [[ "$ready" == true ]] && return 0
+    fi
+    sleep 2
+  done
+  fail "device plugin on ${TARGET_NODE} did not restart"
 }
 
 create_pod() {
   local name=$1 memory=$2
-  printf '%s\n' "{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"name\":\"${name}\",\"namespace\":\"${NS}\",\"annotations\":{\"nvidia.com/vgpu-mode\":\"mig\"}},\"spec\":{\"schedulerName\":\"hami-scheduler\",\"restartPolicy\":\"Never\",\"containers\":[{\"name\":\"cuda\",\"image\":\"${IMAGE}\",\"imagePullPolicy\":\"IfNotPresent\",\"command\":[\"bash\",\"-lc\",\"set -euo pipefail; nvidia-smi -L; n=0; echo 0 > /tmp/gpu-progress; while true; do if ! /cuda-samples/vectorAdd > /tmp/vectoradd.last 2>&1; then cat /tmp/vectoradd.last >&2; exit 1; fi; n=\$((n + 1)); echo \\\"\$n\\\" > /tmp/gpu-progress.next; mv /tmp/gpu-progress.next /tmp/gpu-progress; done\"],\"resources\":{\"limits\":{\"nvidia.com/gpu\":1,\"nvidia.com/gpumem\":${memory}}}}]}}" | kubectl apply -f -
+  printf '%s\n' "{\"apiVersion\":\"v1\",\"kind\":\"Pod\",\"metadata\":{\"name\":\"${name}\",\"namespace\":\"${NS}\",\"annotations\":{\"nvidia.com/vgpu-mode\":\"mig\"}},\"spec\":{\"schedulerName\":\"hami-scheduler\",\"nodeSelector\":{\"kubernetes.io/hostname\":\"${TARGET_NODE}\"},\"restartPolicy\":\"Never\",\"containers\":[{\"name\":\"cuda\",\"image\":\"${IMAGE}\",\"imagePullPolicy\":\"IfNotPresent\",\"command\":[\"bash\",\"-lc\",\"set -euo pipefail; nvidia-smi -L; n=0; echo 0 > /tmp/gpu-progress; while true; do if ! /cuda-samples/vectorAdd > /tmp/vectoradd.last 2>&1; then cat /tmp/vectoradd.last >&2; exit 1; fi; n=\$((n + 1)); echo \\\"\$n\\\" > /tmp/gpu-progress.next; mv /tmp/gpu-progress.next /tmp/gpu-progress; done\"],\"resources\":{\"limits\":{\"nvidia.com/gpu\":1,\"nvidia.com/gpumem\":${memory}}}}]}}" | kubectl apply -f -
 }
 
 wait_ready() { kubectl wait -n "$NS" --for=condition=Ready "pod/$1" --timeout=180s; }
-mig_count() { nvidia-smi -L | grep -c 'MIG ' || true; }
-profile_count() { nvidia-smi -L | grep -c "MIG $1" || true; }
+mig_count() { node_nvidia_smi -L | grep -c 'MIG ' || true; }
+profile_count() { node_nvidia_smi -L | grep -c "MIG $1" || true; }
 pod_uuid() { kubectl exec -n "$NS" "$1" -- nvidia-smi -L | sed -n 's/.*UUID: \(MIG-[^)]*\)).*/\1/p' | head -1; }
 gpu_progress() { kubectl exec -n "$NS" "$1" -- cat /tmp/gpu-progress; }
 
@@ -87,7 +122,7 @@ wait_count() {
   while true; do
     count=$(mig_count)
     [[ "$count" == "$want" ]] && { echo "MIG_COUNT=${want}"; return; }
-    (( $(date +%s) - start < timeout )) || { nvidia-smi -L; fail "MIG count=${count}, want=${want}"; }
+    (( $(date +%s) - start < timeout )) || { node_nvidia_smi -L; fail "MIG count=${count}, want=${want}"; }
     sleep 2
   done
 }
@@ -112,7 +147,13 @@ assert_pending_unbound() {
   [[ "$phase" == Pending && -z "$node" ]] || fail "$pod expected Pending/unbound, got phase=${phase} node=${node}"
 }
 
-log "baseline cleanup"
+[[ -n "$TARGET_NODE" ]] || fail "set TARGET_NODE to the Kubernetes node under test"
+kubectl get node "$TARGET_NODE" >/dev/null || fail "target node ${TARGET_NODE} does not exist"
+node_nvidia_smi -L >/dev/null
+physical_gpu_count=$(node_nvidia_smi --query-gpu=index --format=csv,noheader | wc -l | tr -d ' ')
+[[ "$physical_gpu_count" == 1 ]] || fail "target node ${TARGET_NODE} must expose exactly one physical GPU, found ${physical_gpu_count}"
+
+log "baseline cleanup on ${TARGET_NODE}"
 cleanup
 kubectl create namespace "$NS"
 wait_count 0
@@ -165,8 +206,7 @@ echo "PASS CASE 2 capacity enforced"
 
 log "CASE 3: busy device-plugin restart preserves every MIG UUID"
 progress_before_restart=$(snapshot_gpu_progress one-a two-a two-b two-c)
-kubectl rollout restart daemonset/hami-device-plugin -n "$HAMI_NS"
-kubectl rollout status daemonset/hami-device-plugin -n "$HAMI_NS" --timeout=180s
+restart_target_device_plugin
 sleep 15
 assert_gpu_progress_since "$progress_before_restart" one-a two-a two-b two-c
 assert_uuid one-a "$uuid_one_a"
@@ -175,7 +215,7 @@ assert_uuid two-b "$uuid_two_b"
 assert_uuid two-c "$uuid_two_c"
 wait_count 4
 [[ "$(profile_count 1g.5gb)" == 1 && "$(profile_count 2g.10gb)" == 3 ]] || fail "layout changed during restart"
-kubectl logs -n "$HAMI_NS" daemonset/hami-device-plugin -c device-plugin --since=3m | grep 'inUseGPUs=\[0\]' >/dev/null || fail "startup did not detect busy GPU"
+kubectl logs -n "$HAMI_NS" "$(device_plugin_pod)" -c "$DEVICE_PLUGIN_CONTAINER" --since=3m | grep 'inUseGPUs=\[0\]' >/dev/null || fail "startup did not detect busy GPU"
 echo "PASS CASE 3 all UUIDs preserved"
 
 log "CASE 4: immediate delete/replacement after restart"
@@ -283,5 +323,5 @@ cleanup
 wait_count 0
 kubectl get nodes
 kubectl get pods -n "$HAMI_NS"
-nvidia-smi -q | grep -A3 'MIG Mode'
+node_nvidia_smi -q | grep -A3 'MIG Mode'
 echo "ALL_FIXED_MIG_E2E_TESTS_PASSED"

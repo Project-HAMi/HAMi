@@ -54,6 +54,7 @@ import (
 	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
@@ -189,6 +190,10 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
 		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
 	}
+	var migMgr *MigInstanceManager
+	if mode == "mig" {
+		migMgr = NewMigInstanceManager()
+	}
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
 		rm:                         resourceManager,
@@ -205,6 +210,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:            sConfig.NvidiaConfig,
 		operatingMode:              mode,
+		migMgr:                     migMgr,
 		deviceCache:                "",
 
 		// These will be reinitialized every
@@ -280,7 +286,7 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		klog.Fatalf("RemoveMigApplyLock failed: %v", err)
 	}
 
-	deviceSupportMig := true
+	deviceSupportMig := len(deviceNames) > 0
 	for _, name := range deviceNames {
 		supported := false
 		for _, allowlist := range plugin.schedulerConfig.MigProfileAllowlist {
@@ -305,7 +311,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
 	if plugin.operatingMode == "mig" {
-		plugin.migMgr = NewMigInstanceManager()
 		if deviceSupportMig {
 			inUse, detectErr := collectInUseGPUs(plugin.ctx, os.Getenv(util.NodeNameEnvName))
 			if detectErr != nil {
@@ -386,7 +391,18 @@ func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error 
 	if err != nil {
 		return err
 	}
-	if err := util.PatchPodAnnotations(pod, map[string]string{nvidia.MigAllocationsAnnotation: string(raw)}); err != nil {
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"resourceVersion": pod.ResourceVersion,
+			"annotations": map[string]string{
+				nvidia.MigAllocationsAnnotation: string(raw),
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := client.GetClient().CoreV1().Pods(pod.Namespace).Patch(plugin.ctx, pod.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
 		return err
 	}
 	pod.Annotations[nvidia.MigAllocationsAnnotation] = string(raw)
@@ -799,11 +815,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 			if idx+1 < len(reqs.ContainerRequests) {
-				current, err = client.GetClient().CoreV1().Pods(current.Namespace).Get(ctx, current.Name, metav1.GetOptions{})
-				if err != nil {
+				refreshed, refreshErr := client.GetClient().CoreV1().Pods(current.Namespace).Get(ctx, current.Name, metav1.GetOptions{})
+				if refreshErr != nil {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
-					return nil, fmt.Errorf("refresh Pod allocation annotations: %w", err)
+					return nil, fmt.Errorf("refresh Pod allocation annotations: %w", refreshErr)
 				}
+				current = refreshed
 			}
 
 			if plugin.operatingMode != "mig" {
