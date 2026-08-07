@@ -307,7 +307,7 @@ restart:
 	}
 
 	klog.Info("Starting Plugins.")
-	plugins, restartPlugins, err := startPlugins(c, o)
+	plugins, restartPlugins, err := startPlugins(c, o, hostPIDBroker)
 	if err != nil {
 		return fmt.Errorf("error starting plugins: %v", err)
 	}
@@ -324,12 +324,7 @@ restart:
 		select {
 		case <-hostPIDBrokerDone:
 			hostPIDBrokerFailureReported = true
-			if hostPIDBroker.serveErr != nil {
-				resultErr = fmt.Errorf("host PID broker stopped: %w",
-					hostPIDBroker.serveErr)
-			} else {
-				resultErr = errors.New("host PID broker stopped unexpectedly")
-			}
+			resultErr = hostPIDBroker.failure()
 			goto exit
 
 		// If the restart timeout has expired, then restart the plugins
@@ -371,7 +366,8 @@ exit:
 	return resultErr
 }
 
-func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) {
+func startPlugins(c *cli.Context, o *options,
+	hostPIDBroker *runningHostPIDBroker) ([]plugin.Interface, bool, error) {
 	// Load the configuration file
 	klog.Info("Loading configuration.")
 	config, err := loadConfig(c, o.flags)
@@ -430,16 +426,25 @@ func startPlugins(c *cli.Context, o *options) ([]plugin.Interface, bool, error) 
 	// to serve. If even one plugin fails to start properly, try
 	// starting them all again.
 	started := 0
+	startedPlugins := make([]plugin.Interface, 0, len(plugins))
 	for _, p := range plugins {
 		// Just continue if there are no devices to serve for plugin p.
 		if len(p.Devices()) == 0 {
 			continue
 		}
 
+		if err := hostPIDBroker.failure(); err != nil {
+			return nil, false, errors.Join(err, stopPlugins(startedPlugins))
+		}
+
 		// Start the gRPC server for plugin p and connect it with the kubelet.
 		if err := p.Start(o.kubeletSocket); err != nil {
 			klog.Errorf("Failed to start plugin: %v", err)
 			return plugins, true, nil
+		}
+		startedPlugins = append(startedPlugins, p)
+		if err := hostPIDBroker.failure(); err != nil {
+			return nil, false, errors.Join(err, stopPlugins(startedPlugins))
 		}
 		started++
 	}

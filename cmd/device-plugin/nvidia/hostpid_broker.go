@@ -7,6 +7,8 @@
 package main
 
 import (
+	"errors"
+	"fmt"
 	"os"
 
 	"k8s.io/klog/v2"
@@ -44,4 +46,19 @@ func (running *runningHostPIDBroker) stop() error {
 	closeErr := running.broker.Close()
 	<-running.done
 	return closeErr
+}
+
+func (running *runningHostPIDBroker) failure() error {
+	if running == nil {
+		return nil
+	}
+	select {
+	case <-running.done:
+		if running.serveErr != nil {
+			return fmt.Errorf("host PID broker stopped: %w", running.serveErr)
+		}
+		return errors.New("host PID broker stopped unexpectedly")
+	default:
+		return nil
+	}
 }
