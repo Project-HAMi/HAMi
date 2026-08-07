@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -229,11 +230,19 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			ctr.Name, MetaxResourceNameVCount)
 		return device.ContainerDeviceRequest{}
 	}
+	if count <= 0 || count > math.MaxInt32 {
+		klog.ErrorS(nil, "metax sgpu device count request is out of range", "container", ctr.Name, "request", count)
+		return device.ContainerDeviceRequest{}
+	}
 
 	core := int64(100)
 	coreQuantity, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCore)]
 	if ok {
 		if v, ok := coreQuantity.AsInt64(); ok {
+			if v < 0 || v > math.MaxInt32 {
+				klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
+				return device.ContainerDeviceRequest{}
+			}
 			core = v
 		}
 	}
@@ -250,7 +259,15 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			if hasUnit {
 				mem = v / 1024 / 1024
 			} else {
-				mem = v * MemoryFactor
+				if v < 0 || v > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
+					return device.ContainerDeviceRequest{}
+				}
+				mem = v * int64(MemoryFactor)
+			}
+			if mem < 0 || mem > math.MaxInt32 {
+				klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
+				return device.ContainerDeviceRequest{}
 			}
 		}
 	}

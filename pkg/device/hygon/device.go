@@ -19,6 +19,7 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"math"
 	"slices"
 	"strings"
 
@@ -175,6 +176,10 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "dcu device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found dcu devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[dcuResourceMem]
@@ -184,9 +189,17 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if memnums < 0 || memnums > math.MaxInt32 {
+						klog.ErrorS(nil, "dcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
+						return device.ContainerDeviceRequest{}
+					}
 					if MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(MemoryFactor)
+						if memnums > math.MaxInt32 {
+							klog.ErrorS(nil, "dcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
+							return device.ContainerDeviceRequest{}
+						}
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
 					}
 					memnum = int(memnums)
@@ -200,6 +213,10 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				corenums, ok := core.AsInt64()
 				if ok {
+					if corenums < 0 || corenums > math.MaxInt32 {
+						klog.ErrorS(nil, "dcu device core request is out of range", "container", ctr.Name, "request", core.String())
+						return device.ContainerDeviceRequest{}
+					}
 					corenum = int32(corenums)
 				}
 			}
