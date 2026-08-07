@@ -300,6 +300,106 @@ func TestOverrideScore(t *testing.T) {
 			policy:    "binpack",
 			wantScore: 0,
 		},
+		{
+			// MetaxSDevices implements device.PolicyNeutralScorer, so OverrideScore
+			// weights its raw "higher is better" score by 10000 under Binpack. The
+			// two allocated topology-aware devices yield a raw score of 60
+			// (see scoreExclusiveDevices), so the weighted result is 600000.
+			name: "MetaX-SGPU with binpack policy returns weighted score",
+			nodeScore: &NodeScore{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Metax-SGPU": device.PodSingleDevice{
+						device.ContainerDevices{
+							{
+								UUID:      "GPU-3",
+								Usedcores: 100,
+								CustomInfo: map[string]any{
+									"LinkZone": int32(1),
+									"Pod.Annotations": map[string]string{
+										"metax-tech.com/sgpu-topology-aware": "true",
+									},
+								},
+							},
+							{
+								UUID:      "GPU-4",
+								Usedcores: 100,
+								CustomInfo: map[string]any{
+									"LinkZone": int32(1),
+									"Pod.Annotations": map[string]string{
+										"metax-tech.com/sgpu-topology-aware": "true",
+									},
+								},
+							},
+						},
+					},
+				},
+				Score: 0,
+			},
+			devices: []*device.DeviceUsage{
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+			},
+			policy:    "binpack",
+			wantScore: 600000,
+		},
+		{
+			// Under Spread the same policy-neutral raw score of 60 is inverted
+			// (weight -10000), producing -600000. Because Binpack picks the highest
+			// score and Spread picks the lowest, inverting the sign preserves the
+			// original node ranking across both policies.
+			name: "MetaX-SGPU with spread policy returns inverted weighted score",
+			nodeScore: &NodeScore{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+					},
+				},
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Metax-SGPU": device.PodSingleDevice{
+						device.ContainerDevices{
+							{
+								UUID:      "GPU-3",
+								Usedcores: 100,
+								CustomInfo: map[string]any{
+									"LinkZone": int32(1),
+									"Pod.Annotations": map[string]string{
+										"metax-tech.com/sgpu-topology-aware": "true",
+									},
+								},
+							},
+							{
+								UUID:      "GPU-4",
+								Usedcores: 100,
+								CustomInfo: map[string]any{
+									"LinkZone": int32(1),
+									"Pod.Annotations": map[string]string{
+										"metax-tech.com/sgpu-topology-aware": "true",
+									},
+								},
+							},
+						},
+					},
+				},
+				Score: 0,
+			},
+			devices: []*device.DeviceUsage{
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+			},
+			policy:    "spread",
+			wantScore: -600000,
+		},
 		// Add more test cases here to cover other scenarios and policies.
 	}
 
