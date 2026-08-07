@@ -64,7 +64,7 @@ func TestExtractGPUNodeInfo(t *testing.T) {
 	if info.GPUCount != 20 { // two devices, count=10 each
 		t.Errorf("GPUCount = %d, want 20", info.GPUCount)
 	}
-	wantTotalMiB := float64(40960 * 10 * 2) // devmem * count, summed over 2 devices
+	wantTotalMiB := float64(40960 * 2) // physical VRAM, summed over 2 devices
 	if info.TotalMemoryMiB != wantTotalMiB {
 		t.Errorf("TotalMemoryMiB = %v, want %v", info.TotalMemoryMiB, wantTotalMiB)
 	}
