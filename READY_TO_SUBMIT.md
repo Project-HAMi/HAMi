@@ -57,23 +57,18 @@
 
 ## How to Submit
 
-### Step 1: Update GitHub Token
-```bash
-# Go to: https://github.com/settings/tokens
-# Find your token
-# Check "workflow" scope
-# Update token
-```
+### Authentication Note
+If you encounter authentication issues when pushing, refer to [GitHub's Personal Access Token documentation](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/managing-your-personal-access-tokens) for the repository's approved authentication process.
 
-### Step 2: Push the Branch
+### Step 1: Push the Branch
 ```bash
 cd ~/Documents/HAMi-fork
 git checkout fix/nvml-init-panic
 git push origin fix/nvml-init-panic
 ```
 
-### Step 3: Create PR
-1. Go to: https://github.com/Project-HAMi/HAMi/compare/master...nishantbkl3345-ship-it:HAMi:fix/nvml-init-panic
+### Step 2: Create PR
+1. Visit the URL shown by GitHub after pushing
 2. Click "Create pull request"
 3. Copy content from `PR_DESCRIPTION_NVML_INIT.md`
 4. Paste as PR description
@@ -108,7 +103,7 @@ git push origin fix/nvml-init-panic
 **A**: See `TECHNICAL_EXPLANATION.md` for detailed explanation.
 
 ### Q: Why fail-open instead of fail-closed?
-**A**: NVML init failure affects the whole plugin. Returning empty list allows self-healing. The WatchAndRegister loop retries every 30 seconds. Fail-closed would require manual intervention for driver issues.
+**A**: NVML init failure affects the whole plugin. Returning empty list allows self-healing. The WatchAndRegister loop retries: 30 seconds after successful registration, 5 seconds after annotation patch failures. Fail-closed would require manual intervention for driver issues.
 
 ### Q: What about other panics in getAPIDevices()?
 **A**: Those will be separate PRs. This PR is intentionally focused on just the init panic to keep changes reviewable.

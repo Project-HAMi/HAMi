@@ -102,13 +102,15 @@ klog.ErrorS(
 
 ## NVML Error Codes
 
-Common failure scenarios:
-- `nvml.ERROR_UNINITIALIZED` (1): Driver not loaded
+Common failure scenarios (from NVIDIA NVML API):
+- `nvml.ERROR_UNINITIALIZED` (1): NVML was not first initialized with nvmlInit()
 - `nvml.ERROR_INVALID_ARGUMENT` (2): Invalid parameter
 - `nvml.ERROR_NOT_SUPPORTED` (3): System doesn't support NVML
 - `nvml.ERROR_NO_PERMISSION` (4): Insufficient permissions
-- `nvml.ERROR_LIBRARY_NOT_FOUND` (13): NVML library not found
-- `nvml.ERROR_DRIVER_NOT_LOADED` (29): NVIDIA driver not loaded
+- `nvml.ERROR_LIBRARY_NOT_FOUND` (29): NVML library not found
+- `nvml.ERROR_DRIVER_NOT_LOADED` (13): NVIDIA driver not loaded
+
+**Note**: After failed init, `nvml.Shutdown()` will return `NVML_ERROR_UNINITIALIZED` rather than crashing the process.
 
 ## Testing Strategy
 
@@ -124,11 +126,27 @@ func TestGetAPIDevices_NVMLInitFailure(t *testing.T) {
         return nvml.ERROR_DRIVER_NOT_LOADED
     }
     
+    // Create mock resource manager
+    mockRM := &rm.ResourceManagerMock{
+        DevicesFunc: func() rm.Devices {
+            return rm.Devices{
+                "GPU-123": &pluginapi.Device{
+                    ID: "GPU-123", 
+                    Health: pluginapi.Healthy,
+                },
+            }
+        },
+    }
+    
     // Test
     plugin := &NvidiaDevicePlugin{
-        devices: map[string]*pluginapi.Device{
-            "GPU-123": {ID: "GPU-123", Health: "Healthy"},
+        rm: mockRM,
+        schedulerConfig: &nvidia.NvidiaConfig{
+            DeviceMemoryScaling: floatPtr(1.0),
+            DeviceCoreScaling: floatPtr(1.0),
+            DeviceSplitCount: uintPtr(1),
         },
+        operatingMode: nvidia.PassthroughMode,
     }
     
     devices := plugin.getAPIDevices()

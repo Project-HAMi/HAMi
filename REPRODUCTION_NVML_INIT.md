@@ -90,23 +90,29 @@ func TestGetAPIDevices_NVMLInitFailure(t *testing.T) {
 
 ## Current Behavior (After This Fix)
 ```text
+# When NVML init fails
 E0807 12:00:00.123456   12345 register.go:96] Failed to initialize NVML, returning empty device list for graceful degradation error="nvml init failed: Initialization Failed" returnCode=6
-I0807 12:00:00.789012   12345 register.go:210] Discovered 0 device(s) for registration
-I0807 12:00:00.789123   12345 register.go:250] Updating node annotations with 0 device(s)
-I0807 12:00:30.123456   12345 register.go:95] Retrying device registration...
+I0807 12:00:00.789012   12345 register.go:217] Discovered 0 device(s) for registration
+I0807 12:00:00.789123   12345 register.go:254] Updating node annotations with 0 device(s)
+
+# On successful registration (even with 0 devices), waits 30 seconds
+I0807 12:00:30.123456   12345 register.go:284] Successfully updated node annotation. Next check in 30s...
+
+# If annotation patch fails, retries after 5 seconds
+E0807 12:00:00.999999   12345 register.go:281] Failed to register annotation: connection refused. Retrying in 5s...
 ```
 
 ## Expected Behavior (Self-Healing)
 ```text
-# Cycle 1: NVML init fails
+# Cycle 1: NVML init fails, annotation succeeds, wait 30s
 E0807 12:00:00.123456   12345 register.go:96] Failed to initialize NVML, returning empty device list for graceful degradation error="nvml init failed: Driver Not Loaded" returnCode=29
-I0807 12:00:00.789012   12345 register.go:210] Discovered 0 device(s) for registration
+I0807 12:00:00.789012   12345 register.go:217] Discovered 0 device(s) for registration
+I0807 12:00:00.999999   12345 register.go:284] Successfully updated node annotation. Next check in 30s...
 
-# Wait 30 seconds...
-
-# Cycle 2: Driver loaded, NVML succeeds
-I0807 12:00:30.123456   12345 register.go:210] Discovered 4 device(s) for registration
-I0807 12:00:30.456789   12345 register.go:250] Successfully updated node annotation
+# Cycle 2 (after 30s): Driver loaded, NVML succeeds
+I0807 12:00:30.123456   12345 register.go:217] Discovered 4 device(s) for registration
+I0807 12:00:30.456789   12345 register.go:254] Updating node annotations with 4 device(s)
+I0807 12:00:30.789012   12345 register.go:284] Successfully updated node annotation. Next check in 30s...
 ```
 
 ## Related Issues
