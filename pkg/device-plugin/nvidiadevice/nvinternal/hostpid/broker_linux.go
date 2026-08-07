@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"golang.org/x/sys/unix"
+	"k8s.io/klog/v2"
 )
 
 const (
@@ -48,6 +49,7 @@ type Broker struct {
 	handlerWG    sync.WaitGroup
 	handlerMu    sync.Mutex
 	closing      atomic.Bool
+	dropped      atomic.Uint64
 	closeOnce    sync.Once
 	closeErr     error
 }
@@ -290,6 +292,7 @@ func (broker *Broker) handle(connection *net.UnixConn) {
 
 	request := make([]byte, requestSize)
 	if _, err := io.ReadFull(connection, request); err != nil {
+		broker.logDroppedTransaction("request read", err)
 		return
 	}
 	if !validRequest(request) {
@@ -299,11 +302,25 @@ func (broker *Broker) handle(connection *net.UnixConn) {
 	}
 
 	pid, err := peerPID(connection)
-	if err != nil || pid <= 0 {
+	if err != nil {
+		broker.logDroppedTransaction("peer credentials", err)
+		return
+	}
+	if pid <= 0 {
 		return
 	}
 	response := makeResponse(statusOK, uint32(pid))
 	writeResponse(connection, response)
+}
+
+func (broker *Broker) logDroppedTransaction(operation string, err error) {
+	count := broker.dropped.Add(1)
+	if count&(count-1) != 0 {
+		return
+	}
+	klog.V(4).Infof(
+		"Dropped host PID broker transaction during %s (count=%d): %v",
+		operation, count, err)
 }
 
 func writeResponse(connection *net.UnixConn,
