@@ -698,7 +698,8 @@ func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool 
 	cardType = strings.ToUpper(cardType)
 	match := func(list string) bool {
 		return slices.ContainsFunc(strings.Split(list, ","), func(t string) bool {
-			return strings.Contains(cardType, strings.ToUpper(t))
+			t = strings.TrimSpace(t)
+			return t != "" && strings.Contains(cardType, strings.ToUpper(t))
 		})
 	}
 	if inuse, ok := annos[useKey]; ok && strings.TrimSpace(inuse) != "" {
