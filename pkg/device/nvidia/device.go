@@ -844,11 +844,7 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
 		}
-		// CustomFilterRule must see the resolved memory request: for
-		// percentage-based requests (MemPercentagereq set, Memreq == 0),
-		// the raw request.Memreq is still 0, which would make its MIG
-		// template/slot size checks trivially pass regardless of whether
-		// any slot is actually big enough.
+		// CustomFilterRule must see the resolved memory request, not the raw (possibly zero) Memreq field.
 		resolvedReq := request
 		resolvedReq.Memreq = memreq
 		if !nv.CustomFilterRule(allocated, resolvedReq, tmpDevs[k.Type], dev) {

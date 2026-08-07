@@ -2887,12 +2887,7 @@ func TestFit_MigPercentageRequestRejectsUndersizedTemplate(t *testing.T) {
 	}
 	nv := InitNvidiaDevice(config)
 
-	// The only MIG template offers 1024MiB slots, but the pod requests 50%
-	// of an 8192MiB card (= 4096MiB) via MemPercentagereq rather than an
-	// explicit Memreq. CustomFilterRule must be evaluated against the
-	// resolved 4096MiB figure, not the raw (still zero) Memreq field, or
-	// it would wrongly report a fit against any unused slot regardless of
-	// size.
+	// The only MIG template offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
 	devices := []*device.DeviceUsage{
 		{
 			ID: "dev-0", Index: 0, Used: 0, Count: 1,
