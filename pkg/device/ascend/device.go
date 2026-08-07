@@ -512,6 +512,12 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
 		}
+		if !needTopology && !device.FitQuotaWithPodDevices(tmpDevs, allocated, pod.Namespace, k.Type,
+			int64(memreq), int64(k.Coresreq), npu.GetResourceNames().MemoryFactor) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "memreq", memreq, "coresreq", k.Coresreq)
+			continue
+		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
@@ -575,6 +581,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 
 	if needTopology {
 		if len(tmpDevs[k.Type]) == int(originReq) {
+			if !npu.fitQuotaForSelection(tmpDevs, allocated, pod, k.Type, reason) {
+				return false, tmpDevs, common.GenReason(reason, len(devices))
+			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		} else if len(tmpDevs[k.Type]) > int(originReq) {
@@ -584,6 +593,9 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				// If requesting multiple devices, select the best combination of cards.
 				combination := npu.computeBestCombination(nodeInfo, int(originReq), tmpDevs[k.Type])
 				tmpDevs[k.Type] = combination
+			}
+			if !npu.fitQuotaForSelection(tmpDevs, allocated, pod, k.Type, reason) {
+				return false, tmpDevs, common.GenReason(reason, len(devices))
 			}
 			klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
 			return true, tmpDevs, ""
@@ -595,6 +607,18 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
+}
+
+// fitQuotaForSelection charges the namespace for exactly the cards that were
+// chosen. Passing no extra request means only the contents of tmpDevs and
+// anything already allocated to the pod are weighed.
+func (npu *Devices) fitQuotaForSelection(tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, pod *corev1.Pod, devType string, reason map[string]int) bool {
+	if device.FitQuotaWithPodDevices(tmpDevs, allocated, pod.Namespace, devType, 0, 0, npu.GetResourceNames().MemoryFactor) {
+		return true
+	}
+	reason[common.ResourceQuotaNotFit]++
+	klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", klog.KObj(pod), "selected", len(tmpDevs[devType]))
+	return false
 }
 
 func hasNetworkID(devices []*device.DeviceUsage) bool {

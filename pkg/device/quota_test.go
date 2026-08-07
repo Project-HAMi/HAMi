@@ -400,3 +400,103 @@ func TestUpdateQuota(t *testing.T) {
 		t.Errorf("memory limit = %d, want 3000", got)
 	}
 }
+
+// FitQuotaWithPodDevices has to count the cards already picked for this pod,
+// otherwise a multi-card request is waved through one card at a time and the
+// namespace ends up over its limit.
+func TestFitQuotaWithPodDevices(t *testing.T) {
+	initTest()
+	ns := "fit-quota"
+	qm := NewQuotaManager()
+	qm.Quotas[ns] = &DeviceQuota{
+		"nvidia.com/gpumem":  &Quota{Used: 0, Limit: 1000, LimitSet: true},
+		"nvidia.com/gpucore": &Quota{Used: 0, Limit: 200, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	tests := []struct {
+		name      string
+		ns        string
+		tmpDevs   map[string]ContainerDevices
+		allocated *PodDevices
+		memreq    int64
+		coresreq  int64
+		factor    int32
+		want      bool
+	}{
+		{
+			name:   "first card fits",
+			memreq: 400, coresreq: 50, factor: 1,
+			want: true,
+		},
+		{
+			name: "second card counted against the first",
+			tmpDevs: map[string]ContainerDevices{
+				"NVIDIA": {{UUID: "dev-0", Usedmem: 700, Usedcores: 50}},
+			},
+			memreq: 400, coresreq: 50, factor: 1,
+			want: false,
+		},
+		{
+			name: "cards from an earlier container counted too",
+			allocated: &PodDevices{
+				"NVIDIA": PodSingleDevice{{{UUID: "dev-0", Usedmem: 700, Usedcores: 50}}},
+			},
+			memreq: 400, coresreq: 50, factor: 1,
+			want: false,
+		},
+		{
+			name:   "cores alone can exceed",
+			memreq: 10, coresreq: 250, factor: 1,
+			want: false,
+		},
+		{
+			name:   "factor raises the limit, so a scaled request still fits",
+			memreq: 2000, coresreq: 50, factor: 4,
+			want: true,
+		},
+		{
+			name:   "factor applied, request still over",
+			memreq: 5000, coresreq: 50, factor: 4,
+			want: false,
+		},
+		{
+			name:     "namespace with no quota is unrestricted",
+			ns:       "no-quota-here",
+			memreq:   999999,
+			coresreq: 999999,
+			factor:   1,
+			want:     true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			namespace := tt.ns
+			if namespace == "" {
+				namespace = ns
+			}
+			got := FitQuotaWithPodDevices(tt.tmpDevs, tt.allocated, namespace, "NVIDIA", tt.memreq, tt.coresreq, tt.factor)
+			if got != tt.want {
+				t.Errorf("FitQuotaWithPodDevices() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// A nil allocated pointer is the normal case for the first container in a pod.
+func TestFitQuotaWithPodDevicesNilAllocated(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	qm.Quotas["nil-alloc"] = &DeviceQuota{
+		"nvidia.com/gpumem": &Quota{Used: 0, Limit: 100, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, "nil-alloc") })
+
+	if !FitQuotaWithPodDevices(nil, nil, "nil-alloc", "NVIDIA", 50, 0, 1) {
+		t.Error("FitQuotaWithPodDevices() = false, want true for a request inside the limit")
+	}
+	if FitQuotaWithPodDevices(nil, nil, "nil-alloc", "NVIDIA", 150, 0, 1) {
+		t.Error("FitQuotaWithPodDevices() = true, want false for a request past the limit")
+	}
+}
