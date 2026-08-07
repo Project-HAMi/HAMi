@@ -114,6 +114,8 @@ type NvidiaDevicePlugin struct {
 
 	imexChannels imex.Channels
 
+	registerInAnnotationFn func() (bool, error) // test seam; nil in production, do not export
+
 	server *grpc.Server
 	health chan *rm.Device
 	stop   chan any
