@@ -210,7 +210,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			if err := sendMetric(ch, nodevGPUMemoryLimitDesc, prometheus.GaugeValue, float64(devs.Device.Totalmem)*float64(1024)*float64(1024), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUMemoryLimitDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodevGPUCoreLimitDesc, prometheus.GaugeValue, coreLimit, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			limitRatio := 1.0
+			if coreLimit <= 0 {
+				limitRatio = 0.0
+			}
+			if err := sendMetric(ch, nodevGPUCoreLimitDesc, prometheus.GaugeValue, limitRatio, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUCoreLimitDesc metric: %v", err)
 			}
 			if err := sendMetric(ch, nodevGPUMemoryAllocatedDesc, prometheus.GaugeValue, float64(devs.Device.Usedmem)*float64(1024)*float64(1024), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type); err != nil {
@@ -219,7 +223,11 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			if err := sendMetric(ch, nodevGPUSharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUSharedNumDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodeGPUCoreAllocatedDesc, prometheus.GaugeValue, coreAllocated, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+			allocatedRatio := 0.0
+			if coreLimit > 0 {
+				allocatedRatio = coreAllocated / coreLimit
+			}
+			if err := sendMetric(ch, nodeGPUCoreAllocatedDesc, prometheus.GaugeValue, allocatedRatio, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodeGPUCoreAllocatedDesc metric: %v", err)
 			}
 			if err := sendMetric(ch, nodeGPUOverview, prometheus.GaugeValue, float64(devs.Device.Usedmem)*float64(1024)*float64(1024), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type); err != nil {
@@ -289,22 +297,15 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							val.Namespace, val.Name, ctridx, val.NodeID)
 						continue
 					}
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
-						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
-					}
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
-						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
-					}
-					if legacy {
-						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-					}
-					var totaldev int32
+					var totalmem int32
+					var totalcore int32
 					found := false
 					for _, ni := range *nu {
 						for _, nodedev := range ni.Devices.DeviceLists {
-							if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
-								totaldev = nodedev.Device.Totalmem
+							lookupUUID := strings.Split(ctrdevval.UUID, "::")[0]
+							if strings.Compare(nodedev.Device.ID, lookupUUID) == 0 {
+								totalmem = nodedev.Device.Totalmem
+								totalcore = nodedev.Device.Totalcore
 								found = true
 								break
 							}
@@ -313,9 +314,24 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							break
 						}
 					}
+					
+					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
+						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
+					}
+					ctrAllocatedRatio := 0.0
+					if totalcore > 0 {
+						ctrAllocatedRatio = float64(ctrdevval.Usedcores) / float64(totalcore)
+					}
+					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrAllocatedRatio, val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
+						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
+					}
+					if legacy {
+						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+					}
 					klog.V(4).InfoS("Total memory for device",
 						"deviceUUID", ctrdevval.UUID,
-						"totalMemory", totaldev,
+						"totalMemory", totalmem,
 						"nodeID", val.NodeID,
 					)
 				}
