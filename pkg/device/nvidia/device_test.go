@@ -1224,6 +1224,80 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+func TestFit_DeviceCordon(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpumem",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	newDevices := func() []*device.DeviceUsage {
+		return []*device.DeviceUsage{
+			{ID: "dev-0", Count: 100, Totalmem: 128, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+			{ID: "dev-1", Count: 100, Totalmem: 128, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		}
+	}
+	request := device.ContainerDeviceRequest{Nums: 1, Memreq: 64, Coresreq: 50, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{}
+
+	nodeWithCordon := func(uuids string) *device.NodeInfo {
+		return &device.NodeInfo{Node: &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{DeviceCordonAnnotation: uuids}},
+		}}
+	}
+
+	t.Run("cordoned device is skipped, healthy sibling still fits", func(t *testing.T) {
+		fit, result, reason := dev.Fit(newDevices(), request, pod, nodeWithCordon("dev-1, "), &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected fit, got reason: %s", reason)
+		}
+		if got := result[NvidiaGPUDevice][0].UUID; got != "dev-0" {
+			t.Errorf("expected dev-0 (dev-1 is cordoned), got %s", got)
+		}
+	})
+
+	t.Run("all devices cordoned fails with CardCordoned reason", func(t *testing.T) {
+		fit, _, reason := dev.Fit(newDevices(), request, pod, nodeWithCordon("dev-0,dev-1"), &device.PodDevices{})
+		if fit {
+			t.Fatal("expected no fit, all devices are cordoned")
+		}
+		if reason != "2/2 CardCordoned" {
+			t.Errorf("expected reason %q, got %q", "2/2 CardCordoned", reason)
+		}
+	})
+
+	t.Run("running pods on a cordoned device are unaffected", func(t *testing.T) {
+		devices := newDevices()
+		devices[1].Used = 1
+		devices[1].Usedcores = 50
+		devices[1].Usedmem = 64
+		fit, result, _ := dev.Fit(devices, request, pod, nodeWithCordon("dev-1"), &device.PodDevices{})
+		if !fit {
+			t.Fatal("expected fit onto the non-cordoned device")
+		}
+		if got := result[NvidiaGPUDevice][0].UUID; got != "dev-0" {
+			t.Errorf("expected dev-0, got %s", got)
+		}
+		if devices[1].Used != 1 {
+			t.Errorf("cordon must not touch existing usage on dev-1, got Used=%d", devices[1].Used)
+		}
+	})
+
+	t.Run("no annotation or no node info means nothing cordoned", func(t *testing.T) {
+		for name, ni := range map[string]*device.NodeInfo{
+			"node present, annotation absent": {Node: &corev1.Node{}},
+			"NodeInfo.Node is nil":            {},
+		} {
+			fit, _, reason := dev.Fit(newDevices(), request, pod, ni, &device.PodDevices{})
+			if !fit {
+				t.Errorf("%s: expected fit, got reason: %s", name, reason)
+			}
+		}
+	})
+}
+
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string

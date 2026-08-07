@@ -29,6 +29,7 @@ const (
 	CardInsufficientMemory            = "CardInsufficientMemory"
 	CardInsufficientCore              = "CardInsufficientCore"
 	CardNotHealth                     = "CardNotHealth"
+	CardCordoned                      = "CardCordoned"
 	NumaNotFit                        = "NumaNotFit"
 	ExclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
