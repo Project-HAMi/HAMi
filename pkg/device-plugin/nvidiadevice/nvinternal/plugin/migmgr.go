@@ -252,13 +252,18 @@ func destroyAllMigInstances(dev nvml.Device) error {
 			continue
 		}
 		for _, gi := range gis {
-			ciInfoRet := profileIDToCIProfileID(giProfileID)
-			if ciInfo, r := gi.GetComputeInstanceProfileInfo(ciInfoRet, nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED); r == nvml.SUCCESS {
-				if cis, r2 := gi.GetComputeInstances(&ciInfo); r2 == nvml.SUCCESS {
-					for _, ci := range cis {
-						if d := ci.Destroy(); d != nvml.SUCCESS {
-							return fmt.Errorf("destroy compute instance: %s", nvml.ErrorString(d))
-						}
+			for ciProfileID := 0; ciProfileID < nvml.COMPUTE_INSTANCE_PROFILE_COUNT; ciProfileID++ {
+				ciInfo, r := gi.GetComputeInstanceProfileInfo(ciProfileID, nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
+				if r != nvml.SUCCESS {
+					continue
+				}
+				cis, r := gi.GetComputeInstances(&ciInfo)
+				if r != nvml.SUCCESS {
+					continue
+				}
+				for _, ci := range cis {
+					if d := ci.Destroy(); d != nvml.SUCCESS {
+						return fmt.Errorf("destroy compute instance: %s", nvml.ErrorString(d))
 					}
 				}
 			}
@@ -303,8 +308,10 @@ func allocationKey(gpuIndex int, profile string, placement nvml.GpuInstancePlace
 }
 
 // EnsureAllocation realizes exactly the scheduler-reserved profile and
-// placement. It never retries another placement.
-func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (string, error) {
+// placement. It returns whether this call created the instance, allowing the
+// caller to roll back only its own partial allocation. It never retries
+// another placement.
+func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (string, bool, error) {
 	key := allocationKey(gpuIndex, profile, placement)
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
@@ -314,33 +321,33 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	if inst := m.byAllocation[key]; inst != nil && inst.Present {
 		uuid := inst.MigUUID
 		m.mu.Unlock()
-		return uuid, nil
+		return uuid, false, nil
 	}
 	m.mu.Unlock()
 
 	if err := ensureMigModeEnabled(gpuIndex); err != nil {
-		return "", err
+		return "", false, err
 	}
 	profileKey := profileSliceKey(profile)
 	giProfileID, ok := profileNameToGIProfileID[profileKey]
 	if !ok {
-		return "", fmt.Errorf("unsupported MIG profile %q", profile)
+		return "", false, fmt.Errorf("unsupported MIG profile %q", profile)
 	}
 	ciProfileID, ok := profileNameToCIProfileID[profileKey]
 	if !ok {
-		return "", fmt.Errorf("unsupported MIG compute profile %q", profile)
+		return "", false, fmt.Errorf("unsupported MIG compute profile %q", profile)
 	}
 	dev, err := deviceHandleByIndex(gpuIndex)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 	giInfo, ret := dev.GetGpuInstanceProfileInfo(giProfileID)
 	if ret != nvml.SUCCESS {
-		return "", fmt.Errorf("get GI profile %s: %s", profile, nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("get GI profile %s: %s", profile, nvml.ErrorString(ret))
 	}
 	possible, ret := dev.GetGpuInstancePossiblePlacements(&giInfo)
 	if ret != nvml.SUCCESS {
-		return "", fmt.Errorf("get placements for %s: %s", profile, nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("get placements for %s: %s", profile, nvml.ErrorString(ret))
 	}
 	valid := false
 	for _, candidate := range possible {
@@ -350,38 +357,38 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 		}
 	}
 	if !valid {
-		return "", fmt.Errorf("scheduler selected invalid placement %+v for profile %s", placement, profile)
+		return "", false, fmt.Errorf("scheduler selected invalid placement %+v for profile %s", placement, profile)
 	}
 	gi, ret := dev.CreateGpuInstanceWithPlacement(&giInfo, &placement)
 	if ret != nvml.SUCCESS {
-		return "", fmt.Errorf("create GI profile=%s placement=%+v: %s", profile, placement, nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("create GI profile=%s placement=%+v: %s", profile, placement, nvml.ErrorString(ret))
 	}
 	giData, ret := gi.GetInfo()
 	if ret != nvml.SUCCESS {
 		gi.Destroy()
-		return "", fmt.Errorf("get GI info: %s", nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("get GI info: %s", nvml.ErrorString(ret))
 	}
 	ciInfo, ret := gi.GetComputeInstanceProfileInfo(ciProfileID, nvml.COMPUTE_INSTANCE_ENGINE_PROFILE_SHARED)
 	if ret != nvml.SUCCESS {
 		gi.Destroy()
-		return "", fmt.Errorf("get CI profile info: %s", nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("get CI profile info: %s", nvml.ErrorString(ret))
 	}
 	ci, ret := gi.CreateComputeInstance(&ciInfo)
 	if ret != nvml.SUCCESS {
 		gi.Destroy()
-		return "", fmt.Errorf("create CI: %s", nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("create CI: %s", nvml.ErrorString(ret))
 	}
 	ciData, ret := ci.GetInfo()
 	if ret != nvml.SUCCESS {
 		ci.Destroy()
 		gi.Destroy()
-		return "", fmt.Errorf("get CI info: %s", nvml.ErrorString(ret))
+		return "", false, fmt.Errorf("get CI info: %s", nvml.ErrorString(ret))
 	}
 	migUUID, err := findMigUUIDForGI(dev, giData.Id)
 	if err != nil {
 		ci.Destroy()
 		gi.Destroy()
-		return "", err
+		return "", false, err
 	}
 	inst := &migInstance{Profile: profile, Placement: placement, Present: true, GIID: giData.Id, CIID: ciData.Id, MigUUID: migUUID}
 	m.mu.Lock()
@@ -389,7 +396,7 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 	m.byAllocationMigUUID[migUUID] = key
 	m.mu.Unlock()
 	klog.InfoS("created scheduler-reserved MIG allocation", "uuid", migUUID, "gpu", gpuIndex, "profile", profile, "start", placement.Start, "size", placement.Size, "gpuInstanceID", giData.Id, "computeInstanceID", ciData.Id)
-	return migUUID, nil
+	return migUUID, true, nil
 }
 
 func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (migAllocationRuntimeInfo, bool) {

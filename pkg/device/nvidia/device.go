@@ -580,6 +580,9 @@ func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, requ
 	if devusage.Mode == MigMode {
 		occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
 		for _, existing := range toAllocate {
+			if existing.UUID != devusage.ID {
+				continue
+			}
 			_, placement, ok := selectMigCandidate(devusage.MigProfiles, occupied, existing.Usedmem)
 			if !ok {
 				return false

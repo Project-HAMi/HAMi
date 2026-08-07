@@ -19,6 +19,8 @@ package nvidia
 import (
 	"testing"
 
+	corev1 "k8s.io/api/core/v1"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
@@ -63,5 +65,46 @@ func TestCustomFilterUsesReportedPlacementCapacity(t *testing.T) {
 	}
 	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, nil, usage) {
 		t.Fatal("1g request should fit the remaining placement")
+	}
+}
+
+func TestCustomFilterIgnoresQueuedAllocationsForOtherGPUs(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 0, Size: 2}},
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 2, Size: 2}},
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 4, Size: 2}},
+		},
+	}
+	queued := device.ContainerDevices{{UUID: "GPU-b", Usedmem: 5000}}
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage) {
+		t.Fatal("allocation queued on another GPU consumed this GPU's remaining placement")
+	}
+	queued[0].UUID = "GPU-a"
+	if dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 5000}, queued, usage) {
+		t.Fatal("two allocations on this GPU should not fit its single remaining placement")
+	}
+}
+
+func TestFitUsesEffectivePercentageMemoryForMigPlacement(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Type: NvidiaGPUDevice, Mode: MigMode, Health: true,
+		Count: 7, Used: 3, Totalmem: 40960, Usedmem: 30720, Totalcore: 100,
+		MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 0, Size: 2}},
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 2, Size: 2}},
+			{Profile: "2g.10gb", Placement: device.MigPlacement{Start: 4, Size: 2}},
+		},
+	}
+	request := device.ContainerDeviceRequest{
+		Nums: 1, Type: NvidiaGPUDevice, MemPercentagereq: 25,
+	}
+	fit, _, _ := dev.Fit([]*device.DeviceUsage{usage}, request, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Fatal("25 percent memory request should not fit when only a 1g placement remains")
 	}
 }

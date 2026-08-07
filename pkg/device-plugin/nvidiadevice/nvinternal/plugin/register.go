@@ -189,6 +189,10 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		}
 		if isMigMode {
 			info.MIGProfiles = plugin.discoverMigProfiles(ndev, Model)
+			if len(info.MIGProfiles) == 0 {
+				klog.InfoS("skip MIG device with no discovered profile capacity", "id", UUID, "model", Model)
+				continue
+			}
 			info.Count = 0
 			for _, profile := range info.MIGProfiles {
 				if int32(profile.InstanceCount) > info.Count {

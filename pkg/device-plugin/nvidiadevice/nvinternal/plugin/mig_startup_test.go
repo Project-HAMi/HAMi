@@ -15,9 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 func TestSortedIntSetKeys(t *testing.T) {
