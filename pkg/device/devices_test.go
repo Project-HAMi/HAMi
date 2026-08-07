@@ -1515,6 +1515,26 @@ func TestCheckType(t *testing.T) {
 			cardType: "NVIDIA-A100",
 			want:     false,
 		},
+		// Regression: a trailing/leading/double comma leaves an empty split member, and
+		// strings.Contains(cardType, "") is always true, so it must not match every card.
+		{
+			name:     "nouse with trailing comma only excludes named type",
+			annos:    map[string]string{noUseKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "nouse with leading comma only excludes named type",
+			annos:    map[string]string{noUseKey: ",V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use with trailing comma matches named type only",
+			annos:    map[string]string{useKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
