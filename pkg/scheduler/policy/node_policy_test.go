@@ -255,8 +255,53 @@ func TestOverrideScore(t *testing.T) {
 					Usedmem:   0,
 				},
 			},
+			// Metax-GPU implements device.PolicyNeutralScorer, so OverrideScore
+			// weights its raw "higher is better" score by 10000 under Binpack.
+			// The node only carries the losses annotation, so the raw score
+			// falls back to 2000 - loss = 2000 - 321 = 1679 for the requested
+			// two devices, giving a weighted result of 16790000.
 			policy:    "binpack",
-			wantScore: 1679,
+			wantScore: 16790000,
+		},
+		{
+			// Under Spread the same policy-neutral raw score of 1679 is inverted
+			// (weight -10000), producing -16790000. Because Binpack picks the
+			// highest score and Spread picks the lowest, inverting the sign
+			// preserves the node ranking across both policies.
+			name: "Metax-GPU with spread policy returns inverted weighted score",
+			nodeScore: &NodeScore{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"metax-tech.com/gpu.topology.losses": "{\"1\":123,\"2\":321}",
+						},
+					},
+				},
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Metax-GPU": device.PodSingleDevice{
+						device.ContainerDevices{
+							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
+							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
+						},
+					},
+				},
+				Score: 0,
+			},
+			devices: []*device.DeviceUsage{
+				{
+					Count:     4,
+					Totalcore: 8,
+					Totalmem:  4096,
+					Type:      "gpu",
+					Used:      0,
+					Usedcores: 0,
+					Usedmem:   0,
+				},
+			},
+			policy:    "spread",
+			wantScore: -16790000,
 		},
 		{
 			name: "Device score equal to zero",
