@@ -261,22 +261,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		return err
 	}
 
-	err = plugin.Serve()
-	if err != nil {
-		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
-		plugin.cleanup()
-		return err
-	}
-	klog.Infof("Starting to serve '%s' on %s", plugin.rm.Resource(), plugin.socket)
-
-	err = plugin.Register(kubeletSocket)
-	if err != nil {
-		klog.Infof("Could not register device plugin: %s", err)
-		plugin.Stop()
-		return err
-	}
-	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
-
 	// Prepare the lock directory before any dynamic MIG operation. A stale
 	// lock can be left behind when the previous plugin process exits midway.
 	if err = CreateMigApplyLockDir(); err != nil {
@@ -300,16 +284,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 			break
 		}
 	}
-	go func() {
-		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
-		if err != nil {
-			klog.Infof("Failed to start health check: %v; continuing with health checks disabled", err)
-		}
-	}()
-
-	go func() {
-		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
-	}()
 	if plugin.operatingMode == "mig" {
 		if deviceSupportMig {
 			inUse, detectErr := collectInUseGPUs(plugin.ctx, os.Getenv(util.NodeNameEnvName))
@@ -333,6 +307,35 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 				klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
 			}
 		}
+	}
+
+	err = plugin.Serve()
+	if err != nil {
+		klog.Infof("Could not start device plugin for '%s': %s", plugin.rm.Resource(), err)
+		plugin.cleanup()
+		return err
+	}
+	klog.Infof("Starting to serve '%s' on %s", plugin.rm.Resource(), plugin.socket)
+
+	err = plugin.Register(kubeletSocket)
+	if err != nil {
+		klog.Infof("Could not register device plugin: %s", err)
+		plugin.Stop()
+		return err
+	}
+	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
+
+	go func() {
+		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
+		if err != nil {
+			klog.Infof("Failed to start health check: %v; continuing with health checks disabled", err)
+		}
+	}()
+
+	go func() {
+		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
+	}()
+	if plugin.operatingMode == "mig" {
 		// Pod annotations are the allocation source of truth. Periodically
 		// reconcile the manager with live Pods so completed or deleted Pods
 		// release their exact profile+placement allocation.

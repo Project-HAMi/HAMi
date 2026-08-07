@@ -642,6 +642,21 @@ func nodeListLen(nodes *corev1.NodeList) int {
 	return len(nodes.Items)
 }
 
+func migAllocationUsage(allocation nvidia.MigAllocation) device.MigAllocation {
+	usage := device.MigAllocation{
+		Profile: allocation.Profile, Placement: allocation.Placement,
+		MigUUID:      allocation.MigUUID,
+		RuntimeReady: allocation.MigUUID != "" && allocation.GPUInstanceID != nil && allocation.ComputeInstanceID != nil,
+	}
+	if allocation.GPUInstanceID != nil {
+		usage.GPUInstanceID = *allocation.GPUInstanceID
+	}
+	if allocation.ComputeInstanceID != nil {
+		usage.ComputeInstanceID = *allocation.ComputeInstanceID
+	}
+	return usage
+}
+
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
@@ -692,18 +707,7 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 								}
 								allocation := allocations[0]
 								allocationsByGPU[udevice.UUID] = allocations[1:]
-								migAllocation := device.MigAllocation{
-									Profile: allocation.Profile, Placement: allocation.Placement,
-									MigUUID:      allocation.MigUUID,
-									RuntimeReady: allocation.MigUUID != "" && allocation.GPUInstanceID != nil && allocation.ComputeInstanceID != nil,
-								}
-								if allocation.GPUInstanceID != nil {
-									migAllocation.GPUInstanceID = *allocation.GPUInstanceID
-								}
-								if allocation.ComputeInstanceID != nil {
-									migAllocation.ComputeInstanceID = *allocation.ComputeInstanceID
-								}
-								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocation)
+								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocationUsage(allocation))
 								continue
 							}
 							if d.Device.Mode == nvidia.MigMode {
@@ -711,6 +715,36 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 								d.Device.Health = false
 							}
 						}
+					}
+				}
+			}
+		}
+		for gpuUUID, allocations := range allocationsByGPU {
+			if len(allocations) == 0 {
+				continue
+			}
+			matched := false
+			for _, d := range node.Devices.DeviceLists {
+				if d.Device.ID != gpuUUID {
+					continue
+				}
+				matched = true
+				if d.Device.Mode != nvidia.MigMode {
+					klog.ErrorS(nil, "unconsumed MIG reservations reference a non-MIG device", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+					d.Device.Health = false
+					break
+				}
+				for _, allocation := range allocations {
+					d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocationUsage(allocation))
+				}
+				klog.InfoS("restored MIG reservations missing from cached Pod devices", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+				break
+			}
+			if !matched {
+				klog.ErrorS(nil, "unconsumed MIG reservations reference an unknown device", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+				for _, d := range node.Devices.DeviceLists {
+					if d.Device.Mode == nvidia.MigMode {
+						d.Device.Health = false
 					}
 				}
 			}

@@ -57,6 +57,10 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
+func ptr[T any](value T) *T {
+	return &value
+}
+
 func TestCDIAllocateResponse(t *testing.T) {
 	testCases := []struct {
 		description          string
