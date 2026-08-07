@@ -128,6 +128,47 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
 }
 
+// Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()
+// does not apply that same filter and returns success. Before the fix, getNodesUsage()
+// blindly assigned cachenodeMap[id] = overallnodeMap[id] for every node GetNode() accepted,
+// so a node present in nodeManager but absent from the ListNodes() snapshot produced a nil
+// *NodeUsage entry with no corresponding failedNodes record. That nil is later dereferenced
+// unconditionally by calcScoreWithOptions (viewStatus(*node)), panicking the scheduler.
+func Test_getNodesUsage_NodeMissingFromSnapshotIsNotCachedAsNil(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: nil,
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "hami",
+				Health:  true,
+			}},
+		},
+	})
+	podMap := device.NewPodManager()
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 0, len(*cachenodeMap))
+	v, present := (*cachenodeMap)["node1"]
+	assert.Assert(t, !present, "node1 must not be cached at all, got %v", v)
+	_, failed := failedNodes["node1"]
+	assert.Assert(t, failed, "node1 should be recorded as a failed node")
+}
+
 func Test_getNodesUsage_StaleMigIndexDoesNotPanic(t *testing.T) {
 	nodeMage := newNodeManager()
 	nodeMage.addNode("node1", &device.NodeInfo{
