@@ -74,3 +74,37 @@ func TestGetNodesUsageFailsClosedWithoutMigAllocation(t *testing.T) {
 		t.Fatal("MIG device must be fail-closed when an allocated Pod lacks profile/placement")
 	}
 }
+
+func TestGetNodesUsageRestoresUnconsumedMigReservations(t *testing.T) {
+	nodes := newNodeManager()
+	nodes.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {{
+			ID: "GPU-a", Count: 7, Devmem: 40960, Devcore: 100, Mode: nvidia.MigMode, Health: true,
+			MIGProfiles: []device.MigProfile{{Name: "1g.5gb", MemoryMB: 5120, Core: 14, Placements: []device.MigPlacement{{Start: 5, Size: 1}, {Start: 6, Size: 1}}}},
+		}}},
+	})
+	pods := device.NewPodManager()
+	pods.AddPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		UID: "pod-1", Name: "pod-1", Namespace: "default",
+		Annotations: map[string]string{nvidia.MigAllocationsAnnotation: `[
+			{"containerIndex":0,"deviceIndex":0,"gpuUUID":"GPU-a","profile":"1g.5gb","placement":{"start":6,"size":1}},
+			{"containerIndex":0,"deviceIndex":1,"gpuUUID":"GPU-a","profile":"1g.5gb","placement":{"start":5,"size":1}}
+		]`},
+	}}, "node1", device.PodDevices{nvidia.NvidiaGPUDevice: {{{UUID: "GPU-a", Usedmem: 5120, Usedcores: 14}}}})
+
+	s := Scheduler{nodeManager: nodes, podManager: pods}
+	nodeNames := []string{"node1"}
+	usage, _, _, err := s.getNodesUsage(&nodeNames, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deviceUsage := (*usage)["node1"].Devices.DeviceLists[0].Device
+	if !deviceUsage.Health {
+		t.Fatal("MIG device should remain healthy when every reservation can be restored")
+	}
+	allocations := deviceUsage.MigAllocationsInUse
+	if len(allocations) != 2 || allocations[0].Placement != (device.MigPlacement{Start: 6, Size: 1}) || allocations[1].Placement != (device.MigPlacement{Start: 5, Size: 1}) {
+		t.Fatalf("restored allocations: %+v", allocations)
+	}
+}
