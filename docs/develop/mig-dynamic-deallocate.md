@@ -1,5 +1,7 @@
 # Dynamic MIG Architecture
 
+For an operator-focused upgrade path from the `master` Geometry implementation or NVIDIA MIG Manager, see [Migrating to HAMi Dynamic MIG](./dynamic-mig-migration.md).
+
 ## Context
 
 NVIDIA MIG divides a physical GPU into hardware-isolated compute instances. GPU models expose profile capacity and placement rules through NVML, while Kubernetes schedules workloads through declarative resources.

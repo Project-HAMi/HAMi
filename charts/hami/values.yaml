@@ -550,12 +550,8 @@ prometheus:
 # device-config:
 #   content: |
 #     nvidia:
-#       knownMigGeometries:
+#       migProfileAllowlist:
 #         - models: [ "RTX 6000 Ada" ]
-#           allowedGeometries:
-#             - - name: "1g.6gb"
-#                 core: 25
-#                 memory: 6144
-#                 count: 4
+#           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
 device-config:
   content: ""
