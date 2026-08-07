@@ -49,6 +49,12 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
+var (
+	getNode              = util.GetNode
+	patchNodeAnnotations = util.PatchNodeAnnotations
+	getAPIDevices        = (*NvidiaDevicePlugin).getAPIDevices
+)
+
 // int8Slice wraps an []int8 with more functions.
 type int8Slice []int8
 
@@ -195,14 +201,14 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 // RegisterInAnnotation scans devices and patches node annotations.
 // Returns (changed, error) where changed indicates whether the annotation was actually updated.
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
-	devices := plugin.getAPIDevices()
+	devices := getAPIDevices(plugin)
 
 	// Log compact summary at V(3); full details at V(5)
 	klog.V(3).Infof("Discovered %d device(s) for registration", len(*devices))
 	klog.V(5).InfoS("Device details", "devices", devices)
 
 	annos := make(map[string]string)
-	node, err := util.GetNode(util.NodeName)
+	node, err := getNode(util.NodeName)
 	if err != nil {
 		klog.Errorln("get node error", err.Error())
 		return false, err
@@ -212,7 +218,6 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		klog.V(3).Info("Device info unchanged, skipping annotation update")
 		return false, nil
 	}
-	plugin.deviceCache = encodeddevices
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
@@ -240,12 +245,13 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	}
 	klog.Infof("Updating node annotations with %d device(s)", len(*devices))
 	klog.V(3).Infof("Annotation content: %v", annos)
-	err = util.PatchNodeAnnotations(node, annos)
-
+	err = patchNodeAnnotations(node, annos)
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
+		return true, err
 	}
-	return true, err
+	plugin.deviceCache = encodeddevices
+	return true, nil
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
