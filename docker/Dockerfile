@@ -8,7 +8,7 @@ ADD . /k8s-vgpu
 #RUN --mount=type=cache,target=/go/pkg/mod \
 #    cd /k8s-vgpu && make all
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.12.2
+RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM $NVIDIA_IMAGE AS nvbuild
 RUN dnf install -y cmake git && dnf clean all
@@ -19,7 +19,7 @@ WORKDIR /libvgpu
 RUN rm -rf /libvgpu/build
 RUN bash ./build.sh
 
-FROM nvidia/cuda:13.3.0-base-ubuntu22.04@sha256:e08868e73d2045f1cbe0c39222441d670f8245d6d98e0434bcc9453c7cdb6a31
+FROM nvidia/cuda:13.3.1-base-ubuntu22.04@sha256:ea2a388e99273207c6389b3098a61ebca5ab41d31168dfc4350d0cfa614703e4
 RUN apt-get update && \
     apt-mark hold cuda-toolkit-config-common cuda-toolkit-13-config-common && \
     DEBIAN_FRONTEND=noninteractive apt-get upgrade -y && \

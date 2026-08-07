@@ -185,8 +185,13 @@ func (l *ContainerLister) Update() error {
 		if !entry.IsDir() {
 			continue
 		}
+		parts := strings.SplitN(entry.Name(), "_", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			klog.Warningf("Skipping dir with unexpected name format: %s", entry.Name())
+			continue
+		}
 		dirName := filepath.Join(l.containerPath, entry.Name())
-		podUID := strings.Split(entry.Name(), "_")[0]
+		podUID := parts[0]
 		if !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
 			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
@@ -209,11 +214,10 @@ func (l *ContainerLister) Update() error {
 			continue
 		}
 		if usage == nil {
-			// no cuInit in container
 			continue
 		}
 		usage.PodUID = podUID
-		usage.ContainerName = strings.Split(entry.Name(), "_")[1]
+		usage.ContainerName = parts[1]
 		l.containers[entry.Name()] = usage
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
 	}
@@ -277,12 +281,13 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	if info.Size() == 1197897 {
 		klog.Infoln("casting......v0")
 		usage.Info = v0.CastSpec(usage.data)
-	} else if head.majorVersion == 1 {
+	} else if head.majorVersion == 1 && info.Size() >= int64(v1.MinSize()) {
 		klog.Infoln("casting......v1")
 		usage.Info = v1.CastSpec(usage.data)
 	} else {
+		majorVersion, minorVersion := head.majorVersion, head.minorVersion
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.majorVersion, head.minorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	return usage, nil
 }

@@ -365,6 +365,7 @@ test case matrix.
 
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -476,6 +477,7 @@ test case matrix.
 */
 func Test_Filter(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -855,6 +857,114 @@ func Test_Filter(t *testing.T) {
 	}
 }
 
+func TestSchedulerOnDelQuotaClearsLimitFromTombstone(t *testing.T) {
+	const namespace = "quota-tombstone-test"
+
+	s := NewScheduler()
+
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	require.True(t, ok, "NVIDIA device should be registered")
+
+	resourceName := nvidiaDevice.GetResourceNames().ResourceMemoryName
+	require.NotEmpty(t, resourceName, "NVIDIA memory resource name should not be empty")
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-quota",
+			Namespace: namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + resourceName): *resource.NewQuantity(1024, resource.BinarySI),
+			},
+		},
+	}
+
+	s.onAddQuota(quota)
+	t.Cleanup(func() {
+		s.onDelQuota(quota)
+	})
+
+	quotas := s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok := quotas[namespace]
+	require.True(t, ok)
+	require.Equal(t, int64(1024), (*namespaceQuota)[resourceName].Limit)
+
+	s.onDelQuota(cache.DeletedFinalStateUnknown{
+		Key: namespace + "/" + quota.Name,
+		Obj: quota,
+	})
+
+	quotas = s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok = quotas[namespace]
+	require.True(t, ok)
+	require.Equal(t, int64(0), (*namespaceQuota)[resourceName].Limit)
+}
+
+func TestSchedulerOnDelQuotaIgnoresInvalidObjects(t *testing.T) {
+	const namespace = "invalid-quota-delete-test"
+
+	s := NewScheduler()
+
+	nvidiaDevice, ok := device.GetDevices()[nvidia.NvidiaGPUDevice]
+	require.True(t, ok, "NVIDIA device should be registered")
+
+	resourceName := nvidiaDevice.GetResourceNames().ResourceMemoryName
+	require.NotEmpty(t, resourceName)
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "gpu-quota",
+			Namespace: namespace,
+		},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits." + resourceName): *resource.NewQuantity(1024, resource.BinarySI),
+			},
+		},
+	}
+
+	s.onAddQuota(quota)
+	t.Cleanup(func() {
+		s.onDelQuota(quota)
+	})
+
+	quotas := s.quotaManager.GetResourceQuota()
+	namespaceQuota, ok := quotas[namespace]
+	require.True(t, ok)
+	expectedLimit := (*namespaceQuota)[resourceName].Limit
+
+	tests := []struct {
+		name string
+		obj  any
+	}{
+		{
+			name: "tombstone containing non-quota object",
+			obj: cache.DeletedFinalStateUnknown{
+				Key: "test/invalid",
+				Obj: struct{}{},
+			},
+		},
+		{
+			name: "unknown delete object",
+			obj:  struct{}{},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				s.onDelQuota(test.obj)
+			})
+
+			currentQuotas := s.quotaManager.GetResourceQuota()
+			currentNamespaceQuota, ok := currentQuotas[namespace]
+			require.True(t, ok)
+			require.Equal(t, expectedLimit, (*currentNamespaceQuota)[resourceName].Limit)
+		})
+	}
+}
+
 func TestSchedulerOnDelNodeCleansLockDirectNode(t *testing.T) {
 	nodelockutil.ResetNodeLocksForTest()
 	t.Cleanup(nodelockutil.ResetNodeLocksForTest)
@@ -1202,6 +1312,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 
 	s := NewScheduler()
 	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 
@@ -1271,6 +1382,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 
 func Test_ResourceQuota(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -1955,7 +2067,9 @@ func Test_Scheduler_Issue1368_TerminatingPodRetainsCache(t *testing.T) {
 
 func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 	device.SupportDevices["TEST"] = "hami.io/test-allocated"
+	t.Cleanup(func() { delete(device.SupportDevices, "TEST") })
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			UID:       "bad-anno-uid",
@@ -1986,6 +2100,7 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
@@ -2029,6 +2144,7 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
+	t.Cleanup(func() { close(s.stopCh) })
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})

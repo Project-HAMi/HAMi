@@ -160,6 +160,12 @@ type ResourceNames struct {
 	ResourceCountName  string
 	ResourceMemoryName string
 	ResourceCoreName   string
+	// MemoryFactor is the scale GenerateResourceRequests applies to the memory
+	// value read off the container spec. Recorded usage is in scaled units
+	// while a ResourceQuota limit is written in unscaled ones, so a quota check
+	// has to bring the limit up by the same factor. Backends that do not scale
+	// leave this zero.
+	MemoryFactor int32
 }
 
 type ContainerDevice struct {
@@ -692,7 +698,8 @@ func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool 
 	cardType = strings.ToUpper(cardType)
 	match := func(list string) bool {
 		return slices.ContainsFunc(strings.Split(list, ","), func(t string) bool {
-			return strings.Contains(cardType, strings.ToUpper(t))
+			t = strings.TrimSpace(t)
+			return t != "" && strings.Contains(cardType, strings.ToUpper(t))
 		})
 	}
 	if inuse, ok := annos[useKey]; ok && strings.TrimSpace(inuse) != "" {

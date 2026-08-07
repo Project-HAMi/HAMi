@@ -19,10 +19,12 @@ package util
 import (
 	"context"
 	"testing"
+	"time"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -518,6 +520,98 @@ func Test_AllContainersCreated(t *testing.T) {
 	}
 }
 
+func TestIsPodGroupMember(t *testing.T) {
+	podGroupName := "my-training-job"
+	emptyPodGroupName := ""
+
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "nil pod",
+			pod:  nil,
+			want: false,
+		},
+		{
+			name: "no group membership at all",
+			pod:  &corev1.Pod{},
+			want: false,
+		},
+		{
+			name: "scheduler-plugins Coscheduling label present",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: podGroupName},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "coscheduling label present but empty",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: ""},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "native GenericWorkload PodGroup via Spec.SchedulingGroup",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &podGroupName,
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "Spec.SchedulingGroup set but PodGroupName nil",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "Spec.SchedulingGroup set but PodGroupName empty",
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &emptyPodGroupName,
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "both coscheduling label and native SchedulingGroup present",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Labels: map[string]string{PodGroupLabel: podGroupName},
+				},
+				Spec: corev1.PodSpec{
+					SchedulingGroup: &corev1.PodSchedulingGroup{
+						PodGroupName: &podGroupName,
+					},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := IsPodGroupMember(test.pod)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func TestPatchPodLabels(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 
@@ -685,4 +779,98 @@ func TestSchedulerPolicyName_String(t *testing.T) {
 			assert.Equal(t, tt.want, tt.policy.String())
 		})
 	}
+}
+
+func TestEmitNodeWarningEvent(t *testing.T) {
+	const (
+		nodeName = "test-node"
+		nodeUID  = types.UID("test-uid-1234")
+		reason   = "AsymmetricGPUP2PLink"
+		msg1     = "first message"
+		msg2     = "updated message"
+	)
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			UID:  nodeUID,
+		},
+	}
+	dedupWindow := time.Hour
+
+	t.Run("no existing event creates new event", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+
+		EmitNodeWarningEvent(node, reason, msg1, dedupWindow)
+
+		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
+			context.TODO(), metav1.ListOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, 1, len(events.Items))
+		assert.Equal(t, reason, events.Items[0].Reason)
+		assert.Equal(t, msg1, events.Items[0].Message)
+		assert.Equal(t, int32(1), events.Items[0].Count)
+		assert.Equal(t, corev1.EventTypeWarning, events.Items[0].Type)
+	})
+
+	t.Run("existing event within dedupWindow updates count and message", func(t *testing.T) {
+		past := metav1.NewTime(time.Now().Add(-30 * time.Minute)) // within 1h window
+		existing := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      nodeName + "-existing",
+				Namespace: corev1.NamespaceDefault,
+			},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node",
+				Name: nodeName,
+				UID:  nodeUID,
+			},
+			Reason:         reason,
+			Message:        msg1,
+			Type:           corev1.EventTypeWarning,
+			Count:          3,
+			FirstTimestamp: past,
+			LastTimestamp:  past,
+		}
+		client.KubeClient = fake.NewClientset(existing)
+
+		EmitNodeWarningEvent(node, reason, msg2, dedupWindow)
+
+		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
+			context.TODO(), metav1.ListOptions{})
+		assert.NilError(t, err)
+		// Must still be exactly one event — no new object created.
+		assert.Equal(t, 1, len(events.Items))
+		assert.Equal(t, int32(4), events.Items[0].Count)
+		assert.Equal(t, msg2, events.Items[0].Message)
+	})
+
+	t.Run("existing event outside dedupWindow creates new event", func(t *testing.T) {
+		old := metav1.NewTime(time.Now().Add(-2 * time.Hour)) // outside 1h window
+		existing := &corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      nodeName + "-old",
+				Namespace: corev1.NamespaceDefault,
+			},
+			InvolvedObject: corev1.ObjectReference{
+				Kind: "Node",
+				Name: nodeName,
+				UID:  nodeUID,
+			},
+			Reason:         reason,
+			Message:        msg1,
+			Type:           corev1.EventTypeWarning,
+			Count:          1,
+			FirstTimestamp: old,
+			LastTimestamp:  old,
+		}
+		client.KubeClient = fake.NewClientset(existing)
+
+		EmitNodeWarningEvent(node, reason, msg2, dedupWindow)
+
+		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
+			context.TODO(), metav1.ListOptions{})
+		assert.NilError(t, err)
+		// Old event still present plus one new event.
+		assert.Equal(t, 2, len(events.Items))
+	})
 }

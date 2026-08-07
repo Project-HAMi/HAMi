@@ -19,6 +19,7 @@ package plugin
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/context"
@@ -31,6 +32,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func TestGenerateMigTemplate(t *testing.T) {
@@ -430,7 +432,6 @@ func Test_PodAllocationTrySuccess(t *testing.T) {
 }
 
 func Test_PodAllocationSuccess(t *testing.T) {
-	// Initialize fake clientset and pre-load test data
 	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -441,35 +442,18 @@ func Test_PodAllocationSuccess(t *testing.T) {
 			},
 		},
 	}
-
-	// Add the pod to the fake clientset
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
 	nodeName := "test-node"
-	lockName := "test-lock"
-
-	// Update pod annotations and release the lock as part of the setup for the test
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
-
-	// Call the function under test
-	PodAllocationSuccess(nodeName, pod, lockName)
-
-	// Refresh the pod state from the fake clientset and check the DeviceBindPhase annotation
-	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get refreshed pod: %v", err)
+	if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+		t.Fatal(err)
 	}
 
-	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
-	if !ok || annos != util.DeviceBindSuccess {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindSuccess, annos)
-	}
+	PodAllocationSuccess(nodeName, pod, "test-lock")
+
+	assertDeviceBindPhase(t, pod, util.DeviceBindSuccess)
+	assertNodeLockAbsent(t, nodeName)
 }
-func Test_PodAllocationFailed(t *testing.T) {
 
+func Test_PodAllocationFailed(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -478,30 +462,140 @@ func Test_PodAllocationFailed(t *testing.T) {
 			Annotations: map[string]string{"test-annotation-key": "test-annotation-value"},
 		},
 	}
-
-	// add pod to the fake client
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
+	nodeName := "test-node"
+	if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+		t.Fatal(err)
 	}
 
-	nodeName := "test-node"
-	lockName := "test-lock"
+	PodAllocationFailed(nodeName, pod, "test-lock")
 
-	// simulate a failed pod allocation
-	PodAllocationFailed(nodeName, pod, lockName)
+	assertDeviceBindPhase(t, pod, util.DeviceBindFailed)
+	assertNodeLockAbsent(t, nodeName)
+}
 
-	// retrieve the pod from the fake client
+func TestUpdatePodAnnotationsAndReleaseLock(t *testing.T) {
+	t.Run("releases lock when patch fails", func(t *testing.T) {
+		for _, phase := range []string{util.DeviceBindFailed, util.DeviceBindSuccess} {
+			t.Run(phase, func(t *testing.T) {
+				client.KubeClient = fake.NewClientset()
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testpod",
+						Namespace: "default",
+					},
+				}
+				nodeName := "test-node"
+				if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(pod, nodeName), metav1.CreateOptions{}); err != nil {
+					t.Fatalf("Failed to create test node: %v", err)
+				}
+
+				updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", phase)
+
+				assertNodeLockAbsent(t, nodeName)
+			})
+		}
+	})
+
+	t.Run("patches phase and releases lock when patch succeeds", func(t *testing.T) {
+		for _, phase := range []string{util.DeviceBindFailed, util.DeviceBindSuccess} {
+			t.Run(phase, func(t *testing.T) {
+				client.KubeClient = fake.NewClientset()
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testpod",
+						Namespace: "default",
+					},
+				}
+				nodeName := "test-node"
+				if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+					t.Fatal(err)
+				}
+
+				updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", phase)
+
+				assertDeviceBindPhase(t, pod, phase)
+				assertNodeLockAbsent(t, nodeName)
+			})
+		}
+	})
+
+	t.Run("does not clear another pod lock when patch fails", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		owner := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "owner-pod",
+				Namespace: "default",
+			},
+		}
+		caller := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "caller-pod",
+				Namespace: "default",
+			},
+		}
+		nodeName := "test-node"
+		if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(owner, nodeName), metav1.CreateOptions{}); err != nil {
+			t.Fatalf("Failed to create test node: %v", err)
+		}
+
+		updatePodAnnotationsAndReleaseLock(nodeName, caller, "test-lock", util.DeviceBindFailed)
+
+		refreshedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Failed to get refreshed node: %v", err)
+		}
+		lockStr, ok := refreshedNode.Annotations[nodelock.NodeLockKey]
+		if !ok {
+			t.Fatal("expected other pod's node lock to remain")
+		}
+		if !strings.HasSuffix(lockStr, nodelock.NodeLockSep+nodelock.GeneratePodNamespaceName(owner, nodelock.NodeLockSep)) {
+			t.Fatalf("expected lock owned by %s/%s, got %q", owner.Namespace, owner.Name, lockStr)
+		}
+	})
+}
+
+func lockedNode(pod *corev1.Pod, nodeName string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod),
+			},
+		},
+	}
+}
+
+func createPodAndLockedNode(t *testing.T, pod *corev1.Pod, nodeName string) error {
+	t.Helper()
+	if _, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		return err
+	}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(pod, nodeName), metav1.CreateOptions{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func assertDeviceBindPhase(t *testing.T, pod *corev1.Pod, want string) {
+	t.Helper()
 	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get refreshed pod: %v", err)
 	}
+	got, ok := refreshedPod.Annotations[util.DeviceBindPhase]
+	if !ok || got != want {
+		t.Fatalf("Expected DeviceBindPhase annotation to be %q, got %q", want, got)
+	}
+}
 
-	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
-	if !ok {
-		t.Error("Expected DeviceBindPhase annotation to be present")
-	} else if annos != util.DeviceBindFailed {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
+func assertNodeLockAbsent(t *testing.T, nodeName string) {
+	t.Helper()
+	refreshedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed node: %v", err)
+	}
+	if _, ok := refreshedNode.Annotations[nodelock.NodeLockKey]; ok {
+		t.Fatal("expected node lock to be released")
 	}
 }
 

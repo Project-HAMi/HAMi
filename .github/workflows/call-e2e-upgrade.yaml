@@ -6,7 +6,8 @@ on:
       ref:
         required: true
         type: string
-permissions: write-all
+permissions:
+  contents: read
 
 jobs:
   upgrade-e2e:

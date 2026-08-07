@@ -54,6 +54,9 @@ const (
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
 	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. One cambricon.com/mlu.smlu.vmemory is 256 MiB.
+	MemoryFactor = 256
 )
 
 var (
@@ -198,7 +201,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Index:        uint(i),
 			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * 256 * 100 / cards),
+			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
 			Devcore:      100,
 			Type:         CambriconMLUDevice,
 			Numa:         0,
@@ -251,7 +254,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				memnums, ok := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
-					memnum = int(memnums) * 256
+					memnum = int(memnums) * MemoryFactor
 				}
 			}
 			corenum := int32(100)
@@ -339,7 +342,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -414,9 +417,9 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
@@ -426,5 +429,6 @@ func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MLUResourceCount,
 		ResourceMemoryName: MLUResourceMemory,
 		ResourceCoreName:   MLUResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

@@ -113,10 +113,21 @@ func (m *nodeManager) rmNode(nodeID string) {
 func (m *nodeManager) GetNode(nodeID string) (*device.NodeInfo, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
-	if n, ok := m.nodes[nodeID]; ok {
-		return n, nil
+	n, ok := m.nodes[nodeID]
+	if !ok {
+		return &device.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
 	}
-	return &device.NodeInfo{}, fmt.Errorf("node %v not found", nodeID)
+	nodeInfoCopy := &device.NodeInfo{
+		ID:      n.ID,
+		Devices: make(map[string][]device.DeviceInfo, len(n.Devices)),
+	}
+	if n.Node != nil {
+		nodeInfoCopy.Node = n.Node.DeepCopy()
+	}
+	for k, v := range n.Devices {
+		nodeInfoCopy.Devices[k] = device.DeepCopyDeviceInfos(v)
+	}
+	return nodeInfoCopy, nil
 }
 
 func (m *nodeManager) ListNodes() (map[string]*device.NodeInfo, error) {

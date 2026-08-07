@@ -458,3 +458,50 @@ func Test_rmNodeDevices(t *testing.T) {
 		})
 	}
 }
+
+func TestGetNode_DeepCopy(t *testing.T) {
+	m := newNodeManager()
+	m.addNode("node-copy", &device.NodeInfo{
+		ID:   "node-copy",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-copy"}},
+		Devices: map[string][]device.DeviceInfo{
+			"NVIDIA": {{
+				ID:           "GPU-0",
+				Count:        int32(1),
+				Devcore:      int32(100),
+				Devmem:       int32(8000),
+				DeviceVendor: "NVIDIA",
+			}},
+		},
+	})
+
+	got, err := m.GetNode("node-copy")
+	if err != nil {
+		t.Fatalf("GetNode returned unexpected error: %v", err)
+	}
+
+	got.Devices["NVIDIA"][0].Devmem = int32(9999)
+
+	m.mutex.RLock()
+	internalMem := m.nodes["node-copy"].Devices["NVIDIA"][0].Devmem
+	m.mutex.RUnlock()
+
+	if internalMem == int32(9999) {
+		t.Errorf("GetNode returned a live pointer instead of a deep copy: internal Devmem was mutated to %d", internalMem)
+	}
+
+	got.Node.Name = "mutated-name"
+
+	m.mutex.RLock()
+	internalNodeName := m.nodes["node-copy"].Node.Name
+	m.mutex.RUnlock()
+
+	if internalNodeName == "mutated-name" {
+		t.Errorf("GetNode returned a live Node pointer instead of a deep copy: internal Node.Name was mutated to %s", internalNodeName)
+	}
+
+	_, err = m.GetNode("nonexistent-node")
+	if err == nil {
+		t.Error("expected error for nonexistent node, got nil")
+	}
+}

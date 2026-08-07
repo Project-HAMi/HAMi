@@ -86,16 +86,26 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 	return true, node, nil
 }
 
+// nvmlInit is overridable in tests to simulate NVML init failures without a real driver.
+var nvmlInit = nvml.Init
+
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
-	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
+fix/remove-panic-nvml-operations
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), "Failed to initialize NVML", "returnCode", nvret)
 		// Return empty device list instead of crashing - allows graceful degradation
 		emptyRes := make([]*device.DeviceInfo, 0)
 		return &emptyRes
+
+	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
+		klog.Errorln("nvml Init err: ", nvret)
+		panic(0)
+ master
 	}
+	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
+	defer nvml.Shutdown()
 	res := make([]*device.DeviceInfo, 0, len(devs))
 
 	// Log mode-related warnings once per scan instead of per device
@@ -218,10 +228,16 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
-		gpuScore, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
+		gpuScore, hasAsymmetry, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
 			return false, err
+		}
+		if hasAsymmetry {
+			util.EmitNodeWarningEvent(node, "AsymmetricGPUP2PLink",
+				"One or more GPU pairs on this node have asymmetric P2P link data; "+
+					"affected pairs scored 0 (possible NVLink hardware or driver issue)",
+				time.Hour)
 		}
 		data, err = json.Marshal(gpuScore)
 		if err != nil {

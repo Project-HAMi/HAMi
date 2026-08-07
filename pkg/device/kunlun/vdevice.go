@@ -83,6 +83,9 @@ func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	if ok {
 		trimMem := dev.trimMemory(memory.Value())
 		ctr.Resources.Limits[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
 		ctr.Resources.Requests[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
 		return true, nil
 	}
@@ -252,7 +255,7 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums)
 		}
-		return false, tmpDevs, common.GenReason(reason, len(reason))
+		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	for _, dev := range alloc {
 		for _, val := range devices {

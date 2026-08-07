@@ -1094,6 +1094,49 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
 		{
+			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      NvidiaGPUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     1,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      NvidiaGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             3,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+				Type:             NvidiaGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
 			name: "fit success:  memory percentage",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
@@ -1897,6 +1940,79 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         0,
 			},
 		},
+		{
+			name: "gpu count + memory percentage of 0 — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "memory percentage of 0 in Requests — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "negative memory percentage — treated as unset",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "memory percentage of 0 + explicit memory — explicit memory wins",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem":            *resource.NewQuantity(2000, resource.DecimalSI),
+						"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           2000,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -1948,6 +2064,59 @@ func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 	result := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(512))
 	assert.Equal(t, result.MemPercentagereq, int32(101))
+
+	// a percentage of 0 is unset, so it lands on defaultMemory just like nvidia.com/gpumem: 0
+	ctr.Resources.Limits["nvidia.com/gpumem-percentage"] = *resource.NewQuantity(0, resource.DecimalSI)
+	result = dev.GenerateResourceRequests(ctr)
+	assert.Equal(t, result.Memreq, int32(512))
+	assert.Equal(t, result.MemPercentagereq, int32(101))
+
+	delete(ctr.Resources.Limits, "nvidia.com/gpumem-percentage")
+	ctr.Resources.Limits["nvidia.com/gpumem"] = *resource.NewQuantity(0, resource.DecimalSI)
+	control := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, control)
+}
+
+// A gpumem-percentage of 0 used to reach Fit as memreq=0: the pod fitted any card and was booked
+// with 0 memory, so the device plugin injected CUDA_DEVICE_MEMORY_LIMIT=0m ("no limit").
+func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+	ctr := &corev1.Container{
+		Name: "test",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/gpumem-percentage": *resource.NewQuantity(0, resource.DecimalSI),
+			},
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "zero-percentage", Namespace: "zero-percentage-ns"},
+		Spec:       corev1.PodSpec{Containers: []corev1.Container{*ctr}},
+	}
+	newCard := func(usedmem int32) []*device.DeviceUsage {
+		return []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Used: 0, Count: 10,
+			Usedmem: usedmem, Totalmem: 11264, Totalcore: 100, Usedcores: 0,
+			Type: NvidiaGPUDevice, Health: true,
+		}}
+	}
+	req := dev.GenerateResourceRequests(ctr)
+
+	fit, result, reason := dev.Fit(newCard(0), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, fit, "empty card should fit, reason: %s", reason)
+	// must book the whole card, not 0
+	assert.Equal(t, int32(11264), result[NvidiaGPUDevice][0].Usedmem)
+
+	fit, _, reason = dev.Fit(newCard(11260), req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Assert(t, !fit, "an almost full card must not fit")
+	assert.Assert(t, strings.Contains(reason, "CardInsufficientMemory"), "reason: %s", reason)
 }
 
 func TestMigNeedsReset(t *testing.T) {
@@ -2522,6 +2691,27 @@ func TestAddResourceUsage_MigNonResetNoSlot(t *testing.T) {
 	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
 	assert.Assert(t, err != nil)
 	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+	assert.Equal(t, usage.Used, int32(0))
+}
+
+func TestAddResourceUsage_MigResetNoFit(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	usage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigTemplate: []device.Geometry{
+			{
+				{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+			},
+		},
+	}
+	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096}
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
+	assert.Assert(t, err != nil)
+	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+	// No template fit: usage counters must not reflect a phantom allocation.
+	assert.Equal(t, usage.Usedmem, int32(0))
+	assert.Equal(t, usage.Used, int32(0))
+	assert.Assert(t, !strings.Contains(ctr.UUID, "["))
 }
 
 func TestCustomFilterRule_MigEmptyUsageWithTemplate(t *testing.T) {
@@ -2688,6 +2878,33 @@ func TestFit_MutexPolicy(t *testing.T) {
 	assert.Equal(t, fit, false)
 }
 
+func TestFit_MigPercentageRequestRejectsUndersizedTemplate(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+
+	// The only MIG template offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
+	devices := []*device.DeviceUsage{
+		{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true,
+			Mode: MigMode,
+			MigTemplate: []device.Geometry{
+				{
+					{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+				},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, _, _ := nv.Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
 func TestFit_TopologyExactMatch(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
@@ -2782,4 +2999,94 @@ func TestFit_TopologyBestCombination(t *testing.T) {
 	}
 	assert.Assert(t, uuids["dev-0"])
 	assert.Assert(t, uuids["dev-2"])
+}
+
+func TestFit_TopologyBestCombinationZeroScores(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": 0, "dev-2": 0}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 0, "dev-2": 0}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": 0, "dev-1": 0}}},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+		},
+	}
+	fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+}
+
+func TestFit_TopologyNegativeScores(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{ID: "dev-0", Index: 0, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-1", Index: 1, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+		{ID: "dev-2", Index: 2, Used: 0, Count: 10, Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true},
+	}
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "dev-0", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-1": -5, "dev-2": -3}}},
+				{ID: "dev-1", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": -5, "dev-2": -1}}},
+				{ID: "dev-2", DevicePairScore: device.DevicePairScore{Scores: map[string]int{"dev-0": -3, "dev-1": -1}}},
+			},
+		},
+	}
+
+	// Test single-GPU request (exercises computeWorstSingleCard)
+	t.Run("SingleGPU", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+			},
+		}
+		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+		assert.Equal(t, fit, true)
+		assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+		assert.Equal(t, result[NvidiaGPUDevice][0].UUID, "dev-0")
+	})
+
+	// Test multi-GPU request (exercises computeBestCombination)
+	t.Run("MultiGPU", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String()},
+			},
+		}
+		fit, result, _ := nv.Fit(devices, req, pod, nodeInfo, &device.PodDevices{})
+		assert.Equal(t, fit, true)
+		assert.Equal(t, len(result[NvidiaGPUDevice]), 2)
+		uuids := map[string]bool{}
+		for _, d := range result[NvidiaGPUDevice] {
+			uuids[d.UUID] = true
+		}
+		assert.Assert(t, uuids["dev-1"])
+		assert.Assert(t, uuids["dev-2"])
+	})
 }

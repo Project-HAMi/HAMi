@@ -41,8 +41,9 @@ func viewStatus(usage NodeUsage) {
 
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
+	targetType := strings.ToLower(t)
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(val.Device.Type, t) {
+		if strings.Contains(strings.ToLower(val.Device.Type), targetType) {
 			l = append(l, val.Device)
 		}
 	}
@@ -50,17 +51,12 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 }
 
 func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
-	//devmap := make(map[string]device.ContainerDevices)
-	total, totalCore, totalMem := int32(0), int32(0), int32(0)
-	free, freeCore, freeMem := int32(0), int32(0), int32(0)
-	sums := 0
 	// computer all device score for one node
 	for index := range node.Devices.DeviceLists {
 		node.Devices.DeviceLists[index].ComputeScore(requests)
 	}
 	//This loop is for requests for different devices
 	for _, k := range requests {
-		sums += int(k.Nums)
 		if int(k.Nums) > len(node.Devices.DeviceLists) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod), "request devices nums", k.Nums, "node device nums", len(node.Devices.DeviceLists))
 			return false, common.NodeInsufficientDevice
@@ -78,12 +74,6 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 					if v.Device.ID != val.UUID {
 						continue
 					}
-					total += v.Device.Count
-					totalCore += v.Device.Totalcore
-					totalMem += v.Device.Totalmem
-					free += v.Device.Count - v.Device.Used
-					freeCore += v.Device.Totalcore - v.Device.Usedcores
-					freeMem += v.Device.Totalmem - v.Device.Usedmem
 					err := device.GetDevices()[k.Type].AddResourceUsage(pod, node.Devices.DeviceLists[nidx].Device, &tmpDevs[k.Type][idx])
 					if err != nil {
 						klog.Errorf("AddResourceUsage failed:%s", err.Error())
@@ -187,10 +177,10 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 			}
 
 			if ctrfit {
+				score.OverrideScore(snapshot, userNodePolicy)
 				fitNodesMutex.Lock()
 				res.NodeList = append(res.NodeList, &score)
 				fitNodesMutex.Unlock()
-				score.OverrideScore(snapshot, userNodePolicy)
 				klog.V(4).InfoS(common.NodeFitPod, "pod", klog.KObj(task), "node", nodeID, "score", score.Score)
 			}
 		}(nodeID, node)
