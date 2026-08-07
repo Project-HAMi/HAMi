@@ -105,7 +105,16 @@ func start() error {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
-					<-lockChannel
+					for plugin.IsMigApplyLockExist() {
+						select {
+						case <-ctx.Done():
+							return
+						case _, ok := <-lockChannel:
+							if !ok {
+								return
+							}
+						}
+					}
 					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
 					continue
 				}

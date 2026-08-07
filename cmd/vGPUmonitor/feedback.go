@@ -25,6 +25,7 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
@@ -133,12 +134,17 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan struct{}) error {
 	klog.Info("Starting watchAndFeedback")
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
 	}
 	defer nvml.Shutdown()
+
+	if plugin.IsMigApplyLockExist() {
+		klog.Info("MIG apply lock file already exists at startup")
+		return errTemporaryClosed
+	}
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
@@ -148,9 +154,13 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 		case <-ctx.Done():
 			klog.Info("Shutting down watchAndFeedback")
 			return nil
-		case signal := <-migLockSignal:
-			if signal {
-				klog.Info("Received MIG apply lock file")
+		case _, ok := <-migLockSignal:
+			if !ok {
+				klog.Info("MIG lock signal channel closed")
+				return nil
+			}
+			if plugin.IsMigApplyLockExist() {
+				klog.Info("Received MIG apply lock file event, lock is held")
 				return errTemporaryClosed
 			}
 
