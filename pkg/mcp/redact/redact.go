@@ -38,8 +38,28 @@ var sensitivePattern = regexp.MustCompile(`(?i)(?:^|[._\-/])(token|secret|passwo
 // which is anchored on separators.
 var camelBoundary = regexp.MustCompile(`([a-z0-9])([A-Z])`)
 
+// knownSafeCompounds are camelCase/compound keys where a sensitive word
+// appears as a prefix or fragment but the whole word describes something
+// that isn't a secret (a policy about credentials, a name for a key, an
+// API's version, a server's authority). Splitting on camel-case boundaries
+// to catch authToken/clientSecret has the side effect of also splitting
+// these into standalone sensitive-looking tokens, so they're checked
+// against this list before the pattern match runs.
+var knownSafeCompounds = map[string]bool{
+	"apiversion":       true,
+	"keyname":          true,
+	"credentialpolicy": true,
+	"authority":        true,
+}
+
+var nonAlnumStripper = strings.NewReplacer("_", "", "-", "", ".", "", "/", "")
+
 // isSensitiveKey reports whether key looks like it names a secret.
 func isSensitiveKey(key string) bool {
+	collapsed := strings.ToLower(nonAlnumStripper.Replace(key))
+	if knownSafeCompounds[collapsed] {
+		return false
+	}
 	normalized := strings.ToLower(camelBoundary.ReplaceAllString(key, "${1}_${2}"))
 	return sensitivePattern.MatchString("_" + normalized + "_")
 }
