@@ -161,15 +161,26 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 			continue
 		}
 		klog.Infoln("inspecting", val)
-		num := strings.Split(val, "Device")[1]
+		deviceParts := strings.Split(val, "Device")
+		if len(deviceParts) < 2 {
+			klog.Warningf("unexpected MIG output format, missing Device delimiter: %q", val)
+			continue
+		}
+		num := deviceParts[1]
 		num = strings.Split(num, ":")[0]
 		num = strings.TrimSpace(num)
 		index, err := strconv.Atoi(num)
 		if err != nil {
-			klog.Fatal("atoi failed num=", num)
+			klog.Warningf("failed to parse MIG device index %q: %v", num, err)
+			continue
 		}
 		if index == idx {
-			outputStr := strings.Split(val, ":")[2]
+			colonParts := strings.Split(val, ":")
+			if len(colonParts) < 3 {
+				klog.Warningf("unexpected MIG output format, missing colon fields: %q", val)
+				continue
+			}
+			outputStr := colonParts[2]
 			outputStr = strings.TrimSpace(outputStr)
 			outputStr = strings.TrimRight(outputStr, ")")
 			return outputStr
