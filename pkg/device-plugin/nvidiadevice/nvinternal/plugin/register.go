@@ -217,7 +217,7 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 	}
 
 	var data []byte
-	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
+	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" && len(*devices) > 0 {
 		gpuScore, hasAsymmetry, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
