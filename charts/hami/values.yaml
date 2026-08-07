@@ -21,6 +21,21 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    # Leave empty to manage SCC grants outside this chart.
+    # Set to privileged only as an explicit opt-in.
+    name: ""
+
+# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
+selinux:
+  enabled: false
+  type: container_file_t
+  level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -262,14 +277,16 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
-    runAsUser: 2000
+    # Leave unset to let the platform allocate a UID (required by OpenShift SCC).
+    runAsUser: null
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: 9395
-    httpTargetPort: 443
+    # Keep the container on an unprivileged port; the Service still exposes 443.
+    httpTargetPort: 9443
     labels: {}
     annotations: {}
 
@@ -418,7 +435,12 @@ devicePlugin:
       add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
-  tolerations: []
+  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Equal
+      value: "true"
+      effect: NoSchedule
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:

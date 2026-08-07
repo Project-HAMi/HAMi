@@ -43,8 +43,47 @@ spec:
       hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
-      {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+      {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
+        {{- if .Values.selinux.enabled }}
+        - name: selinux-relabel
+          image: {{ include "hami.devicePlugin.image" . }}
+          imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
+          securityContext:
+            privileged: true
+            allowPrivilegeEscalation: true
+            runAsUser: 0
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -eu
+              mkdir -p /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+              chmod 0777 /host/hami/containers
+              chmod 1777 /host/hami/tmp/vgpulock
+              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
+                /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
+              {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
+                /host/hami/driver-root
+              {{- end }}
+          env:
+            - name: SELINUX_TYPE
+              value: {{ .Values.selinux.type | quote }}
+            - name: SELINUX_LEVEL
+              value: {{ .Values.selinux.level | quote }}
+          volumeMounts:
+            - name: lib
+              mountPath: /host/hami/vgpu
+            - name: ctrs
+              mountPath: /host/hami/containers
+            - name: hosttmp
+              mountPath: /host/hami/tmp
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: driver-root
+              mountPath: /host/hami/driver-root
+            {{- end }}
+        {{- end }}
+        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: toolkit-validation
           image: {{ include "hami.devicePlugin.image" . }}
           imagePullPolicy: {{ .Values.devicePlugin.image.pullPolicy }}
@@ -66,6 +105,7 @@ spec:
               mountPath: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | quote }}
               mountPropagation: HostToContainer
               readOnly: true
+        {{- end }}
       {{- end }}
       containers:
         - name: device-plugin
@@ -98,7 +138,7 @@ spec:
             - name: PASS_DEVICE_SPECS
               value: {{ .Values.devicePlugin.passDeviceSpecsEnabled | quote }}
             {{- end }}
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             - name: NVIDIA_DRIVER_ROOT
               value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
             {{- end }}
@@ -147,7 +187,7 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
             - name: driver-root
@@ -182,6 +222,10 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- end }}
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -204,10 +248,19 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
       volumes:
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}
+            {{- if .Values.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         - name: hosttmp
           hostPath:
             path: /tmp
@@ -223,13 +276,16 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
+            {{- if .Values.selinux.enabled }}
+            type: DirectoryOrCreate
+            {{- end }}
         {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: nvidia-validations
           hostPath:
             path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+        {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
         - name: driver-root
           hostPath:
             path: {{ .Values.devicePlugin.nvidiaDriverRoot }}

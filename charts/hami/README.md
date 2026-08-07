@@ -17,6 +17,11 @@ This document provides detailed descriptions of all configurable values paramete
 | `nameOverride` | Name override | `""` |
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
+| `platform.openshift` | Enable OpenShift-specific SCC and SELinux handling | `false` |
+| `openshift.securityContextConstraints.name` | SecurityContextConstraints resource granted to enabled device plugin service accounts. Leave empty to manage the grant outside this chart; set to `privileged` only as an explicit opt-in | `""` |
+| `selinux.enabled` | Relabel shared vGPU host directories on SELinux-enabled Kubernetes nodes | `false` |
+| `selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
+| `selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |
 
 ## Resource Name Configuration
 
@@ -178,6 +183,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
+| `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Equal","value":"true","effect":"NoSchedule"}]` |
 
 ### Device Plugin Service Configuration
 
