@@ -124,24 +124,28 @@ var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
 	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
+			"Failed to initialize NVML in GetIndexAndTypeFromUUID", "uuid", uuid, "returnCode", nvret)
+		return "", -1
 	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get handlebyuuid error ret=", ret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml get device handle failed: %s", nvml.ErrorString(ret)), 
+			"Failed to get device handle by UUID", "uuid", originuuid, "returnCode", ret)
+		return "", -1
 	}
 	Model, ret := ndev.GetName()
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get name error ret=", ret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml get device name failed: %s", nvml.ErrorString(ret)), 
+			"Failed to get device name", "uuid", originuuid, "returnCode", ret)
+		return "", -1
 	}
 	index, ret := ndev.GetIndex()
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get index error ret=", ret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml get device index failed: %s", nvml.ErrorString(ret)), 
+			"Failed to get device index", "uuid", originuuid, "returnCode", ret)
+		return "", -1
 	}
 	return Model, index
 }
@@ -181,25 +185,28 @@ func GetMigUUIDFromSmiOutput(output string, uuid string, idx int) string {
 func GetMigUUIDFromIndex(uuid string, idx int) string {
 	defer nvml.Shutdown()
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
+			"Failed to initialize NVML in GetMigUUIDFromIndex", "uuid", uuid, "index", idx, "returnCode", nvret)
+		return ""
 	}
 	originuuid := strings.Split(uuid, "[")[0]
 	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
 	if ret != nvml.SUCCESS {
-		klog.Error(`nvml get device uuid error ret=`, ret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml get device handle failed: %s", nvml.ErrorString(ret)), 
+			"Failed to get device handle by UUID", "uuid", originuuid, "returnCode", ret)
+		return ""
 	}
 	migdev, ret := nvml.DeviceGetMigDeviceHandleByIndex(ndev, idx)
 	if ret != nvml.SUCCESS {
-		klog.Error("nvml get mig dev error ret=", ret, ",idx=", idx, "using nvidia-smi -L for query")
+		klog.Warningf("nvml get mig dev error ret=%v, idx=%d, falling back to nvidia-smi -L for query", nvml.ErrorString(ret), idx)
 		cmd := exec.Command("nvidia-smi", "-L")
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout = &stdout
 		cmd.Stderr = &stderr
 		err := cmd.Run()
 		if err != nil {
-			klog.Fatalf("nvidia-smi -L failed with %s\n", err)
+			klog.ErrorS(err, "nvidia-smi -L fallback failed", "stderr", stderr.String())
+			return ""
 		}
 		outStr := stdout.String()
 		uuid := GetMigUUIDFromSmiOutput(outStr, originuuid, idx)
@@ -207,8 +214,9 @@ func GetMigUUIDFromIndex(uuid string, idx int) string {
 	}
 	res, ret := migdev.GetUUID()
 	if ret != nvml.SUCCESS {
-		klog.Error(`nvml get mig uuid error ret=`, ret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml get mig uuid failed: %s", nvml.ErrorString(ret)), 
+			"Failed to get MIG device UUID", "deviceUuid", originuuid, "migIndex", idx, "returnCode", ret)
+		return ""
 	}
 	return res
 }
@@ -466,6 +474,11 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 			tmp = append(tmp, val.UUID)
 		} else {
 			devtype, devindex := GetIndexAndTypeFromUUID(val.UUID)
+			if devindex == -1 {
+				klog.ErrorS(fmt.Errorf("failed to get device info"), 
+					"Skipping device due to GetIndexAndTypeFromUUID failure", "uuid", val.UUID)
+				continue
+			}
 			position, needsreset = nv.GenerateMigTemplate(devtype, devindex, val)
 			if needsreset {
 				nv.ApplyMigTemplate()
@@ -500,7 +513,13 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 					}
 				}
 			}
-			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
+			migUUID := GetMigUUIDFromIndex(val.UUID, position)
+			if migUUID == "" {
+				klog.ErrorS(fmt.Errorf("failed to get MIG UUID"), 
+					"Skipping device due to GetMigUUIDFromIndex failure", "uuid", val.UUID, "position", position)
+				continue
+			}
+			tmp = append(tmp, migUUID)
 		}
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)

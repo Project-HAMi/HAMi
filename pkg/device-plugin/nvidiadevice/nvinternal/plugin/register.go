@@ -91,8 +91,10 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	defer nvml.Shutdown()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), "Failed to initialize NVML", "returnCode", nvret)
+		// Return empty device list instead of crashing - allows graceful degradation
+		emptyRes := make([]*device.DeviceInfo, 0)
+		return &emptyRes
 	}
 	res := make([]*device.DeviceInfo, 0, len(devs))
 
@@ -105,13 +107,15 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	for UUID := range devs {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
-			panic(0)
+			klog.ErrorS(fmt.Errorf("nvml get device handle failed: %s", nvml.ErrorString(ret)), 
+				"Failed to get device handle, skipping device", "uuid", UUID, "returnCode", ret)
+			continue
 		}
 		idx, ret := ndev.GetIndex()
 		if ret != nvml.SUCCESS {
-			klog.Errorln("nvml get index error ret=", ret)
-			panic(0)
+			klog.ErrorS(fmt.Errorf("nvml get device index failed: %s", nvml.ErrorString(ret)), 
+				"Failed to get device index, skipping device", "uuid", UUID, "returnCode", ret)
+			continue
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
@@ -132,13 +136,15 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 				continue
 			}
 		default:
-			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+			klog.ErrorS(fmt.Errorf("nvml get memory info failed: %s", nvml.ErrorString(ret)), 
+				"Failed to get device memory info, skipping device", "uuid", UUID, "returnCode", ret)
+			continue
 		}
 		Model, ret := ndev.GetName()
 		if ret != nvml.SUCCESS {
-			klog.Error("nvml get name error ret=", ret)
-			panic(0)
+			klog.ErrorS(fmt.Errorf("nvml get device name failed: %s", nvml.ErrorString(ret)), 
+				"Failed to get device name, skipping device", "uuid", UUID, "returnCode", ret)
+			continue
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
