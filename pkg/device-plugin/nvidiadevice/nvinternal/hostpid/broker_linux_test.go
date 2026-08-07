@@ -577,7 +577,7 @@ func TestListenDefaultRequiresRoot(t *testing.T) {
 }
 
 func TestBrokerSocketIdentityUsesDeviceAndInode(t *testing.T) {
-	_, socketPath := startTestBroker(t)
+	broker, socketPath := startTestBroker(t)
 	info, err := os.Lstat(socketPath)
 	if err != nil {
 		t.Fatal(err)
@@ -585,5 +585,10 @@ func TestBrokerSocketIdentityUsesDeviceAndInode(t *testing.T) {
 	stat, ok := info.Sys().(*syscall.Stat_t)
 	if !ok || stat.Ino == 0 {
 		t.Fatalf("invalid socket stat: %#v", info.Sys())
+	}
+	if uint64(stat.Dev) != broker.socket.device ||
+		stat.Ino != broker.socket.inode {
+		t.Fatalf("recorded identity dev=%d ino=%d, want dev=%d ino=%d",
+			broker.socket.device, broker.socket.inode, stat.Dev, stat.Ino)
 	}
 }
