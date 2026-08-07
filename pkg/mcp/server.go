@@ -28,6 +28,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	klog "k8s.io/klog/v2"
 
@@ -157,8 +158,8 @@ func (s *Server) RunHTTP(ctx context.Context, addr string) error {
 
 	if s.config.MetricsEnabled {
 		registry := prometheus.NewRegistry()
-		registry.MustRegister(prometheus.NewGoCollector())
-		registry.MustRegister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+		registry.MustRegister(collectors.NewGoCollector())
+		registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}))
 		mux.Handle("/metrics", promhttp.HandlerFor(registry, promhttp.HandlerOpts{}))
 		klog.InfoS("Metrics endpoint enabled", "path", "/metrics")
 	}
