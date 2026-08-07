@@ -849,10 +849,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		}
 		usage, ok := overallnodeMap[node.ID]
 		if !ok {
-			// GetNode() succeeded but the node is absent from the overallnodeMap snapshot
-			// (e.g. registered between the ListNodes() snapshot and this lookup, or filtered
-			// out of ListNodes() by a nil Node). Treat it as unavailable instead of caching a
-			// nil *NodeUsage, which would later be dereferenced unconditionally by the scorer.
 			klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
 			failedNodes[nodeID] = "node usage unavailable"
 			continue
