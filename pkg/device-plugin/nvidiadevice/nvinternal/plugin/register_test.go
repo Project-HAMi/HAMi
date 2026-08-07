@@ -24,6 +24,10 @@ import (
 	corev1 "k8s.io/api/core/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
@@ -82,6 +86,80 @@ func TestInt8SliceString(t *testing.T) {
 				t.Errorf("int8Slice.String() = %q, want %q", got, tt.expected)
 			}
 		})
+	}
+}
+
+func TestGetNumaNode(t *testing.T) {
+	t.Run("error getting PCI info", func(t *testing.T) {
+		d := &mock.Device{
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
+			},
+		}
+		hasNode, node, err := GetNumaNode(d)
+		if err == nil {
+			t.Fatal("expected an error getting PCI info")
+		}
+		if hasNode || node != 0 {
+			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+		}
+	})
+
+	t.Run("numa_node file not present for this bus ID", func(t *testing.T) {
+		// GetPciInfo succeeds but no /sys/bus/pci/devices entry exists for this bus ID on the test host.
+		d := &mock.Device{
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+			},
+		}
+		hasNode, node, err := GetNumaNode(d)
+		if err == nil {
+			t.Fatal("expected an error reading the (nonexistent) numa_node file")
+		}
+		if hasNode || node != 0 {
+			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+		}
+	})
+}
+
+// TestGetAPIDevices_PanicsOnNVMLInitFailure verifies getAPIDevices panics when nvml.Init fails, using a stubbed nvmlInit so the test doesn't need a real NVIDIA driver.
+func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
+	origInit := nvmlInit
+	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
+	defer func() { nvmlInit = origInit }()
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices { return rm.Devices{} },
+	}
+	plugin := &NvidiaDevicePlugin{rm: mockRM}
+
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("expected getAPIDevices to panic when nvml.Init fails")
+		}
+	}()
+	plugin.getAPIDevices()
+}
+
+// TestGetAPIDevices_ShutsDownOnNVMLInitSuccess verifies nvml.Shutdown is deferred only after nvmlInit succeeds, using stubbed seams so the real NVML library is never touched.
+func TestGetAPIDevices_ShutsDownOnNVMLInitSuccess(t *testing.T) {
+	origInit := nvmlInit
+	origShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = origInit
+		nvml.Shutdown = origShutdown
+	}()
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices { return rm.Devices{} },
+	}
+	plugin := &NvidiaDevicePlugin{rm: mockRM}
+
+	got := plugin.getAPIDevices()
+	if got == nil || len(*got) != 0 {
+		t.Fatalf("got %v, want a non-nil empty slice", got)
 	}
 }
 
