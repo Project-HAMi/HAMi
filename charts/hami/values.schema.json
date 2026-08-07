@@ -1,0 +1,404 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "HAMi Helm chart values",
+  "description": "Permissive schema for the HAMi chart. Constrains load-bearing value types (bool vs int vs string vs null) without over-constraining valid installs. Objects allow additional properties by default so undocumented and forward-compatible keys pass validation.",
+  "type": "object",
+  "definitions": {
+    "image": {
+      "type": "object",
+      "properties": {
+        "registry": {"type": "string"},
+        "repository": {"type": "string"},
+        "tag": {"type": ["string", "number"]},
+        "pullPolicy": {"type": "string"},
+        "pullSecrets": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "customresources": {
+      "type": "array",
+      "items": {"type": "string"}
+    }
+  },
+  "properties": {
+    "global": {
+      "type": "object",
+      "properties": {
+        "imageRegistry": {"type": "string"},
+        "imagePullSecrets": {"type": "array"},
+        "imageTag": {"type": "string"},
+        "gpuHookPath": {"type": "string"},
+        "labels": {"type": "object"},
+        "annotations": {"type": "object"},
+        "managedNodeSelectorEnable": {"type": "boolean"},
+        "managedNodeSelector": {"type": "object"}
+      }
+    },
+    "nameOverride": {"type": "string"},
+    "fullnameOverride": {"type": "string"},
+    "namespaceOverride": {"type": "string"},
+
+    "resourceName": {"type": "string"},
+    "resourceMem": {"type": "string"},
+    "resourceMemPercentage": {"type": "string"},
+    "resourceCores": {"type": "string"},
+    "resourcePriority": {"type": "string"},
+
+    "mluResourceName": {"type": "string"},
+    "mluResourceMem": {"type": "string"},
+    "mluResourceCores": {"type": "string"},
+
+    "dcuResourceName": {"type": "string"},
+    "dcuResourceMem": {"type": "string"},
+    "dcuResourceCores": {"type": "string"},
+
+    "metaxResourceName": {"type": "string"},
+    "metaxResourceCore": {"type": "string"},
+    "metaxResourceMem": {"type": "string"},
+    "metaxsGPUTopologyAware": {
+      "type": "string",
+      "description": "Rendered as a raw YAML scalar in the device config; kept as a string (e.g. \"false\"), not a boolean."
+    },
+
+    "enflameResourceNameDRSGCU": {"type": "string"},
+    "enflameResourceNameGCUMemory": {"type": "string"},
+    "enflameResourceNameGCUCore": {"type": "string"},
+
+    "kunlunResourceName": {"type": "string"},
+    "kunlunResourceVCountName": {"type": "string"},
+    "kunlunResourceVMemoryName": {"type": "string"},
+
+    "vastaiResourceName": {"type": "string"},
+    "birenResourceName": {"type": "string"},
+
+    "schedulerName": {"type": "string"},
+
+    "podSecurityPolicy": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "nodeName": {"type": "string"},
+        "nodeLabelSelector": {"type": ["null", "object"]},
+        "overwriteEnv": {
+          "type": "string",
+          "description": "Rendered as a raw scalar into the device config; kept as a string (e.g. \"false\"), not a boolean."
+        },
+        "defaultSchedulerPolicy": {
+          "type": "object",
+          "properties": {
+            "nodeSchedulerPolicy": {
+              "type": "string",
+              "description": "Free-form policy string (e.g. binpack, spread). Not enum-constrained on purpose."
+            },
+            "gpuSchedulerPolicy": {
+              "type": "string",
+              "description": "Free-form policy string (e.g. binpack, spread, topology-aware). Not enum-constrained on purpose."
+            }
+          }
+        },
+        "metricsBindAddress": {"type": "string"},
+        "forceOverwriteDefaultScheduler": {"type": "boolean"},
+        "livenessProbe": {"type": "boolean"},
+        "leaderElect": {"type": "boolean"},
+        "replicas": {"type": "integer"},
+        "kubeScheduler": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "image": {"$ref": "#/definitions/image"},
+            "resources": {"type": "object"},
+            "extraNewArgs": {"type": "array"},
+            "extraArgs": {"type": "array"}
+          }
+        },
+        "extender": {
+          "type": "object",
+          "properties": {
+            "image": {"$ref": "#/definitions/image"},
+            "resources": {"type": "object"},
+            "extraArgs": {"type": "array"}
+          }
+        },
+        "nodeLockExpire": {"type": "string"},
+        "podAnnotations": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "admissionWebhook": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customURL": {
+              "type": "object",
+              "properties": {
+                "enabled": {"type": "boolean"},
+                "host": {"type": "string"},
+                "port": {"type": "integer"},
+                "path": {"type": "string"}
+              }
+            },
+            "whitelistNamespaces": {
+              "type": ["null", "array"],
+              "items": {"type": "string"}
+            },
+            "manageNamespaceSelector": {"type": "boolean"},
+            "namespaceSelector": {
+              "type": "object",
+              "properties": {
+                "matchLabels": {"type": ["null", "object"]},
+                "matchExpressions": {"type": "array"}
+              }
+            },
+            "objectSelector": {
+              "type": "object",
+              "properties": {
+                "matchLabels": {"type": ["null", "object"]},
+                "matchExpressions": {"type": "array"}
+              }
+            },
+            "reinvocationPolicy": {"type": "string"},
+            "failurePolicy": {"type": "string"}
+          }
+        },
+        "certManager": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"}
+          }
+        },
+        "patch": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "image": {"$ref": "#/definitions/image"},
+            "imageNew": {"$ref": "#/definitions/image"},
+            "priorityClassName": {"type": "string"},
+            "podAnnotations": {"type": "object"},
+            "nodeSelector": {"type": "object"},
+            "tolerations": {"type": "array"},
+            "runAsUser": {"type": "integer"}
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {"type": "string"},
+            "httpPort": {"type": "integer"},
+            "schedulerPort": {"type": "integer"},
+            "monitorPort": {"type": "integer"},
+            "monitorTargetPort": {"type": "integer"},
+            "httpTargetPort": {"type": "integer"},
+            "labels": {"type": "object"},
+            "annotations": {"type": "object"}
+          }
+        }
+      }
+    },
+
+    "devicePlugin": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "gpuOperatorToolkitReady": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "hostPath": {"type": "string"},
+            "securityContext": {"type": "object"}
+          }
+        },
+        "image": {"$ref": "#/definitions/image"},
+        "monitor": {
+          "type": "object",
+          "properties": {
+            "image": {"$ref": "#/definitions/image"},
+            "ctrPath": {"type": "string"},
+            "resyncInterval": {"type": "string"},
+            "extraArgs": {"type": "array"},
+            "extraEnvs": {"type": "object"},
+            "securityContext": {"type": "object"},
+            "resources": {"type": "object"}
+          }
+        },
+        "deviceSplitCount": {"type": "integer"},
+        "deviceMemoryScaling": {
+          "type": ["number", "string"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Memory over-subscription ratio, parsed as a float64 (fractional values such as 0.8 or 1.5 are valid). Accepts a number from a values file, or a numeric string because Helm renders floats passed via --set as strings; the numeric pattern still rejects non-numeric input."
+        },
+        "deviceCoreScaling": {
+          "type": ["number", "string"],
+          "pattern": "^[0-9]+(\\.[0-9]+)?$",
+          "description": "Core over-subscription ratio, parsed as a float64. Accepts a number or a numeric string; see deviceMemoryScaling."
+        },
+        "enableNumaTopology": {"type": "boolean"},
+        "preConfiguredDeviceMemory": {"type": "integer"},
+        "nodeConfiguration": {
+          "type": "object",
+          "properties": {
+            "config": {"type": "string"},
+            "externalConfigName": {"type": "string"}
+          }
+        },
+        "runtimeClassName": {"type": "string"},
+        "createRuntimeClass": {"type": "boolean"},
+        "migStrategy": {"type": "string"},
+        "disablecorelimit": {
+          "type": "string",
+          "description": "Rendered into a CLI flag as a raw string (e.g. \"false\"), not a boolean."
+        },
+        "passDeviceSpecsEnabled": {"type": "boolean"},
+        "deviceListStrategy": {"type": "string"},
+        "nvidiaHookPath": {
+          "type": ["null", "string"],
+          "description": "Null by default; only consumed when set to a string (template guards with typeIs \"string\")."
+        },
+        "nvidiaDriverRoot": {
+          "type": ["null", "string"],
+          "description": "Null by default; only consumed when set to a string (template guards with typeIs \"string\")."
+        },
+        "gdrcopyEnabled": {
+          "type": ["null", "boolean"],
+          "description": "Null by default; only consumed when set to a boolean (template guards with typeIs \"bool\")."
+        },
+        "gdsEnabled": {
+          "type": ["null", "boolean"],
+          "description": "Null by default; only consumed when set to a boolean (template guards with typeIs \"bool\")."
+        },
+        "mofedEnabled": {
+          "type": ["null", "boolean"],
+          "description": "Null by default; only consumed when set to a boolean (template guards with typeIs \"bool\")."
+        },
+        "extraArgs": {"type": "array"},
+        "extraEnvs": {"type": "object"},
+        "service": {
+          "type": "object",
+          "properties": {
+            "type": {"type": "string"},
+            "httpPort": {"type": "integer"},
+            "labels": {"type": "object"},
+            "annotations": {"type": "object"}
+          }
+        },
+        "pluginPath": {"type": "string"},
+        "libPath": {"type": "string"},
+        "podAnnotations": {"type": "object"},
+        "hostPID": {"type": "boolean"},
+        "hostNetwork": {"type": "boolean"},
+        "securityContext": {"type": "object"},
+        "nvidiaNodeSelector": {"type": "object"},
+        "tolerations": {"type": "array"},
+        "updateStrategy": {"type": "object"},
+        "resources": {"type": "object"}
+      }
+    },
+
+    "mockDevicePlugin": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"},
+        "image": {"$ref": "#/definitions/image"}
+      }
+    },
+
+    "devices": {
+      "type": "object",
+      "properties": {
+        "amd": {
+          "type": "object",
+          "properties": {
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "awsneuron": {
+          "type": "object",
+          "properties": {
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "kunlun": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "enflame": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "mthreads": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "vastai": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "biren": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "nvidia": {
+          "type": "object",
+          "properties": {
+            "gpuCorePolicy": {"type": "string"},
+            "libCudaLogLevel": {"type": "integer"}
+          }
+        },
+        "ascend": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "image": {"type": "string"},
+            "imagePullPolicy": {"type": "string"},
+            "extraArgs": {"type": "array"},
+            "nodeSelector": {"type": "object"},
+            "tolerations": {"type": "array"},
+            "runtimeClassName": {"type": "string"},
+            "hamiVnpuCore": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        },
+        "iluvatar": {
+          "type": "object",
+          "properties": {
+            "enabled": {"type": "boolean"},
+            "customresources": {"$ref": "#/definitions/customresources"}
+          }
+        }
+      }
+    },
+
+    "legacyMetrics": {"type": "boolean"},
+
+    "prometheus": {
+      "type": "object",
+      "properties": {
+        "enabled": {"type": "boolean"}
+      }
+    },
+
+    "device-config": {
+      "type": "object",
+      "properties": {
+        "content": {"type": "string"}
+      }
+    }
+  }
+}
