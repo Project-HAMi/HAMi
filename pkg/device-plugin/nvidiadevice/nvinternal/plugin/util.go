@@ -499,6 +499,11 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 			tmp = append(tmp, val.UUID)
 		} else {
 			devtype, devindex := GetIndexAndTypeFromUUID(val.UUID)
+			if devtype == "" || devindex < 0 {
+				klog.ErrorS(fmt.Errorf("failed to get device info"), 
+					"Skipping device due to GetIndexAndTypeFromUUID failure", "uuid", val.UUID)
+				continue
+			}
 			position, needsreset = nv.GenerateMigTemplate(devtype, devindex, val)
 			if needsreset {
 				nv.ApplyMigTemplate()
@@ -533,7 +538,13 @@ func (nv *NvidiaDevicePlugin) GetContainerDeviceStrArray(c device.ContainerDevic
 					}
 				}
 			}
-			tmp = append(tmp, GetMigUUIDFromIndex(val.UUID, position))
+			migUUID := GetMigUUIDFromIndex(val.UUID, position)
+			if migUUID == "" {
+				klog.ErrorS(fmt.Errorf("failed to get MIG UUID"), 
+					"Skipping device due to GetMigUUIDFromIndex failure", "uuid", val.UUID, "position", position)
+				continue
+			}
+			tmp = append(tmp, migUUID)
 		}
 	}
 	klog.V(3).Infoln("mig current=", nv.migCurrent, ":", needsreset, "position=", position, "uuid lists", tmp)
