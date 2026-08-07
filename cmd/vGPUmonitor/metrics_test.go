@@ -68,3 +68,58 @@ func TestDescribeCollectSync(t *testing.T) {
 		t.Errorf("Gather failed (legacy): %v", err)
 	}
 }
+
+func TestSendMetric(t *testing.T) {
+	desc := prometheus.NewDesc("hami_test_metric", "test metric", []string{"label"}, nil)
+	ch := make(chan prometheus.Metric, 1)
+
+	if err := sendMetric(ch, desc, prometheus.GaugeValue, 1, "value"); err != nil {
+		t.Fatalf("sendMetric returned unexpected error: %v", err)
+	}
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected a metric to be sent on the channel")
+	}
+
+	// Supplying the wrong number of label values makes NewConstMetric fail,
+	// and sendMetric must surface that error instead of sending on the channel.
+	if err := sendMetric(ch, desc, prometheus.GaugeValue, 1); err == nil {
+		t.Fatal("expected sendMetric to return an error for mismatched labels")
+	}
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent on error")
+	default:
+	}
+}
+
+func TestSendLegacyMetric(t *testing.T) {
+	ch := make(chan prometheus.Metric, 1)
+
+	// A nil descriptor means the legacy metric is disabled; sendLegacyMetric
+	// must no-op rather than panic or send a metric.
+	sendLegacyMetric(ch, nil, prometheus.GaugeValue, 1, "value")
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent for a nil descriptor")
+	default:
+	}
+
+	desc := prometheus.NewDesc("hami_test_legacy_metric", "test legacy metric", []string{"label"}, nil)
+
+	// sendLegacyMetric logs and swallows errors from sendMetric rather than panicking.
+	sendLegacyMetric(ch, desc, prometheus.GaugeValue, 1)
+	select {
+	case <-ch:
+		t.Fatal("did not expect a metric to be sent when sendMetric errors")
+	default:
+	}
+
+	sendLegacyMetric(ch, desc, prometheus.GaugeValue, 1, "value")
+	select {
+	case <-ch:
+	default:
+		t.Fatal("expected a metric to be sent on the channel")
+	}
+}
