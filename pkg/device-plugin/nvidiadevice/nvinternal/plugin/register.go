@@ -215,7 +215,6 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		klog.V(3).Info("Device info unchanged, skipping annotation update")
 		return false, nil
 	}
-	plugin.deviceCache = encodeddevices
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
@@ -247,8 +246,11 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
+		return true, err
 	}
-	return true, err
+	// Only update cache after successful patch to ensure retries work correctly
+	plugin.deviceCache = encodeddevices
+	return true, nil
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {

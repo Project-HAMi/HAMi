@@ -1,19 +1,34 @@
-# Reproduction: NVML Init Panic
+# Reproduction: NVML Init Panic Fix
 
-## Issue
-The device plugin crashes with `panic(0)` when NVML initialization fails.
+## Issue (Before This Fix)
+The device plugin crashed with `panic(0)` when NVML initialization failed.
+
+## Solution (After This Fix)
+The device plugin now returns an empty device list and retries on the next cycle.
 
 ## Location
-`pkg/device-plugin/nvidiadevice/nvinternal/plugin/register.go:97`
+`pkg/device-plugin/nvidiadevice/nvinternal/plugin/register.go:96-100`
 
+**Before:**
 ```go
 if nvret := nvmlInit(); nvret != nvml.SUCCESS {
     klog.Errorln("nvml Init err: ", nvret)
-    panic(0)  // ← CRASH HERE
+    panic(0)  // ← CRASH
 }
 ```
 
-## How to Reproduce
+**After:**
+```go
+if nvret := nvmlInit(); nvret != nvml.SUCCESS {
+    klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
+        "Failed to initialize NVML, returning empty device list for graceful degradation", 
+        "returnCode", nvret)
+    emptyRes := make([]*device.DeviceInfo, 0)
+    return &emptyRes  // ← GRACEFUL DEGRADATION
+}
+```
+
+## How to Reproduce the Original Issue
 
 ### Method 1: Unload NVIDIA Driver
 ```bash
@@ -59,34 +74,37 @@ func TestGetAPIDevices_NVMLInitFailure(t *testing.T) {
 
 ## Impact
 
-**Before Fix:**
+### Behavior Before Fix
 - Single NVML failure → Entire device plugin crashes
 - ALL GPUs on node become unavailable
 - Requires manual pod restart
 - MTTR: 5-30 minutes
 
-**After Fix:**
+### Behavior After Fix
 - NVML failure → Returns empty device list
 - Plugin stays running
 - Retries on next cycle (30s)
 - Self-healing
 
-## Current Behavior
-```
-E0807 12:00:00.123456   12345 register.go:97] nvml Init err:  6
-panic: 0
-
-goroutine 1 [running]:
-github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin.(*NvidiaDevicePlugin).getAPIDevices(...)
-    /workspace/pkg/device-plugin/nvidiadevice/nvinternal/plugin/register.go:97
-...
+## Current Behavior (After This Fix)
+```text
+E0807 12:00:00.123456   12345 register.go:96] Failed to initialize NVML, returning empty device list for graceful degradation error="nvml init failed: Initialization Failed" returnCode=6
+I0807 12:00:00.789012   12345 register.go:210] Discovered 0 device(s) for registration
+I0807 12:00:00.789123   12345 register.go:250] Updating node annotations with 0 device(s)
+I0807 12:00:30.123456   12345 register.go:95] Retrying device registration...
 ```
 
-## Expected Behavior After Fix
-```
-E0807 12:00:00.123456   12345 register.go:95] Failed to initialize NVML, returning empty device list for graceful degradation error="nvml init failed: Initialization Failed" returnCode=6
-I0807 12:00:00.789012   12345 register.go:210] Registered 0 device(s)
-I0807 12:00:35.123456   12345 register.go:95] Retrying device registration...
+## Expected Behavior (Self-Healing)
+```text
+# Cycle 1: NVML init fails
+E0807 12:00:00.123456   12345 register.go:96] Failed to initialize NVML, returning empty device list for graceful degradation error="nvml init failed: Driver Not Loaded" returnCode=29
+I0807 12:00:00.789012   12345 register.go:210] Discovered 0 device(s) for registration
+
+# Wait 30 seconds...
+
+# Cycle 2: Driver loaded, NVML succeeds
+I0807 12:00:30.123456   12345 register.go:210] Discovered 4 device(s) for registration
+I0807 12:00:30.456789   12345 register.go:250] Successfully updated node annotation
 ```
 
 ## Related Issues
