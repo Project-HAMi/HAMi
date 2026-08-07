@@ -218,6 +218,7 @@ func Test_DeviceList_Filter(t *testing.T) {
 			got, err := list.Filter(test.uuids)
 			if test.wantErr {
 				assert.ErrorContains(t, err, "no device with uuid")
+				assert.Assert(t, got == nil)
 				return
 			}
 			assert.NilError(t, err)
@@ -233,28 +234,32 @@ func Test_calculateGPUPairScore(t *testing.T) {
 	gpu0 := &Device{Index: 0, nvlibDevice: nvlibDevice{UUID: "gpu0"}}
 	gpu1 := &Device{Index: 1, nvlibDevice: nvlibDevice{UUID: "gpu1"}}
 
-	// linkTypes describes the gpu0 -> gpu1 links to install for the test; a matching
-	// same-length placeholder slice is installed on gpu1 -> gpu0 so the bidirectional
-	// link-count check in calculateGPUPairScore doesn't flag the pair as asymmetric.
+	// linkTypes describes the gpu0 -> gpu1 links to install for the test. By default a
+	// matching same-length placeholder slice is installed on gpu1 -> gpu0 so the
+	// bidirectional link-count check in calculateGPUPairScore doesn't flag the pair as
+	// asymmetric; backwardCount overrides that length to exercise the asymmetric branch.
 	tests := []struct {
-		name      string
-		gpu0      *Device
-		gpu1      *Device
-		linkTypes []P2PLinkType
-		want      int
+		name           string
+		gpu0           *Device
+		gpu1           *Device
+		linkTypes      []P2PLinkType
+		backwardCount  int
+		want           int
+		wantAsymmetric bool
 	}{
-		{name: "nil gpu0", gpu0: nil, gpu1: gpu1, want: 0},
-		{name: "nil gpu1", gpu0: gpu0, gpu1: nil, want: 0},
-		{name: "same pointer", gpu0: gpu0, gpu1: gpu0, want: 0},
-		{name: "cross cpu", linkTypes: []P2PLinkType{P2PLinkCrossCPU}, want: 10},
-		{name: "same cpu", linkTypes: []P2PLinkType{P2PLinkSameCPU}, want: 20},
-		{name: "host bridge", linkTypes: []P2PLinkType{P2PLinkHostBridge}, want: 30},
-		{name: "multi switch", linkTypes: []P2PLinkType{P2PLinkMultiSwitch}, want: 40},
-		{name: "single switch", linkTypes: []P2PLinkType{P2PLinkSingleSwitch}, want: 50},
-		{name: "same board", linkTypes: []P2PLinkType{P2PLinkSameBoard}, want: 60},
-		{name: "two nvlink + host bridge", linkTypes: []P2PLinkType{TwoNVLINKLinks, P2PLinkHostBridge}, want: 230},
-		{name: "eighteen nvlink", linkTypes: []P2PLinkType{EighteenNVLINKLinks}, want: 1800},
-		{name: "unknown link type contributes nothing", linkTypes: []P2PLinkType{P2PLinkUnknown}, want: 0},
+		{name: "nil gpu0", gpu0: nil, gpu1: gpu1, backwardCount: -1, want: 0},
+		{name: "nil gpu1", gpu0: gpu0, gpu1: nil, backwardCount: -1, want: 0},
+		{name: "same pointer", gpu0: gpu0, gpu1: gpu0, backwardCount: -1, want: 0},
+		{name: "cross cpu", linkTypes: []P2PLinkType{P2PLinkCrossCPU}, backwardCount: -1, want: 10},
+		{name: "same cpu", linkTypes: []P2PLinkType{P2PLinkSameCPU}, backwardCount: -1, want: 20},
+		{name: "host bridge", linkTypes: []P2PLinkType{P2PLinkHostBridge}, backwardCount: -1, want: 30},
+		{name: "multi switch", linkTypes: []P2PLinkType{P2PLinkMultiSwitch}, backwardCount: -1, want: 40},
+		{name: "single switch", linkTypes: []P2PLinkType{P2PLinkSingleSwitch}, backwardCount: -1, want: 50},
+		{name: "same board", linkTypes: []P2PLinkType{P2PLinkSameBoard}, backwardCount: -1, want: 60},
+		{name: "two nvlink + host bridge", linkTypes: []P2PLinkType{TwoNVLINKLinks, P2PLinkHostBridge}, backwardCount: -1, want: 230},
+		{name: "eighteen nvlink", linkTypes: []P2PLinkType{EighteenNVLINKLinks}, backwardCount: -1, want: 1800},
+		{name: "unknown link type contributes nothing", linkTypes: []P2PLinkType{P2PLinkUnknown}, backwardCount: -1, want: 0},
+		{name: "asymmetric link counts", linkTypes: []P2PLinkType{P2PLinkSameCPU}, backwardCount: 0, want: 0, wantAsymmetric: true},
 	}
 
 	for _, test := range tests {
@@ -265,12 +270,16 @@ func Test_calculateGPUPairScore(t *testing.T) {
 				for _, lt := range test.linkTypes {
 					forward = append(forward, P2PLink{Type: lt})
 				}
-				backward := make([]P2PLink, len(forward))
+				backwardCount := len(forward)
+				if test.backwardCount >= 0 {
+					backwardCount = test.backwardCount
+				}
+				backward := make([]P2PLink, backwardCount)
 				g0 = &Device{Index: 0, nvlibDevice: nvlibDevice{UUID: "gpu0"}, Links: map[int][]P2PLink{1: forward}}
 				g1 = &Device{Index: 1, nvlibDevice: nvlibDevice{UUID: "gpu1"}, Links: map[int][]P2PLink{0: backward}}
 			}
 			got, asymmetric := calculateGPUPairScore(g0, g1)
-			assert.Equal(t, asymmetric, false)
+			assert.Equal(t, asymmetric, test.wantAsymmetric)
 			assert.Equal(t, got, test.want)
 		})
 	}

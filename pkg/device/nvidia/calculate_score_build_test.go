@@ -121,13 +121,13 @@ func newFakeDevice(uuid string, busID string, topologyLevel nvml.GpuTopologyLeve
 
 func Test_newDevice(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
-		d := newFakeDevice("gpu-uuid-0", "0000:00:00.0", nvml.TOPOLOGY_INTERNAL)
+		d := newFakeDevice("gpu-uuid-0", "00000000:00:00.0", nvml.TOPOLOGY_INTERNAL)
 		got, err := newDevice(0, d)
 		assert.NilError(t, err)
 		assert.Equal(t, got.Index, 0)
 		assert.Equal(t, got.UUID, "gpu-uuid-0")
 		// BusID() strips a leading "0000" prefix (see links.go PciInfo.BusID).
-		assert.Equal(t, got.PCI.BusID, ":00:00.0")
+		assert.Equal(t, got.PCI.BusID, "0000:00:00.0")
 	})
 
 	t.Run("GetUUID fails", func(t *testing.T) {
