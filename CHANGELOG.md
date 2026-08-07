@@ -407,4 +407,6 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 **Bug fixes**
 - Fix initialization error when using tensor parallelism on vLLM above 0.18
 - Fix multiple device typos
+- Add unit test coverage for node discovery handshake parsing with malformed or empty annotations
+
 

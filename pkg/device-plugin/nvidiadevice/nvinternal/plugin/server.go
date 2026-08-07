@@ -454,7 +454,11 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
-	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	if err != nil {
+		klog.Errorf("Failed to send ListAndWatch response: %v", err)
+		return err
+	}
 
 	for {
 		select {
@@ -464,7 +468,10 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
+				return nil
+			}
 		}
 	}
 }

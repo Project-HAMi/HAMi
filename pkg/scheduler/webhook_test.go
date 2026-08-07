@@ -273,8 +273,8 @@ func TestFitResourceQuota(t *testing.T) {
 	coreName := "nvidia.com/gpucores"
 
 	qm.Quotas[ns] = &device.DeviceQuota{
-		memName:  &device.Quota{Used: 1000, Limit: 2000},
-		coreName: &device.Quota{Used: 200, Limit: 400},
+		memName:  &device.Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &device.Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	testCases := []struct {
@@ -486,13 +486,13 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 	// One MLU vmemory unit is 256 MiB, so a limit of 100 units leaves room for
 	// 25600 MiB. Comparing the request against the raw 100 would deny every pod.
 	qm.Quotas["mlu-mem"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100},
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 100, LimitSet: true},
 	}
 	qm.Quotas["mlu-core"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50},
+		"cambricon.com/mlu.smlu.vcore": &device.Quota{Used: 20, Limit: 50, LimitSet: true},
 	}
 	qm.Quotas["dcu-mem"] = &device.DeviceQuota{
-		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000},
+		"hygon.com/dcumem": &device.Quota{Used: 0, Limit: 1000, LimitSet: true},
 	}
 	t.Cleanup(func() {
 		for _, ns := range []string{"mlu-mem", "mlu-core", "dcu-mem"} {
@@ -590,7 +590,7 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 	qm := device.NewQuotaManager()
 	// 60 units is 15360 MiB of headroom.
 	qm.Quotas["mlu-multi"] = &device.DeviceQuota{
-		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60},
+		"cambricon.com/mlu.smlu.vmemory": &device.Quota{Used: 0, Limit: 60, LimitSet: true},
 	}
 	t.Cleanup(func() { delete(qm.Quotas, "mlu-multi") })
 
@@ -649,7 +649,7 @@ func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
 
 	qm := device.NewQuotaManager()
 	qm.Quotas["ascend"] = &device.DeviceQuota{
-		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192},
+		"huawei.com/Ascend910B-memory": &device.Quota{Used: 0, Limit: 8192, LimitSet: true},
 	}
 	t.Cleanup(func() { delete(qm.Quotas, "ascend") })
 

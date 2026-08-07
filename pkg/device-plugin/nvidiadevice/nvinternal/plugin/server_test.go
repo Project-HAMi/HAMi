@@ -48,6 +48,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
@@ -1455,5 +1456,65 @@ func TestAllocate_EmptyDevicesIdsAndRegression(t *testing.T) {
 			require.Equal(t, tc.expectSuccess, successCalled, "PodAllocationTrySuccess invoked mismatch")
 		})
 	}
+type mockListAndWatchServer struct {
+	grpc.ServerStream
+	sendErrs []error
+	sent     []*kubeletdevicepluginv1beta1.ListAndWatchResponse
+}
+
+func (m *mockListAndWatchServer) Send(resp *kubeletdevicepluginv1beta1.ListAndWatchResponse) error {
+	m.sent = append(m.sent, resp)
+	if len(m.sendErrs) > 0 {
+		err := m.sendErrs[0]
+		m.sendErrs = m.sendErrs[1:]
+		return err
+	}
+	return nil
+}
+
+func TestListAndWatch_SendError(t *testing.T) {
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{}
+		},
+		ResourceFunc: func() v1.ResourceName {
+			return v1.ResourceName("nvidia.com/gpu")
+		},
+	}
+
+	t.Run("InitialSendFails", func(t *testing.T) {
+		expectedErr := fmt.Errorf("initial send failed")
+		server := &mockListAndWatchServer{
+			sendErrs: []error{expectedErr},
+		}
+		plugin := &NvidiaDevicePlugin{
+			rm:              mockRM,
+			stop:            make(chan any),
+			health:          make(chan *rm.Device, 1),
+			schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr[uint](1)}},
+		}
+
+		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
+		require.ErrorIs(t, err, expectedErr)
+		require.Len(t, server.sent, 1)
+	})
+
+	t.Run("UpdateSendFails", func(t *testing.T) {
+		expectedErr := fmt.Errorf("update send failed")
+		server := &mockListAndWatchServer{
+			sendErrs: []error{nil, expectedErr},
+		}
+		plugin := &NvidiaDevicePlugin{
+			rm:              mockRM,
+			stop:            make(chan any),
+			health:          make(chan *rm.Device, 1),
+			schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{DeviceSplitCount: ptr[uint](1)}},
+		}
+
+		plugin.health <- &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "gpu-1"}}
+		err := plugin.ListAndWatch(&kubeletdevicepluginv1beta1.Empty{}, server)
+		require.NoError(t, err)
+		require.Len(t, server.sent, 2)
+	})
 }
 

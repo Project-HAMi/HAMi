@@ -2691,6 +2691,27 @@ func TestAddResourceUsage_MigNonResetNoSlot(t *testing.T) {
 	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
 	assert.Assert(t, err != nil)
 	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+	assert.Equal(t, usage.Used, int32(0))
+}
+
+func TestAddResourceUsage_MigResetNoFit(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	usage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigTemplate: []device.Geometry{
+			{
+				{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+			},
+		},
+	}
+	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096}
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
+	assert.Assert(t, err != nil)
+	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
+	// No template fit: usage counters must not reflect a phantom allocation.
+	assert.Equal(t, usage.Usedmem, int32(0))
+	assert.Equal(t, usage.Used, int32(0))
+	assert.Assert(t, !strings.Contains(ctr.UUID, "["))
 }
 
 func TestCustomFilterRule_MigEmptyUsageWithTemplate(t *testing.T) {
@@ -2854,6 +2875,33 @@ func TestFit_MutexPolicy(t *testing.T) {
 	// mutex cannot satisfy 2 cards when only one device is idle.
 	two := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
 	fit, _, _ = nv.Fit(devices, two, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func TestFit_MigPercentageRequestRejectsUndersizedTemplate(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+
+	// The only MIG template offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
+	devices := []*device.DeviceUsage{
+		{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true,
+			Mode: MigMode,
+			MigTemplate: []device.Geometry{
+				{
+					{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+				},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, _, _ := nv.Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 }
 

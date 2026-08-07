@@ -678,9 +678,9 @@ func (dev *NvidiaGPUDevices) migNeedsReset(n *device.DeviceUsage) bool {
 }
 
 func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
-	n.Used++
 	if n.Mode == MigMode {
 		if dev.migNeedsReset(n) {
+			found := false
 		OuterLoop:
 			for tidx, templates := range n.MigTemplate {
 				for idx, template := range templates {
@@ -700,9 +700,13 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 						}
 						n.MigUsage.Index = int32(tidx)
 						n.MigUsage.UsageList[usageListIdx].InUse = true
+						found = true
 						break OuterLoop
 					}
 				}
+			}
+			if !found {
+				return errors.New("mig template allocate resource fail")
 			}
 		} else {
 			found := false
@@ -723,6 +727,7 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 			}
 		}
 	}
+	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 	return nil
@@ -839,7 +844,10 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
 		}
-		if !nv.CustomFilterRule(allocated, request, tmpDevs[k.Type], dev) {
+		// CustomFilterRule must see the resolved memory request, not the raw (possibly zero) Memreq field.
+		resolvedReq := request
+		resolvedReq.Memreq = memreq
+		if !nv.CustomFilterRule(allocated, resolvedReq, tmpDevs[k.Type], dev) {
 			reason[common.CardNotFoundCustomFilterRule]++
 			klog.V(5).InfoS(common.CardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
