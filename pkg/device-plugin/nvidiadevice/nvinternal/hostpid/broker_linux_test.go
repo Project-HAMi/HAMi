@@ -206,6 +206,9 @@ func TestBrokerTimesOutPartialRequest(t *testing.T) {
 		t.Fatal(err)
 	}
 	time.Sleep(transactionTimeout + 100*time.Millisecond)
+	if err := connection.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+		t.Fatal(err)
+	}
 	buffer := make([]byte, 1)
 	if count, err := connection.Read(buffer); count != 0 || err == nil {
 		t.Fatalf("partial request connection stayed open: n=%d err=%v",
