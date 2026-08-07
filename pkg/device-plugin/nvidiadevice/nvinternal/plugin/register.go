@@ -265,9 +265,9 @@ func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackD
 		default:
 		}
 		if disableWatchAndRegister {
-			klog.V(3).Info("WatchAndRegister is disabled, sleeping")
+			klog.V(3).Info("WatchAndRegister is disabled, waiting for resume signal")
 			ackDisableWatchAndRegister <- true
-			time.Sleep(successSleepInterval)
+			disableWatchAndRegister = <-disableNVML
 			continue
 		}
 		changed, err := plugin.RegisterInAnnotation()

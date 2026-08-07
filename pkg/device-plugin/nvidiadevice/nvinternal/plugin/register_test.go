@@ -243,31 +243,50 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 	// Send disable signal before starting
 	disableCh <- true
 
-	// Create a minimal plugin - WatchAndRegister will read the disable signal
-	// and send an ack, then sleep. We verify the ack arrives.
+	// Create a minimal plugin - WatchAndRegister will read the disable signal,
+	// send a single ack, and block waiting for the resume signal.
 	plugin := &NvidiaDevicePlugin{}
 
-	done := make(chan struct{})
 	go func() {
 		plugin.WatchAndRegister(disableCh, ackCh)
 	}()
 
-	go func() {
-		// Wait for the ack that confirms WatchAndRegister entered disabled state
-		ack := <-ackCh
+	// 1. Wait for the initial ack confirming WatchAndRegister entered disabled state
+	select {
+	case ack := <-ackCh:
 		if !ack {
 			t.Error("expected ack to be true")
 		}
-		close(done)
-	}()
-
-	// Use a select with timeout to avoid hanging forever
-	select {
-	case <-done:
-		// Success: received the ack
 	case <-timeAfter(3 * time.Second):
 		t.Fatal("timed out waiting for disable ack from WatchAndRegister")
 	}
+
+	// 2. Assert no duplicate ack is sent while remaining in disabled state
+	select {
+	case extraAck := <-ackCh:
+		t.Fatalf("received unexpected extra ack during disable period: %v", extraAck)
+	case <-timeAfter(100 * time.Millisecond):
+		// Success: no duplicate ack was sent
+	}
+
+	// 3. Send resume signal
+	disableCh <- false
+
+	// 4. Verify re-disabling works as expected for a subsequent disable cycle
+	time.Sleep(50 * time.Millisecond)
+	disableCh <- true
+
+	select {
+	case ack := <-ackCh:
+		if !ack {
+			t.Error("expected second disable cycle ack to be true")
+		}
+	case <-timeAfter(3 * time.Second):
+		t.Fatal("timed out waiting for second disable ack from WatchAndRegister")
+	}
+
+	// Clean up by sending resume signal
+	disableCh <- false
 }
 
 // timeAfter returns a channel that closes after the given duration.
