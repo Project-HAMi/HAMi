@@ -365,6 +365,7 @@ test case matrix.
 
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -476,6 +477,7 @@ test case matrix.
 */
 func Test_Filter(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -1042,7 +1044,6 @@ func Test_RegisterFromNodeAnnotations(t *testing.T) {
 			name: "test node handshake annotations layout",
 			Scheduler: func() *Scheduler {
 				s := NewScheduler()
-				s.stopCh = make(chan struct{})
 				s.nodeNotify = make(chan struct{})
 				client.KubeClient = fake.NewClientset()
 				s.kubeClient = client.KubeClient
@@ -1136,7 +1137,6 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 	// Define a helper function to create a scheduler with a node that has nil annotations.
 	createSchedulerWithNilAnnotations := func() *Scheduler {
 		s := NewScheduler()
-		s.stopCh = make(chan struct{})
 		s.nodeNotify = make(chan struct{})
 
 		client.KubeClient = fake.NewClientset()
@@ -1309,7 +1309,6 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	}
 
 	s := NewScheduler()
-	s.stopCh = make(chan struct{})
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 
@@ -1346,6 +1345,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 
 	informerFactory.Start(s.stopCh)
 	informerFactory.WaitForCacheSync(s.stopCh)
+	t.Cleanup(s.Stop)
 
 	s.addNode("node-1", &device.NodeInfo{
 		ID:   "node-1",
@@ -1379,6 +1379,7 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 
 func Test_ResourceQuota(t *testing.T) {
 	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -2094,6 +2095,7 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
@@ -2137,6 +2139,7 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
+	t.Cleanup(s.Stop)
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
@@ -2210,11 +2213,6 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	device.DevicesMap = map[string]device.Devices{"bind-lock-mock": mock}
 
 	s := NewScheduler()
-	cleanup := func() {
-		config.NodeLockRetryTimeout = oldRetry
-		device.DevicesMap = oldDevicesMap
-		close(s.stopCh)
-	}
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
@@ -2225,6 +2223,11 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	client.KubeClient = fakeClient
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(fakeClient, time.Hour)
+	cleanup := func() {
+		config.NodeLockRetryTimeout = oldRetry
+		device.DevicesMap = oldDevicesMap
+		s.Stop()
+	}
 	require.NoError(t, informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod))
 	require.NoError(t, informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node))
 	s.podLister = informerFactory.Core().V1().Pods().Lister()
