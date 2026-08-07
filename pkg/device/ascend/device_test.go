@@ -667,6 +667,24 @@ func Test_MutateAdmission(t *testing.T) {
 			},
 			want: true,
 		},
+		{
+			name: "nil Requests does not panic",
+			args: struct {
+				ctr corev1.Container
+				pod corev1.Pod
+			}{
+				ctr: corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"huawei.com/Ascend910A":        resource.MustParse("1"),
+							"huawei.com/Ascend910A-memory": resource.MustParse("8738"),
+						},
+					},
+				},
+				pod: corev1.Pod{},
+			},
+			want: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
