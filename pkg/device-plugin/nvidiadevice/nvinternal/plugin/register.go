@@ -93,8 +93,11 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		klog.ErrorS(fmt.Errorf("nvml init failed: %s", nvml.ErrorString(nvret)), 
+			"Failed to initialize NVML, returning empty device list for graceful degradation", 
+			"returnCode", nvret)
+		emptyRes := make([]*device.DeviceInfo, 0)
+		return &emptyRes
 	}
 	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
 	defer nvml.Shutdown()
@@ -212,10 +215,9 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		klog.V(3).Info("Device info unchanged, skipping annotation update")
 		return false, nil
 	}
-	plugin.deviceCache = encodeddevices
 
 	var data []byte
-	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
+	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" && len(*devices) > 0 {
 		gpuScore, hasAsymmetry, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
@@ -244,8 +246,11 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	if err != nil {
 		klog.Errorln("patch node error", err.Error())
+		return true, err
 	}
-	return true, err
+	// Only update cache after successful patch to ensure retries work correctly
+	plugin.deviceCache = encodeddevices
+	return true, nil
 }
 
 func (plugin *NvidiaDevicePlugin) WatchAndRegister(disableNVML <-chan bool, ackDisableWatchAndRegister chan<- bool) {
