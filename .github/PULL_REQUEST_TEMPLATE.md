@@ -20,3 +20,7 @@ Fixes #
 **Special notes for your reviewer**:
 
 **Does this PR introduce a user-facing change?**:
+
+**AI Disclosure**:
+
+<!-- Briefly disclose any AI assistance used. Do not add AI co-author or assistance trailers to commits. -->
