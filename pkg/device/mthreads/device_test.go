@@ -569,10 +569,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// A Gi-scale memory quantity, times the x512 factor, overflows
-			// int32. Rather than silently wrapping to Memreq: 0 (which would
-			// let the pod schedule onto a full device), the request is rejected,
-			// mirroring the count-overflow handling above.
 			name: "memory overflowing int32 is rejected, not truncated to zero",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -586,9 +582,6 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// A decimal-form quantity such as 16.0Gi can't be read as an int64
-			// (AsInt64 returns false), so it must be rejected rather than
-			// silently treated as zero.
 			name: "decimal-form memory request is rejected, not treated as zero",
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
