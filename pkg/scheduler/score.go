@@ -50,10 +50,10 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	return l
 }
 
-func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
+func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices, weights util.DeviceScoringWeights) (bool, string) {
 	// computer all device score for one node
 	for index := range node.Devices.DeviceLists {
-		node.Devices.DeviceLists[index].ComputeScore(requests)
+		node.Devices.DeviceLists[index].ComputeScore(requests, weights)
 	}
 	//This loop is for requests for different devices
 	for _, k := range requests {
@@ -95,6 +95,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 }
 
 func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
+	deviceScoringWeights, err := util.GetDeviceScoringWeightsByPod(task)
+	if err != nil {
+		return nil, err
+	}
+
 	userNodePolicy := config.NodeSchedulerPolicy
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
@@ -149,7 +154,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
-				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
+				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices, deviceScoringWeights)
 				// found certain deviceType, fill missing empty allocation for containers before this
 				for idx := range score.Devices {
 					deviceType = idx

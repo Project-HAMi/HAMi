@@ -3414,11 +3414,23 @@ func Test_fitInDevices(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			viewStatus(test.args.node)
-			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.pod, nil, test.args.devinput)
+			result1, result2 := fitInDevices(&test.args.node, test.args.requests, test.args.pod, nil, test.args.devinput, util.DefaultDeviceScoringWeights())
 			assert.DeepEqual(t, result1, test.want1)
 			assert.DeepEqual(t, result2, test.want2)
 		})
 	}
+}
+
+func TestCalcScoreRejectsInvalidDeviceScoringWeights(t *testing.T) {
+	nodes := map[string]*NodeUsage{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		util.DeviceScoringWeightsAnnotationKey: "slot=1,core=-1,memory=3",
+	}}}
+
+	result, err := (&Scheduler{}).calcScoreWithOptions(&nodes, nil, pod, map[string]string{}, false, false)
+
+	assert.Assert(t, result == nil)
+	assert.ErrorContains(t, err, `"core" weight must not be negative`)
 }
 
 func Test_Nvidia_GPU_Topology(t *testing.T) {
@@ -3643,7 +3655,7 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 	devinput := &device.PodDevices{}
 
 	viewStatus(node)
-	fit, reason := fitInDevices(&node, requests, &corev1.Pod{}, nil, devinput)
+	fit, reason := fitInDevices(&node, requests, &corev1.Pod{}, nil, devinput, util.DefaultDeviceScoringWeights())
 
 	assert.Equal(t, fit, true)
 	assert.Equal(t, reason, "")
