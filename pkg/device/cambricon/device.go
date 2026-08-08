@@ -164,13 +164,18 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 		return nil
 	}
 
-	newNode := n.DeepCopy()
-	delete(newNode.Annotations, DsmluLockTime)
-	_, err := client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+	ctx := context.Background()
+	// Patch, not Update: the scheduler ServiceAccount is granted only
+	// get/list/patch/watch on nodes, so an Update is rejected with 403 and the
+	// lock is never released. setNodeLock above already patches for the same
+	// reason. A merge patch also carries no resourceVersion, so a retry is a
+	// fresh attempt rather than a replay of one stale object.
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":null}}}`, DsmluLockTime)
+	_, err := client.GetClient().CoreV1().Nodes().Patch(ctx, n.Name, types.StrategicMergePatchType, []byte(patchData), metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, n.Name, types.StrategicMergePatchType, []byte(patchData), metav1.PatchOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
