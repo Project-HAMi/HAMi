@@ -2369,5 +2369,3 @@ func Test_Bind_ReleaseNodeLockFailureTriggersRetry(t *testing.T) {
 	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(2),
 		"expected at least 2 ReleaseNodeLock calls (initial failure + retry)")
 }
-
-
