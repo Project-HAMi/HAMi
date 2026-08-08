@@ -408,5 +408,6 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix initialization error when using tensor parallelism on vLLM above 0.18
 - Fix multiple device typos
 - Add unit test coverage for node discovery handshake parsing with malformed or empty annotations
+- Fix node lock not released on Bind success path in scheduler, which could block scheduling on a node for up to 5 minutes if the device-plugin was down or delayed
 
 
