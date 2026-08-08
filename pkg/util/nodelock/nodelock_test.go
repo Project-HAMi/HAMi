@@ -957,3 +957,112 @@ func TestSetupNodeLockTimeout(t *testing.T) {
 		})
 	}
 }
+
+func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "contention-node"
+	clientSet := fake.NewClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	})
+	client.KubeClient = clientSet
+
+	t.Run("Context Cancellation Halts Retry Backoff", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		clientSet := fake.NewClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+		})
+		client.KubeClient = clientSet
+
+		// Prepend a reactor to patch that simulates persistent transient API failure
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated transient API error")
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+		defer cancel()
+
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-waiter", Namespace: "ns"}}
+		errChan := make(chan error, 1)
+
+		go func() {
+			errChan <- SetNodeLockWithContext(ctx, nodeName, "", pod)
+		}()
+
+		select {
+		case err := <-errChan:
+			if err == nil {
+				t.Fatalf("Expected error due to context cancellation, got nil")
+			}
+			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "context canceled") {
+				t.Fatalf("Expected context error during retries, got %v", err)
+			}
+		case <-time.After(2 * time.Second):
+			t.Fatalf("SetNodeLockWithContext hung after context deadline")
+		}
+	})
+
+	t.Run("High Lock Contention Goroutine Safety", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		clientSet = fake.NewClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+		})
+		client.KubeClient = clientSet
+
+		numGoroutines := 10
+		var wg sync.WaitGroup
+		errs := make(chan error, numGoroutines)
+
+		for i := 0; i < numGoroutines; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-" + string(rune('a'+id)), Namespace: "ns"}}
+				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+				defer cancel()
+				err := LockNodeWithContext(ctx, nodeName, "", pod)
+				if err != nil {
+					errs <- err
+				} else {
+					time.Sleep(10 * time.Millisecond)
+					_ = ReleaseNodeLockWithContext(ctx, nodeName, "", pod, false)
+				}
+			}(i)
+		}
+
+		wg.Wait()
+		close(errs)
+
+		var totalErrors int
+		for err := range errs {
+			if err != nil {
+				totalErrors++
+			}
+		}
+		t.Logf("High contention completed with %d goroutines encountering contention/timeout out of %d", totalErrors, numGoroutines)
+	})
+
+	t.Run("TryLockNode Non-blocking Attempt", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		clientSet = fake.NewClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+		})
+		client.KubeClient = clientSet
+
+		podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "try-pod-a", Namespace: "ns"}}
+		if err := TryLockNode(nodeName, "", podA); err != nil {
+			t.Fatalf("TryLockNode should succeed when node is unlocked: %v", err)
+		}
+
+		if _, err := clientSet.CoreV1().Pods("ns").Create(context.Background(), podA, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("Failed to create pod fixture: %v", err)
+		}
+
+		podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "try-pod-b", Namespace: "ns"}}
+		if err := TryLockNode(nodeName, "", podB); err == nil {
+			t.Fatalf("TryLockNode should fail when node is locked by another pod")
+		} else if !IsNodeLockContention(err) {
+			t.Fatalf("Expected NodeLockContention error, got: %v", err)
+		}
+	})
+}
+
