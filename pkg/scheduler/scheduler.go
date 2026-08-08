@@ -429,7 +429,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
+				klog.Warningf("Device is unhealthy, cleaning up node %s for device vendor %s", val.Name, devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
 					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
