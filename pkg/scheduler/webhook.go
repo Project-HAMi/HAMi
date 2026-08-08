@@ -70,6 +70,17 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		for _, val := range device.GetDevices() {
@@ -140,6 +151,14 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
 		var memoryReq, coresReq int64
+		for i := range pod.Spec.InitContainers {
+			req := dev.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			if req.Nums == 0 {
+				continue
+			}
+			memoryReq += int64(req.Memreq) * int64(req.Nums)
+			coresReq += int64(req.Coresreq) * int64(req.Nums)
+		}
 		for i := range pod.Spec.Containers {
 			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if req.Nums == 0 {

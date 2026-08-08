@@ -408,5 +408,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Fix initialization error when using tensor parallelism on vLLM above 0.18
 - Fix multiple device typos
 - Add unit test coverage for node discovery handshake parsing with malformed or empty annotations
+- Fix webhook mutating requests for pods with initContainers and multiple application containers
+
 
 

@@ -1070,3 +1070,113 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 		})
 	}
 }
+
+func TestMutateAdmissionMultiContainerAndInitContainers(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+
+	t.Run("initContainer and multi-container pod patch validation", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "multi-container-init-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-downloader",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": resource.MustParse("1"),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-main",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": resource.MustParse("1"),
+							},
+						},
+					},
+					{
+						Name: "sidecar-logging",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{},
+						},
+					},
+				},
+			},
+		}
+
+		podBytes, err := runtime.Encode(codec, pod)
+		if err != nil {
+			t.Fatalf("Error encoding pod: %v", err)
+		}
+
+		req := admission.Request{
+			AdmissionRequest: admissionv1.AdmissionRequest{
+				UID:       "multi-container-uid",
+				Namespace: pod.Namespace,
+				Name:      pod.Name,
+				Object: runtime.RawExtension{
+					Raw: podBytes,
+				},
+			},
+		}
+
+		resp := wh.Handle(context.Background(), req)
+		if !resp.Allowed {
+			t.Fatalf("Expected allowed response for multi-container pod with initContainers, got denied: %+v", resp.Result)
+		}
+
+		if len(resp.Patches) == 0 {
+			t.Fatalf("Expected JSON patches to be generated for multi-container pod, but got 0 patches")
+		}
+
+		// Verify JSON patches target both initContainers and containers appropriately
+		initContainerPatched := false
+		mainContainerPatched := false
+		for _, patch := range resp.Patches {
+			if strings.HasPrefix(patch.Path, "/spec/initContainers/0") {
+				initContainerPatched = true
+			}
+			if strings.HasPrefix(patch.Path, "/spec/containers/0") {
+				mainContainerPatched = true
+			}
+		}
+
+		if !initContainerPatched {
+			t.Errorf("Expected JSON patches for initContainers[0], but none found in patches: %+v", resp.Patches)
+		}
+		if !mainContainerPatched {
+			t.Errorf("Expected JSON patches for containers[0], but none found in patches: %+v", resp.Patches)
+		}
+	})
+}
+
