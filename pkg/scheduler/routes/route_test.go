@@ -137,7 +137,6 @@ func TestWebHookRoute_InitError(t *testing.T) {
 	}
 	if !strings.Contains(w.Body.String(), "custom init error") {
 		t.Errorf("Expected response body to contain error string, got %s", w.Body.String())
->>>>>>> 4573a99 (added-test-and-suggested-fixes)
 	}
 }
 
