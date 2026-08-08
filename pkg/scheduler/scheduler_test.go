@@ -22,6 +22,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -1582,6 +1583,163 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 	for _, v := range *s.quotaManager.GetResourceQuota()[pod.Namespace] {
 		assert.Equal(t, int64(0), v.Used)
 	}
+}
+
+// Test_Filter_ConcurrentNoDoubleAllocation asserts that concurrent Filter
+// calls do not reserve the same device (issue #2232). Each device holds one
+// pod, so the 8 pods must each get a distinct device id.
+func Test_Filter_ConcurrentNoDoubleAllocation(t *testing.T) {
+	const numPods = 8
+
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}))
+
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = nil })
+	s := NewScheduler()
+	s.kubeClient = client.KubeClient
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// One node with numPods devices; each device fits exactly one pod.
+	deviceInfos := make([]device.DeviceInfo, 0, numPods)
+	for i := range numPods {
+		deviceInfos = append(deviceInfos, device.DeviceInfo{
+			ID:           fmt.Sprintf("device-%d", i),
+			Index:        uint(i),
+			Count:        10,
+			Devmem:       8000,
+			Devcore:      100,
+			Mode:         "hami",
+			Type:         nvidia.NvidiaGPUDevice,
+			Health:       true,
+			DeviceVendor: nvidia.NvidiaGPUDevice,
+		})
+	}
+	s.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: deviceInfos,
+		},
+	})
+
+	// Create the pods in the fake apiserver so PatchPodAnnotations succeeds.
+	pods := make([]*corev1.Pod, numPods)
+	for i := range numPods {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: fmt.Sprintf("pod-%d", i),
+				UID:  types.UID(fmt.Sprintf("uid-%d", i)),
+				Annotations: map[string]string{
+					util.GPUSchedulerPolicyAnnotationKey:  util.GPUSchedulerPolicyBinpack.String(),
+					util.NodeSchedulerPolicyAnnotationKey: util.NodeSchedulerPolicyBinpack.String(),
+				},
+			},
+			Spec: corev1.PodSpec{
+				Containers: []corev1.Container{{
+					Name: "gpu-burn",
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(5000, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(10, resource.BinarySI),
+					}},
+				}},
+			},
+		}
+		pods[i] = pod
+		_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(t.Context(), pod, metav1.CreateOptions{})
+		require.NoError(t, err)
+	}
+
+	nodeNames := []string{"node1"}
+
+	// Barrier so all goroutines enter Filter simultaneously.
+	start := make(chan struct{})
+	var wg sync.WaitGroup
+	for i := range numPods {
+		wg.Add(1)
+		go func(pod *corev1.Pod) {
+			defer wg.Done()
+			<-start
+			_, _ = s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &nodeNames})
+		}(pods[i])
+	}
+	close(start)
+	wg.Wait()
+
+	// Every pod must have been annotated with a distinct device id.
+	seen := make(map[string]string, numPods) // deviceID -> podName
+	for _, pod := range pods {
+		refreshed, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(t.Context(), pod.Name, metav1.GetOptions{})
+		require.NoError(t, err)
+		allocated, err := device.DecodePodDevices(device.InRequestDevices, refreshed.Annotations)
+		require.NoError(t, err, "decoding devices for pod %s", pod.Name)
+		single, ok := allocated[nvidia.NvidiaGPUDevice]
+		require.True(t, ok && len(single) > 0 && len(single[0]) > 0, "pod %s has no allocated device", pod.Name)
+		deviceID := single[0][0].UUID
+		require.NotEmpty(t, deviceID, "pod %s has empty device id", pod.Name)
+		if other, dup := seen[deviceID]; dup {
+			t.Fatalf("device %s double-allocated to pod %s and pod %s", deviceID, other, pod.Name)
+		}
+		seen[deviceID] = pod.Name
+	}
+	require.Len(t, seen, numPods, "expected each pod on a distinct device")
+}
+
+// Test_Filter_RollbackOnPatchFailure verifies that when the annotation patch
+// fails, Filter rolls back the reservation it just committed to the cache.
+func Test_Filter_RollbackOnPatchFailure(t *testing.T) {
+	require.NoError(t, config.InitDevicesWithConfig(&config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:  "hami.io/gpu",
+			ResourceMemoryName: "hami.io/gpumem",
+			ResourceCoreName:   "hami.io/gpucores",
+			DefaultGPUNum:      1,
+		},
+	}))
+	// Empty clientset: the pod is unknown to the apiserver, so PatchPodAnnotations fails.
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = nil })
+
+	s := NewScheduler()
+	s.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID: "device1", Index: 0, Count: 10, Devmem: 8000, Devcore: 100,
+				Mode: "hami", Type: nvidia.NvidiaGPUDevice, Health: true, DeviceVendor: nvidia.NvidiaGPUDevice,
+			}},
+		},
+	})
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-fail", UID: "uid-fail"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "c",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				"hami.io/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"hami.io/gpumem": *resource.NewQuantity(1000, resource.BinarySI),
+			}},
+		}}},
+	}
+
+	_, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod, NodeNames: &[]string{"node1"}})
+	require.Error(t, err, "expected patch failure to surface as an error")
+
+	_, inCache := s.podManager.GetPod(pod)
+	require.False(t, inCache, "reservation must be rolled back when the annotation patch fails")
 }
 
 func TestFilterUsesTemplateNodesWithoutSideEffects(t *testing.T) {

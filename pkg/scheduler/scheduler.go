@@ -78,6 +78,10 @@ type Scheduler struct {
 
 	lock   sync.RWMutex
 	synced bool
+
+	// filterLock serializes device selection in Filter so concurrent requests
+	// cannot reserve the same device (issue #2232).
+	filterLock sync.Mutex
 }
 
 func NewScheduler() *Scheduler {
@@ -1030,13 +1034,62 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
 	}
+	klog.V(2).InfoS("Choosing live filter path",
+		"pod", klog.KObj(args.Pod),
+		"reason", "request does not contain full nodes",
+		"nodeNamesLen", nodeNamesLen(args.NodeNames))
+	// selectAndCommitDevice holds filterLock during selection; the annotation
+	// patch below runs outside it (issue #2232).
+	selection, err := s.selectAndCommitDevice(args, resourceReqs)
+	if err != nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		return nil, err
+	}
+	if selection.chosen == nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		return &extenderv1.ExtenderFilterResult{
+			FailedNodes: selection.failedNodes,
+		}, nil
+	}
+	m := selection.chosen
+	// Patch the annotation outside the lock; roll back the cache on failure.
+	if err = util.PatchPodAnnotations(args.Pod, selection.annotations); err != nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		if selection.added {
+			s.quotaManager.RmUsage(args.Pod, selection.effectiveDevices)
+		}
+		s.podManager.DelPod(args.Pod)
+		return nil, err
+	}
+	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, selection.nodeList)
+	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
+	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
+	return &res, nil
+}
 
+// filterSelection holds a Filter reservation; chosen is nil when no node fits
+// (failedNodes then carries the per-node reasons).
+type filterSelection struct {
+	chosen           *policy.NodeScore
+	annotations      map[string]string
+	added            bool
+	nodeList         []*policy.NodeScore
+	failedNodes      map[string]string
+	effectiveDevices device.PodDevices
+}
+
+// selectAndCommitDevice selects a device and commits it to the cache under
+// filterLock. It does not publish the pod annotation; the caller patches it.
+func (s *Scheduler) selectAndCommitDevice(args extenderv1.ExtenderArgs, resourceReqs device.PodDeviceRequests) (*filterSelection, error) {
+	s.filterLock.Lock()
+	defer s.filterLock.Unlock()
+
+	selection := &filterSelection{}
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
 	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
 	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
@@ -1044,16 +1097,12 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
-		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		return nil, err
+		return nil, fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
 	}
 	if len((*nodeScores).NodeList) == 0 {
 		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
-		return &extenderv1.ExtenderFilterResult{
-			FailedNodes: failedNodes,
-		}, nil
+		selection.failedNodes = failedNodes
+		return selection, nil
 	}
 	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
 	sort.Sort(nodeScores)
@@ -1066,33 +1115,20 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	annotations := make(map[string]string)
 	annotations[util.AssignedNodeAnnotations] = m.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
-
 	for _, val := range device.GetDevices() {
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
-
-	rawDevices := m.Devices
-	effectiveDevices := device.CollapseInitContainerUsage(args.Pod, rawDevices)
-	if args.Nodes == nil {
-		added := s.podManager.AddPod(args.Pod, m.NodeID, effectiveDevices)
-		if added {
-			s.quotaManager.AddUsage(args.Pod, effectiveDevices) // use collapsed
-		}
-		err = util.PatchPodAnnotations(args.Pod, annotations)
-		if err != nil {
-			s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-			if added {
-				s.quotaManager.RmUsage(args.Pod, effectiveDevices)
-			}
-			s.podManager.DelPod(args.Pod)
-			return nil, err
-		}
+	// Collapse init-container usage so the cache reflects the effective footprint.
+	effectiveDevices := device.CollapseInitContainerUsage(args.Pod, m.Devices)
+	selection.chosen = m
+	selection.annotations = annotations
+	selection.nodeList = nodeScores.NodeList
+	selection.effectiveDevices = effectiveDevices
+	selection.added = s.podManager.AddPod(args.Pod, m.NodeID, effectiveDevices)
+	if selection.added {
+		s.quotaManager.AddUsage(args.Pod, effectiveDevices)
 	}
-
-	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
-	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
-	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
-	return &res, nil
+	return selection, nil
 }
 
 func (s *Scheduler) filterSimulation(args extenderv1.ExtenderArgs, resourceReqs device.PodDeviceRequests) (*extenderv1.ExtenderFilterResult, error) {
