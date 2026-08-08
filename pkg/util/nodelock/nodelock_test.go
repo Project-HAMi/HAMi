@@ -1123,7 +1123,7 @@ func TestSetNodeLockWithContext_Coverage(t *testing.T) {
 		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
 		client.KubeClient = clientSet
 
-		if err := SetNodeLockWithContext(nil, nodeName, "", pod); err != nil {
+		if err := SetNodeLockWithContext(context.TODO(), nodeName, "", pod); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -1231,7 +1231,7 @@ func TestReleaseNodeLockWithContext_Coverage(t *testing.T) {
 		}})
 		client.KubeClient = clientSet
 
-		if err := ReleaseNodeLockWithContext(nil, nodeName, "", pod, false); err != nil {
+		if err := ReleaseNodeLockWithContext(context.TODO(), nodeName, "", pod, false); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -1391,7 +1391,7 @@ func TestLockNodeWithContext_Coverage(t *testing.T) {
 		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
 		client.KubeClient = clientSet
 
-		if err := LockNodeWithContext(nil, nodeName, "", pod); err != nil {
+		if err := LockNodeWithContext(context.TODO(), nodeName, "", pod); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
@@ -1574,4 +1574,3 @@ func TestTestHelpers(t *testing.T) {
 		t.Fatalf("expected 1 lock after no-op ensure, got %d", count)
 	}
 }
-
