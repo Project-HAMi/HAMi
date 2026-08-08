@@ -17,6 +17,7 @@ limitations under the License.
 package metax
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -186,7 +187,7 @@ func (sdev *MetaxSDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, MetaxNodeLock, p)
 }
 
-func (sdev *MetaxSDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (sdev *MetaxSDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 
 	for _, val := range p.Spec.Containers {
@@ -200,7 +201,7 @@ func (sdev *MetaxSDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error 
 		return nil
 	}
 
-	return nodelock.ReleaseNodeLock(n.Name, MetaxNodeLock, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, MetaxNodeLock, p, false)
 }
 
 func (sdev *MetaxSDevices) NodeCleanUp(nn string) error {

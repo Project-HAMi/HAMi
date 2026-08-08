@@ -17,6 +17,7 @@ limitations under the License.
 package enflame
 
 import (
+	"context"
 	"fmt"
 	"slices"
 
@@ -126,7 +127,7 @@ func (dev *GCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *GCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *GCUDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

@@ -16,6 +16,7 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -57,7 +58,7 @@ func (m *MockDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (m *MockDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (m *MockDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

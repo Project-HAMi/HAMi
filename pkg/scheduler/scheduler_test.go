@@ -1279,8 +1279,10 @@ func (m *registerMockDevice) GetResourceNames() device.ResourceNames { return de
 func (m *registerMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
 	return m.nodeDevices, m.getNodeErr
 }
-func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
-func (m *registerMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *registerMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
 func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{}
 }
@@ -2188,10 +2190,12 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 type bindLockMockDevice struct {
 	registerMockDevice
-	lockErr      error
-	lockErrOnce  bool
-	lockCalls    atomic.Int32
-	releaseCalls atomic.Int32
+	lockErr         error
+	lockErrOnce     bool
+	lockCalls       atomic.Int32
+	releaseErr      error
+	releaseErrCount atomic.Int32
+	releaseCalls    atomic.Int32
 }
 
 func (m *bindLockMockDevice) CommonWord() string { return "bind-lock-mock" }
@@ -2202,14 +2206,17 @@ func (m *bindLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 	}
 	return nil
 }
-func (m *bindLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
-	m.releaseCalls.Add(1)
+func (m *bindLockMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	n := m.releaseCalls.Add(1)
+	if m.releaseErr != nil && int(m.releaseErrCount.Load()) >= int(n) {
+		return m.releaseErr
+	}
 	return nil
 }
 
 var errContention = fmt.Errorf("contended: %w", nodelockutil.ErrNodeLockContention)
 
-func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev1.Pod, mock *bindLockMockDevice) (*Scheduler, extenderv1.ExtenderBindingArgs, func()) {
+func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev1.Pod, mock device.Devices) (*Scheduler, extenderv1.ExtenderBindingArgs, func()) {
 	t.Helper()
 
 	oldRetry := config.NodeLockRetryTimeout
@@ -2221,6 +2228,7 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	cleanup := func() {
 		config.NodeLockRetryTimeout = oldRetry
 		device.DevicesMap = oldDevicesMap
+		defer func() { _ = recover() }()
 		close(s.stopCh)
 	}
 	scheme := runtime.NewScheme()
@@ -2314,4 +2322,109 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "apiserver 500")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
+}
+
+func Test_Bind_SuccessPathReleasesNodeLock(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-success", Namespace: "default", UID: types.UID("uid-success"),
+		},
+	}
+	// lockErr is nil so acquireNodeLocks succeeds immediately.
+	mock := &bindLockMockDevice{}
+	s, args, cleanup := setupBindLockRetryTest(t, 0, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "bind should succeed without error")
+	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(1),
+		"expected ReleaseNodeLock to be called on the success path")
+}
+
+func Test_Bind_ReleaseNodeLockFailureTriggersRetry(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-release-fail", Namespace: "default", UID: types.UID("uid-release-fail"),
+		},
+	}
+	mock := &bindLockMockDevice{
+		releaseErr: fmt.Errorf("mock release error"),
+	}
+	mock.releaseErrCount.Store(1) // fail only the first release call
+
+	s, args, cleanup := setupBindLockRetryTest(t, 0, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "bind should succeed even if release locks fails initially")
+
+	// Wait for the background retry/reconciliation to complete
+	err = wait.PollUntilContextTimeout(context.Background(), 50*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		calls := mock.releaseCalls.Load()
+		if calls >= 2 {
+			return true, nil
+		}
+		return false, nil
+	})
+	require.NoError(t, err, "expected background retry to eventually call ReleaseNodeLock again")
+	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(2),
+		"expected at least 2 ReleaseNodeLock calls (initial failure + retry)")
+}
+
+func Test_Bind_ReleaseNodeLockCancellation(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-release-cancel", Namespace: "default", UID: types.UID("uid-release-cancel"),
+		},
+	}
+	mock := &blockingReleaseMockDevice{
+		blockedCh:     make(chan struct{}),
+		releaseDoneCh: make(chan struct{}),
+	}
+
+	s, args, cleanup := setupBindLockRetryTest(t, 0, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "bind should succeed even if release locks fails initially")
+
+	// Wait until the background retry is blocked in ReleaseNodeLock
+	select {
+	case <-mock.blockedCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for background retry to block")
+	}
+
+	// Close stopCh to trigger cancelation
+	close(s.stopCh)
+
+	// Verify that the blocked ReleaseNodeLock is unblocked/canceled
+	select {
+	case <-mock.releaseDoneCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timeout waiting for ReleaseNodeLock to be canceled")
+	}
+}
+
+type blockingReleaseMockDevice struct {
+	registerMockDevice
+	releaseCalls  atomic.Int32
+	blockedCh     chan struct{}
+	releaseDoneCh chan struct{}
+}
+
+func (m *blockingReleaseMockDevice) CommonWord() string                           { return "blocking-release-mock" }
+func (m *blockingReleaseMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *blockingReleaseMockDevice) ReleaseNodeLock(ctx context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	calls := m.releaseCalls.Add(1)
+	if calls == 1 {
+		return fmt.Errorf("initial release error")
+	}
+	close(m.blockedCh)
+	<-ctx.Done()
+	close(m.releaseDoneCh)
+	return ctx.Err()
 }

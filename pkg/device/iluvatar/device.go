@@ -17,6 +17,7 @@ limitations under the License.
 package iluvatar
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -167,7 +168,7 @@ func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
-func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *IluvatarDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -179,7 +180,7 @@ func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
 		return nil
 	}
 
-	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, nodelock.NodeLockKey, p, false)
 }
 
 func (dev *IluvatarDevices) NodeCleanUp(nn string) error {

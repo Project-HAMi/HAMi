@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -278,7 +279,7 @@ func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, NodeLockNvidia, p)
 }
 
-func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *NvidiaGPUDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -289,7 +290,7 @@ func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, NodeLockNvidia, p, false)
 }
 
 func (dev *NvidiaGPUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {

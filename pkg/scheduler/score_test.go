@@ -17,6 +17,7 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
 	"strconv"
 	"strings"
 	"testing"
@@ -3590,8 +3591,10 @@ func (m *fitMockDevice) GetResourceNames() device.ResourceNames            { ret
 func (m *fitMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
 	return nil, nil
 }
-func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
-func (m *fitMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *fitMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
 func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{}
 }

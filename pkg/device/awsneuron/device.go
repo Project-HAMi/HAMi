@@ -17,6 +17,7 @@ limitations under the License.
 package awsneuron
 
 import (
+	"context"
 	"fmt"
 	"slices"
 	"strconv"
@@ -173,7 +174,7 @@ func (dev *AWSNeuronDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *AWSNeuronDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *AWSNeuronDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

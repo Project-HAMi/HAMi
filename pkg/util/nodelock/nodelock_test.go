@@ -141,7 +141,7 @@ func TestReleaseNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent lock"))
 	})
 
-	if err := ReleaseNodeLock(nodeName, "", podA, false); err != nil {
+	if err := ReleaseNodeLock(context.Background(), nodeName, "", podA, false); err != nil {
 		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
 	}
 	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
@@ -185,7 +185,7 @@ func TestReleaseNodeLockPreservesReplacedLegacyLockAfterConflict(t *testing.T) {
 		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent legacy lock"))
 	})
 
-	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+	if err := ReleaseNodeLock(context.Background(), nodeName, "", pod, false); err != nil {
 		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
 	}
 	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
@@ -232,7 +232,7 @@ func TestReleaseNodeLockReleasesRestampedLockForSamePod(t *testing.T) {
 		return false, nil, nil
 	})
 
-	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+	if err := ReleaseNodeLock(context.Background(), nodeName, "", pod, false); err != nil {
 		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
 	}
 	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
@@ -655,7 +655,7 @@ func TestReleaseNodeLock(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			nodeName := tt.args.nodeName()
-			if err := ReleaseNodeLock(nodeName, tt.args.lockname, tt.args.pod, tt.args.timeout); (err != nil) != tt.wantErr {
+			if err := ReleaseNodeLock(context.Background(), nodeName, tt.args.lockname, tt.args.pod, tt.args.timeout); (err != nil) != tt.wantErr {
 				t.Errorf("ReleaseNodeLock() error = %v, wantErr %v", err, tt.wantErr)
 			}
 
@@ -725,7 +725,7 @@ func TestConcurrentNodeLocks(t *testing.T) {
 	nodeALock.Unlock()
 
 	// Clean up node-b lock to avoid leaking state for subsequent checks.
-	if err := ReleaseNodeLock("node-b", "", podB, false); err != nil {
+	if err := ReleaseNodeLock(context.Background(), "node-b", "", podB, false); err != nil {
 		t.Fatalf("ReleaseNodeLock for node-b failed: %v", err)
 	}
 
@@ -751,7 +751,7 @@ func TestConcurrentNodeLocks(t *testing.T) {
 		t.Fatalf("LockNode for node-a failed after releasing lock: %v", err)
 	}
 
-	if err := ReleaseNodeLock("node-a", "", podA, false); err != nil {
+	if err := ReleaseNodeLock(context.Background(), "node-a", "", podA, false); err != nil {
 		t.Fatalf("ReleaseNodeLock for node-a failed: %v", err)
 	}
 }

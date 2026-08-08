@@ -17,6 +17,7 @@ limitations under the License.
 package vastai
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"slices"
@@ -111,7 +112,7 @@ func (dev *VastaiDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
-func (dev *VastaiDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *VastaiDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -122,7 +123,7 @@ func (dev *VastaiDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, nodelock.NodeLockKey, p, false)
 }
 
 func (dev *VastaiDevices) NodeCleanUp(nn string) error {

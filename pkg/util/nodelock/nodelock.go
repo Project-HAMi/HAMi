@@ -172,7 +172,7 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	return nil
 }
 
-func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
+func ReleaseNodeLock(ctx context.Context, nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
 	if pod == nil {
 		return fmt.Errorf("cannot release node lock: pod is nil")
 	}
@@ -181,7 +181,6 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
 
-	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
@@ -200,9 +199,11 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 
 	released := false
 	err = retry.OnError(DefaultStrategy, func(err error) bool {
-		// Retry on any error
-		return true
+		return ctx.Err() == nil
 	}, func() error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		node, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 		if err != nil {
 			klog.ErrorS(err, "Failed to get node when retry to patch", "node", nodeName)
@@ -279,7 +280,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	}
 
 	if skipOwnerCheck {
-		err = ReleaseNodeLock(nodeName, lockname, pods, true)
+		err = ReleaseNodeLock(ctx, nodeName, lockname, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err

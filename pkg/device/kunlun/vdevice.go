@@ -17,6 +17,7 @@ limitations under the License.
 package kunlun
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -147,7 +148,7 @@ func (dev *KunlunVDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, NodeLock, p)
 }
 
-func (dev *KunlunVDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *KunlunVDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -158,7 +159,7 @@ func (dev *KunlunVDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error 
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLock, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, NodeLock, p, false)
 }
 
 func (dev *KunlunVDevices) CheckType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool) {

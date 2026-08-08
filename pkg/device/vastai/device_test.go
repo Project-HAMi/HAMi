@@ -524,7 +524,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			dev := InitVastaiDevice(VastaiConfig{
 				ResourceCountName: "vastaitech.com/va",
 			})
-			err = dev.ReleaseNodeLock(node, tt.pod)
+			err = dev.ReleaseNodeLock(context.Background(), node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {

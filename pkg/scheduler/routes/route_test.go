@@ -20,12 +20,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -90,6 +93,50 @@ func TestWebHookRoute(t *testing.T) {
 
 	if w.Code == 0 {
 		t.Error("Expected a non-zero status code from webhook handler")
+	}
+}
+
+func TestWebHookRoute_NilHandler(t *testing.T) {
+	origNewWebHook := newWebHook
+	defer func() { newWebHook = origNewWebHook }()
+
+	newWebHook = func() (*admission.Webhook, error) {
+		return nil, nil
+	}
+
+	handler := WebHookRoute()
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for nil webhook handler, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Webhook handler is nil") {
+		t.Errorf("Expected response body to contain error string, got %s", w.Body.String())
+	}
+}
+
+func TestWebHookRoute_InitError(t *testing.T) {
+	origNewWebHook := newWebHook
+	defer func() { newWebHook = origNewWebHook }()
+
+	newWebHook = func() (*admission.Webhook, error) {
+		return nil, errors.New("custom init error")
+	}
+
+	handler := WebHookRoute()
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for webhook init error, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "custom init error") {
+		t.Errorf("Expected response body to contain error string, got %s", w.Body.String())
 	}
 }
 

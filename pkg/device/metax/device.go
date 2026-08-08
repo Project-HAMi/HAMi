@@ -17,6 +17,7 @@ limitations under the License.
 package metax
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"slices"
@@ -106,7 +107,7 @@ func (dev *MetaxDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *MetaxDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *MetaxDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

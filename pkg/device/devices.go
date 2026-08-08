@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -41,7 +42,7 @@ type Devices interface {
 	GetResourceNames() ResourceNames
 	GetNodeDevices(n corev1.Node) ([]*DeviceInfo, error)
 	LockNode(n *corev1.Node, p *corev1.Pod) error
-	ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error
+	ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error
 	GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest
 	PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd PodDevices) map[string]string
 	ScoreNode(node *corev1.Node, podDevices PodSingleDevice, previous []*DeviceUsage, policy string) float32

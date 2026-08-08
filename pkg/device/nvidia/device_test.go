@@ -2805,7 +2805,7 @@ func TestReleaseNodeLock(t *testing.T) {
 			assert.NilError(t, err)
 
 			dev := InitNvidiaDevice(config)
-			err = dev.ReleaseNodeLock(node, tt.pod)
+			err = dev.ReleaseNodeLock(context.Background(), node, tt.pod)
 			assert.NilError(t, err)
 
 			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "test-node", metav1.GetOptions{})

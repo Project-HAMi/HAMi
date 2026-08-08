@@ -17,6 +17,7 @@ limitations under the License.
 package hygon
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"slices"
@@ -113,7 +114,7 @@ func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, NodeLockDCU, p)
 }
 
-func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *DCUDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -124,7 +125,7 @@ func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockDCU, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, NodeLockDCU, p, false)
 }
 
 func (dev *DCUDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
