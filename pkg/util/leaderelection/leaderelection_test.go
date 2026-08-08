@@ -462,6 +462,72 @@ var _ = ginkgo.Describe("Nil checks for lease fields", func() {
 	})
 })
 
+var _ = ginkgo.Describe("isHolderOf table-driven tests", func() {
+	type testCase struct {
+		name           string
+		managerHost    string
+		lease          *coordinationv1.Lease
+		expectedHolder bool
+	}
+
+	strPtr := func(s string) *string {
+		return &s
+	}
+
+	tests := []testCase{
+		{
+			name:           "exact match without uuid",
+			managerHost:    "hami-scheduler-1",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: strPtr("hami-scheduler-1")}},
+			expectedHolder: true,
+		},
+		{
+			name:           "exact match with uuid (holder == hostname + _ + uuid)",
+			managerHost:    "hami-scheduler-1",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: strPtr("hami-scheduler-1_abcd-1234")}},
+			expectedHolder: true,
+		},
+		{
+			name:           "strict prefix of a different hostname (hami-scheduler-1 vs hami-scheduler-10_abcd-1234)",
+			managerHost:    "hami-scheduler-1",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: strPtr("hami-scheduler-10_abcd-1234")}},
+			expectedHolder: false,
+		},
+		{
+			name:           "hostname with no underscore separator collision (hami-scheduler-10 vs hami-scheduler-1_abcd-1234)",
+			managerHost:    "hami-scheduler-10",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: strPtr("hami-scheduler-1_abcd-1234")}},
+			expectedHolder: false,
+		},
+		{
+			name:           "nil lease",
+			managerHost:    "hami-scheduler-1",
+			lease:          nil,
+			expectedHolder: false,
+		},
+		{
+			name:           "nil HolderIdentity",
+			managerHost:    "hami-scheduler-1",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: nil}},
+			expectedHolder: false,
+		},
+		{
+			name:           "empty HolderIdentity string",
+			managerHost:    "hami-scheduler-1",
+			lease:          &coordinationv1.Lease{Spec: coordinationv1.LeaseSpec{HolderIdentity: strPtr("")}},
+			expectedHolder: false,
+		},
+	}
+
+	for _, tc := range tests {
+		ginkgo.It(tc.name, func() {
+			lm := NewLeaderManager(tc.managerHost, "kube-system", "hami-scheduler", LeaderCallbacks{})
+			result := lm.isHolderOf(tc.lease)
+			g.Expect(result).Should(g.Equal(tc.expectedHolder))
+		})
+	}
+})
+
 var _ = ginkgo.Describe("DummyLeaderManager", func() {
 	var lm LeaderManager
 	var elected bool

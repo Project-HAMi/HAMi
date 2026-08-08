@@ -92,6 +92,21 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	return corev1.Container{}, res, errors.New("device request not found")
 }
 
+func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.PodSingleDevice) error {
+	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
+	encoded := device.EncodePodSingleDevice(podSingleDev)
+	annoKey := device.InRequestDevices[dtype]
+	newAnnos := map[string]string{annoKey: encoded}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		return err
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations[annoKey] = encoded
+	return nil
+}
+
 // decodePodSingleDevice decodes the pod's device allocation annotation for the
 // given device type into a PodSingleDevice slice. Each element corresponds to
 // one container (init containers first, then regular containers).
@@ -129,22 +144,6 @@ func popNextContainerDevices(pod *corev1.Pod, podSingleDev device.PodSingleDevic
 		}
 	}
 	return corev1.Container{}, nil, errors.New("no pending device allocation found")
-}
-
-// patchErasedAnnotation patches the pod's device annotation with the given
-// podSingleDev (which has had some containers popped). It also updates
-// pod.Annotations in place so that subsequent Allocate calls within the same
-// kubelet invocation see the erased state.
-func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.PodSingleDevice) error {
-	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
-	encoded := device.EncodePodSingleDevice(podSingleDev)
-	annoKey := device.InRequestDevices[dtype]
-	newAnnos := map[string]string{annoKey: encoded}
-	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
-		return err
-	}
-	pod.Annotations[annoKey] = encoded
-	return nil
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {

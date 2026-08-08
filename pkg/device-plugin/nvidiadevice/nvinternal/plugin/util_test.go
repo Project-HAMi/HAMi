@@ -17,12 +17,12 @@
 package plugin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -940,3 +940,87 @@ func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
 		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }
+
+func TestPatchErasedAnnotation_NilMapGuard(t *testing.T) {
+	dev := device.PodSingleDevice{
+		device.ContainerDevices{
+			{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 50},
+		},
+	}
+	expectedEncoded := device.EncodePodSingleDevice(dev)
+	annoKey := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+
+	t.Run("NilAnnotationsMapInitializedWithoutPanic", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-nil-annotations",
+				Namespace: "default",
+				// Annotations explicitly left nil — Go distinguishes nil map from empty map.
+			},
+		}
+
+		client.KubeClient = fake.NewSimpleClientset(pod)
+
+		err := patchErasedAnnotation(pod, nvidia.NvidiaGPUDevice, dev)
+		if err != nil {
+			t.Fatalf("patchErasedAnnotation failed: %v", err)
+		}
+		if pod.Annotations == nil {
+			t.Fatal("expected pod.Annotations to be initialized (non-nil) after patchErasedAnnotation")
+		}
+		if got := pod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("pod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
+
+		// Assert persisted state in fake clientset
+		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch persisted pod: %v", err)
+		}
+		if persistedPod.Annotations == nil {
+			t.Fatal("expected persistedPod.Annotations to be initialized (non-nil)")
+		}
+		if got := persistedPod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("persistedPod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
+	})
+
+	t.Run("ExistingAnnotationsPreserved", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "test-pod-existing-annotations",
+				Namespace: "default",
+				Annotations: map[string]string{
+					"existing-key": "existing-value",
+				},
+			},
+		}
+
+		client.KubeClient = fake.NewSimpleClientset(pod)
+
+		err := patchErasedAnnotation(pod, nvidia.NvidiaGPUDevice, dev)
+		if err != nil {
+			t.Fatalf("patchErasedAnnotation failed: %v", err)
+		}
+		if got := pod.Annotations["existing-key"]; got != "existing-value" {
+			t.Errorf("existing annotation was overwritten or lost: got %q, want %q", got, "existing-value")
+		}
+		if got := pod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("pod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
+
+		// Assert persisted state in fake clientset
+		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch persisted pod: %v", err)
+		}
+		if got := persistedPod.Annotations["existing-key"]; got != "existing-value" {
+			t.Errorf("persisted existing annotation was overwritten or lost: got %q, want %q", got, "existing-value")
+		}
+		if got := persistedPod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("persistedPod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
+	})
+}
+
+

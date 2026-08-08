@@ -166,7 +166,8 @@ func (m *leaderManager) isHolderOf(lease *coordinationv1.Lease) bool {
 	if lease == nil || lease.Spec.HolderIdentity == nil {
 		return false
 	}
-	return strings.HasPrefix(*lease.Spec.HolderIdentity, m.hostname)
+	holder := *lease.Spec.HolderIdentity
+	return holder == m.hostname || strings.HasPrefix(holder, m.hostname+"_")
 }
 
 func (m *leaderManager) isLeaseValid(now time.Time) bool {
