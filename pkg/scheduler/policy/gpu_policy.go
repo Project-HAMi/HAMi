@@ -113,7 +113,7 @@ func (ds *DeviceListsScore) DeepCopy() *DeviceListsScore {
 	}
 }
 
-func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests) {
+func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests, weights util.DeviceScoringWeights) {
 	if ds.Device == nil || ds.Device.Count == 0 || ds.Device.Totalcore == 0 || ds.Device.Totalmem == 0 {
 		ds.Score = 0
 		return
@@ -139,6 +139,6 @@ func (ds *DeviceListsScore) ComputeScore(requests device.ContainerDeviceRequests
 	usedScore := float32(request+ds.Device.Used) / float32(ds.Device.Count)
 	coreScore := float32(core+ds.Device.Usedcores) / float32(ds.Device.Totalcore)
 	memScore := float32(mem+ds.Device.Usedmem) / float32(ds.Device.Totalmem)
-	ds.Score = float32(util.Weight) * (usedScore + coreScore + memScore)
+	ds.Score = float32(util.Weight) * (float32(weights.Slot)*usedScore + float32(weights.Core)*coreScore + float32(weights.Memory)*memScore)
 	klog.V(2).Infof("device %s computer score is %f", ds.Device.ID, ds.Score)
 }
