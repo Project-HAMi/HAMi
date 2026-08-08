@@ -78,6 +78,12 @@ type Scheduler struct {
 
 	lock   sync.RWMutex
 	synced bool
+
+	// podMu serializes podAdd/podDelete/podRe-Add cycles between Filter()
+	// and the pod informer callbacks. Without it, onAddPod() could fire
+	// between Filter()'s TakeAndDeletePod and its subsequent AddPod,
+	// double-counting quota usage.
+	podMu sync.Mutex
 }
 
 func NewScheduler() *Scheduler {
@@ -146,6 +152,9 @@ func (s *Scheduler) onAddPod(obj any) {
 	if !ok {
 		return
 	}
+	s.podMu.Lock()
+	defer s.podMu.Unlock()
+
 	if util.IsPodInTerminatedState(pod) {
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
@@ -195,6 +204,8 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
+	s.podMu.Lock()
+	defer s.podMu.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
@@ -797,6 +808,8 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 }
 
 func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
+	s.podMu.Lock()
+	defer s.podMu.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
@@ -953,6 +966,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"pod", klog.KObj(args.Pod),
 		"reason", "request does not contain full nodes",
 		"nodeNamesLen", nodeNamesLen(args.NodeNames))
+
+	// Keep the pod absent from the manager for the complete usage calculation.
+	// Informer callbacks must not re-add it with stale devices in this window.
+	s.podMu.Lock()
+	defer s.podMu.Unlock()
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
