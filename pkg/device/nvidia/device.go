@@ -17,6 +17,7 @@ limitations under the License.
 package nvidia
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
