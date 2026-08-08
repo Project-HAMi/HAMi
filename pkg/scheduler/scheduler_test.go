@@ -2315,3 +2315,22 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
 }
+
+func Test_Bind_SuccessPathReleasesNodeLock(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-success", Namespace: "default", UID: types.UID("uid-success"),
+		},
+	}
+	// lockErr is nil so acquireNodeLocks succeeds immediately.
+	mock := &bindLockMockDevice{}
+	s, args, cleanup := setupBindLockRetryTest(t, 0, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "bind should succeed without error")
+	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(1),
+		"expected ReleaseNodeLock to be called on the success path")
+}
+
