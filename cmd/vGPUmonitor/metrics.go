@@ -428,14 +428,13 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 
 	// Iterate through each device
 	for i := range c.Info.DeviceNum() {
-		uuid := c.Info.DeviceUUID(i)
-		if len(uuid) < 40 {
-			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UUID length %d (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name, len(uuid))
+		if !c.Info.IsValidUUID(i) {
+			klog.Warningf("Device %d in Pod %s/%s, Container %s UUID not yet initialised; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
 			continue
 		}
-		uuid = uuid[0:40] // Ensure UUID is truncated to 40 characters
+		uuid := c.Info.DeviceUUID(i)[0:40]
 		if !utf8.ValidString(uuid) {
-			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
+			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
 			continue
 		}
 
