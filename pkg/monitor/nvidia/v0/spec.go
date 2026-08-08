@@ -78,7 +78,7 @@ func (s Spec) DeviceMax() int {
 }
 
 func (s Spec) DeviceNum() int {
-	return int(s.sr.num)
+	return int(min(max(s.sr.num, 0), uint64(maxDevices)))
 }
 
 // activeProcs returns the process slots currently in use. procnum is read from
@@ -138,10 +138,8 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceSmLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
+	for idx := 0; idx < s.DeviceNum(); idx++ {
 		s.sr.smLimit[idx] = l
-		idx += 1
 	}
 }
 
@@ -158,10 +156,8 @@ func (s Spec) DeviceMemoryLimit(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
+	for idx := 0; idx < s.DeviceNum(); idx++ {
 		s.sr.limit[idx] = l
-		idx += 1
 	}
 }
 
