@@ -649,3 +649,101 @@ func TestTakeAndDeletePodIsAtomic(t *testing.T) {
 	assert.False(t, ok2)
 	assert.Nil(t, pi2)
 }
+
+// The metrics collector scrapes on its own goroutine while the pod informer
+// keeps calling AddPod. Copying only the map would leave the collector holding
+// the stored *PodInfo, whose Devices field AddPod rewrites in place.
+func TestGetScheduledPodsCopiesEntries(t *testing.T) {
+	pm := NewPodManager()
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID:       "copy-uid",
+			Name:      "copy-pod",
+			Namespace: "default",
+		},
+	}
+	devices := func(mem int32) PodDevices {
+		return PodDevices{
+			"NVIDIA": PodSingleDevice{{{UUID: "dev-0", Usedmem: mem, Usedcores: 10}}},
+		}
+	}
+	pm.AddPod(pod, "node1", devices(1))
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for i := int32(0); ; i++ {
+			select {
+			case <-stop:
+				return
+			default:
+				pm.AddPod(pod, "node1", devices(i))
+			}
+		}
+	})
+
+	wg.Go(func() {
+		for range 20000 {
+			scheduled, _ := pm.GetScheduledPods()
+			for _, pi := range scheduled {
+				for _, single := range pi.Devices {
+					for _, ctr := range single {
+						for _, d := range ctr {
+							_ = d.Usedmem
+							_ = pi.Namespace
+						}
+					}
+				}
+			}
+		}
+		close(stop)
+	})
+
+	wg.Wait()
+}
+
+// A caller must not be able to reach into the manager through what it hands back.
+func TestGetScheduledPodsReturnsDetachedEntries(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "detach-uid", Name: "detach-pod", Namespace: "default"},
+	}
+	pm.AddPod(pod, "node1", PodDevices{
+		"NVIDIA": PodSingleDevice{{{UUID: "dev-0", Usedmem: 100, Usedcores: 10}}},
+	})
+
+	scheduled, err := pm.GetScheduledPods()
+	assert.NoError(t, err)
+	scheduled["detach-uid"].Devices["NVIDIA"][0][0].Usedmem = 999
+	scheduled["detach-uid"].NodeID = "tampered"
+
+	again, _ := pm.GetScheduledPods()
+	assert.Equal(t, int32(100), again["detach-uid"].Devices["NVIDIA"][0][0].Usedmem)
+	assert.Equal(t, "node1", again["detach-uid"].NodeID)
+}
+
+func TestGetPodReturnsDetachedCopy(t *testing.T) {
+	pm := NewPodManager()
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "getpod-uid", Name: "getpod", Namespace: "default"},
+	}
+	pm.AddPod(pod, "node1", PodDevices{
+		"NVIDIA": PodSingleDevice{{{UUID: "dev-0", Usedmem: 100, Usedcores: 10}}},
+	})
+
+	pi, ok := pm.GetPod(pod)
+	assert.True(t, ok)
+	pi.Devices["NVIDIA"][0][0].Usedmem = 999
+	pi.NodeID = "tampered"
+
+	again, ok := pm.GetPod(pod)
+	assert.True(t, ok)
+	assert.Equal(t, int32(100), again.Devices["NVIDIA"][0][0].Usedmem)
+	assert.Equal(t, "node1", again.NodeID)
+
+	missing, ok := pm.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: "nope"}})
+	assert.False(t, ok)
+	assert.Nil(t, missing)
+}
