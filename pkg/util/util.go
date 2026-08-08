@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -81,7 +83,8 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	if pod != nil {
 		return pod, nil
 	}
-	// filter pods for this node.
+	// Primary lock path returned nothing — fall back to annotation scanning.
+	// Collect ALL matching candidates, then pick deterministically.
 	selector := fmt.Sprintf("spec.nodeName=%s", node)
 	podListOptions := metav1.ListOptions{
 		FieldSelector: selector,
@@ -90,31 +93,68 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range podlist.Items {
+
+	var candidates []*corev1.Pod
+	for i := range podlist.Items {
+		p := &podlist.Items[i]
 		if p.Status.Phase != corev1.PodPending {
 			continue
 		}
 		if _, ok := p.Annotations[BindTimeAnnotations]; !ok {
 			continue
 		}
-		if phase, ok := p.Annotations[DeviceBindPhase]; !ok {
+		phase, ok := p.Annotations[DeviceBindPhase]
+		if !ok {
 			continue
-		} else {
-			// Allow both "allocating" and "success" phases for multi-container pods
-			// where some containers have already been allocated but others are still pending
-			if phase != DeviceBindAllocating && phase != DeviceBindSuccess {
-				continue
-			}
 		}
-		if n, ok := p.Annotations[AssignedNodeAnnotations]; !ok {
+		// Allow both "allocating" and "success" phases for multi-container pods
+		// where some containers have already been allocated but others are still pending.
+		if phase != DeviceBindAllocating && phase != DeviceBindSuccess {
 			continue
-		} else {
-			if strings.Compare(n, node) == 0 {
-				return &p, nil
-			}
+		}
+		n, ok := p.Annotations[AssignedNodeAnnotations]
+		if !ok || n != node {
+			continue
+		}
+		pCopy := p.DeepCopy()
+		candidates = append(candidates, pCopy)
+	}
+
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no binding pod found on node %s", node)
+	}
+	if len(candidates) == 1 {
+		return candidates[0], nil
+	}
+
+	// Multiple candidates: prefer pods still in "allocating" phase (not yet partially done).
+	// Among ties, pick the one with the most recent bind-time (largest Unix timestamp).
+	klog.Warningf("GetPendingPod: %d candidates found on node %s, selecting deterministically", len(candidates), node)
+	var allocating []*corev1.Pod
+	for _, c := range candidates {
+		if c.Annotations[DeviceBindPhase] == DeviceBindAllocating {
+			allocating = append(allocating, c)
 		}
 	}
-	return nil, fmt.Errorf("no binding pod found on node %s", node)
+	pool := allocating
+	if len(pool) == 0 {
+		// All are in "success" phase; fall through to bind-time sort.
+		pool = candidates
+	}
+	sort.Slice(pool, func(i, j int) bool {
+		ti, _ := strconv.ParseInt(pool[i].Annotations[BindTimeAnnotations], 10, 64)
+		tj, _ := strconv.ParseInt(pool[j].Annotations[BindTimeAnnotations], 10, 64)
+		if ti != tj {
+			return ti > tj // descending: most recent bind first
+		}
+		// Stable tiebreaker so equal timestamps always yield the same pod.
+		ni := pool[i].Namespace + "/" + pool[i].Name
+		nj := pool[j].Namespace + "/" + pool[j].Name
+		return ni < nj
+	})
+	klog.Warningf("GetPendingPod: selected pod %s/%s (phase=%s) from %d candidates on node %s",
+		pool[0].Namespace, pool[0].Name, pool[0].Annotations[DeviceBindPhase], len(candidates), node)
+	return pool[0], nil
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
@@ -134,6 +174,109 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 		return client.GetClient().CoreV1().Pods(ns).Get(ctx, name, metav1.GetOptions{})
 	}
 	return nil, nil
+}
+
+// GetPendingPodByDeviceIDs finds the pending pod whose scheduler-recorded GPU UUIDs
+// (in devAnnotationKey, e.g. "hami.io/vgpu-devices-to-allocate") overlap with the
+// device IDs kubelet is currently allocating. This is deterministic because physical
+// GPU UUIDs are globally unique — no two pods can legitimately share the same UUID at
+// allocation time.
+//
+// Callers should pass device.InRequestDevices["NVIDIA"] as devAnnotationKey.
+func GetPendingPodByDeviceIDs(ctx context.Context, node string, deviceIDs []string, devAnnotationKey string) (*corev1.Pod, error) {
+	if len(deviceIDs) == 0 || devAnnotationKey == "" {
+		return nil, fmt.Errorf("GetPendingPodByDeviceIDs: deviceIDs and devAnnotationKey must not be empty")
+	}
+
+	// Build a set of the physical UUIDs kubelet is allocating (strip virtual-device suffixes).
+	requested := make(map[string]struct{}, len(deviceIDs))
+	for _, id := range deviceIDs {
+		requested[physicalDeviceUUID(id)] = struct{}{}
+	}
+
+	cli := client.GetClient()
+	if cli == nil {
+		return nil, fmt.Errorf("GetPendingPodByDeviceIDs: kubernetes client not initialized")
+	}
+
+	selector := fmt.Sprintf("spec.nodeName=%s", node)
+	podlist, err := cli.CoreV1().Pods("").List(ctx, metav1.ListOptions{
+		FieldSelector: selector,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("GetPendingPodByDeviceIDs: failed to list pods on node %s: %w", node, err)
+	}
+
+	for i := range podlist.Items {
+		p := &podlist.Items[i]
+		if p.Status.Phase != corev1.PodPending {
+			continue
+		}
+		annoVal, ok := p.Annotations[devAnnotationKey]
+		if !ok || annoVal == "" {
+			continue
+		}
+		if annotationContainsAnyDevice(annoVal, requested) {
+			klog.V(4).Infof("GetPendingPodByDeviceIDs: matched pod %s/%s on node %s", p.Namespace, p.Name, node)
+			return p.DeepCopy(), nil
+		}
+	}
+	return nil, fmt.Errorf("GetPendingPodByDeviceIDs: no pod matched device IDs %v on node %s", deviceIDs, node)
+}
+
+// physicalDeviceUUID strips virtual-device and MIG suffixes to return the base GPU UUID.
+//
+//	- MIG format:     "GPU-UUID[tidx-idx]" → "GPU-UUID"
+//	- Virtual device: "GPU-UUID-N" (exactly 6 dashes) → "GPU-UUID"
+//	- Annotated ID:   "GPU-UUID::N" → "GPU-UUID" (CDI / time-slicing)
+func physicalDeviceUUID(id string) string {
+	// Annotated IDs (time-slicing, CDI): strip "::N" suffix
+	if idx := strings.Index(id, "::"); idx != -1 {
+		return id[:idx]
+	}
+	// MIG format: GPU-UUID[tidx-idx] → GPU-UUID
+	if idx := strings.Index(id, "["); idx != -1 {
+		return id[:idx]
+	}
+	// Virtual device: GPU-UUID-N (6 dashes, last segment is a plain integer)
+	if strings.Count(id, "-") == 6 {
+		lastDash := strings.LastIndex(id, "-")
+		if lastDash != -1 && lastDash < len(id)-1 {
+			if _, err := strconv.Atoi(id[lastDash+1:]); err == nil {
+				return id[:lastDash]
+			}
+		}
+	}
+	return id
+}
+
+// annotationContainsAnyDevice reports whether the encoded annotation value produced by
+// device.EncodePodSingleDevice contains any UUID present in deviceSet.
+//
+// Wire format produced by pkg/device/devices.go EncodePodSingleDevice:
+//
+//	"UUID,type,mem,cores:;UUID,type,mem,cores:;"
+//	  ↑ device fields joined by ','          ↑
+//	      devices within a container joined by ':' (OneContainerMultiDeviceSplitSymbol)
+//	                    containers joined by ';'   (OnePodMultiContainerSplitSymbol)
+func annotationContainsAnyDevice(annoVal string, deviceSet map[string]struct{}) bool {
+	// Outer split on ";": one slot per container (OnePodMultiContainerSplitSymbol).
+	for _, containerSlot := range strings.Split(annoVal, ";") {
+		// Inner split on ":": one entry per device within the container.
+		for _, entry := range strings.Split(containerSlot, ":") {
+			entry = strings.TrimSpace(entry)
+			if entry == "" {
+				continue
+			}
+			// First comma-separated field is the UUID.
+			fields := strings.SplitN(entry, ",", 2)
+			uuid := physicalDeviceUUID(strings.TrimSpace(fields[0]))
+			if _, ok := deviceSet[uuid]; ok {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {

@@ -935,6 +935,10 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
 	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
 
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() { enableGetPreferredAllocation = previousEnableGetPreferredAllocation }()
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
@@ -1007,6 +1011,10 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
 	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
 	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() { enableGetPreferredAllocation = previousEnableGetPreferredAllocation }()
 
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
