@@ -1098,3 +1098,480 @@ func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
 		}
 	})
 }
+
+func TestLockMutexWithContext_Cancelled(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "mutex-cancel-node"
+	mu := nodeLocks.getLock(nodeName)
+	mu.Lock()
+	defer mu.Unlock()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+
+	err := lockMutexWithContext(ctx, mu)
+	if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+	}
+}
+
+func TestSetNodeLockWithContext_Coverage(t *testing.T) {
+	t.Run("nil context uses background context", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-nil-ctx-set"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		if err := SetNodeLockWithContext(nil, nodeName, "", pod); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("mutex lock failure when context is canceled", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-mutex-fail-set"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		mu := nodeLocks.getLock(nodeName)
+		mu.Lock()
+		defer mu.Unlock()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := SetNodeLockWithContext(ctx, nodeName, "", pod)
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	})
+
+	t.Run("initial node get error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-get-fail-set"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset()
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated initial get error")
+		})
+
+		err := SetNodeLockWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "simulated initial get error") {
+			t.Fatalf("expected initial get error, got %v", err)
+		}
+	})
+
+	t.Run("retry loop node get error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-retry-get-fail-set"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		getCalls := 0
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			getCalls++
+			if getCalls > 1 {
+				return true, nil, errors.New("simulated retry get error")
+			}
+			return false, nil, nil
+		})
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("conflict"))
+		})
+
+		err := SetNodeLockWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "simulated retry get error") {
+			t.Fatalf("expected retry get error, got %v", err)
+		}
+	})
+
+	t.Run("canceled context during retry", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-retry-cancel-set"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated transient error requiring retry")
+		})
+
+		err := SetNodeLockWithContext(ctx, nodeName, "", pod)
+		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+	})
+}
+
+func TestReleaseNodeLockWithContext_Coverage(t *testing.T) {
+	t.Run("nil pod returns error", func(t *testing.T) {
+		err := ReleaseNodeLockWithContext(context.Background(), "node", "", nil, false)
+		if err == nil || !strings.Contains(err.Error(), "pod is nil") {
+			t.Fatalf("expected pod is nil error, got %v", err)
+		}
+	})
+
+	t.Run("nil context uses background context", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-nil-ctx-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: "2026-08-01T00:00:00Z,ns1,pod1",
+			},
+		}})
+		client.KubeClient = clientSet
+
+		if err := ReleaseNodeLockWithContext(nil, nodeName, "", pod, false); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("mutex lock failure when context is canceled", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-mutex-fail-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		mu := nodeLocks.getLock(nodeName)
+		mu.Lock()
+		defer mu.Unlock()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		err := ReleaseNodeLockWithContext(ctx, nodeName, "", pod, false)
+		if err == nil || !errors.Is(err, context.Canceled) {
+			t.Fatalf("expected context.Canceled, got %v", err)
+		}
+	})
+
+	t.Run("initial node get error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-get-fail-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset()
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated get error")
+		})
+
+		err := ReleaseNodeLockWithContext(context.Background(), nodeName, "", pod, false)
+		if err == nil || !strings.Contains(err.Error(), "simulated get error") {
+			t.Fatalf("expected get error, got %v", err)
+		}
+	})
+
+	t.Run("retry loop node get error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-retry-get-fail-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: "2026-08-01T00:00:00Z,ns1,pod1",
+			},
+		}})
+		client.KubeClient = clientSet
+
+		getCalls := 0
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			getCalls++
+			if getCalls > 1 {
+				return true, nil, errors.New("simulated retry get error")
+			}
+			return false, nil, nil
+		})
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated patch retry error")
+		})
+
+		err := ReleaseNodeLockWithContext(context.Background(), nodeName, "", pod, false)
+		if err == nil || !strings.Contains(err.Error(), "simulated retry get error") {
+			t.Fatalf("expected retry get error, got %v", err)
+		}
+	})
+
+	t.Run("retry loop annotation missing concurrently", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-deleted-ann-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: "2026-08-01T00:00:00Z,ns1,pod1",
+			},
+		}})
+		client.KubeClient = clientSet
+
+		getCalls := 0
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			getCalls++
+			if getCalls > 1 {
+				return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+					Name: nodeName,
+				}}, nil
+			}
+			return false, nil, nil
+		})
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated patch retry error")
+		})
+
+		err := ReleaseNodeLockWithContext(context.Background(), nodeName, "", pod, false)
+		if err != nil {
+			t.Fatalf("expected nil error when annotation removed concurrently, got %v", err)
+		}
+	})
+
+	t.Run("canceled context during retry", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-retry-cancel-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: "2026-08-01T00:00:00Z,ns1,pod1",
+			},
+		}})
+		client.KubeClient = clientSet
+
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Millisecond)
+		defer cancel()
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated transient patch error requiring retry")
+		})
+
+		err := ReleaseNodeLockWithContext(ctx, nodeName, "", pod, false)
+		if err == nil || !errors.Is(err, context.DeadlineExceeded) {
+			t.Fatalf("expected context.DeadlineExceeded, got %v", err)
+		}
+	})
+
+	t.Run("retry exhausted returns formatted error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-exhausted-rel"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: "2026-08-01T00:00:00Z,ns1,pod1",
+			},
+		}})
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("persistent patch failure")
+		})
+
+		err := ReleaseNodeLockWithContext(context.Background(), nodeName, "", pod, false)
+		if err == nil || !strings.Contains(err.Error(), "failed to release node lock") {
+			t.Fatalf("expected failed to release node lock error, got %v", err)
+		}
+	})
+}
+
+func TestLockNodeWithContext_Coverage(t *testing.T) {
+	t.Run("nil context uses background context", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-nil-ctx-lock"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		if err := LockNodeWithContext(nil, nodeName, "", pod); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("expired lock triggers takeover", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-expired-lock"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "new-pod", Namespace: "new-ns"}}
+		oldLockTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
+		expiredLockStr := fmt.Sprintf("%s,old-ns,old-pod", oldLockTime)
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: expiredLockStr,
+			},
+		}})
+		client.KubeClient = clientSet
+
+		if err := LockNodeWithContext(context.Background(), nodeName, "", pod); err != nil {
+			t.Fatalf("expected success taking over expired lock, got %v", err)
+		}
+	})
+
+	t.Run("pod get returns non-NotFound error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-pod-get-err"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		freshLockTime := time.Now().Format(time.RFC3339)
+		lockStr := fmt.Sprintf("%s,other-ns,other-pod", freshLockTime)
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: lockStr,
+			},
+		}})
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("get", "pods", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated pod API error")
+		})
+
+		err := LockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "simulated pod API error") {
+			t.Fatalf("expected pod API error, got %v", err)
+		}
+	})
+
+	t.Run("release failure during expired/dangling lock takeover", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-release-takeover-err"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		oldLockTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
+		expiredLockStr := fmt.Sprintf("%s,old-ns,old-pod", oldLockTime)
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: expiredLockStr,
+			},
+		}})
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated patch error during release")
+		})
+
+		err := LockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "failed to release node lock") {
+			t.Fatalf("expected release failure error, got %v", err)
+		}
+	})
+}
+
+func TestTryLockNodeWithContext_Coverage(t *testing.T) {
+	t.Run("nil context uses background context", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-nil-ctx-try"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		if err := TryLockNodeWithContext(nil, nodeName, "", pod); err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("in-memory mutex locked returns contention error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-in-memory-locked"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		mu := nodeLocks.getLock(nodeName)
+		mu.Lock()
+		defer mu.Unlock()
+
+		err := TryLockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !IsNodeLockContention(err) {
+			t.Fatalf("expected ErrNodeLockContention, got %v", err)
+		}
+	})
+
+	t.Run("node get error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-get-fail-try"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset()
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated get node error")
+		})
+
+		err := TryLockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "simulated get node error") {
+			t.Fatalf("expected get node error, got %v", err)
+		}
+	})
+
+	t.Run("patch conflict error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-patch-conflict-try"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated conflict"))
+		})
+
+		err := TryLockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !IsNodeLockContention(err) || !strings.Contains(err.Error(), "patch conflict") {
+			t.Fatalf("expected patch conflict contention error, got %v", err)
+		}
+	})
+
+	t.Run("patch general error", func(t *testing.T) {
+		nodeLocks = newNodeLockManager()
+		nodeName := "node-patch-gen-err-try"
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "ns1"}}
+		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+		client.KubeClient = clientSet
+
+		clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+			return true, nil, errors.New("simulated generic patch error")
+		})
+
+		err := TryLockNodeWithContext(context.Background(), nodeName, "", pod)
+		if err == nil || !strings.Contains(err.Error(), "simulated generic patch error") {
+			t.Fatalf("expected generic patch error, got %v", err)
+		}
+	})
+}
+
+func TestParseNodeLock_Malformed(t *testing.T) {
+	_, _, _, err := ParseNodeLock("part1,part2")
+	if err == nil || !strings.Contains(err.Error(), "malformed lock annotation: expected 3 parts, got 2") {
+		t.Fatalf("expected malformed lock annotation error, got %v", err)
+	}
+}
+
+func TestGenerateNodeLockKeyByPod_NilPod(t *testing.T) {
+	key := GenerateNodeLockKeyByPod(nil)
+	if key == "" {
+		t.Fatalf("expected non-empty key for nil pod")
+	}
+	if strings.Contains(key, NodeLockSep) {
+		t.Fatalf("expected timestamp-only key without separator for nil pod, got %q", key)
+	}
+}
+
+func TestTestHelpers(t *testing.T) {
+	ResetNodeLocksForTest()
+	if count := NodeLockCountForTest(); count != 0 {
+		t.Fatalf("expected 0 locks after reset, got %d", count)
+	}
+	EnsureNodeLockForTest("node1")
+	if count := NodeLockCountForTest(); count != 1 {
+		t.Fatalf("expected 1 lock after ensure, got %d", count)
+	}
+	EnsureNodeLockForTest("node1")
+	if count := NodeLockCountForTest(); count != 1 {
+		t.Fatalf("expected 1 lock after no-op ensure, got %d", count)
+	}
+}
+
