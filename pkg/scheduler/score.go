@@ -135,7 +135,6 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 			// Assume the node is a fit by default. This handles pods with no device
 			// requests, which should be schedulable on any node.
 			ctrfit := true
-			deviceType := ""
 			//This loop is for different container request
 			for ctrid, n := range resourceReqs {
 				sums := 0
@@ -143,21 +142,39 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 					sums += int(k.Nums)
 				}
 
-				// container need no device and we have got certain deviceType
-				if sums == 0 && deviceType != "" {
-					score.Devices[deviceType] = append(score.Devices[deviceType], device.ContainerDevices{})
+				// container needs no device: keep every type discovered so far aligned
+				// to this container index by appending a trailing empty slot to each.
+				if sums == 0 {
+					for idx := range score.Devices {
+						for len(score.Devices[idx]) <= ctrid {
+							score.Devices[idx] = append(score.Devices[idx], device.ContainerDevices{})
+						}
+					}
 					continue
 				}
 				klog.V(5).InfoS("fitInDevices", "pod", klog.KObj(task), "node", nodeID)
+				requestedTypes := make(map[string]bool, len(n))
+				for _, k := range n {
+					requestedTypes[k.Type] = true
+				}
 				fit, reason := fitInDevices(node, n, task, nodeInfo, &score.Devices)
-				// found certain deviceType, fill missing empty allocation for containers before this
+				// keep every device type's allocation list aligned to container index:
+				// - types this container just requested: fitInDevices appended the real
+				//   entry at the tail, so pad any missing leading slots in front of it.
+				// - types only requested by earlier containers: append one trailing
+				//   empty slot for this container.
 				for idx := range score.Devices {
-					deviceType = idx
-					for len(score.Devices[idx]) <= ctrid {
-						emptyContainerDevices := device.ContainerDevices{}
-						emptyPodSingleDevice := device.PodSingleDevice{}
-						emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
-						score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+					if requestedTypes[idx] {
+						for len(score.Devices[idx]) <= ctrid {
+							emptyContainerDevices := device.ContainerDevices{}
+							emptyPodSingleDevice := device.PodSingleDevice{}
+							emptyPodSingleDevice = append(emptyPodSingleDevice, emptyContainerDevices)
+							score.Devices[idx] = append(emptyPodSingleDevice, score.Devices[idx]...)
+						}
+					} else {
+						for len(score.Devices[idx]) <= ctrid {
+							score.Devices[idx] = append(score.Devices[idx], device.ContainerDevices{})
+						}
 					}
 				}
 				ctrfit = fit
