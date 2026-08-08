@@ -17,6 +17,7 @@
 package plugin
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -90,7 +91,16 @@ func IsMigApplyLockExist() bool {
 
 func isLockFileExist(file string) bool {
 	_, err := os.Stat(file)
-	return err == nil
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	// Unknown stat error (permission denied, I/O error, etc.): fail closed so
+	// callers never proceed as if the lock is released when its state is unknown.
+	klog.Warningf("Unable to stat lock file %s, treating as locked: %v", file, err)
+	return true
 }
 
 func WatchLockFile() (chan struct{}, error) {
@@ -128,6 +138,17 @@ func watchLockFile(file string) (chan struct{}, error) {
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
+				}
+				if errors.Is(err, fsnotify.ErrEventOverflow) {
+					// Event queue overflowed: a create/remove transition on the
+					// lock file may have been silently lost. Send a non-blocking
+					// coalesced wake-up so consumers re-check filesystem state.
+					klog.Warningf("fsnotify event overflow, coalescing wake-up: %v", err)
+					select {
+					case sigChan <- struct{}{}:
+					default:
+					}
+					continue
 				}
 				klog.Errorf("File watch error: %v", err)
 			}

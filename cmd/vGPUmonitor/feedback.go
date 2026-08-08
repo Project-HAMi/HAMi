@@ -31,6 +31,19 @@ import (
 
 var errTemporaryClosed = errors.New("temporary closed")
 
+// migLockExistFn is a package-level testability seam: production code always
+// calls plugin.IsMigApplyLockExist(); tests may override this var (restoring
+// it via t.Cleanup) to exercise lock-present/absent paths without real
+// filesystem infrastructure.
+var migLockExistFn = plugin.IsMigApplyLockExist
+
+// nvmlInitFn and nvmlShutdownFn are testability seams for the NVML lifecycle
+// calls inside watchAndFeedback. Tests swap these to stubs that return
+// nvml.SUCCESS / do nothing, so the lock-check and notification paths can
+// be exercised without real GPU hardware.
+var nvmlInitFn = func() nvml.Return { return nvml.Init() }
+var nvmlShutdownFn = func() { nvml.Shutdown() }
+
 //type hostGPUPid struct {
 //	hostGPUPid int
 //	mtime      uint64
@@ -136,12 +149,12 @@ func Observe(lister *nvidia.ContainerLister) {
 
 func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan struct{}) error {
 	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+	if nvret := nvmlInitFn(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
 	}
-	defer nvml.Shutdown()
+	defer nvmlShutdownFn()
 
-	if plugin.IsMigApplyLockExist() {
+	if migLockExistFn() {
 		klog.Info("MIG apply lock file already exists at startup")
 		return errTemporaryClosed
 	}
@@ -159,7 +172,7 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 				klog.Info("MIG lock signal channel closed")
 				return nil
 			}
-			if plugin.IsMigApplyLockExist() {
+			if migLockExistFn() {
 				klog.Info("Received MIG apply lock file event, lock is held")
 				return errTemporaryClosed
 			}

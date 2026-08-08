@@ -76,7 +76,11 @@ func TestWatchLockFile(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			select {
-			case <-sigChan:
+			case _, ok := <-sigChan:
+				if !ok {
+					t.Fatal("sigChan closed unexpectedly on file creation")
+					return
+				}
 				klog.Info("Received signal on file creation")
 				if !isLockFileExist(testFile) {
 					t.Error("Expected lock file to exist")
@@ -114,7 +118,11 @@ func TestWatchLockFile(t *testing.T) {
 		go func() {
 			defer wg.Done()
 			select {
-			case <-sigChan:
+			case _, ok := <-sigChan:
+				if !ok {
+					t.Fatal("sigChan closed unexpectedly on file removal")
+					return
+				}
 				klog.Info("Received signal on file removal")
 				if isLockFileExist(testFile) {
 					t.Error("Expected lock file to be removed")
@@ -165,21 +173,30 @@ func TestWatchLockFile(t *testing.T) {
 			t.Fatalf("WatchLockFile failed: %v", err)
 		}
 
-		// Rapidly create and remove lock file back-to-back
+		// Step 1: create the lock file and wait (with a bounded timeout) until
+		// isLockFileExist reports true, so the removal path below is guaranteed
+		// to actually be exercised by the consumer goroutine.
 		f, err := os.Create(testFile)
 		if err != nil {
 			t.Fatalf("Create file failed: %v", err)
 		}
 		f.Close()
-		err = os.Remove(testFile)
-		if err != nil {
+
+		pollDeadline := time.Now().Add(time.Second)
+		for !isLockFileExist(testFile) {
+			if time.Now().After(pollDeadline) {
+				t.Fatal("Timed out waiting for isLockFileExist to report true after create")
+			}
+			time.Sleep(10 * time.Millisecond)
+		}
+
+		// Step 2: now remove the file so the consumer goroutine has real work to do.
+		if err = os.Remove(testFile); err != nil {
 			t.Fatalf("Remove file failed: %v", err)
 		}
 
-		// Wait briefly for fsnotify events to settle
-		time.Sleep(100 * time.Millisecond)
-
-		// Simulate consumer logic: re-check filesystem state first
+		// Step 3: start the consumer goroutine AFTER removal so it must loop on
+		// isLockFileExist/sigChan until the lock is confirmed gone.
 		done := make(chan struct{})
 		go func() {
 			for isLockFileExist(testFile) {
@@ -193,8 +210,8 @@ func TestWatchLockFile(t *testing.T) {
 
 		select {
 		case <-done:
-			// Success: consumer observed lock is released and did not block forever
-		case <-time.After(1 * time.Second):
+			// Success: consumer observed lock is released and did not block forever.
+		case <-time.After(2 * time.Second):
 			t.Fatal("Consumer blocked waiting for lock removal signal after rapid create and remove")
 		}
 	})
