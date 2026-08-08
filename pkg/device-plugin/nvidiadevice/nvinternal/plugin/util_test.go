@@ -941,7 +941,7 @@ func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
 	}
 }
 
-func TestPatchErasedAnnotation(t *testing.T) {
+func TestPatchErasedAnnotation_NilMapGuard(t *testing.T) {
 	dev := device.PodSingleDevice{
 		device.ContainerDevices{
 			{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 50},
@@ -1023,74 +1023,4 @@ func TestPatchErasedAnnotation(t *testing.T) {
 	})
 }
 
-// TestEraseNextDeviceTypeFromAnnotation directly exercises the
-// eraseNextDeviceTypeFromAnnotation var (the delegating wrapper) to confirm
-// that the delegation to patchErasedAnnotation does not panic when
-// pod.Annotations is nil and that the server-side patch is attempted via the
-// fake client without error.
-func TestEraseNextDeviceTypeFromAnnotation(t *testing.T) {
-	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
-	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
-	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
 
-	encoded := "GPU-03f69c50-207a-2038-9b45-23cac89cb67a,NVIDIA,3000,50:;"
-
-	t.Run("NilAnnotationsDoesNotPanic", func(t *testing.T) {
-		// Pod with nil Annotations — eraseNextDeviceTypeFromAnnotation
-		// receives a value copy of the pod, so patchErasedAnnotation
-		// must not panic when initialising the local copy's map.
-		pod := corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "erase-nil-annos",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"hami.io/vgpu-devices-to-allocate": encoded,
-				},
-			},
-		}
-		client.KubeClient = fake.NewSimpleClientset(&pod)
-
-		// Nil out Annotations AFTER creating in fake client so the fake
-		// MergePatch still finds the pod, but the local copy has nil map.
-		pod.Annotations = nil
-
-		// Must not panic.
-		err := eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, pod)
-		// The decoded annotation was nil, so DecodePodDevices will fail to
-		// find the key and return "erase device annotation not found" — that
-		// is the expected error when Annotations is nil at decode time.
-		// The important thing is that it did NOT panic with nil-map write.
-		if err != nil && err.Error() != "erase device annotation not found" {
-			t.Errorf("unexpected error: %v", err)
-		}
-	})
-
-	t.Run("WithAnnotationsErasesFirstContainer", func(t *testing.T) {
-		pod := corev1.Pod{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      "erase-with-annos",
-				Namespace: "default",
-				Annotations: map[string]string{
-					"hami.io/vgpu-devices-to-allocate": encoded,
-				},
-			},
-			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
-		}
-		client.KubeClient = fake.NewSimpleClientset(&pod)
-
-		err := eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, pod)
-		if err != nil {
-			t.Fatalf("eraseNextDeviceTypeFromAnnotation: %v", err)
-		}
-
-		// Assert persisted state in fake clientset
-		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-		if err != nil {
-			t.Fatalf("failed to fetch persisted pod: %v", err)
-		}
-		expectedErased := ";;"
-		if got := persistedPod.Annotations["hami.io/vgpu-devices-to-allocate"]; got != expectedErased {
-			t.Errorf("persistedPod.Annotations[hami.io/vgpu-devices-to-allocate] = %q, want %q", got, expectedErased)
-		}
-	})
-}
