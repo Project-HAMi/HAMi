@@ -16,6 +16,7 @@ limitations under the License.
 package device
 
 import (
+	"context"
 	"sync"
 	"sync/atomic"
 	"testing"
