@@ -313,44 +313,31 @@ func TestWatchAndFeedback(t *testing.T) {
 	})
 
 	t.Run("CoalescedBurst_FinalStateConverges", func(t *testing.T) {
-		// Simulate an ErrEventOverflow scenario: many signals coalesce into
-		// the buffered channel (capacity 1), but the lock is ultimately absent.
-		// The final observed state must converge to "unlocked" (no
-		// errTemporaryClosed returned).
+		// Simulate ErrEventOverflow coalescing: a stale "locked" signal was
+		// queued, but by the time watchAndFeedback consumes it, the real
+		// state has already moved to unlocked. This proves watchAndFeedback
+		// re-checks filesystem state via migLockExistFn() rather than
+		// trusting the signal's implied state at send time — deterministically,
+		// with no concurrent producer goroutine to race against.
 		stubNvml(t)
-		setLocked := stubMigLock(t, false)
+		setLocked := stubMigLock(t, false) // start unlocked, clears startup check
 
 		sigChan := make(chan struct{}, 1)
 		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
 
-		// Simulate a burst: toggle lock on/off rapidly, then settle on absent.
-		// Drain/fill sigChan without blocking (non-blocking send) mimics the
-		// coalescing behaviour of the watcher goroutine under ErrEventOverflow.
+		setLocked(true)
+		sigChan <- struct{}{}
+		setLocked(false) // resolved before watchAndFeedback ever runs
+
 		go func() {
-			for i := 0; i < 10; i++ {
-				setLocked(i%2 == 0) // alternates locked/unlocked
-				select {
-				case sigChan <- struct{}{}:
-				default:
-				}
-				time.Sleep(2 * time.Millisecond)
-			}
-			// Settle: lock absent, one final notification.
-			setLocked(false)
-			select {
-			case sigChan <- struct{}{}:
-			default:
-			}
-			// Give the function time to process the final state, then cancel.
-			time.Sleep(50 * time.Millisecond)
+			time.Sleep(80 * time.Millisecond)
 			cancel()
 		}()
 
 		err := watchAndFeedback(ctx, nilLister, sigChan)
-		// After the burst the lock is absent, so the function must have
-		// exited via ctx.Done() → nil, NOT via errTemporaryClosed.
 		if err != nil {
-			t.Errorf("want nil after coalesced burst (final state unlocked), got %v", err)
+			t.Errorf("want nil after stale locked signal resolves to unlocked, got %v", err)
 		}
 	})
 
