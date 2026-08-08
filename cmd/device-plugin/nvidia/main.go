@@ -422,9 +422,24 @@ func startPlugins(c *cli.Context, o *options,
 		return nil, false, fmt.Errorf("error getting plugins: %v", err)
 	}
 
-	// Loop through all plugins, starting them if they have any devices
-	// to serve. If even one plugin fails to start properly, try
-	// starting them all again.
+	started, restartPlugins, err := startPluginServers(plugins,
+		o.kubeletSocket, hostPIDBroker)
+	if err != nil {
+		return nil, false, err
+	}
+	if restartPlugins {
+		return plugins, true, nil
+	}
+
+	if started == 0 {
+		klog.Info("No devices found. Waiting indefinitely.")
+	}
+
+	return plugins, false, nil
+}
+
+func startPluginServers(plugins []plugin.Interface, kubeletSocket string,
+	hostPIDBroker *runningHostPIDBroker) (int, bool, error) {
 	started := 0
 	startedPlugins := make([]plugin.Interface, 0, len(plugins))
 	for _, p := range plugins {
@@ -434,26 +449,23 @@ func startPlugins(c *cli.Context, o *options,
 		}
 
 		if err := hostPIDBroker.failure(); err != nil {
-			return nil, false, errors.Join(err, stopPlugins(startedPlugins))
+			return started, false,
+				errors.Join(err, stopPlugins(startedPlugins))
 		}
 
 		// Start the gRPC server for plugin p and connect it with the kubelet.
-		if err := p.Start(o.kubeletSocket); err != nil {
+		if err := p.Start(kubeletSocket); err != nil {
 			klog.Errorf("Failed to start plugin: %v", err)
-			return plugins, true, nil
+			return started, true, nil
 		}
 		startedPlugins = append(startedPlugins, p)
 		if err := hostPIDBroker.failure(); err != nil {
-			return nil, false, errors.Join(err, stopPlugins(startedPlugins))
+			return started, false,
+				errors.Join(err, stopPlugins(startedPlugins))
 		}
 		started++
 	}
-
-	if started == 0 {
-		klog.Info("No devices found. Waiting indefinitely.")
-	}
-
-	return plugins, false, nil
+	return started, false, nil
 }
 
 func stopPlugins(plugins []plugin.Interface) error {

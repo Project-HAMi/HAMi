@@ -17,16 +17,30 @@ import (
 )
 
 type runningHostPIDBroker struct {
-	broker   *hostpid.Broker
+	broker   hostPIDBroker
 	done     chan struct{}
 	serveErr error
 }
 
+type hostPIDBroker interface {
+	Serve() error
+	Close() error
+}
+
+type hostPIDBrokerListener func() (hostPIDBroker, error)
+
 func startHostPIDBroker() (*runningHostPIDBroker, error) {
+	return startHostPIDBrokerWithListener(func() (hostPIDBroker, error) {
+		return hostpid.ListenDefault()
+	})
+}
+
+func startHostPIDBrokerWithListener(
+	listen hostPIDBrokerListener) (*runningHostPIDBroker, error) {
 	if !hostpid.Enabled(os.Getenv(hostpid.EnvironmentVariable)) {
 		return nil, nil
 	}
-	broker, err := hostpid.ListenDefault()
+	broker, err := listen()
 	if err != nil {
 		return nil, err
 	}
