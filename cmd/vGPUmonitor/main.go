@@ -54,6 +54,34 @@ var (
 	legacyMetrics      bool
 )
 
+// isMigApplyLockExistFn is a package-level testability seam: production code
+// always calls plugin.IsMigApplyLockExist(); tests may override this var
+// (restoring it via t.Cleanup) to control lock-present/absent state in the
+// wait-loop without real filesystem or GPU infrastructure.
+var isMigApplyLockExistFn = plugin.IsMigApplyLockExist
+
+// waitForLockRemoval blocks until lockExistFn reports the lock is gone, ctx is
+// cancelled, or sigChan is closed. It returns true when the lock has been
+// released and the caller should restart watchAndFeedback, and false when the
+// caller should exit instead (ctx cancelled or channel closed).
+//
+// This is the logic that was previously inlined in start()'s goroutine; it is
+// extracted so that unit tests can call it directly and Codecov instruments the
+// real source lines.
+func waitForLockRemoval(ctx context.Context, sigChan <-chan struct{}, lockExistFn func() bool) bool {
+	for lockExistFn() {
+		select {
+		case <-ctx.Done():
+			return false
+		case _, ok := <-sigChan:
+			if !ok {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 func init() {
 	rootCmd.Flags().SortFlags = false
 	rootCmd.PersistentFlags().SortFlags = false
@@ -105,7 +133,9 @@ func start() error {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
-					<-lockChannel
+					if !waitForLockRemoval(ctx, lockChannel, isMigApplyLockExistFn) {
+						return
+					}
 					klog.Info("MIG apply lock file has been removed, restarting watchAndFeedback")
 					continue
 				}

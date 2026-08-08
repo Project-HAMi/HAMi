@@ -17,6 +17,7 @@
 package plugin
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 
@@ -83,12 +84,31 @@ func removeMigApplyLock(file string) error {
 	return nil
 }
 
-func WatchLockFile() (chan bool, error) {
+// IsMigApplyLockExist checks if the lock file exists
+func IsMigApplyLockExist() bool {
+	return isLockFileExist(MigApplyLockFile)
+}
+
+func isLockFileExist(file string) bool {
+	_, err := os.Stat(file)
+	if err == nil {
+		return true
+	}
+	if os.IsNotExist(err) {
+		return false
+	}
+	// Unknown stat error (permission denied, I/O error, etc.): fail closed so
+	// callers never proceed as if the lock is released when its state is unknown.
+	klog.Warningf("Unable to stat lock file %s, treating as locked: %v", file, err)
+	return true
+}
+
+func WatchLockFile() (chan struct{}, error) {
 	return watchLockFile(MigApplyLockFile)
 }
 
-func watchLockFile(file string) (chan bool, error) {
-	sigChan := make(chan bool, 1)
+func watchLockFile(file string) (chan struct{}, error) {
+	sigChan := make(chan struct{}, 1)
 	watcher, err := fsnotify.NewWatcher()
 	if err != nil {
 		return nil, err
@@ -101,6 +121,7 @@ func watchLockFile(file string) (chan bool, error) {
 
 	go func() {
 		defer watcher.Close()
+		defer close(sigChan)
 		for {
 			select {
 			case event, ok := <-watcher.Events:
@@ -108,24 +129,26 @@ func watchLockFile(file string) (chan bool, error) {
 					return
 				}
 				if event.Name == file {
-					if event.Has(fsnotify.Create) {
-						select {
-						case sigChan <- true:
-							klog.V(4).Infof("MIG apply lock file detected: %s", event.Name)
-						default:
-						}
-					}
-					if event.Has(fsnotify.Remove) {
-						select {
-						case sigChan <- false:
-							klog.V(4).Infof("MIG apply lock file removed: %s", event.Name)
-						default:
-						}
+					select {
+					case sigChan <- struct{}{}:
+						klog.V(4).Infof("MIG apply lock file event detected: %s", event.Name)
+					default:
 					}
 				}
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return
+				}
+				if errors.Is(err, fsnotify.ErrEventOverflow) {
+					// Event queue overflowed: a create/remove transition on the
+					// lock file may have been silently lost. Send a non-blocking
+					// coalesced wake-up so consumers re-check filesystem state.
+					klog.Warningf("fsnotify event overflow, coalescing wake-up: %v", err)
+					select {
+					case sigChan <- struct{}{}:
+					default:
+					}
+					continue
 				}
 				klog.Errorf("File watch error: %v", err)
 			}

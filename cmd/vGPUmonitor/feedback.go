@@ -25,10 +25,24 @@ import (
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"k8s.io/klog/v2"
 
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
 
 var errTemporaryClosed = errors.New("temporary closed")
+
+// migLockExistFn is a package-level testability seam: production code always
+// calls plugin.IsMigApplyLockExist(); tests may override this var (restoring
+// it via t.Cleanup) to exercise lock-present/absent paths without real
+// filesystem infrastructure.
+var migLockExistFn = plugin.IsMigApplyLockExist
+
+// nvmlInitFn and nvmlShutdownFn are testability seams for the NVML lifecycle
+// calls inside watchAndFeedback. Tests swap these to stubs that return
+// nvml.SUCCESS / do nothing, so the lock-check and notification paths can
+// be exercised without real GPU hardware.
+var nvmlInitFn = func() nvml.Return { return nvml.Init() }
+var nvmlShutdownFn = func() { nvml.Shutdown() }
 
 //type hostGPUPid struct {
 //	hostGPUPid int
@@ -133,12 +147,17 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan struct{}) error {
 	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+	if nvret := nvmlInitFn(); nvret != nvml.SUCCESS {
 		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
 	}
-	defer nvml.Shutdown()
+	defer nvmlShutdownFn()
+
+	if migLockExistFn() {
+		klog.Info("MIG apply lock file already exists at startup")
+		return errTemporaryClosed
+	}
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()
@@ -148,9 +167,13 @@ func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLo
 		case <-ctx.Done():
 			klog.Info("Shutting down watchAndFeedback")
 			return nil
-		case signal := <-migLockSignal:
-			if signal {
-				klog.Info("Received MIG apply lock file")
+		case _, ok := <-migLockSignal:
+			if !ok {
+				klog.Info("MIG lock signal channel closed")
+				return nil
+			}
+			if migLockExistFn() {
+				klog.Info("Received MIG apply lock file event, lock is held")
 				return errTemporaryClosed
 			}
 

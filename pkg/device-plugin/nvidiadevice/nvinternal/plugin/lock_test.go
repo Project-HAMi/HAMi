@@ -75,15 +75,20 @@ func TestWatchLockFile(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case status := <-sigChan:
-					klog.Infof("Received signal %v", status)
-					return
-				case <-time.After(time.Second):
-					t.Error("Timeout waiting for create signal")
+			select {
+			case _, ok := <-sigChan:
+				if !ok {
+					t.Fatal("sigChan closed unexpectedly on file creation")
 					return
 				}
+				klog.Info("Received signal on file creation")
+				if !isLockFileExist(testFile) {
+					t.Error("Expected lock file to exist")
+				}
+				return
+			case <-time.After(time.Second):
+				t.Error("Timeout waiting for create signal")
+				return
 			}
 		}()
 		wg.Wait()
@@ -95,7 +100,7 @@ func TestWatchLockFile(t *testing.T) {
 			t.Fatalf("WatchLockFile failed: %v", err)
 		}
 
-		if _, err := os.Stat(testFile); os.IsNotExist(err) {
+		if !isLockFileExist(testFile) {
 			f, err := os.Create(testFile)
 			if err != nil {
 				t.Fatalf("Create file failed: %v", err)
@@ -112,15 +117,20 @@ func TestWatchLockFile(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case status := <-sigChan:
-					klog.Infof("Received signal %v", status)
-					return
-				case <-time.After(time.Second):
-					t.Error("Timeout waiting for remove signal")
+			select {
+			case _, ok := <-sigChan:
+				if !ok {
+					t.Fatal("sigChan closed unexpectedly on file removal")
 					return
 				}
+				klog.Info("Received signal on file removal")
+				if isLockFileExist(testFile) {
+					t.Error("Expected lock file to be removed")
+				}
+				return
+			case <-time.After(time.Second):
+				t.Error("Timeout waiting for remove signal")
+				return
 			}
 		}()
 		wg.Wait()
@@ -134,6 +144,10 @@ func TestWatchLockFile(t *testing.T) {
 		}
 		f.Close()
 
+		if !isLockFileExist(testFile) {
+			t.Fatal("Lock file should exist initially")
+		}
+
 		sigChan, err := watchLockFile(testFile)
 		if err != nil {
 			t.Fatalf("WatchLockFile failed: %v", err)
@@ -142,17 +156,61 @@ func TestWatchLockFile(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for {
-				select {
-				case <-sigChan:
-					t.Error("Unexpected signal when file exist")
-					return
-				case <-time.After(time.Second):
-					return
-				}
+			select {
+			case <-sigChan:
+				t.Error("Unexpected signal when file was not modified")
+				return
+			case <-time.After(100 * time.Millisecond):
+				return
 			}
 		}()
 		wg.Wait()
+	})
+
+	t.Run("RapidCreateAndRemove", func(t *testing.T) {
+		sigChan, err := watchLockFile(testFile)
+		if err != nil {
+			t.Fatalf("WatchLockFile failed: %v", err)
+		}
+
+		f, err := os.Create(testFile)
+		if err != nil {
+			t.Fatalf("Create file failed: %v", err)
+		}
+		f.Close()
+
+		deadline := time.After(time.Second)
+		for !isLockFileExist(testFile) {
+			select {
+			case <-deadline:
+				t.Fatal("Timed out waiting for lock file to appear")
+			case <-time.After(10 * time.Millisecond):
+			}
+		}
+
+		if err := os.Remove(testFile); err != nil {
+			t.Fatalf("Remove file failed: %v", err)
+		}
+
+		done := make(chan struct{})
+		go func() {
+			for isLockFileExist(testFile) {
+				select {
+				case _, ok := <-sigChan:
+					if !ok {
+						return
+					}
+				case <-time.After(50 * time.Millisecond):
+				}
+			}
+			close(done)
+		}()
+
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Fatal("Consumer blocked waiting for lock removal signal after rapid create and remove")
+		}
 	})
 }
 
@@ -168,7 +226,7 @@ func TestCreateAndRemoveMigApplyLock(t *testing.T) {
 			t.Errorf("CreateMigApplyLock failed: %v", err)
 		}
 
-		if _, err = os.Stat(MigApplyLockFile); os.IsNotExist(err) {
+		if !IsMigApplyLockExist() {
 			t.Error("Lock file was not created")
 		}
 	})
@@ -190,7 +248,7 @@ func TestCreateAndRemoveMigApplyLock(t *testing.T) {
 			t.Errorf("RemoveMigApplyLock failed: %v", err)
 		}
 
-		if _, err := os.Stat(MigApplyLockFile); !os.IsNotExist(err) {
+		if IsMigApplyLockExist() {
 			t.Error("Lock file was not removed")
 		}
 	})
