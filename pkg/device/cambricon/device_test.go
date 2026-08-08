@@ -634,7 +634,7 @@ func Test_ReleaseNodeLock(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
-			result := dev.ReleaseNodeLock(&test.args.node, &test.args.pod)
+			result := dev.ReleaseNodeLock(context.Background(), &test.args.node, &test.args.pod)
 			assert.Equal(t, test.err, result)
 		})
 	}

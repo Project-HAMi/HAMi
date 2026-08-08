@@ -3591,7 +3591,7 @@ func (m *fitMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, err
 	return nil, nil
 }
 func (m *fitMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
-func (m *fitMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *fitMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error { return nil }
 func (m *fitMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{}
 }

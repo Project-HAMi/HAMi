@@ -812,10 +812,10 @@ func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
 	return nil
 }
 
-func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) error {
+func (s *Scheduler) releaseAllDevices(ctx context.Context, node *corev1.Node, pod *corev1.Pod) error {
 	var errs []error
 	for _, val := range device.GetDevices() {
-		if err := val.ReleaseNodeLock(node, pod); err != nil {
+		if err := val.ReleaseNodeLock(ctx, node, pod); err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
 			errs = append(errs, err)
 		}
@@ -834,7 +834,7 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 		if err == nil {
 			return nil
 		}
-		s.releaseAllDevices(node, pod)
+		s.releaseAllDevices(context.Background(), node, pod)
 		if !nodelockutil.IsNodeLockContention(err) {
 			return err
 		}
@@ -890,7 +890,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 	fail := func(e error) (*extenderv1.ExtenderBindingResult, error) {
 		klog.InfoS("Release node locks", "node", args.Node)
-		s.releaseAllDevices(node, current)
+		s.releaseAllDevices(context.Background(), node, current)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, e)
 		errStr := ""
 		if e != nil {
@@ -915,7 +915,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 
 	klog.InfoS("Release node locks after successful bind", "node", args.Node)
-	if err = s.releaseAllDevices(node, current); err != nil {
+	if err = s.releaseAllDevices(context.Background(), node, current); err != nil {
 		klog.ErrorS(err, "Failed to release node locks, initiating background retry/reconciliation", "node", args.Node, "pod", klog.KObj(current))
 		go func(n *corev1.Node, p *corev1.Pod) {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -930,7 +930,7 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 			}()
 
 			retryErr := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
-				if err := s.releaseAllDevices(n, p); err != nil {
+				if err := s.releaseAllDevices(ctx, n, p); err != nil {
 					klog.V(4).InfoS("Retrying to release node locks...", "node", n.Name, "pod", klog.KObj(p), "err", err)
 					return false, nil
 				}

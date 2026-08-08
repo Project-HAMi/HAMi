@@ -17,6 +17,7 @@ limitations under the License.
 package ascend
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -264,7 +265,7 @@ func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, NodeLockAscend, p)
 }
 
-func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *Devices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -276,7 +277,7 @@ func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 		return nil
 	}
 
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockAscend, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, NodeLockAscend, p, false)
 }
 
 func (dev *Devices) NodeCleanUp(nn string) error {

@@ -698,7 +698,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
 				},
 			}
-			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			err := dev.ReleaseNodeLock(context.Background(), tt.node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {

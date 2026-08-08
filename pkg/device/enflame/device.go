@@ -17,6 +17,7 @@ limitations under the License.
 package enflame
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"maps"
@@ -299,7 +300,7 @@ func (dev *EnflameDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *EnflameDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *EnflameDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

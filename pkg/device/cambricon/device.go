@@ -145,7 +145,7 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	}
 	if time.Since(lockTime) > time.Minute*2 {
 		klog.InfoS("Node lock expired", "node", n.Name, "lockTime", lockTime)
-		err = dev.ReleaseNodeLock(n, p)
+		err = dev.ReleaseNodeLock(context.Background(), n, p)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", n.Name)
 			return err
@@ -155,7 +155,7 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return fmt.Errorf("node %s has been locked within 2 minutes", n.Name)
 }
 
-func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *CambriconDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	if n.Annotations == nil {
 		return nil
 	}
@@ -166,11 +166,11 @@ func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) erro
 
 	newNode := n.DeepCopy()
 	delete(newNode.Annotations, DsmluLockTime)
-	_, err := client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+	_, err := client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+		_, err = client.GetClient().CoreV1().Nodes().Update(ctx, newNode, metav1.UpdateOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)

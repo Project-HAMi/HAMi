@@ -17,6 +17,7 @@ limitations under the License.
 package amd
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -144,7 +145,7 @@ func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nodelock.LockNode(n.Name, NodeLockAMD, p)
 }
 
-func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *AMDDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
@@ -155,7 +156,7 @@ func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	if !found {
 		return nil
 	}
-	return nodelock.ReleaseNodeLock(n.Name, NodeLockAMD, p, false)
+	return nodelock.ReleaseNodeLock(ctx, n.Name, NodeLockAMD, p, false)
 }
 
 func (dev *AMDDevices) NodeCleanUp(nn string) error {

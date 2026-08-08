@@ -382,7 +382,7 @@ func Test_KunlunVDevices_ReleaseNodeLock(t *testing.T) {
 			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
 			assert.NilError(t, err)
 
-			err = dev.ReleaseNodeLock(node, test.pod)
+			err = dev.ReleaseNodeLock(context.Background(), node, test.pod)
 			assert.NilError(t, err)
 
 			got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})

@@ -1429,7 +1429,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 					ResourceMemoryName: "huawei.com/Ascend310P-memory",
 				},
 			}
-			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			err := dev.ReleaseNodeLock(context.Background(), tt.node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {

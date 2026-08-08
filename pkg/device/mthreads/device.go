@@ -17,6 +17,7 @@ limitations under the License.
 package mthreads
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -180,7 +181,7 @@ func (dev *MthreadsDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *MthreadsDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *MthreadsDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 

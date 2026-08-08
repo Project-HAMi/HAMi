@@ -718,7 +718,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 				ResourceMemoryName: "hygon.com/dcumem",
 				ResourceCoreName:   "hygon.com/dcucores",
 			})
-			err = dev.ReleaseNodeLock(node, tt.pod)
+			err = dev.ReleaseNodeLock(context.Background(), node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {

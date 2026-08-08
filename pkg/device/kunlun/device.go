@@ -17,6 +17,7 @@ limitations under the License.
 package kunlun
 
 import (
+	"context"
 	"fmt"
 	"strings"
 
@@ -109,7 +110,7 @@ func (dev *KunlunDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
-func (dev *KunlunDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
+func (dev *KunlunDevices) ReleaseNodeLock(ctx context.Context, n *corev1.Node, p *corev1.Pod) error {
 	return nil
 }
 
