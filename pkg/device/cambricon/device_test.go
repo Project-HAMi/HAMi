@@ -287,6 +287,30 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(2),
 			},
 		},
+		{
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

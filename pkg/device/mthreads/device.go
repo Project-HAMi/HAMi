@@ -222,14 +222,17 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				mem, ok = ctr.Resources.Requests[mthreadsResourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					memnum = int(memnums) * MemoryFactor
-					klog.InfoS("Memory allocation calculated",
-						"container", ctr.Name,
-						"requestedMem", memnums,
-						"allocatedMem", memnum)
+				memnums, parsed := mem.AsInt64()
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "mthreads memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name)
+					return device.ContainerDeviceRequest{}
 				}
+				memnum = int(memnums) * MemoryFactor
+				klog.InfoS("Memory allocation calculated",
+					"container", ctr.Name,
+					"requestedMem", memnums,
+					"allocatedMem", memnum)
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[mthreadsResourceCores]

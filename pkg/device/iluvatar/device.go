@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -215,10 +216,13 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				mem, ok = ctr.Resources.Requests[iluvatarResourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					memnum = int(memnums) * MemoryFactor
+				memnums, parsed := mem.AsInt64()
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "iluvatar memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name)
+					return device.ContainerDeviceRequest{}
 				}
+				memnum = int(memnums) * MemoryFactor
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]

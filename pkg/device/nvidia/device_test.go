@@ -2013,6 +2013,30 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         0,
 			},
 		},
+		{
+			name: "byte-scale memory quantity that overflows int32 is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 
 	for _, tt := range tests {
