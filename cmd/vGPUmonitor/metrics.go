@@ -70,6 +70,36 @@ var (
 		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
+	hostGPUTemperatureDesc = prometheus.NewDesc(
+		"hami_host_gpu_temperature_celsius",
+		"GPU Temperature in Celsius",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUPowerUsageDesc = prometheus.NewDesc(
+		"hami_host_gpu_power_usage_milliwatts",
+		"GPU Power Usage in milliwatts",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUPowerLimitDesc = prometheus.NewDesc(
+		"hami_host_gpu_power_limit_milliwatts",
+		"GPU Power Limit in milliwatts",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUMemoryUtilizationDesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_utilization_ratio",
+		"GPU Memory Bandwidth Utilization ratio (0-100)",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUMemoryTotalDesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_total_bytes",
+		"GPU Total Memory in bytes",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
 		"vGPU device memory usage in bytes",
@@ -188,6 +218,11 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 // These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUdesc
+	ch <- hostGPUTemperatureDesc
+	ch <- hostGPUPowerUsageDesc
+	ch <- hostGPUPowerLimitDesc
+	ch <- hostGPUMemoryUtilizationDesc
+	ch <- hostGPUMemoryTotalDesc
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
@@ -288,6 +323,10 @@ func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.M
 		return err
 	}
 
+	if err := cc.collectGPUHealthMetrics(ch, hdev, index); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -317,6 +356,13 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		hostGPUdesc,
 		prometheus.GaugeValue,
 		float64(memory.Used),
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
+	ch <- prometheus.MustNewConstMetric(
+		hostGPUMemoryTotalDesc,
+		prometheus.GaugeValue,
+		float64(memory.Total),
 		fmt.Sprint(index), uuid, deviceName,
 	)
 
@@ -352,9 +398,67 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		fmt.Sprint(index), uuid, deviceName,
 	)
 
+	ch <- prometheus.MustNewConstMetric(
+		hostGPUMemoryUtilizationDesc,
+		prometheus.GaugeValue,
+		float64(util.Memory),
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
 	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
 		fmt.Sprint(index), uuid, deviceName,
 	)
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUHealthMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	uuid, nvret := hdev.GetUUID()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+	deviceName = "NVIDIA-" + deviceName
+
+	temp, ret := hdev.GetTemperature(nvml.TEMPERATURE_GPU)
+	if ret == nvml.SUCCESS {
+		ch <- prometheus.MustNewConstMetric(
+			hostGPUTemperatureDesc,
+			prometheus.GaugeValue,
+			float64(temp),
+			fmt.Sprint(index), uuid, deviceName,
+		)
+	} else if ret != nvml.ERROR_NOT_SUPPORTED {
+		klog.V(4).Infof("nvml get temperature error for device %d, ret=%d", index, ret)
+	}
+
+	power, ret := hdev.GetPowerUsage()
+	if ret == nvml.SUCCESS {
+		ch <- prometheus.MustNewConstMetric(
+			hostGPUPowerUsageDesc,
+			prometheus.GaugeValue,
+			float64(power),
+			fmt.Sprint(index), uuid, deviceName,
+		)
+	} else if ret != nvml.ERROR_NOT_SUPPORTED {
+		klog.V(4).Infof("nvml get power usage error for device %d, ret=%d", index, ret)
+	}
+
+	limit, ret := hdev.GetPowerManagementLimit()
+	if ret == nvml.SUCCESS {
+		ch <- prometheus.MustNewConstMetric(
+			hostGPUPowerLimitDesc,
+			prometheus.GaugeValue,
+			float64(limit),
+			fmt.Sprint(index), uuid, deviceName,
+		)
+	} else if ret != nvml.ERROR_NOT_SUPPORTED {
+		klog.V(4).Infof("nvml get power limit error for device %d, ret=%d", index, ret)
+	}
 
 	return nil
 }
