@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -87,7 +88,7 @@ func TestGetPendingPod(t *testing.T) {
 				Name:      "pending-pod",
 				Namespace: "default",
 				Annotations: map[string]string{
-					BindTimeAnnotations:     "2024-01-01T00:00:00Z",
+					BindTimeAnnotations:     "1704067200", // 2024-01-01 00:00:00 UTC as Unix seconds
 					DeviceBindPhase:         DeviceBindAllocating,
 					AssignedNodeAnnotations: "test-node-0",
 				},
@@ -124,7 +125,7 @@ func TestGetPendingPod(t *testing.T) {
 				Name:      "ignore-pod-2",
 				Namespace: "default",
 				Annotations: map[string]string{
-					BindTimeAnnotations:     "2024-01-01T00:00:00Z",
+					BindTimeAnnotations:     "1704067200",
 					AssignedNodeAnnotations: "test-node-0",
 				},
 			},
@@ -138,7 +139,7 @@ func TestGetPendingPod(t *testing.T) {
 				Name:      "ignore-pod-3",
 				Namespace: "default",
 				Annotations: map[string]string{
-					BindTimeAnnotations:     "2024-01-01T00:00:00Z",
+					BindTimeAnnotations:     "1704067200",
 					DeviceBindPhase:         "",
 					AssignedNodeAnnotations: "test-node-2",
 				},
@@ -153,7 +154,7 @@ func TestGetPendingPod(t *testing.T) {
 				Name:      "ignore-pod-4",
 				Namespace: "default",
 				Annotations: map[string]string{
-					BindTimeAnnotations: "2024-01-01T00:00:00Z",
+					BindTimeAnnotations: "1704067200",
 					DeviceBindPhase:     DeviceBindAllocating,
 				},
 			},
@@ -231,6 +232,314 @@ func TestGetPendingPod(t *testing.T) {
 				assert.Equal(t, got.Name, tt.want.Name)
 			}
 		})
+	}
+}
+
+// TestGetPendingPod_MultipleMatchesPrefersAllocating verifies that when both an
+// "allocating" and a "success" phase pod match the fallback filter, the "allocating"
+// pod is always returned regardless of list order.
+func TestGetPendingPod_MultipleMatchesPrefersAllocating(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node-multi",
+			Annotations: map[string]string{}, // no lock → forces fallback path
+		},
+	}
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+
+	now := time.Now().Unix()
+
+	// Pod A: phase=success (partial multi-container allocation done)
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-success",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     "1000", // older bind time
+				DeviceBindPhase:         DeviceBindSuccess,
+				AssignedNodeAnnotations: "test-node-multi",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-multi"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	// Pod B: phase=allocating (just arrived, is the genuinely waiting pod)
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-allocating",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     fmt.Sprintf("%d", now),
+				DeviceBindPhase:         DeviceBindAllocating,
+				AssignedNodeAnnotations: "test-node-multi",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-multi"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	// Create in "wrong" order to ensure we don't rely on list ordering.
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podA, metav1.CreateOptions{})
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podB, metav1.CreateOptions{})
+
+	got, err := GetPendingPod(context.TODO(), "test-node-multi")
+	if err != nil {
+		t.Fatalf("GetPendingPod returned unexpected error: %v", err)
+	}
+	if got.Name != podB.Name {
+		t.Errorf("expected allocating pod %q to be selected, got %q", podB.Name, got.Name)
+	}
+}
+
+// TestGetPendingPod_StickySuccessMultipleReturnsNewest verifies that when all candidates
+// are in "success" phase (all multi-container pods partially done), the one with the
+// most recent bind-time is returned deterministically.
+func TestGetPendingPod_StickySuccessMultipleReturnsNewest(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node-sticky",
+			Annotations: map[string]string{},
+		},
+	}
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+
+	// Two pods both in "success" phase; pod-newer has a larger bind-time int.
+	podOlder := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-older",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     "1000",
+				DeviceBindPhase:         DeviceBindSuccess,
+				AssignedNodeAnnotations: "test-node-sticky",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-sticky"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	podNewer := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-newer",
+			Namespace: "default",
+			Annotations: map[string]string{
+				BindTimeAnnotations:     "9999",
+				DeviceBindPhase:         DeviceBindSuccess,
+				AssignedNodeAnnotations: "test-node-sticky",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-sticky"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	// Create older first so the list returns it first if we naively iterate.
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podOlder, metav1.CreateOptions{})
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podNewer, metav1.CreateOptions{})
+
+	got, err := GetPendingPod(context.TODO(), "test-node-sticky")
+	if err != nil {
+		t.Fatalf("GetPendingPod returned unexpected error: %v", err)
+	}
+	if got.Name != podNewer.Name {
+		t.Errorf("expected newest pod %q to be selected, got %q", podNewer.Name, got.Name)
+	}
+}
+
+// TestGetPendingPodByDeviceIDs_Deterministic verifies that the UUID-based lookup always
+// returns the pod whose annotation contains the requested UUID, regardless of which pod
+// appears first in the API list response.
+func TestGetPendingPodByDeviceIDs_Deterministic(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "test-node-uuid",
+			Annotations: map[string]string{},
+		},
+	}
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+
+	annoKey := "hami.io/vgpu-devices-to-allocate"
+
+	// Annotation format: "UUID,type,mem,cores" per device, ":" separates devices,
+	// "_" separates container slots. We keep it minimal here.
+	podA := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-uuid-a",
+			Namespace: "default",
+			Annotations: map[string]string{
+				annoKey: "GPU-AAAA,NVIDIA,4096,100",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-uuid"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+	podB := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-uuid-b",
+			Namespace: "default",
+			Annotations: map[string]string{
+				annoKey: "GPU-BBBB,NVIDIA,4096,100",
+			},
+		},
+		Spec:   corev1.PodSpec{NodeName: "test-node-uuid"},
+		Status: corev1.PodStatus{Phase: corev1.PodPending},
+	}
+
+	// podA is created (and likely listed) first, but we request podB's UUID.
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podA, metav1.CreateOptions{})
+	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), podB, metav1.CreateOptions{})
+
+	tests := []struct {
+		name      string
+		deviceIDs []string
+		wantPod   string
+		wantErr   bool
+	}{
+		{
+			name:      "matches pod-B by UUID",
+			deviceIDs: []string{"GPU-BBBB"},
+			wantPod:   "pod-uuid-b",
+			wantErr:   false,
+		},
+		{
+			name:      "matches pod-A by UUID",
+			deviceIDs: []string{"GPU-AAAA"},
+			wantPod:   "pod-uuid-a",
+			wantErr:   false,
+		},
+		{
+			name:      "unknown UUID returns error",
+			deviceIDs: []string{"GPU-ZZZZ"},
+			wantErr:   true,
+		},
+		{
+			name:      "empty deviceIDs returns error",
+			deviceIDs: []string{},
+			wantErr:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := GetPendingPodByDeviceIDs(context.TODO(), "test-node-uuid", tt.deviceIDs, annoKey)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetPendingPodByDeviceIDs() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				if got == nil {
+					t.Fatal("expected a pod, got nil")
+				}
+				if got.Name != tt.wantPod {
+					t.Errorf("expected pod %q, got %q", tt.wantPod, got.Name)
+				}
+			}
+		})
+	}
+}
+
+// TestAnnotationContainsAnyDevice_MultiContainer directly tests the P0 bug fix:
+// the annotation container separator is ";" (OnePodMultiContainerSplitSymbol),
+// NOT "_". Before the fix, a multi-container annotation was never matched.
+func TestAnnotationContainsAnyDevice_MultiContainer(t *testing.T) {
+	const uuidA = "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76"
+	const uuidB = "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4"
+
+	// Annotation format produced by device.EncodePodSingleDevice for 2 containers,
+	// each with 1 device: "UUID,Type,mem,cores:;UUID,Type,mem,cores:;"
+	annoTwoContainers := uuidA + ",NVIDIA,500,3:;" + uuidB + ",NVIDIA,500,3:;"
+
+	// Annotation for a single container with 2 devices: "UUID1,Type,m,c:UUID2,Type,m,c:;"
+	annoOneContainerTwoDevices := uuidA + ",NVIDIA,500,3:" + uuidB + ",NVIDIA,500,3:;"
+
+	tests := []struct {
+		name     string
+		anno     string
+		uuid     string
+		wantHit  bool
+	}{
+		{"container-1 of 2", annoTwoContainers, uuidA, true},
+		{"container-2 of 2", annoTwoContainers, uuidB, true},
+		{"unrelated UUID", annoTwoContainers, "GPU-00000000-0000-0000-0000-000000000000", false},
+		{"device-1 in single container", annoOneContainerTwoDevices, uuidA, true},
+		{"device-2 in single container", annoOneContainerTwoDevices, uuidB, true},
+		{"empty annotation", "", uuidA, false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			devSet := map[string]struct{}{tt.uuid: {}}
+			got := annotationContainsAnyDevice(tt.anno, devSet)
+			if got != tt.wantHit {
+				t.Errorf("annotationContainsAnyDevice(%q, %q) = %v, want %v", tt.anno, tt.uuid, got, tt.wantHit)
+			}
+		})
+	}
+}
+
+// TestGetPendingPod_EqualTimestampTiebreaker verifies that when two "allocating" pods
+// share the same BindTime, the result is deterministic (lexicographic namespace/name).
+func TestGetPendingPod_EqualTimestampTiebreaker(t *testing.T) {
+	cl := fake.NewClientset()
+	client.KubeClient = cl
+
+	const sameBindTime = "1722960000" // both pods share this Unix timestamp
+	const node = "test-node-tiebreak"
+
+	pods := []*corev1.Pod{
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "zzz-pod", // sorts last lexicographically
+				Namespace: "default",
+				Annotations: map[string]string{
+					BindTimeAnnotations:     sameBindTime,
+					DeviceBindPhase:         DeviceBindAllocating,
+					AssignedNodeAnnotations: node,
+				},
+			},
+			Spec:   corev1.PodSpec{NodeName: node},
+			Status: corev1.PodStatus{Phase: corev1.PodPending},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "aaa-pod", // sorts first lexicographically
+				Namespace: "default",
+				Annotations: map[string]string{
+					BindTimeAnnotations:     sameBindTime,
+					DeviceBindPhase:         DeviceBindAllocating,
+					AssignedNodeAnnotations: node,
+				},
+			},
+			Spec:   corev1.PodSpec{NodeName: node},
+			Status: corev1.PodStatus{Phase: corev1.PodPending},
+		},
+	}
+	for _, p := range pods {
+		cl.CoreV1().Pods("default").Create(context.TODO(), p, metav1.CreateOptions{})
+	}
+	testNode := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: node, Annotations: map[string]string{}},
+	}
+	cl.CoreV1().Nodes().Create(context.TODO(), testNode, metav1.CreateOptions{})
+
+	// Call twice to prove the result is always the same regardless of list order.
+	for i := 0; i < 3; i++ {
+		got, err := GetPendingPod(context.TODO(), node)
+		if err != nil {
+			t.Fatalf("run %d: unexpected error: %v", i, err)
+		}
+		if got == nil {
+			t.Fatalf("run %d: got nil pod", i)
+		}
+		// With our tiebreaker (namespace/name ascending), "default/aaa-pod" sorts first.
+		if got.Name != "aaa-pod" {
+			t.Errorf("run %d: expected deterministic selection of \"aaa-pod\", got %q", i, got.Name)
+		}
 	}
 }
 

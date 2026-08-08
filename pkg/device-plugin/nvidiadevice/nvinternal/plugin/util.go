@@ -54,6 +54,32 @@ func GetLibPath() string {
 	return libPath
 }
 
+// getPendingPodByUUID is a plugin-internal wrapper around util.GetPendingPodByDeviceIDs.
+// It is defined here so that server.go can call it without importing corev1 directly.
+//   - Returns (pod, nil)  on a successful UUID match.
+//   - Returns (nil, nil)  when no annotation matched any requested UUID (benign — use fallback).
+//   - Returns (nil, err)  on a Kubernetes API failure (caller should abort, not fall back).
+func getPendingPodByUUID(ctx context.Context, nodename string, deviceIDs []string) (*corev1.Pod, error) {
+	if len(deviceIDs) == 0 {
+		return nil, nil
+	}
+	pod, err := util.GetPendingPodByDeviceIDs(ctx, nodename, deviceIDs, device.InRequestDevices[nvidia.NvidiaGPUDevice])
+	if err != nil {
+		// "no pod matched" is a benign miss — fall back to annotation-state scan.
+		if strings.HasSuffix(err.Error(), fmt.Sprintf("on node %s", nodename)) &&
+			strings.Contains(err.Error(), "no pod matched device IDs") {
+			klog.V(4).Infof("getPendingPodByUUID: no UUID match on node %s, using annotation fallback", nodename)
+			return nil, nil
+		}
+		// All other errors (network, RBAC, timeout) are real API failures.
+		// Do NOT silently fall back — return the error so Allocate() can fail cleanly.
+		klog.Warningf("getPendingPodByUUID: API error during UUID lookup, not falling back: %v", err)
+		return nil, err
+	}
+	return pod, nil
+}
+
+
 func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.ContainerDevices, error) {
 	pdevices, err := device.DecodePodDevices(device.InRequestDevices, p.Annotations)
 	if err != nil {

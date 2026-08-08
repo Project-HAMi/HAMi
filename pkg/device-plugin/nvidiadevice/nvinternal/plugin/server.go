@@ -100,6 +100,7 @@ type NvidiaDevicePlugin struct {
 	schedulerConfig      nvidia.NvidiaConfig
 
 	applyMutex                 sync.Mutex
+	allocateMu                 sync.Mutex // serialises pod-lookup + annotation-erase in Allocate()
 	disableHealthChecks        chan bool
 	ackDisableHealthChecks     chan bool
 	disableWatchAndRegister    chan bool
@@ -483,7 +484,18 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	var annotatedRequests device.PodSingleDevice
 	nodename := os.Getenv(util.NodeNameEnvName)
 	if nodename != "" {
-		current, err := getPendingPod(ctx, nodename)
+		// Use the same UUID-first resolution as Allocate() to identify which pod
+		// kubelet is hinting for. Collect all AvailableDeviceIDs across container
+		// requests as the UUID hint set.
+		var availableIDs []string
+		for _, cr := range r.ContainerRequests {
+			availableIDs = append(availableIDs, cr.AvailableDeviceIDs...)
+		}
+		current, err := getPendingPodByUUID(ctx, nodename, availableIDs)
+		if err != nil || current == nil {
+			// UUID lookup failed or no match — fall back to annotation-state scan.
+			current, err = getPendingPod(ctx, nodename)
+		}
 		if err == nil && current != nil {
 			if podRequests, decodeErr := device.DecodePodDevices(device.InRequestDevices, current.Annotations); decodeErr == nil {
 				annotatedRequests = podRequests[nvidia.NvidiaGPUDevice]
@@ -601,10 +613,32 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
-	current, err := getPendingPod(ctx, nodename)
-	if err != nil {
-		//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
-		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+
+	// Serialise the pod-identity lookup and annotation-erase sequence so that
+	// concurrent Allocate() calls (e.g. for two containers of the same pod)
+	// cannot race on the same annotation entry.
+	plugin.allocateMu.Lock()
+	defer plugin.allocateMu.Unlock()
+
+	// --- Pod identity resolution (deterministic path first) ---
+	// Collect all DevicesIds from this request so we can match by UUID.
+	var allDeviceIDs []string
+	for _, req := range reqs.ContainerRequests {
+		allDeviceIDs = append(allDeviceIDs, req.DevicesIds...)
+	}
+
+	// Primary: match by UUID overlap with the scheduler-written annotation.
+	// This is deterministic even when multiple pods are in flight on the same node.
+	// GetPendingPodByDeviceIDs is in pkg/util so it returns *corev1.Pod; we rely
+	// on type inference via := to avoid importing corev1 directly in this file.
+	current, err := getPendingPodByUUID(ctx, nodename, allDeviceIDs)
+	if err != nil || current == nil {
+		// Fallback: annotation-state scan (lock path + heuristic ordering).
+		current, err = getPendingPod(ctx, nodename)
+		if err != nil {
+			//nodelock.ReleaseNodeLock(nodename, NodeLockNvidia, current)
+			return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+		}
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
