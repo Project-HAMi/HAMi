@@ -97,33 +97,47 @@ func TestWebHookRoute(t *testing.T) {
 }
 
 func TestWebHookRoute_NilHandler(t *testing.T) {
-	// Mock newWebHook to return nil and an error
-	oldNewWebHook := newWebHook
+	origNewWebHook := newWebHook
+	defer func() { newWebHook = origNewWebHook }()
+
 	newWebHook = func() (*admission.Webhook, error) {
-		return nil, errors.New("mock webhook initialization error")
+		return nil, nil
 	}
-	defer func() {
-		newWebHook = oldNewWebHook
-	}()
 
 	handler := WebHookRoute()
-	if handler == nil {
-		t.Fatal("WebHookRoute returned nil handler")
-	}
-
 	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
-	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
 
 	handler(w, req, nil)
 
 	if w.Code != http.StatusInternalServerError {
-		t.Errorf("Expected status code %d, got %d", http.StatusInternalServerError, w.Code)
+		t.Errorf("Expected status 500 for nil webhook handler, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "Webhook handler is nil") {
+		t.Errorf("Expected response body to contain error string, got %s", w.Body.String())
+	}
+}
+
+func TestWebHookRoute_InitError(t *testing.T) {
+	origNewWebHook := newWebHook
+	defer func() { newWebHook = origNewWebHook }()
+
+	newWebHook = func() (*admission.Webhook, error) {
+		return nil, errors.New("custom init error")
 	}
 
-	expectedBody := "webhook initialization failed\n"
-	if w.Body.String() != expectedBody {
-		t.Errorf("Expected body %q, got %q", expectedBody, w.Body.String())
+	handler := WebHookRoute()
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	handler(w, req, nil)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("Expected status 500 for webhook init error, got %d", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), "custom init error") {
+		t.Errorf("Expected response body to contain error string, got %s", w.Body.String())
+>>>>>>> 4573a99 (added-test-and-suggested-fixes)
 	}
 }
 

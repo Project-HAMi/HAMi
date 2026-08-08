@@ -148,14 +148,15 @@ var newWebHook = scheduler.NewWebHook
 
 func WebHookRoute() httprouter.Handle {
 	h, err := newWebHook()
-	if err != nil {
-		klog.ErrorS(err, "Failed to create new webhook")
-	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.V(5).Infof("Handling webhook request on %s", r.URL.Path)
-		if h == nil {
-			klog.ErrorS(err, "Webhook handler is nil, webhook initialization failed")
-			http.Error(w, "webhook initialization failed", http.StatusInternalServerError)
+		if h == nil || err != nil {
+			errMsg := "Webhook handler is nil, webhook initialization failed"
+			if err != nil {
+				errMsg = fmt.Sprintf("Failed to create new webhook: %v", err)
+			}
+			klog.ErrorS(err, errMsg)
+			http.Error(w, errMsg, http.StatusInternalServerError)
 			return
 		}
 		h.ServeHTTP(w, r)
