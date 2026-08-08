@@ -1472,7 +1472,7 @@ func TestTryLockNodeWithContext_Coverage(t *testing.T) {
 		clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
 		client.KubeClient = clientSet
 
-		if err := TryLockNodeWithContext(nil, nodeName, "", pod); err != nil {
+		if err := TryLockNodeWithContext(context.TODO(), nodeName, "", pod); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
 	})
