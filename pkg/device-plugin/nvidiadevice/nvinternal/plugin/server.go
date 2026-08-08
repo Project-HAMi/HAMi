@@ -699,6 +699,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						HostPath: "/tmp/vgpulock",
 						ReadOnly: false},
 				)
+				configureHostPIDBroker(response)
 				found := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
