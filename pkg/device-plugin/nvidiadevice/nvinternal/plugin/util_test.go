@@ -17,12 +17,12 @@
 package plugin
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 
-	"golang.org/x/net/context"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
@@ -971,6 +971,18 @@ func TestPatchErasedAnnotation(t *testing.T) {
 		if got := pod.Annotations[annoKey]; got != expectedEncoded {
 			t.Errorf("pod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
 		}
+
+		// Assert persisted state in fake clientset
+		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch persisted pod: %v", err)
+		}
+		if persistedPod.Annotations == nil {
+			t.Fatal("expected persistedPod.Annotations to be initialized (non-nil)")
+		}
+		if got := persistedPod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("persistedPod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
 	})
 
 	t.Run("ExistingAnnotationsPreserved", func(t *testing.T) {
@@ -995,6 +1007,18 @@ func TestPatchErasedAnnotation(t *testing.T) {
 		}
 		if got := pod.Annotations[annoKey]; got != expectedEncoded {
 			t.Errorf("pod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
+		}
+
+		// Assert persisted state in fake clientset
+		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch persisted pod: %v", err)
+		}
+		if got := persistedPod.Annotations["existing-key"]; got != "existing-value" {
+			t.Errorf("persisted existing annotation was overwritten or lost: got %q, want %q", got, "existing-value")
+		}
+		if got := persistedPod.Annotations[annoKey]; got != expectedEncoded {
+			t.Errorf("persistedPod.Annotations[%s] = %q, want %q", annoKey, got, expectedEncoded)
 		}
 	})
 }
@@ -1057,6 +1081,16 @@ func TestEraseNextDeviceTypeFromAnnotation(t *testing.T) {
 		err := eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, pod)
 		if err != nil {
 			t.Fatalf("eraseNextDeviceTypeFromAnnotation: %v", err)
+		}
+
+		// Assert persisted state in fake clientset
+		persistedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("failed to fetch persisted pod: %v", err)
+		}
+		expectedErased := ";;"
+		if got := persistedPod.Annotations["hami.io/vgpu-devices-to-allocate"]; got != expectedErased {
+			t.Errorf("persistedPod.Annotations[hami.io/vgpu-devices-to-allocate] = %q, want %q", got, expectedErased)
 		}
 	})
 }
