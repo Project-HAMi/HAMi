@@ -12,7 +12,8 @@
 | GPU        | Birentech     | Biren166M        | ✅              | ✅            | ❌                |
 | GPU        | MetaX         | MXC500           | ✅              | ✅            | ❌                |
 | XPU        | Kunlunxin     | P800             | ✅              | ✅            | ❌                |
-| GPU        | Vastai        | VA16             | ✅              | ✅            | ❌              |      
+| GPU        | Vastai        | VA16             | ✅              | ✅            | ❌              |
+| Neuron     | AWS           | Inferentia, Trainium | ❌          | ✅            | ✅              |
 
 
 - [ ] Support video codec processing

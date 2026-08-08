@@ -454,7 +454,11 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
-	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	if err != nil {
+		klog.Errorf("Failed to send ListAndWatch response: %v", err)
+		return err
+	}
 
 	for {
 		select {
@@ -464,7 +468,10 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
+				return nil
+			}
 		}
 	}
 }
@@ -601,6 +608,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
 
+	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, current)
+	if err != nil {
+		PodAllocationFailed(nodename, current, NodeLockNvidia)
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+	}
+
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
 		// error out if more than one resource is being allocated.
@@ -627,7 +640,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
-			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
+			currentCtr, devreq, err := popNextContainerDevices(current, podSingleDev)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -637,6 +650,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
+
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
 				if err != nil {
@@ -649,12 +663,6 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
-			}
-
-			err = eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
-			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
-				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
 			if plugin.operatingMode != "mig" {
@@ -727,6 +735,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		}
 	}
+
+	if err := patchErasedAnnotation(current, nvidia.NvidiaGPUDevice, podSingleDev); err != nil {
+		klog.Errorf("erase allocated containers annotation error: %v", err)
+		PodAllocationFailed(nodename, current, NodeLockNvidia)
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+	}
+
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil

@@ -462,7 +462,62 @@ func Test_DecodeNodeDevices(t *testing.T) {
 		}
 	}{
 		{
-			name: "args is invalid",
+			name: "args is empty",
+			args: "",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args is only delimiter",
+			args: ":",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args is multiple delimiters",
+			args: "::",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args missing delimiter with comma",
+			args: ",",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args has comma and delimiter but empty fields",
+			args: ",:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 2 in node annotation"),
+			},
+		},
+		{
+			name: "args is invalid format missing split symbol",
 			args: "a",
 			want: struct {
 				di  []*DeviceInfo
@@ -472,6 +527,7 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				err: errors.New("node annotation missing device separator"),
 			},
 		},
+
 		{
 			name: "str is old format",
 			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:",
@@ -1456,6 +1512,26 @@ func TestCheckType(t *testing.T) {
 		{
 			name:     "use satisfied and nouse matches still excludes",
 			annos:    map[string]string{useKey: "A100", noUseKey: "A100"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
+		// Regression: a trailing/leading/double comma leaves an empty split member, and
+		// strings.Contains(cardType, "") is always true, so it must not match every card.
+		{
+			name:     "nouse with trailing comma only excludes named type",
+			annos:    map[string]string{noUseKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "nouse with leading comma only excludes named type",
+			annos:    map[string]string{noUseKey: ",V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use with trailing comma matches named type only",
+			annos:    map[string]string{useKey: "V100,"},
 			cardType: "NVIDIA-A100",
 			want:     false,
 		},
