@@ -1078,8 +1078,10 @@ func (m *mockDevices) GetResourceNames() ResourceNames                   { retur
 func (m *mockDevices) GetNodeDevices(_ corev1.Node) ([]*DeviceInfo, error) {
 	return nil, nil
 }
-func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
-func (m *mockDevices) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *mockDevices) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *mockDevices) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
 func (m *mockDevices) GenerateResourceRequests(ctr *corev1.Container) ContainerDeviceRequest {
 	// Return the mock request only if the container has the resource annotation we look for
 	for rName := range ctr.Resources.Limits {

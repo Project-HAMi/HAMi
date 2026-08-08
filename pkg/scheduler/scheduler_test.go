@@ -1279,8 +1279,10 @@ func (m *registerMockDevice) GetResourceNames() device.ResourceNames { return de
 func (m *registerMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
 	return m.nodeDevices, m.getNodeErr
 }
-func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
-func (m *registerMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
+func (m *registerMockDevice) ReleaseNodeLock(_ context.Context, _ *corev1.Node, _ *corev1.Pod) error {
+	return nil
+}
 func (m *registerMockDevice) GenerateResourceRequests(_ *corev1.Container) device.ContainerDeviceRequest {
 	return device.ContainerDeviceRequest{}
 }
@@ -2413,7 +2415,7 @@ type blockingReleaseMockDevice struct {
 	releaseDoneCh chan struct{}
 }
 
-func (m *blockingReleaseMockDevice) CommonWord() string { return "blocking-release-mock" }
+func (m *blockingReleaseMockDevice) CommonWord() string                           { return "blocking-release-mock" }
 func (m *blockingReleaseMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error { return nil }
 func (m *blockingReleaseMockDevice) ReleaseNodeLock(ctx context.Context, _ *corev1.Node, _ *corev1.Pod) error {
 	calls := m.releaseCalls.Add(1)
@@ -2421,9 +2423,7 @@ func (m *blockingReleaseMockDevice) ReleaseNodeLock(ctx context.Context, _ *core
 		return fmt.Errorf("initial release error")
 	}
 	close(m.blockedCh)
-	select {
-	case <-ctx.Done():
-		close(m.releaseDoneCh)
-		return ctx.Err()
-	}
+	<-ctx.Done()
+	close(m.releaseDoneCh)
+	return ctx.Err()
 }
