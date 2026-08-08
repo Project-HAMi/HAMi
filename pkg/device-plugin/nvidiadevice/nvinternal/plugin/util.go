@@ -92,6 +92,21 @@ func GetNextDeviceRequest(dtype string, p corev1.Pod) (corev1.Container, device.
 	return corev1.Container{}, res, errors.New("device request not found")
 }
 
+func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.PodSingleDevice) error {
+	klog.V(5).Infof("After erase annotation, remaining devices: %v", podSingleDev)
+	encoded := device.EncodePodSingleDevice(podSingleDev)
+	annoKey := device.InRequestDevices[dtype]
+	newAnnos := map[string]string{annoKey: encoded}
+	if err := util.PatchPodAnnotations(pod, newAnnos); err != nil {
+		return err
+	}
+	if pod.Annotations == nil {
+		pod.Annotations = make(map[string]string)
+	}
+	pod.Annotations[annoKey] = encoded
+	return nil
+}
+
 var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 	pdevices, err := device.DecodePodDevices(device.InRequestDevices, p.Annotations)
 	if err != nil {
@@ -115,10 +130,7 @@ var eraseNextDeviceTypeFromAnnotation = func(dtype string, p corev1.Pod) error {
 			}
 		}
 	}
-	klog.Infoln("After erase res=", res)
-	newannos := make(map[string]string)
-	newannos[device.InRequestDevices[dtype]] = device.EncodePodSingleDevice(res)
-	return util.PatchPodAnnotations(&p, newannos)
+	return patchErasedAnnotation(&p, dtype, res)
 }
 
 func GetIndexAndTypeFromUUID(uuid string) (string, int) {
