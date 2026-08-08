@@ -2228,6 +2228,7 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	cleanup := func() {
 		config.NodeLockRetryTimeout = oldRetry
 		device.DevicesMap = oldDevicesMap
+		defer func() { _ = recover() }()
 		close(s.stopCh)
 	}
 	scheme := runtime.NewScheme()
