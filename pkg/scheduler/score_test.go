@@ -3659,3 +3659,73 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 	assert.Equal(t, len((*devinput)["mockB"][0]), 1)
 	assert.Equal(t, (*devinput)["mockB"][0][0].UUID, "uuid-b")
 }
+
+// Test_calcScore_MultiTypeContainerAlignment guards against container-index
+// misalignment in calcScoreWithOptions: for a pod whose containers request
+// different device types (container 0 = mockA, container 1 = mockB), each
+// type's per-container allocation list must stay aligned to container index.
+// The bug fixed here prepended a padding slot to every already-discovered
+// type instead of only the type just requested, shifting container 0's real
+// mockA allocation into container 1's slot. See Project-HAMi/HAMi#2335.
+func Test_calcScore_MultiTypeContainerAlignment(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+	device.DevicesMap = map[string]device.Devices{
+		"mockA": &fitMockDevice{typeName: "mockA", uuid: "uuid-a"},
+		"mockB": &fitMockDevice{typeName: "mockB", uuid: "uuid-b"},
+	}
+
+	nodes := &map[string]*NodeUsage{
+		"node-1": {
+			Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{Device: &device.DeviceUsage{
+						ID: "uuid-a", Type: "mockA",
+						Count: 4, Used: 0, Totalcore: 100, Usedcores: 0, Totalmem: 8192, Usedmem: 0, Health: true,
+					}},
+					{Device: &device.DeviceUsage{
+						ID: "uuid-b", Type: "mockB",
+						Count: 4, Used: 0, Totalcore: 100, Usedcores: 0, Totalmem: 8192, Usedmem: 0, Health: true,
+					}},
+				},
+			},
+		},
+	}
+	// container 0 requests mockA, container 1 requests mockB.
+	resourceReqs := device.PodDeviceRequests{
+		{"mockA-req": device.ContainerDeviceRequest{Nums: 1, Type: "mockA", Memreq: 1024, MemPercentagereq: 101, Coresreq: 1}},
+		{"mockB-req": device.ContainerDeviceRequest{Nums: 1, Type: "mockB", Memreq: 1024, MemPercentagereq: 101, Coresreq: 1}},
+	}
+	task := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "test-multi-type"}}
+
+	s := NewScheduler()
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: (*nodes)["node-1"].Node,
+		Devices: map[string][]device.DeviceInfo{
+			"mockA": {{ID: "uuid-a", Type: "mockA"}},
+			"mockB": {{ID: "uuid-b", Type: "mockB"}},
+		},
+	})
+
+	failedNodes := map[string]string{}
+	got, err := s.calcScore(nodes, resourceReqs, task, failedNodes)
+	assert.NilError(t, err)
+	assert.DeepEqual(t, failedNodes, map[string]string{})
+	assert.Equal(t, len(got.NodeList), 1)
+
+	devices := got.NodeList[0].Devices
+
+	// mockA must stay with container 0; container 1's slot must be empty.
+	assert.Equal(t, len(devices["mockA"]), 2)
+	assert.Equal(t, len(devices["mockA"][0]), 1)
+	assert.Equal(t, devices["mockA"][0][0].UUID, "uuid-a")
+	assert.Equal(t, len(devices["mockA"][1]), 0)
+
+	// mockB must stay with container 1; container 0's slot must be empty.
+	assert.Equal(t, len(devices["mockB"]), 2)
+	assert.Equal(t, len(devices["mockB"][0]), 0)
+	assert.Equal(t, len(devices["mockB"][1]), 1)
+	assert.Equal(t, devices["mockB"][1][0].UUID, "uuid-b")
+}
