@@ -1179,3 +1179,246 @@ func TestMutateAdmissionMultiContainerAndInitContainers(t *testing.T) {
 		}
 	})
 }
+
+func TestFitResourceQuotaInitContainers(t *testing.T) {
+	t.Run("init container requests larger than container sum", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "init-larger-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-large",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("2000"),
+								"nvidia.com/gpucores": resource.MustParse("50"),
+							},
+						},
+					},
+					{
+						Name: "init-small",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("1000"),
+								"nvidia.com/gpucores": resource.MustParse("20"),
+							},
+						},
+					},
+					{
+						Name: "init-no-gpu",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-main",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("500"),
+								"nvidia.com/gpucores": resource.MustParse("10"),
+							},
+						},
+					},
+					{
+						Name: "app-no-gpu",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{},
+						},
+					},
+				},
+			},
+		}
+
+		if !fitResourceQuota(pod) {
+			t.Errorf("Expected fitResourceQuota to return true for pod under no quota limit")
+		}
+	})
+
+	t.Run("container sum larger than init container max", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "container-larger-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-small",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("500"),
+								"nvidia.com/gpucores": resource.MustParse("10"),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-1",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("1000"),
+								"nvidia.com/gpucores": resource.MustParse("30"),
+							},
+						},
+					},
+					{
+						Name: "app-2",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpumem":   resource.MustParse("1000"),
+								"nvidia.com/gpucores": resource.MustParse("30"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		if !fitResourceQuota(pod) {
+			t.Errorf("Expected fitResourceQuota to return true for container-larger pod under no quota limit")
+		}
+	})
+
+	t.Run("quota denial via init container request", func(t *testing.T) {
+		ns := "quota-test-init-deny"
+		cache := device.GetLocalCache()
+		cache.Quotas[ns] = &device.DeviceQuota{
+			"nvidia.com/gpumem": &device.Quota{
+				Limit:    1500,
+				LimitSet: true,
+				Used:     0,
+			},
+		}
+		defer delete(cache.Quotas, ns)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "init-deny-pod",
+				Namespace: ns,
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-heavy",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":    resource.MustParse("1"),
+								"nvidia.com/gpumem": resource.MustParse("2000"),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-light",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":    resource.MustParse("1"),
+								"nvidia.com/gpumem": resource.MustParse("500"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		if fitResourceQuota(pod) {
+			t.Errorf("Expected fitResourceQuota to return false when init container exceeds memory quota")
+		}
+	})
+
+	t.Run("quota denial via core limit in init container", func(t *testing.T) {
+		ns := "quota-test-core-deny"
+		cache := device.GetLocalCache()
+		cache.Quotas[ns] = &device.DeviceQuota{
+			"nvidia.com/gpucores": &device.Quota{
+				Limit:    30,
+				LimitSet: true,
+				Used:     0,
+			},
+		}
+		defer delete(cache.Quotas, ns)
+
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "core-deny-pod",
+				Namespace: ns,
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-heavy-cores",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpucores": resource.MustParse("50"),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-light-cores",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu":      resource.MustParse("1"),
+								"nvidia.com/gpucores": resource.MustParse("10"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		if fitResourceQuota(pod) {
+			t.Errorf("Expected fitResourceQuota to return false when init container exceeds core quota")
+		}
+	})
+
+	t.Run("pod with zero GPU requests", func(t *testing.T) {
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "no-gpu-pod",
+				Namespace: "default",
+			},
+			Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{
+					{
+						Name: "init-cpu",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"cpu": resource.MustParse("1"),
+							},
+						},
+					},
+				},
+				Containers: []corev1.Container{
+					{
+						Name: "app-cpu",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"cpu": resource.MustParse("1"),
+							},
+						},
+					},
+				},
+			},
+		}
+
+		if !fitResourceQuota(pod) {
+			t.Errorf("Expected fitResourceQuota to return true for pod requesting no GPU resources")
+		}
+	})
+}
