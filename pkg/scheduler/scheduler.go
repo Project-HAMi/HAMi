@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -811,12 +812,15 @@ func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
 	return nil
 }
 
-func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
+func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) error {
+	var errs []error
 	for _, val := range device.GetDevices() {
 		if err := val.ReleaseNodeLock(node, pod); err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
+			errs = append(errs, err)
 		}
 	}
+	return errors.Join(errs...)
 }
 
 func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
@@ -911,7 +915,34 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	}
 
 	klog.InfoS("Release node locks after successful bind", "node", args.Node)
-	s.releaseAllDevices(node, current)
+	if err = s.releaseAllDevices(node, current); err != nil {
+		klog.ErrorS(err, "Failed to release node locks, initiating background retry/reconciliation", "node", args.Node, "pod", klog.KObj(current))
+		go func(n *corev1.Node, p *corev1.Pod) {
+			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer cancel()
+
+			go func() {
+				select {
+				case <-s.stopCh:
+					cancel()
+				case <-ctx.Done():
+				}
+			}()
+
+			retryErr := wait.PollUntilContextTimeout(ctx, 200*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+				if err := s.releaseAllDevices(n, p); err != nil {
+					klog.V(4).InfoS("Retrying to release node locks...", "node", n.Name, "pod", klog.KObj(p), "err", err)
+					return false, nil
+				}
+				return true, nil
+			})
+			if retryErr != nil {
+				klog.ErrorS(retryErr, "Failed to reconcile/release node locks after retries", "node", n.Name, "pod", klog.KObj(p))
+			} else {
+				klog.InfoS("Successfully reconciled/released node locks on retry", "node", n.Name, "pod", klog.KObj(p))
+			}
+		}(node, current)
+	}
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil

@@ -2188,10 +2188,12 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 
 type bindLockMockDevice struct {
 	registerMockDevice
-	lockErr      error
-	lockErrOnce  bool
-	lockCalls    atomic.Int32
-	releaseCalls atomic.Int32
+	lockErr         error
+	lockErrOnce     bool
+	lockCalls       atomic.Int32
+	releaseErr      error
+	releaseErrCount atomic.Int32
+	releaseCalls    atomic.Int32
 }
 
 func (m *bindLockMockDevice) CommonWord() string { return "bind-lock-mock" }
@@ -2203,7 +2205,10 @@ func (m *bindLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
 	return nil
 }
 func (m *bindLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
-	m.releaseCalls.Add(1)
+	n := m.releaseCalls.Add(1)
+	if m.releaseErr != nil && int(m.releaseErrCount.Load()) >= int(n) {
+		return m.releaseErr
+	}
 	return nil
 }
 
@@ -2333,4 +2338,36 @@ func Test_Bind_SuccessPathReleasesNodeLock(t *testing.T) {
 	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(1),
 		"expected ReleaseNodeLock to be called on the success path")
 }
+
+func Test_Bind_ReleaseNodeLockFailureTriggersRetry(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-release-fail", Namespace: "default", UID: types.UID("uid-release-fail"),
+		},
+	}
+	mock := &bindLockMockDevice{
+		releaseErr: fmt.Errorf("mock release error"),
+	}
+	mock.releaseErrCount.Store(1) // fail only the first release call
+
+	s, args, cleanup := setupBindLockRetryTest(t, 0, pod, mock)
+	defer cleanup()
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "bind should succeed even if release locks fails initially")
+
+	// Wait for the background retry/reconciliation to complete
+	err = wait.PollUntilContextTimeout(context.Background(), 50*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
+		calls := mock.releaseCalls.Load()
+		if calls >= 2 {
+			return true, nil
+		}
+		return false, nil
+	})
+	require.NoError(t, err, "expected background retry to eventually call ReleaseNodeLock again")
+	require.GreaterOrEqual(t, mock.releaseCalls.Load(), int32(2),
+		"expected at least 2 ReleaseNodeLock calls (initial failure + retry)")
+}
+
 
