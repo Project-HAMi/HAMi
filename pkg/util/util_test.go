@@ -23,9 +23,12 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -37,6 +40,83 @@ func init() {
 	inRequestDevices = make(map[string]string)
 	inRequestDevices["NVIDIA"] = "hami.io/vgpu-devices-to-allocate"
 }
+func TestGetNode(t *testing.T) {
+	originalClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = originalClient })
+
+	tests := []struct {
+		name       string
+		nodename   string
+		setupMock  func()
+		wantError  bool
+		errMessage string
+	}{
+		{
+			name:       "empty node name",
+			nodename:   "",
+			setupMock:  func() {},
+			wantError:  true,
+			errMessage: "nodename is empty",
+		},
+		{
+			name:       "client not initialized",
+			nodename:   "test-node",
+			setupMock:  func() { client.KubeClient = nil },
+			wantError:  true,
+			errMessage: "kubernetes client is not initialized",
+		},
+		{
+			name:     "node found",
+			nodename: "test-node",
+			setupMock: func() {
+				client.KubeClient = fake.NewClientset(&corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				})
+			},
+			wantError: false,
+		},
+		{
+			name:     "node not found",
+			nodename: "missing-node",
+			setupMock: func() {
+				client.KubeClient = fake.NewClientset()
+			},
+			wantError:  true,
+			errMessage: "node missing-node not found",
+		},
+		{
+			name:     "unauthorized",
+			nodename: "unauth-node",
+			setupMock: func() {
+				fakeClient := fake.NewClientset()
+				fakeClient.PrependReactor("get", "nodes", func(action k8stesting.Action) (handled bool, ret k8sruntime.Object, err error) {
+					return true, nil, apierrors.NewUnauthorized("unauthorized")
+				})
+				client.KubeClient = fakeClient
+			},
+			wantError:  true,
+			errMessage: "unauthorized to access node unauth-node",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			tt.setupMock()
+			t.Cleanup(func() { client.KubeClient = originalClient }) // Restore immediately for next subtest
+
+			node, err := GetNode(tt.nodename)
+			if tt.wantError {
+				assert.ErrorContains(t, err, tt.errMessage)
+				assert.Assert(t, node == nil)
+			} else {
+				assert.NilError(t, err)
+				assert.Assert(t, node != nil)
+				assert.Equal(t, node.Name, tt.nodename)
+			}
+		})
+	}
+}
+
 func TestRemoveAnnotation(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
