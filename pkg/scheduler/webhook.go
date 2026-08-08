@@ -150,15 +150,22 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// container spec here. It applies its own memory factor, defaults and
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
-		var memoryReq, coresReq int64
+		var initMemoryReqMax, initCoresReqMax int64
 		for i := range pod.Spec.InitContainers {
 			req := dev.GenerateResourceRequests(&pod.Spec.InitContainers[i])
 			if req.Nums == 0 {
 				continue
 			}
-			memoryReq += int64(req.Memreq) * int64(req.Nums)
-			coresReq += int64(req.Coresreq) * int64(req.Nums)
+			mem := int64(req.Memreq) * int64(req.Nums)
+			cores := int64(req.Coresreq) * int64(req.Nums)
+			if mem > initMemoryReqMax {
+				initMemoryReqMax = mem
+			}
+			if cores > initCoresReqMax {
+				initCoresReqMax = cores
+			}
 		}
+		var memoryReq, coresReq int64
 		for i := range pod.Spec.Containers {
 			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if req.Nums == 0 {
@@ -166,6 +173,12 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			}
 			memoryReq += int64(req.Memreq) * int64(req.Nums)
 			coresReq += int64(req.Coresreq) * int64(req.Nums)
+		}
+		if initMemoryReqMax > memoryReq {
+			memoryReq = initMemoryReqMax
+		}
+		if initCoresReqMax > coresReq {
+			coresReq = initCoresReqMax
 		}
 		if memoryReq == 0 && coresReq == 0 {
 			continue

@@ -1179,4 +1179,3 @@ func TestMutateAdmissionMultiContainerAndInitContainers(t *testing.T) {
 		}
 	})
 }
-
