@@ -19,15 +19,20 @@ package cambricon
 import (
 	"context"
 	"flag"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
@@ -1163,4 +1168,54 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// Test_ReleaseNodeLockUsesPatch pins the verb used to clear the lock. The
+// hami-scheduler ServiceAccount is granted get/list/patch/watch on nodes and not
+// update, so releasing with Update is rejected and the lock is never cleared,
+// leaving the node unschedulable for MLU once the 2 minute expiry passes.
+func Test_ReleaseNodeLockUsesPatch(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+
+	ctx := context.Background()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-01", Annotations: map[string]string{}},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-01", Namespace: "default"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "ctr",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				corev1.ResourceName(MLUResourceCount): resource.MustParse("1"),
+			}},
+		}}},
+	}
+
+	clientset := fake.NewClientset(node)
+	// What the apiserver returns for a verb the ServiceAccount does not hold.
+	clientset.PrependReactor("update", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "nodes"}, node.Name,
+			fmt.Errorf(`User "system:serviceaccount:kube-system:hami-scheduler" cannot update resource "nodes" in API group "" at the cluster scope`))
+	})
+	client.KubeClient = clientset
+	t.Cleanup(func() { client.KubeClient = nil })
+
+	assert.NoError(t, dev.LockNode(node, pod))
+	locked, err := clientset.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotEmpty(t, locked.Annotations[DsmluLockTime], "setNodeLock should have recorded the lock")
+
+	assert.NoError(t, dev.ReleaseNodeLock(locked, pod), "release must not need the update verb")
+
+	released, err := clientset.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotContains(t, released.Annotations, DsmluLockTime, "lock annotation must be gone from the apiserver")
+
+	// The node is usable again rather than wedged until an operator intervenes.
+	assert.NoError(t, dev.LockNode(released, pod), "node should be lockable again after release")
 }
