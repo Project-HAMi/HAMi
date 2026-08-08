@@ -110,12 +110,18 @@ func (m *PodManager) DelPod(pod *corev1.Pod) {
 	}
 }
 
+// GetPod returns a copy. AddPod and UpdatePod write to the stored PodInfo in
+// place, so handing out the pointer would let the caller read it while the
+// informer is rewriting it.
 func (m *PodManager) GetPod(pod *corev1.Pod) (*PodInfo, bool) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
 
 	pi, ok := m.pods[pod.UID]
-	return pi, ok
+	if !ok {
+		return nil, false
+	}
+	return pi.DeepCopy(), true
 }
 
 func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
@@ -235,9 +241,13 @@ func (m *PodManager) GetScheduledPods() (map[k8stypes.UID]*PodInfo, error) {
 		"podCount", podCount,
 	)
 
-	// Return a shallow copy of the pods map to avoid race conditions.
-	// This prevents a "concurrent map iteration and map write" fatal error.
+	// Copy the entries, not just the map. Copying the map alone keeps callers
+	// off the manager's own map, but leaves them holding the stored *PodInfo,
+	// which AddPod and UpdatePod write to in place. The metrics collector ranges
+	// over Devices after this returns, by which point the read lock is gone.
 	podsCopy := make(map[k8stypes.UID]*PodInfo, podCount)
-	maps.Copy(podsCopy, m.pods)
+	for uid, pi := range m.pods {
+		podsCopy[uid] = pi.DeepCopy()
+	}
 	return podsCopy, nil
 }
