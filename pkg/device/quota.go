@@ -45,10 +45,7 @@ type QuotaManager struct {
 var localCache QuotaManager
 
 func GetLocalCache() *QuotaManager {
-func GetLocalCache() *QuotaManager {
 	return NewQuotaManager()
-}
-	return &localCache
 }
 
 var once sync.Once

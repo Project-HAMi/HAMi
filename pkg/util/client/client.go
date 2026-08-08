@@ -35,8 +35,10 @@ type Client struct {
 }
 
 var (
-	KubeClient kubernetes.Interface
-	once       sync.Once
+	KubeClient           kubernetes.Interface
+	once                 sync.Once
+	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
+	inClusterConfig      = rest.InClusterConfig
 )
 
 func init() {
@@ -92,10 +94,10 @@ func loadKubeConfig() (*rest.Config, error) {
 		kubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	config, err := buildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		klog.Infof("BuildConfigFromFlags failed for file %s: %v. Using in-cluster config.", kubeConfigPath, err)
-		return rest.InClusterConfig()
+		return inClusterConfig()
 	}
 	return config, nil
 }
