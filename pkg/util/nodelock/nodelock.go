@@ -126,13 +126,29 @@ func setupNodeLockTimeout() {
 	}
 }
 
+// lockMutexWithContext attempts to acquire mu while respecting ctx cancellation.
+func lockMutexWithContext(ctx context.Context, mu *sync.Mutex) error {
+	for {
+		if mu.TryLock() {
+			return nil
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(5 * time.Millisecond):
+		}
+	}
+}
+
 func SetNodeLockWithContext(ctx context.Context, nodeName string, lockname string, pods *corev1.Pod) error {
 	if ctx == nil {
 		ctx = context.Background()
 	}
 	// Acquire per-node lock instead of global lock
 	nodeLock := nodeLocks.getLock(nodeName)
-	nodeLock.Lock()
+	if err := lockMutexWithContext(ctx, nodeLock); err != nil {
+		return err
+	}
 	defer nodeLock.Unlock()
 
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
@@ -196,7 +212,9 @@ func ReleaseNodeLockWithContext(ctx context.Context, nodeName string, lockname s
 	}
 	// Acquire per-node lock instead of global lock
 	nodeLock := nodeLocks.getLock(nodeName)
-	nodeLock.Lock()
+	if err := lockMutexWithContext(ctx, nodeLock); err != nil {
+		return err
+	}
 	defer nodeLock.Unlock()
 
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
@@ -323,7 +341,33 @@ func TryLockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 }
 
 func TryLockNodeWithContext(ctx context.Context, nodeName string, lockname string, pods *corev1.Pod) error {
-	return LockNodeWithContext(ctx, nodeName, lockname, pods)
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	nodeLock := nodeLocks.getLock(nodeName)
+	if !nodeLock.TryLock() {
+		return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
+	}
+	defer nodeLock.Unlock()
+
+	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return err
+	}
+	if _, ok := node.Annotations[NodeLockKey]; ok {
+		return fmt.Errorf("node %s is locked: %w", nodeName, ErrNodeLockContention)
+	}
+
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`, NodeLockKey, GenerateNodeLockKeyByPod(pods), node.ResourceVersion)
+	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
+	if err != nil {
+		if apierrors.IsConflict(err) {
+			return fmt.Errorf("node %s patch conflict: %w", nodeName, ErrNodeLockContention)
+		}
+		return err
+	}
+	klog.InfoS("Node lock set via TryLock", "node", nodeName, "podName", pods.Name)
+	return nil
 }
 
 func ParseNodeLock(value string) (lockTime time.Time, ns, name string, err error) {

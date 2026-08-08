@@ -19,6 +19,7 @@ package nodelock
 import (
 	"context"
 	"errors"
+	"fmt"
 	"runtime"
 	"strings"
 	"sync"
@@ -978,6 +979,7 @@ func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
 			return true, nil, errors.New("simulated transient API error")
 		})
 
+		start := time.Now()
 		ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
 		defer cancel()
 
@@ -990,13 +992,17 @@ func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
 
 		select {
 		case err := <-errChan:
+			elapsed := time.Since(start)
 			if err == nil {
 				t.Fatalf("Expected error due to context cancellation, got nil")
 			}
-			if !errors.Is(err, context.DeadlineExceeded) && !errors.Is(err, context.Canceled) && !strings.Contains(err.Error(), "context deadline exceeded") && !strings.Contains(err.Error(), "context canceled") {
-				t.Fatalf("Expected context error during retries, got %v", err)
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("Expected context.DeadlineExceeded during retries, got %v", err)
 			}
-		case <-time.After(2 * time.Second):
+			if elapsed > 300*time.Millisecond {
+				t.Fatalf("Cancellation was not observed promptly: took %v (expected ~50ms)", elapsed)
+			}
+		case <-time.After(500 * time.Millisecond):
 			t.Fatalf("SetNodeLockWithContext hung after context deadline")
 		}
 	})
@@ -1009,36 +1015,63 @@ func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
 		client.KubeClient = clientSet
 
 		numGoroutines := 10
+		pods := make([]*corev1.Pod, numGoroutines)
+		for i := range numGoroutines {
+			pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: fmt.Sprintf("pod-%d", i), Namespace: "ns"}}
+			_, err := clientSet.CoreV1().Pods("ns").Create(context.Background(), pod, metav1.CreateOptions{})
+			if err != nil {
+				t.Fatalf("Failed to create pod fixture: %v", err)
+			}
+			pods[i] = pod
+		}
+
+		startGate := make(chan struct{})
+		doneHolding := make(chan struct{})
 		var wg sync.WaitGroup
 		errs := make(chan error, numGoroutines)
 
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
-			go func(id int) {
+			go func(idx int) {
 				defer wg.Done()
-				pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-" + string(rune('a'+id)), Namespace: "ns"}}
+				pod := pods[idx]
+				<-startGate
 				ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 				defer cancel()
 				err := LockNodeWithContext(ctx, nodeName, "", pod)
-				if err != nil {
-					errs <- err
-				} else {
-					time.Sleep(10 * time.Millisecond)
-					_ = ReleaseNodeLockWithContext(ctx, nodeName, "", pod, false)
+				errs <- err
+				if err == nil {
+					<-doneHolding
+					_ = ReleaseNodeLockWithContext(context.Background(), nodeName, "", pod, false)
 				}
 			}(i)
 		}
 
-		wg.Wait()
-		close(errs)
+		close(startGate)
 
-		var totalErrors int
-		for err := range errs {
-			if err != nil {
-				totalErrors++
+		var successCount int
+		var failureCount int
+		for range numGoroutines {
+			err := <-errs
+			if err == nil {
+				successCount++
+			} else {
+				failureCount++
+				if !IsNodeLockContention(err) {
+					t.Errorf("Expected ErrNodeLockContention, got: %v", err)
+				}
 			}
 		}
-		t.Logf("High contention completed with %d goroutines encountering contention/timeout out of %d", totalErrors, numGoroutines)
+
+		close(doneHolding)
+		wg.Wait()
+
+		if successCount != 1 {
+			t.Fatalf("Expected exactly 1 successful lock acquisition, got %d", successCount)
+		}
+		if failureCount != numGoroutines-1 {
+			t.Fatalf("Expected %d failed lock attempts, got %d", numGoroutines-1, failureCount)
+		}
 	})
 
 	t.Run("TryLockNode Non-blocking Attempt", func(t *testing.T) {
@@ -1065,4 +1098,3 @@ func Test_NodeLock_ContentionBackoffAndTimeout(t *testing.T) {
 		}
 	})
 }
-
