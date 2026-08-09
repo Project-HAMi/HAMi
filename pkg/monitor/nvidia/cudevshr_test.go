@@ -366,6 +366,26 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.Assert(t, os.IsNotExist(err))
 	})
 
+	t.Run("old stale dir with unmap error retains container", func(t *testing.T) {
+		dir := t.TempDir()
+		entryName := "missing-pod-uid_ctr"
+		ctrDir := filepath.Join(dir, entryName)
+		assert.NilError(t, os.Mkdir(ctrDir, 0755))
+		old := time.Now().Add(-2 * resyncInterval)
+		assert.NilError(t, os.Chtimes(ctrDir, old, old))
+
+		usage := &ContainerUsage{data: []byte{1, 2, 3}}
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{entryName: usage},
+			podLister:     newTestPodLister(),
+		}
+		assert.NilError(t, l.Update())
+		got, ok := l.containers[entryName]
+		assert.Equal(t, ok, true)
+		assert.Equal(t, got, usage)
+	})
+
 	t.Run("already tracked entry is left untouched", func(t *testing.T) {
 		dir := t.TempDir()
 		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "p", Namespace: "default", UID: "uid1"}}
@@ -493,5 +513,12 @@ func Test_ContainerUsage_Unmap(t *testing.T) {
 
 		// Second call is safe and no-op
 		assert.NilError(t, usage.Unmap())
+	})
+
+	t.Run("unmap failure preserves data and returns error", func(t *testing.T) {
+		c := &ContainerUsage{data: []byte{1, 2, 3}}
+		err := c.Unmap()
+		assert.Assert(t, err != nil)
+		assert.Assert(t, c.data != nil)
 	})
 }
