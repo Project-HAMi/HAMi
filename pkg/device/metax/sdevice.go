@@ -272,9 +272,8 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 }
 
 // ScoreNode returns a policy-independent score for the node following a
-// "higher score is a better node" convention. MetaxSDevices implements
-// device.PolicyNeutralScorer, so the shared scheduler policy layer is
-// responsible for weighting this score and adapting it to the active
+// "higher score is a better node" convention. The shared scheduler policy layer
+// is responsible for weighting this score and adapting it to the active
 // scheduling policy (for example, inverting it under the Spread policy).
 func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	if appClassOnlineEnable(podDevices) {
@@ -287,7 +286,8 @@ func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 }
 
 // PolicyNeutralScore marks MetaxSDevices as returning a policy-independent
-// score from ScoreNode. See device.PolicyNeutralScorer.
+// score from ScoreNode, so the shared scheduler policy layer owns the weighting
+// and Spread-policy sign inversion.
 func (sdev *MetaxSDevices) PolicyNeutralScore() {}
 
 func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {

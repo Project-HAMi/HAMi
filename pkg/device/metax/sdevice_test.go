@@ -2995,12 +2995,15 @@ func TestScoreNodePolicyIndependence(t *testing.T) {
 	}
 }
 
-// TestMetaxSDevicesImplementsPolicyNeutralScorer ensures MetaxSDevices satisfies
-// the device.PolicyNeutralScorer marker interface, which is how the shared policy
-// layer discovers that ScoreNode is policy-independent and must be weighted.
+// TestMetaxSDevicesImplementsPolicyNeutralScorer ensures MetaxSDevices exposes
+// the PolicyNeutralScore marker method, which is how the shared policy layer
+// discovers that ScoreNode is policy-independent and must be weighted.
 func TestMetaxSDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
 	var dev device.Devices = &MetaxSDevices{}
-	if _, ok := dev.(device.PolicyNeutralScorer); !ok {
-		t.Errorf("MetaxSDevices does not implement device.PolicyNeutralScorer")
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("MetaxSDevices does not implement the PolicyNeutralScore marker")
 	}
 }

@@ -301,7 +301,7 @@ func TestOverrideScore(t *testing.T) {
 			wantScore: 0,
 		},
 		{
-			// MetaxSDevices implements device.PolicyNeutralScorer, so OverrideScore
+			// MetaxSDevices is policy-neutral, so OverrideScore
 			// weights its raw "higher is better" score by 10000 under Binpack. The
 			// two allocated topology-aware devices yield a raw score of 60
 			// (see scoreExclusiveDevices), so the weighted result is 600000.

@@ -52,18 +52,6 @@ type MigPlacement struct {
 	Size  uint32 `json:"size"`
 }
 
-// PolicyNeutralScorer is an optional interface a device backend may implement
-// to declare that its ScoreNode result is policy-independent and follows a
-// "higher score is a better node" convention. Backends that implement it must
-// not inspect the scheduler policy inside ScoreNode; instead, the shared
-// scheduler policy layer weights the returned score and adapts it to the active
-// scheduling policy (for example, inverting it under the Spread policy). This
-// keeps policy handling in one place so new policies do not require
-// backend-specific changes.
-type PolicyNeutralScorer interface {
-	PolicyNeutralScore()
-}
-
 // Deprecated scheduler-template types are retained for source compatibility
 // with non-NVIDIA device implementations and tests. Dynamic NVIDIA MIG does
 // not populate or consume them.
