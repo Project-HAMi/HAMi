@@ -298,6 +298,7 @@ func TestDecodePodDevices_BadAnnotation(t *testing.T) {
 	for _, annotation := range []string{
 		"uuid,type,100:;",
 		"malformed:;",
+		"uuid,type,100,invalid:;",
 	} {
 		annos := map[string]string{"hami.io/vgpu-devices-to-allocate": annotation}
 		_, err := DecodePodDevices(checklist, annos)
