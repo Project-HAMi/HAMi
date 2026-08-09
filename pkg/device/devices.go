@@ -460,19 +460,20 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	tmpdev := ContainerDevice{}
 	klog.V(5).Infof("Start to decode container device %s", str)
 	for _, val := range cd {
+		val = strings.TrimSpace(val)
 		if strings.Contains(val, ",") {
 			tmpstr := strings.Split(val, ",")
 			if len(tmpstr) < 4 {
 				return nil, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
 			}
-			tmpdev.UUID = tmpstr[0]
-			tmpdev.Type = tmpstr[1]
-			devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
+			tmpdev.UUID = strings.TrimSpace(tmpstr[0])
+			tmpdev.Type = strings.TrimSpace(tmpstr[1])
+			devmem, err := strconv.ParseInt(strings.TrimSpace(tmpstr[2]), 10, 32)
 			if err != nil {
 				return nil, fmt.Errorf("invalid memory field: %w", err)
 			}
 			tmpdev.Usedmem = int32(devmem)
-			devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
+			devcores, err := strconv.ParseInt(strings.TrimSpace(tmpstr[3]), 10, 32)
 			if err != nil {
 				return nil, fmt.Errorf("invalid core field: %w", err)
 			}

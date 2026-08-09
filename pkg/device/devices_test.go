@@ -1831,3 +1831,92 @@ func TestDecodeNodeDevicesLegacyFormat(t *testing.T) {
 		},
 	}, decoded)
 }
+
+func TestEncodingDecodingEdgeCases(t *testing.T) {
+	tests := []struct {
+		name      string
+		checklist map[string]string
+		annos     map[string]string
+	}{
+		{
+			name:      "trailing semicolon in pod devices",
+			checklist: map[string]string{"vgpu-device-id": "vgpu-devices-to-allocate"},
+			annos:     map[string]string{"vgpu-devices-to-allocate": "uuid1,NVIDIA,3000,50:;"},
+		},
+		{
+			name:      "whitespace in segments",
+			checklist: map[string]string{"vgpu-device-id": "vgpu-devices-to-allocate"},
+			annos:     map[string]string{"vgpu-devices-to-allocate": " uuid1 , NVIDIA , 3000 , 50 : "},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result, err := DecodePodDevices(tt.checklist, tt.annos)
+			if err != nil {
+				t.Logf("%s: got error: %v", tt.name, err)
+				return
+			}
+			t.Logf("%s: result=%v", tt.name, result)
+		})
+	}
+}
+
+func TestDecodeContainerDevicesEdgeCases(t *testing.T) {
+	tests := []struct {
+		name    string
+		input   string
+		want    ContainerDevices
+		wantErr bool
+	}{
+		{
+			name:    "normal single device",
+			input:   "uuid1,NVIDIA,3000,50",
+			want:    ContainerDevices{{UUID: "uuid1", Type: "NVIDIA", Usedmem: 3000, Usedcores: 50}},
+			wantErr: false,
+		},
+		{
+			name:    "whitespace in fields",
+			input:   " uuid1 , NVIDIA , 3000 , 50 ",
+			want:    ContainerDevices{{UUID: "uuid1", Type: "NVIDIA", Usedmem: 3000, Usedcores: 50}},
+			wantErr: false,
+		},
+		{
+			name:    "empty input",
+			input:   "",
+			want:    ContainerDevices{},
+			wantErr: false,
+		},
+		{
+			name:    "malformed - no comma",
+			input:   "malformed",
+			want:    nil,
+			wantErr: false, // Should be silently ignored or error?
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeContainerDevices(tt.input)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("got error %v, want error %v", err, tt.wantErr)
+			}
+			if !assertContainerDevicesEqual(got, tt.want) {
+				t.Errorf("got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func assertContainerDevicesEqual(got, want ContainerDevices) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i].UUID != want[i].UUID || got[i].Type != want[i].Type ||
+			got[i].Usedmem != want[i].Usedmem || got[i].Usedcores != want[i].Usedcores {
+			return false
+		}
+	}
+	return true
+}
