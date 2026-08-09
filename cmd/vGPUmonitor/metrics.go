@@ -118,6 +118,12 @@ var (
 		"Container device memory buffer size in bytes",
 		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
 	)
+
+	ctrDeviceProcessCountDesc = prometheus.NewDesc(
+		"hami_container_device_process_count",
+		"Number of processes tracked in the container's shared-memory region for this device",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid"}, nil,
+	)
 )
 
 // Legacy metric descriptors (populated only when --legacy-metrics is enabled).
@@ -198,6 +204,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
+	ch <- ctrDeviceProcessCountDesc
 
 	if cc.ClusterManager.LegacyMetrics {
 		ch <- legacyHostGPUdesc
@@ -486,6 +493,12 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 		}
 		if err := sendMetric(ch, ctrDeviceMemoryBufferDesc, prometheus.GaugeValue, float64(memoryBufferSize), labels...); err != nil {
 			klog.Errorf("Failed to send Device Memory buffer size metric: %v", err)
+			return err
+		}
+
+		processCount := c.Info.DeviceProcessCount(i)
+		if err := sendMetric(ch, ctrDeviceProcessCountDesc, prometheus.GaugeValue, float64(processCount), labels...); err != nil {
+			klog.Errorf("Failed to send device process count metric: %v", err)
 			return err
 		}
 

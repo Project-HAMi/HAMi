@@ -83,6 +83,7 @@ func TestCollectContainerMetrics(t *testing.T) {
 		ctrDeviceMemoryContextDesc: 1000,
 		ctrDeviceMemoryModuleDesc:  500,
 		ctrDeviceMemoryBufferDesc:  300,
+		ctrDeviceProcessCountDesc:  0,
 		ctrDeviceLastKernelDesc:    60, // nowSec - lastKernel = 160 - 100
 	}
 	if len(metrics) != len(want) {
@@ -121,8 +122,8 @@ func TestCollectContainerMetricsNoKernelActivity(t *testing.T) {
 			t.Error("last-kernel metric should not be emitted when no kernel has run")
 		}
 	}
-	if len(metrics) != 7 {
-		t.Errorf("got %d metrics, want 7", len(metrics))
+	if len(metrics) != 8 {
+		t.Errorf("got %d metrics, want 8", len(metrics))
 	}
 }
 

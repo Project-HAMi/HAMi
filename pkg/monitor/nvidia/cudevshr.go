@@ -65,7 +65,7 @@ type UsageInfo interface {
 	DeviceMemoryLimit(idx int) uint64
 	SetDeviceMemoryLimit(l uint64)
 	LastKernelTime() int64
-	//UsedMemory(idx int) (uint64, error)
+	DeviceProcessCount(idx int) int
 	GetPriority() int
 	GetRecentKernel() int32
 	SetRecentKernel(v int32)

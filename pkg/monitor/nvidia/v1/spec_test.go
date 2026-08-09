@@ -1388,3 +1388,107 @@ func TestSpec_CorruptProcnumIsClamped(t *testing.T) {
 		})
 	}
 }
+
+func TestSpec_DeviceProcessCount(t *testing.T) {
+	tests := []struct {
+		name      string
+		spec      *Spec
+		deviceIdx int
+		want      int
+	}{
+		{
+			name: "no active processes",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 2,
+				procs: [1024]shrregProcSlotT{
+					{status: 0},
+					{status: 0},
+				},
+			}},
+			deviceIdx: 0,
+			want:      0,
+		},
+		{
+			name: "one active process with memory on device 0",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{status: 1, used: [16]deviceMemory{{total: 512 * 1024 * 1024}}},
+				},
+			}},
+			deviceIdx: 0,
+			want:      1,
+		},
+		{
+			name: "process active on device 1 only is not counted for device 0",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{status: 1, used: [16]deviceMemory{{}, {total: 256 * 1024 * 1024}}},
+				},
+			}},
+			deviceIdx: 0,
+			want:      0,
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     2,
+				procnum: 2,
+				procs: [1024]shrregProcSlotT{
+					{status: 1, used: [16]deviceMemory{{total: 128 * 1024 * 1024}}},
+					{status: 0, used: [16]deviceMemory{{total: 999 * 1024 * 1024}}},
+				},
+			}},
+			deviceIdx: 0,
+			want:      1,
+		},
+		{
+			name: "corrupt procnum is clamped and does not panic",
+			spec: &Spec{sr: func() *sharedRegionT {
+				sr := &sharedRegionT{num: 1, procnum: -99}
+				sr.procs[0].status = 1
+				sr.procs[0].used[0].total = 64 * 1024 * 1024
+				return sr
+			}()},
+			deviceIdx: 0,
+			want:      0,
+		},
+		{
+			name: "context-only slot is counted (total not yet written)",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     1,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{status: 1, used: [16]deviceMemory{{contextSize: 32 * 1024 * 1024}}},
+				},
+			}},
+			deviceIdx: 0,
+			want:      1,
+		},
+		{
+			name: "module-only slot is counted (total not yet written)",
+			spec: &Spec{sr: &sharedRegionT{
+				num:     1,
+				procnum: 1,
+				procs: [1024]shrregProcSlotT{
+					{status: 1, used: [16]deviceMemory{{moduleSize: 16 * 1024 * 1024}}},
+				},
+			}},
+			deviceIdx: 0,
+			want:      1,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := tt.spec.DeviceProcessCount(tt.deviceIdx)
+			if got != tt.want {
+				t.Errorf("DeviceProcessCount(%d) = %d, want %d", tt.deviceIdx, got, tt.want)
+			}
+		})
+	}
+}

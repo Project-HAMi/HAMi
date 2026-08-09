@@ -73,6 +73,7 @@ func (s *stubInfo) GetRecentKernel() int32               { return 1 }
 func (s *stubInfo) SetRecentKernel(int32)                {}
 func (s *stubInfo) GetUtilizationSwitch() int32          { return 0 }
 func (s *stubInfo) SetUtilizationSwitch(int32)           {}
+func (s *stubInfo) DeviceProcessCount(int) int           { return 0 }
 
 func TestCheckFunctionsHighPriority(t *testing.T) {
 	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 1}}

@@ -176,6 +176,16 @@ func (s Spec) SetDeviceSmLimit(l uint64) {
 	}
 }
 
+func (s Spec) DeviceProcessCount(idx int) int {
+	n := 0
+	for _, p := range s.activeProcs() {
+		if p.status != 0 && (p.used[idx].total > 0 || p.used[idx].contextSize > 0 || p.used[idx].moduleSize > 0) {
+			n++
+		}
+	}
+	return n
+}
+
 func (s Spec) IsValidUUID(idx int) bool {
 	return s.sr.uuids[idx].uuid[0] != 0
 }
