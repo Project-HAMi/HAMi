@@ -189,10 +189,12 @@ score = 10 * (
 )
 ```
 
-The annotation changes only the device score. `binpack` still prefers the
-higher-scoring device, while `spread` prefers the lower-scoring device. Device
-fit and capacity checks, NUMA binding, mutex behavior, and topology-aware
-selection are unchanged.
+The annotation changes only the device-utilization score. `binpack` still
+prefers the higher-scoring device, while `spread` prefers the lower-scoring
+device. Capacity, mutex, NUMA, and topology constraints retain their existing
+precedence. The weights affect utilization-score ordering and can resolve ties
+when an existing selection policy consults that order. Device fit and capacity
+checks remain unchanged.
 
 When the annotation is absent, all three weights default to `1`, preserving
 the existing scheduling behavior. When present, the annotation must specify

@@ -25,7 +25,7 @@ import (
 )
 
 // DeviceScoringWeights controls the relative influence of each resource
-// dimension on device-level binpack and spread scores.
+// dimension on the device-utilization score.
 type DeviceScoringWeights struct {
 	Slot   int64
 	Core   int64
@@ -94,11 +94,6 @@ func ParseDeviceScoringWeights(value string) (DeviceScoringWeights, error) {
 		seen[key] = struct{}{}
 	}
 
-	for _, required := range []string{"slot", "core", "memory"} {
-		if _, ok := seen[required]; !ok {
-			return weights, fmt.Errorf("invalid %s annotation %q: missing %q weight", DeviceScoringWeightsAnnotationKey, value, required)
-		}
-	}
 	if weights.Slot == 0 && weights.Core == 0 && weights.Memory == 0 {
 		return weights, fmt.Errorf("invalid %s annotation %q: at least one weight must be positive", DeviceScoringWeightsAnnotationKey, value)
 	}

@@ -3484,6 +3484,66 @@ func TestCalcScoreUsesPodDeviceScoringWeights(t *testing.T) {
 	}), "gpu-b")
 }
 
+func TestCalcScoreUsesDeviceScoringWeightsAsTopologyTieBreaker(t *testing.T) {
+	newNodes := func() *map[string]*NodeUsage {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+		return &map[string]*NodeUsage{
+			"node1": {
+				Node: node,
+				NodeInfo: &device.NodeInfo{
+					ID:   node.Name,
+					Node: node,
+					Devices: map[string][]device.DeviceInfo{
+						nvidia.NvidiaGPUDevice: {
+							{ID: "gpu-a", DevicePairScore: device.DevicePairScore{ID: "gpu-a", Scores: map[string]int{"gpu-b": 1}}},
+							{ID: "gpu-b", DevicePairScore: device.DevicePairScore{ID: "gpu-b", Scores: map[string]int{"gpu-a": 1}}},
+						},
+					},
+				},
+				Devices: policy.DeviceUsageList{
+					Policy: util.GPUSchedulerPolicyTopology.String(),
+					DeviceLists: []*policy.DeviceListsScore{
+						{Device: &device.DeviceUsage{
+							ID: "gpu-a", Index: 0, Type: nvidia.NvidiaGPUDevice, Health: true,
+							Count: 10, Used: 1, Totalcore: 100, Usedcores: 90, Totalmem: 100, Usedmem: 10,
+						}},
+						{Device: &device.DeviceUsage{
+							ID: "gpu-b", Index: 1, Type: nvidia.NvidiaGPUDevice, Health: true,
+							Count: 10, Used: 7, Totalcore: 100, Usedcores: 10, Totalmem: 100, Usedmem: 20,
+						}},
+					},
+				},
+			},
+		}
+	}
+	requests := device.PodDeviceRequests{{
+		"hami.io/vgpu-devices-to-allocate": {
+			Nums: 1, Type: nvidia.NvidiaGPUDevice, MemPercentagereq: 40,
+		},
+	}}
+	selectedDevice := func(t *testing.T, weights string) string {
+		t.Helper()
+		annotations := map[string]string{
+			util.GPUSchedulerPolicyAnnotationKey: util.GPUSchedulerPolicyTopology.String(),
+		}
+		if weights != "" {
+			annotations[util.DeviceScoringWeightsAnnotationKey] = weights
+		}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+			Name: "topology-score-tie", Namespace: "default", Annotations: annotations,
+		}}
+		result, err := (&Scheduler{}).calcScoreWithOptions(newNodes(), requests, pod, map[string]string{}, false, false)
+		assert.NilError(t, err)
+		allocated := result.NodeList[0].Devices[nvidia.NvidiaGPUDevice]
+		return allocated[0][0].UUID
+	}
+
+	// Both devices have equal topology scores, so the existing topology policy
+	// retains precedence and uses utilization-score ordering only as a tie-breaker.
+	assert.Equal(t, selectedDevice(t, ""), "gpu-b")
+	assert.Equal(t, selectedDevice(t, "slot=1,core=1,memory=3"), "gpu-a")
+}
+
 func Test_Nvidia_GPU_Topology(t *testing.T) {
 	tests := []struct {
 		name string
