@@ -47,6 +47,8 @@ type ClusterManager struct {
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
+	NodeName        string
+	ClusterID       string
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -504,7 +506,10 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 }
 
 func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- prometheus.Metric) error {
-	nodeName := os.Getenv(util.NodeNameEnvName)
+	nodeName := cc.ClusterManager.NodeName
+	if nodeName == "" {
+		nodeName = os.Getenv(util.NodeNameEnvName)
+	}
 	if nodeName == "" {
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
@@ -563,15 +568,20 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 
 // NewClusterManager creates a ClusterManager for the given zone, backs its pod
 // lookups with a shared informer, and registers its collector with reg through
-// a wrapping Registerer that adds the zone as a label.
-func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
+// a wrapping Registerer that adds the zone, node_name, and cluster_id as labels.
+func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool, nodeName string, clusterID string) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
+	}
+	if nodeName == "" {
+		nodeName = os.Getenv(util.NodeNameEnvName)
 	}
 	c := &ClusterManager{
 		Zone:            zone,
 		containerLister: containerLister,
 		LegacyMetrics:   legacyMetrics,
+		NodeName:        nodeName,
+		ClusterID:       clusterID,
 	}
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
@@ -580,6 +590,15 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 	informerFactory.Start(stopCh)
 
 	cc := ClusterManagerCollector{ClusterManager: c}
-	prometheus.WrapRegistererWith(prometheus.Labels{"zone": zone}, reg).MustRegister(cc)
+	labels := prometheus.Labels{
+		"zone": zone,
+	}
+	if nodeName != "" {
+		labels["node_name"] = nodeName
+	}
+	if clusterID != "" {
+		labels["cluster_id"] = clusterID
+	}
+	prometheus.WrapRegistererWith(labels, reg).MustRegister(cc)
 	return c
 }
