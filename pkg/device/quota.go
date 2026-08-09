@@ -123,6 +123,9 @@ func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
 	}
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
+	if q.Quotas == nil {
+		q.Quotas = make(map[string]*DeviceQuota)
+	}
 	if q.Quotas[pod.Namespace] == nil {
 		q.Quotas[pod.Namespace] = &DeviceQuota{}
 	}
@@ -231,6 +234,9 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 			dn, ok := managedQuotaName(idx)
 			if !ok {
 				continue
+			}
+			if q.Quotas == nil {
+				q.Quotas = make(map[string]*DeviceQuota)
 			}
 			if q.Quotas[quota.Namespace] == nil {
 				q.Quotas[quota.Namespace] = &DeviceQuota{}

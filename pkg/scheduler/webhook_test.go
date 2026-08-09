@@ -1181,6 +1181,22 @@ func TestMutateAdmissionMultiContainerAndInitContainers(t *testing.T) {
 }
 
 func TestFitResourceQuotaInitContainers(t *testing.T) {
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
 	t.Run("init container requests larger than container sum", func(t *testing.T) {
 		pod := &corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
