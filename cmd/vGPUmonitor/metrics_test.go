@@ -97,7 +97,7 @@ func TestHostMetricsIncludeNodeLabel(t *testing.T) {
 		t.Fatalf("Gather failed: %v", err)
 	}
 
-	// Verify host metrics have 4 labels: node, device_index, device_uuid, device_type
+	// Verify host metrics have 4 labels: node_name, device_index, device_uuid, device_type
 	foundMemoryMetric := false
 	foundUtilizationMetric := false
 
@@ -110,18 +110,18 @@ func TestHostMetricsIncludeNodeLabel(t *testing.T) {
 					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
 				}
 
-				// Verify node label exists and has correct value
+				// Verify node_name label exists and has correct value
 				hasNode := false
 				for _, label := range labels {
-					if label.GetName() == "node" {
+					if label.GetName() == "node_name" {
 						hasNode = true
 						if label.GetValue() != nodeName {
-							t.Errorf("node label = %s, want %s", label.GetValue(), nodeName)
+							t.Errorf("node_name label = %s, want %s", label.GetValue(), nodeName)
 						}
 					}
 				}
 				if !hasNode {
-					t.Errorf("%s missing 'node' label", mf.GetName())
+					t.Errorf("%s missing 'node_name' label", mf.GetName())
 				}
 			}
 		}
@@ -133,18 +133,18 @@ func TestHostMetricsIncludeNodeLabel(t *testing.T) {
 					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
 				}
 
-				// Verify node label exists and has correct value
+				// Verify node_name label exists and has correct value
 				hasNode := false
 				for _, label := range labels {
-					if label.GetName() == "node" {
+					if label.GetName() == "node_name" {
 						hasNode = true
 						if label.GetValue() != nodeName {
-							t.Errorf("node label = %s, want %s", label.GetValue(), nodeName)
+							t.Errorf("node_name label = %s, want %s", label.GetValue(), nodeName)
 						}
 					}
 				}
 				if !hasNode {
-					t.Errorf("%s missing 'node' label", mf.GetName())
+					t.Errorf("%s missing 'node_name' label", mf.GetName())
 				}
 			}
 		}

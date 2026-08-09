@@ -61,13 +61,13 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node_name", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_utilization_ratio",
 		"GPU core utilization ratio (0-100)",
-		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node_name", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	ctrvGPUdesc = prometheus.NewDesc(
