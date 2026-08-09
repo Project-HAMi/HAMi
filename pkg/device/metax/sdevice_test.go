@@ -2995,12 +2995,13 @@ func TestMetaxSDevices_Fit_ZeroAndExceedMemory(t *testing.T) {
 	sdev := InitMetaxSDevice(config)
 
 	tests := []struct {
-		name       string
-		devices    []*device.DeviceUsage
-		request    device.ContainerDeviceRequest
-		pod        *corev1.Pod
-		wantFit    bool
-		wantReason string
+		name        string
+		devices     []*device.DeviceUsage
+		request     device.ContainerDeviceRequest
+		pod         *corev1.Pod
+		wantFit     bool
+		wantUsedmem int32
+		wantReason  string
 	}{
 		{
 			name: "zero memory request (Memreq=0, MemPercentagereq=0) fits safely",
@@ -3160,20 +3161,30 @@ func TestMetaxSDevices_Fit_ZeroAndExceedMemory(t *testing.T) {
 				Coresreq:         50,
 				Type:             MetaxSGPUDevice,
 			},
-			pod:        &corev1.Pod{},
-			wantFit:    true,
-			wantReason: "",
+			pod:         &corev1.Pod{},
+			wantFit:     true,
+			wantUsedmem: math.MaxInt32,
+			wantReason:  "",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			fit, _, reason := sdev.Fit(tt.devices, tt.request, tt.pod, &device.NodeInfo{}, &device.PodDevices{})
+			fit, result, reason := sdev.Fit(tt.devices, tt.request, tt.pod, &device.NodeInfo{}, &device.PodDevices{})
 			if fit != tt.wantFit {
 				t.Errorf("Fit() fit = %v, want %v", fit, tt.wantFit)
 			}
 			if reason != tt.wantReason {
 				t.Errorf("Fit() reason = %v, want %v", reason, tt.wantReason)
+			}
+			if tt.wantFit && tt.wantUsedmem != 0 {
+				devs, ok := result[tt.request.Type]
+				if !ok || len(devs) == 0 {
+					t.Fatalf("Fit() result missing devices for type %s", tt.request.Type)
+				}
+				if devs[0].Usedmem != tt.wantUsedmem {
+					t.Errorf("Fit() Usedmem = %d, want %d", devs[0].Usedmem, tt.wantUsedmem)
+				}
 			}
 		})
 	}
@@ -3192,4 +3203,3 @@ func TestMetaxSDevices_AddResourceUsage_NilGuard(t *testing.T) {
 		t.Errorf("AddResourceUsage() with nil containerDevice expected error, got nil")
 	}
 }
-
