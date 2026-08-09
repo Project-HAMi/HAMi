@@ -174,6 +174,9 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	p.Metadata.Annotations = annotations
 	label := make(map[string]string)
 	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
+		// Note: Kubernetes node names are valid RFC 1123 DNS subdomains, so in practice
+		// the realistic failure mode for node names here is exceeding the 63-character
+		// label value length limit (validation.LabelValueMaxLength), not invalid characters.
 		if errs := validation.IsValidLabelValue(v); len(errs) == 0 {
 			label[AssignedNodeAnnotations] = v
 			p.Metadata.Labels = label

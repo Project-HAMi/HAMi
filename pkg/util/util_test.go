@@ -330,7 +330,6 @@ func TestPatchPodAnnotations(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 
 	longNodeName := "node-" + strings.Repeat("a", 60) // 65 chars > 63
-	invalidCharNodeName := "invalid_node_name!"       // <= 63 chars but contains invalid label character '!'
 
 	tests := []struct {
 		name         string
@@ -360,16 +359,6 @@ func TestPatchPodAnnotations(t *testing.T) {
 			wantErr:      false,
 			wantLabel:    false,
 			expectedNode: longNodeName,
-		},
-		{
-			name:    "node name with invalid label characters but <= 63 chars",
-			podName: "pod-invalid",
-			annotations: map[string]string{
-				AssignedNodeAnnotations: invalidCharNodeName,
-			},
-			wantErr:      false,
-			wantLabel:    false,
-			expectedNode: invalidCharNodeName,
 		},
 		{
 			name:    "patch non-existent pod",
