@@ -797,6 +797,15 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 	}
 	dedupWindow := time.Hour
 
+	t.Run("nil node does nothing", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		EmitNodeWarningEvent(nil, reason, msg1, dedupWindow)
+		events, err := client.KubeClient.CoreV1().Events(corev1.NamespaceDefault).List(
+			context.TODO(), metav1.ListOptions{})
+		assert.NilError(t, err)
+		assert.Equal(t, 0, len(events.Items))
+	})
+
 	t.Run("no existing event creates new event", func(t *testing.T) {
 		client.KubeClient = fake.NewClientset()
 
@@ -872,5 +881,45 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		assert.NilError(t, err)
 		// Old event still present plus one new event.
 		assert.Equal(t, 2, len(events.Items))
+	})
+}
+
+func TestPatchNodeAnnotations(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+
+	t.Run("patch nil node", func(t *testing.T) {
+		err := PatchNodeAnnotations(nil, map[string]string{"foo": "bar"})
+		assert.ErrorContains(t, err, "node is nil")
+	})
+
+	t.Run("patch valid node", func(t *testing.T) {
+		err := PatchNodeAnnotations(node, map[string]string{"foo": "bar"})
+		assert.NilError(t, err)
+	})
+}
+
+func TestRemoveNodeAnnotation(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
+
+	t.Run("remove nil node", func(t *testing.T) {
+		err := RemoveNodeAnnotation(nil, "foo")
+		assert.ErrorContains(t, err, "node is nil")
+	})
+
+	t.Run("remove valid node", func(t *testing.T) {
+		err := RemoveNodeAnnotation(node, "foo")
+		assert.NilError(t, err)
 	})
 }
