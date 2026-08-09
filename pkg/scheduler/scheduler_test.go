@@ -1689,8 +1689,6 @@ func Test_ResourceQuota(t *testing.T) {
 }
 
 func Test_ListNodes_Concurrent(t *testing.T) {
-	t.Parallel()
-
 	m := newNodeManager()
 	stopCh := make(chan struct{})
 	done := make(chan struct{})
@@ -2090,8 +2088,6 @@ func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 }
 
 func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
-	t.Parallel()
-
 	podUID := types.UID("test-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2134,8 +2130,6 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
-	t.Parallel()
-
 	podUID := types.UID("test-uid-2")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2228,8 +2222,11 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	cleanup := func() {
 		config.NodeLockRetryTimeout = oldRetry
 		device.DevicesMap = oldDevicesMap
-		defer func() { _ = recover() }()
-		close(s.stopCh)
+		select {
+		case <-s.stopCh:
+		default:
+			close(s.stopCh)
+		}
 	}
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)

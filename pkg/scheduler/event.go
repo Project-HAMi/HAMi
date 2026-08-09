@@ -54,7 +54,7 @@ func (s *Scheduler) addAllEventHandlers() {
 }
 
 func (s *Scheduler) recordScheduleBindingResultEvent(pod *corev1.Pod, eventReason string, nodeResult []string, schedulerErr error) {
-	if pod == nil {
+	if pod == nil || s.eventRecorder == nil {
 		return
 	}
 	if schedulerErr == nil {
