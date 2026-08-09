@@ -1467,6 +1467,9 @@ func TestFitQuota(t *testing.T) {
 	device.DevicesMap[NvidiaGPUDevice] = dev
 
 	qm := device.NewQuotaManager()
+	t.Cleanup(func() {
+		delete(qm.Quotas, "default")
+	})
 	qm.AddQuota(&corev1.ResourceQuota{
 		TypeMeta: metav1.TypeMeta{
 			APIVersion: "v1",

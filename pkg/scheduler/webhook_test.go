@@ -276,6 +276,9 @@ func TestFitResourceQuota(t *testing.T) {
 		memName:  &device.Quota{Used: 1000, Limit: 2000, LimitSet: true},
 		coreName: &device.Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
+	t.Cleanup(func() {
+		delete(qm.Quotas, ns)
+	})
 
 	testCases := []struct {
 		name string
