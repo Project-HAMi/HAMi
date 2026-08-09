@@ -68,3 +68,88 @@ func TestDescribeCollectSync(t *testing.T) {
 		t.Errorf("Gather failed (legacy): %v", err)
 	}
 }
+
+func TestHostMetricsIncludeNodeLabel(t *testing.T) {
+	reg := prometheus.NewPedanticRegistry()
+
+	// Set NODE_NAME env var
+	nodeName := "test-node-123"
+	t.Setenv(util.NodeNameEnvName, nodeName)
+
+	client := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podLister := informerFactory.Core().V1().Pods().Lister()
+
+	c := &ClusterManager{
+		Zone:            "test-zone",
+		LegacyMetrics:   false,
+		PodLister:       podLister,
+		containerLister: &nvidia.ContainerLister{},
+	}
+	cc := ClusterManagerCollector{ClusterManager: c}
+
+	if err := reg.Register(cc); err != nil {
+		t.Fatalf("Failed to register: %v", err)
+	}
+
+	metrics, err := reg.Gather()
+	if err != nil {
+		t.Fatalf("Gather failed: %v", err)
+	}
+
+	// Track which expected host GPU metrics were found
+	metricsFound := make(map[string]bool)
+	expectedMetrics := []string{
+		"hami_host_gpu_memory_used_bytes",
+		"hami_host_gpu_utilization_ratio",
+		"hami_host_gpu_memory_total_bytes",
+	}
+
+	// Verify host metrics have 4 labels: node, device_index, device_uuid, device_type
+	for _, mf := range metrics {
+		metricName := mf.GetName()
+		
+		// Track if we found each expected metric
+		for _, expected := range expectedMetrics {
+			if metricName == expected {
+				metricsFound[expected] = true
+			}
+		}
+
+		if metricName == "hami_host_gpu_memory_used_bytes" ||
+			metricName == "hami_host_gpu_utilization_ratio" ||
+			metricName == "hami_host_gpu_memory_total_bytes" {
+			for _, m := range mf.GetMetric() {
+				labels := m.GetLabel()
+				if len(labels) != 4 {
+					t.Errorf("%s has %d labels, expected 4", metricName, len(labels))
+				}
+
+				// Verify node label exists and has correct value
+				hasNode := false
+				for _, label := range labels {
+					if label.GetName() == "node" {
+						hasNode = true
+						if label.GetValue() != nodeName {
+							t.Errorf("node label = %s, want %s", label.GetValue(), nodeName)
+						}
+					}
+				}
+				if !hasNode {
+					t.Errorf("%s missing 'node' label", metricName)
+				}
+			}
+		}
+	}
+
+	// Verify all expected metrics were found (skip if no metrics gathered)
+	if len(metricsFound) == 0 {
+		t.Logf("No host GPU metrics gathered - this is expected without GPU hardware")
+		return
+	}
+	for _, expected := range expectedMetrics {
+		if !metricsFound[expected] {
+			t.Errorf("Expected metric %s not found in gathered metrics", expected)
+		}
+	}
+}
