@@ -80,6 +80,16 @@ type ContainerUsage struct {
 	Info          UsageInfo
 }
 
+func (c *ContainerUsage) Unmap() error {
+	if c == nil || len(c.data) == 0 {
+		return nil
+	}
+	err := syscall.Munmap(c.data)
+	c.data = nil
+	c.Info = nil
+	return err
+}
+
 type ContainerLister struct {
 	containerPath string
 	containers    map[string]*ContainerUsage
@@ -199,7 +209,9 @@ func (l *ContainerLister) Update() error {
 			}
 			klog.Infof("Removing dirname %s in monitorpath", dirName)
 			if c, ok := l.containers[entry.Name()]; ok {
-				syscall.Munmap(c.data)
+				if err := c.Unmap(); err != nil {
+					klog.Warningf("Failed to unmap container usage data for %s: %v", entry.Name(), err)
+				}
 				delete(l.containers, entry.Name())
 			}
 			_ = os.RemoveAll(dirName)
@@ -275,7 +287,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	}
 	head := (*headerT)(unsafe.Pointer(&usage.data[0]))
 	if head.initializedFlag != SharedRegionMagicFlag {
-		_ = syscall.Munmap(usage.data)
+		_ = usage.Unmap()
 		return nil, fmt.Errorf("cache file magic flag not matched")
 	}
 	if info.Size() == 1197897 {
@@ -286,7 +298,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		usage.Info = v1.CastSpec(usage.data)
 	} else {
 		majorVersion, minorVersion := head.majorVersion, head.minorVersion
-		_ = syscall.Munmap(usage.data)
+		_ = usage.Unmap()
 		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	return usage, nil

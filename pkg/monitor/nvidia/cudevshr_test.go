@@ -22,7 +22,6 @@ import (
 	"net"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -267,7 +266,7 @@ func Test_loadCache(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Assert(t, usage != nil)
 		assert.Assert(t, usage.Info != nil)
-		defer func() { _ = syscall.Munmap(usage.data) }()
+		defer func() { _ = usage.Unmap() }()
 	})
 
 	t.Run("v0 cache file (exact legacy size)", func(t *testing.T) {
@@ -277,7 +276,7 @@ func Test_loadCache(t *testing.T) {
 		assert.NilError(t, err)
 		assert.Assert(t, usage != nil)
 		assert.Assert(t, usage.Info != nil)
-		defer func() { _ = syscall.Munmap(usage.data) }()
+		defer func() { _ = usage.Unmap() }()
 	})
 
 	t.Run("open file fails", func(t *testing.T) {
@@ -361,6 +360,8 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.NilError(t, l.Update())
 		_, ok := l.containers[entryName]
 		assert.Equal(t, ok, false)
+		assert.Assert(t, usage.data == nil)
+		assert.Assert(t, usage.Info == nil)
 		_, err = os.Stat(ctrDir)
 		assert.Assert(t, os.IsNotExist(err))
 	})
@@ -430,7 +431,7 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.Equal(t, ok, true)
 		assert.Equal(t, got.PodUID, "uid4")
 		assert.Equal(t, got.ContainerName, "mycontainer")
-		defer func() { _ = syscall.Munmap(got.data) }()
+		defer func() { _ = got.Unmap() }()
 	})
 
 	t.Run("dir without underscore in name is skipped", func(t *testing.T) {
@@ -461,5 +462,36 @@ func Test_ContainerLister_Update(t *testing.T) {
 		}
 		assert.NilError(t, l.Update())
 		assert.Equal(t, len(l.containers), 0)
+	})
+}
+
+func Test_ContainerUsage_Unmap(t *testing.T) {
+	t.Run("nil ContainerUsage", func(t *testing.T) {
+		var c *ContainerUsage
+		assert.NilError(t, c.Unmap())
+	})
+
+	t.Run("empty data", func(t *testing.T) {
+		c := &ContainerUsage{}
+		assert.NilError(t, c.Unmap())
+		assert.Assert(t, c.data == nil)
+		assert.Assert(t, c.Info == nil)
+	})
+
+	t.Run("valid mapped data", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.data != nil)
+		assert.Assert(t, usage.Info != nil)
+
+		assert.NilError(t, usage.Unmap())
+		assert.Assert(t, usage.data == nil)
+		assert.Assert(t, usage.Info == nil)
+
+		// Second call is safe and no-op
+		assert.NilError(t, usage.Unmap())
 	})
 }
