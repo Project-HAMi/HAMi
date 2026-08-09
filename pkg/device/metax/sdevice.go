@@ -288,9 +288,22 @@ func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 	return 0
 }
 
+func resolveMemReq(request device.ContainerDeviceRequest, totalMem int32) (int32, bool) {
+	if request.Memreq > 0 {
+		return request.Memreq, true
+	}
+	if request.MemPercentagereq == 101 || request.MemPercentagereq == 0 {
+		return 0, true
+	}
+	if request.MemPercentagereq > 100 || request.MemPercentagereq < 0 {
+		return 0, false
+	}
+	return int32(int64(totalMem) * int64(request.MemPercentagereq) / 100), true
+}
+
 func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	if n == nil || ctr == nil {
-		return nil
+		return errors.New("device usage or container device is nil")
 	}
 	n.Used++
 	n.Usedcores += ctr.Usedcores
@@ -377,11 +390,11 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		memreq := int32(0)
-		if request.Memreq > 0 {
-			memreq = request.Memreq
-		} else if request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
-			memreq = dev.Totalmem * request.MemPercentagereq / 100
+		memreq, valid := resolveMemReq(request, dev.Totalmem)
+		if !valid {
+			reason[common.CardInsufficientMemory]++
+			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "invalid memory percentage", request.MemPercentagereq)
+			continue
 		}
 
 		if dev.Totalmem-dev.Usedmem < memreq {
@@ -459,12 +472,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	}
 
 	for _, dev := range bestDevices {
-		memreq := int32(0)
-		if request.Memreq > 0 {
-			memreq = request.Memreq
-		} else if request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
-			memreq = dev.Totalmem * request.MemPercentagereq / 100
-		}
+		memreq, _ := resolveMemReq(request, dev.Totalmem)
 
 		ctrDevice := device.ContainerDevice{
 			Idx:        int(dev.Index),

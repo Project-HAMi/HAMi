@@ -3664,7 +3664,6 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 // 1. Zero requested memory (Memreq = 0)
 // 2. Memory request exceeding node/device capacity
 // 3. Zero total node capacity
-// 4. Missing or corrupted topology loss/score annotations
 func Test_MetaX_GPU_Scoring_EdgeCases(t *testing.T) {
 	oldDevicesMap := device.DevicesMap
 	defer func() { device.DevicesMap = oldDevicesMap }()
@@ -3776,6 +3775,7 @@ func Test_MetaX_GPU_Scoring_EdgeCases(t *testing.T) {
 			requests := device.ContainerDeviceRequests{
 				tt.request.Type: tt.request,
 			}
+			tt.node.Devices.Policy = tt.policy
 
 			fit, reason := fitInDevices(tt.node, requests, tt.pod, nil, devInput)
 			assert.Equal(t, fit, tt.wantFit)

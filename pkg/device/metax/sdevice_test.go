@@ -19,6 +19,7 @@ package metax
 import (
 	"flag"
 	"fmt"
+	"math"
 	"reflect"
 	"testing"
 
@@ -3055,6 +3056,114 @@ func TestMetaxSDevices_Fit_ZeroAndExceedMemory(t *testing.T) {
 			wantFit:    false,
 			wantReason: "1/1 CardInsufficientMemory",
 		},
+		{
+			name: "invalid memory percentage 102 fails with insufficient memory",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  16384,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 102,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    false,
+			wantReason: "1/1 CardInsufficientMemory",
+		},
+		{
+			name: "sentinel memory percentage 101 fits with 0 memory request",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  16384,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 101,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    true,
+			wantReason: "",
+		},
+		{
+			name: "valid memory percentage 50% and 100% fit correctly",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  16384,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 50,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    true,
+			wantReason: "",
+		},
+		{
+			name: "Totalmem = math.MaxInt32 with 100% percentage fits without overflow",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  math.MaxInt32,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    true,
+			wantReason: "",
+		},
 	}
 
 	for _, tt := range tests {
@@ -3069,3 +3178,18 @@ func TestMetaxSDevices_Fit_ZeroAndExceedMemory(t *testing.T) {
 		})
 	}
 }
+
+func TestMetaxSDevices_AddResourceUsage_NilGuard(t *testing.T) {
+	sdev := &MetaxSDevices{}
+	devUsage := &device.DeviceUsage{}
+	ctrDev := &device.ContainerDevice{}
+
+	if err := sdev.AddResourceUsage(&corev1.Pod{}, nil, ctrDev); err == nil {
+		t.Errorf("AddResourceUsage() with nil deviceUsage expected error, got nil")
+	}
+
+	if err := sdev.AddResourceUsage(&corev1.Pod{}, devUsage, nil); err == nil {
+		t.Errorf("AddResourceUsage() with nil containerDevice expected error, got nil")
+	}
+}
+
