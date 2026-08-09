@@ -39,8 +39,9 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/device"
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 )

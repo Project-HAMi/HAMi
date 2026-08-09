@@ -27,9 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -148,12 +148,12 @@ func mockAllocateGlobals(t *testing.T, pod *corev1.Pod) {
 
 func TestPopNextContainerDevices(t *testing.T) {
 	tests := []struct {
-		name         string
-		containers   []corev1.Container
-		podSingleDev device.PodSingleDevice
-		wantName     string
-		wantUUID     string
-		wantErr      string
+		name          string
+		containers    []corev1.Container
+		podSingleDev  device.PodSingleDevice
+		wantName      string
+		wantUUID      string
+		wantErr       string
 		wantRemaining int
 	}{
 		{

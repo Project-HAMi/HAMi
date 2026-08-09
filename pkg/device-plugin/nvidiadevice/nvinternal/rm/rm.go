@@ -41,8 +41,9 @@ import (
 	"github.com/NVIDIA/go-nvlib/pkg/nvlib/info"
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 // resourceManager forms the base type for specific resource manager implementations
