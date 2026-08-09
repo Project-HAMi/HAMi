@@ -17,9 +17,14 @@ limitations under the License.
 package main
 
 import (
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -66,5 +71,47 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 	if _, err := regLegacy.Gather(); err != nil {
 		t.Errorf("Gather failed (legacy): %v", err)
+	}
+}
+
+func TestLongNodeNamePodSelector(t *testing.T) {
+	longNodeName := "node-" + strings.Repeat("a", 60) // 65 chars > 63
+	safeLabel := util.SafeLabelValue(longNodeName)
+
+	t.Setenv(util.NodeNameEnvName, longNodeName)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod-long-node",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.AssignedNodeAnnotations: safeLabel,
+			},
+		},
+	}
+
+	client := fake.NewSimpleClientset(pod)
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podInformer := informerFactory.Core().V1().Pods()
+	podInformer.Informer()
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	informerFactory.Start(stopCh)
+	informerFactory.WaitForCacheSync(stopCh)
+
+	nodeNameEnv := os.Getenv(util.NodeNameEnvName)
+	labelValue := util.SafeLabelValue(nodeNameEnv)
+	selector := labels.SelectorFromSet(labels.Set{util.AssignedNodeAnnotations: labelValue})
+
+	pods, err := podInformer.Lister().List(selector)
+	if err != nil {
+		t.Fatalf("Failed to list pods using selector: %v", err)
+	}
+
+	if len(pods) != 1 {
+		t.Fatalf("Expected 1 pod matched by selector for long node name, got %d", len(pods))
+	}
+	if pods[0].Name != "test-pod-long-node" {
+		t.Errorf("Expected pod name 'test-pod-long-node', got %q", pods[0].Name)
 	}
 }

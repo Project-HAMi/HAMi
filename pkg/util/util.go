@@ -18,9 +18,12 @@ package util
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -36,8 +39,35 @@ import (
 )
 
 var (
-	HandshakeAnnos map[string]string
+	HandshakeAnnos    map[string]string
+	nonLabelCharRegex = regexp.MustCompile(`[^A-Za-z0-9._-]+`)
 )
+
+// SafeLabelValue converts an arbitrary string into a valid Kubernetes label value
+// that satisfies validation.IsValidLabelValue (<= 63 chars, valid charset, starting
+// and ending with an alphanumeric character). If the input is already a valid label value,
+// it is returned unchanged. Otherwise, a valid label value is deterministically derived
+// using a prefix of the sanitized input combined with a SHA-256 hash of the original input.
+func SafeLabelValue(value string) string {
+	if errs := validation.IsValidLabelValue(value); len(errs) == 0 {
+		return value
+	}
+
+	hashBytes := sha256.Sum256([]byte(value))
+	hash := hex.EncodeToString(hashBytes[:])[:10]
+
+	sanitized := nonLabelCharRegex.ReplaceAllString(value, "-")
+	maxPrefixLen := validation.LabelValueMaxLength - 1 - len(hash)
+	if len(sanitized) > maxPrefixLen {
+		sanitized = sanitized[:maxPrefixLen]
+	}
+
+	prefix := strings.Trim(sanitized, "._-")
+	if prefix == "" {
+		return hash
+	}
+	return prefix + "-" + hash
+}
 
 func init() {
 	HandshakeAnnos = make(map[string]string)
@@ -174,15 +204,15 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	p.Metadata.Annotations = annotations
 	label := make(map[string]string)
 	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
-		// Note: Kubernetes node names are valid RFC 1123 DNS subdomains, so in practice
-		// the realistic failure mode for node names here is exceeding the 63-character
-		// label value length limit (validation.LabelValueMaxLength), not invalid characters.
-		if errs := validation.IsValidLabelValue(v); len(errs) == 0 {
-			label[AssignedNodeAnnotations] = v
-			p.Metadata.Labels = label
-		} else {
-			klog.Warningf("Node name %s is not a valid label value (errs: %v), omitting label %s for pod %s/%s", v, errs, AssignedNodeAnnotations, pod.Namespace, pod.Name)
+		derived := SafeLabelValue(v)
+		if derived != v {
+			// Note: Kubernetes node names are valid RFC 1123 DNS subdomains, so in practice
+			// the realistic failure mode for node names here is exceeding the 63-character
+			// label value length limit (validation.LabelValueMaxLength), not invalid characters.
+			klog.V(4).Infof("Derived safe label value %q from node name %q for pod %s/%s", derived, v, pod.Namespace, pod.Name)
 		}
+		label[AssignedNodeAnnotations] = derived
+		p.Metadata.Labels = label
 	}
 
 	bytes, err := json.Marshal(p)
