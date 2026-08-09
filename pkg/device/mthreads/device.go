@@ -152,25 +152,36 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 	return nodedevices, nil
 }
 
+// PatchAnnotations writes the generic hami.io/*-allocated annotation and the
+// vendor-specific mthreads.com/gpu-index annotation. The vendor key encodes
+// one index-list per container, joined with the same
+// OnePodMultiContainerSplitSymbol (";") used elsewhere in the package, so
+// multi-container pods no longer lose earlier containers' indices to the
+// last container's value. Single-container output is unchanged (no trailing
+// delimiter) to preserve the existing annotation contract. The predicate
+// time/node annotations are left exactly as before (still set inside the
+// loop, once per container that has a device) - fixing their redundant
+// per-container overwrite is out of scope for this fix.
 func (dev *MthreadsDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[MthreadsGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[device.SupportDevices[MthreadsGPUDevice]] = device.EncodePodSingleDevice(devlist)
+
+		parts := make([]string, 0, len(devlist))
 		for _, dp := range devlist {
+			value := ""
+			for _, val := range dp {
+				value = value + fmt.Sprint(val.Idx) + ","
+			}
+			parts = append(parts, strings.TrimRight(value, ","))
+
 			if len(dp) > 0 {
-				value := ""
-				for _, val := range dp {
-					value = value + fmt.Sprint(val.Idx) + ","
-				}
-				if len(value) > 0 {
-					(*annoinput)[MthreadsAssignedGPUIndex] = strings.TrimRight(value, ",")
-					//(*annoinput)[MthreadsAssignedNode]=
-					tmp := strconv.FormatInt(time.Now().UnixNano(), 10)
-					(*annoinput)[MthreadsPredicateTime] = tmp
-					(*annoinput)[MthreadsAssignedNode] = (*annoinput)[util.AssignedNodeAnnotations]
-				}
+				tmp := strconv.FormatInt(time.Now().UnixNano(), 10)
+				(*annoinput)[MthreadsPredicateTime] = tmp
+				(*annoinput)[MthreadsAssignedNode] = (*annoinput)[util.AssignedNodeAnnotations]
 			}
 		}
+		(*annoinput)[MthreadsAssignedGPUIndex] = strings.Join(parts, device.OnePodMultiContainerSplitSymbol)
 	}
 	klog.Infoln("annoinput", (*annoinput))
 	return *annoinput

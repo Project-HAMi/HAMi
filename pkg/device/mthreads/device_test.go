@@ -394,8 +394,28 @@ func Test_PatchAnnotations(t *testing.T) {
 			},
 			want: map[string]string{
 				device.SupportDevices[MthreadsGPUDevice]: "test1,Mthreads,1000,1:;",
-				"mthreads.com/gpu-index":                 "0",
-				"mthreads.com/predicate-node":            "",
+				MthreadsAssignedGPUIndex:                 "0",
+				MthreadsAssignedNode:                     "",
+			},
+		},
+		{
+			name: "multi-container devices preserve each container index",
+			args: struct {
+				annoinput *map[string]string
+				pd        device.PodDevices
+			}{
+				annoinput: &map[string]string{},
+				pd: device.PodDevices{
+					MthreadsGPUDevice: device.PodSingleDevice{
+						device.ContainerDevices{{Idx: 0, UUID: "test1", Type: MthreadsGPUDevice, Usedmem: 1000, Usedcores: 1}},
+						device.ContainerDevices{{Idx: 2, UUID: "test2", Type: MthreadsGPUDevice, Usedmem: 2000, Usedcores: 2}},
+					},
+				},
+			},
+			want: map[string]string{
+				device.SupportDevices[MthreadsGPUDevice]: "test1,Mthreads,1000,1:;test2,Mthreads,2000,2:;",
+				MthreadsAssignedGPUIndex:                 "0;2",
+				MthreadsAssignedNode:                     "",
 			},
 		},
 	}
@@ -403,9 +423,9 @@ func Test_PatchAnnotations(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MthreadsDevices{}
 			result := dev.PatchAnnotations(&corev1.Pod{}, test.args.annoinput, test.args.pd)
-			assert.Equal(t, result[dev.CommonWord()], test.want[dev.CommonWord()])
-			assert.Equal(t, result["mthreads.com/gpu-index"], test.want["mthreads.com/gpu-index"])
-			assert.Equal(t, result["mthreads.com/predicate-node"], test.want["mthreads.com/predicate-node"])
+			assert.Equal(t, result[device.SupportDevices[MthreadsGPUDevice]], test.want[device.SupportDevices[MthreadsGPUDevice]])
+			assert.Equal(t, result[MthreadsAssignedGPUIndex], test.want[MthreadsAssignedGPUIndex])
+			assert.Equal(t, result[MthreadsAssignedNode], test.want[MthreadsAssignedNode])
 		})
 	}
 }

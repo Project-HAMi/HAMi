@@ -78,6 +78,21 @@ func TestKunlunDevices_Fit_NumaNotFit(t *testing.T) {
 	assert.Equal(t, reason, "1/8 "+common.NumaNotFit)
 }
 
+func TestKunlunDevices_PatchAnnotations(t *testing.T) {
+	annoinput := map[string]string{}
+	dev := &KunlunDevices{}
+	pd := device.PodDevices{
+		KunlunGPUDevice: device.PodSingleDevice{
+			device.ContainerDevices{{Idx: 0, UUID: "kunlun-0", Type: KunlunGPUDevice, Usedmem: 1000, Usedcores: 10}},
+			device.ContainerDevices{{Idx: 3, UUID: "kunlun-3", Type: KunlunGPUDevice, Usedmem: 2000, Usedcores: 20}},
+		},
+	}
+
+	got := dev.PatchAnnotations(&corev1.Pod{}, &annoinput, pd)
+	assert.Equal(t, got[device.SupportDevices[KunlunGPUDevice]], "kunlun-0,kunlun,1000,10:;kunlun-3,kunlun,2000,20:;")
+	assert.Equal(t, got[KunlunDeviceSelection], "0;3")
+}
+
 func Test_graphSelect(t *testing.T) {
 	tests := []struct {
 		name string

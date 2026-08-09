@@ -87,20 +87,28 @@ func (dev *KunlunDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, e
 	return nodedevices, nil
 }
 
+// PatchAnnotations writes the generic hami.io/*-allocated annotation (all
+// containers, correct) and the vendor-specific BAIDU_COM_DEVICE_IDX
+// annotation. The vendor key encodes one index-list per container, joined
+// with the same OnePodMultiContainerSplitSymbol (";") used elsewhere in the
+// package, so multi-container pods no longer lose earlier containers'
+// indices to the last container's value. Single-container output is
+// unchanged (no trailing delimiter) to preserve the existing annotation
+// contract for any external consumer already parsing a bare index.
 func (dev *KunlunDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]string, pd device.PodDevices) map[string]string {
 	devlist, ok := pd[KunlunGPUDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[device.SupportDevices[KunlunGPUDevice]] = device.EncodePodSingleDevice(devlist)
+
+		parts := make([]string, 0, len(devlist))
 		for _, dp := range devlist {
-			annoKey := KunlunDeviceSelection
 			value := ""
 			for _, val := range dp {
 				value = value + fmt.Sprint(val.Idx) + ","
 			}
-			if len(value) > 0 {
-				(*annoinput)[annoKey] = strings.TrimRight(value, ",")
-			}
+			parts = append(parts, strings.TrimRight(value, ","))
 		}
+		(*annoinput)[KunlunDeviceSelection] = strings.Join(parts, device.OnePodMultiContainerSplitSymbol)
 	}
 	return *annoinput
 }
