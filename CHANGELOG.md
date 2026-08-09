@@ -403,6 +403,7 @@ Add "NVIDIA_VISIBLE_DEVICES=none" to none-gpu tasks
 - Add Ascend core resource for HAMi-vNPU-core virtualization
 - Add enableGetPreferredAllocation flag
 - Add local-deploy target for minikube/kind clusters
+- Standardize OpenTelemetry metrics and dynamic cluster node labeling in vGPUmonitor
 
 **Bug fixes**
 - Fix initialization error when using tensor parallelism on vLLM above 0.18
