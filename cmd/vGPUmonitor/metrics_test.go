@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	dto "github.com/prometheus/client_model/go"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
 
@@ -70,92 +71,91 @@ func TestDescribeCollectSync(t *testing.T) {
 }
 
 func TestHostMetricsIncludeNodeLabel(t *testing.T) {
-	reg := prometheus.NewPedanticRegistry()
-
-	// Set NODE_NAME env var
-	nodeName := "test-node-123"
-	t.Setenv(util.NodeNameEnvName, nodeName)
-
-	client := fake.NewSimpleClientset()
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podLister := informerFactory.Core().V1().Pods().Lister()
-
-	c := &ClusterManager{
-		Zone:            "test-zone",
-		LegacyMetrics:   false,
-		PodLister:       podLister,
-		containerLister: &nvidia.ContainerLister{},
-	}
-	cc := ClusterManagerCollector{ClusterManager: c}
-
-	if err := reg.Register(cc); err != nil {
-		t.Fatalf("Failed to register: %v", err)
+	cases := []struct {
+		name          string
+		legacyMetrics bool
+		setNodeName   bool
+		wantNodeName  string
+	}{
+		{name: "non-legacy/env-set", legacyMetrics: false, setNodeName: true, wantNodeName: "test-node-123"},
+		{name: "non-legacy/env-unset", legacyMetrics: false, setNodeName: false, wantNodeName: "unknown"},
+		{name: "legacy/env-set", legacyMetrics: true, setNodeName: true, wantNodeName: "test-node-123"},
+		{name: "legacy/env-unset", legacyMetrics: true, setNodeName: false, wantNodeName: "unknown"},
 	}
 
-	metrics, err := reg.Gather()
-	if err != nil {
-		t.Fatalf("Gather failed: %v", err)
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			reg := prometheus.NewPedanticRegistry()
 
-	// Verify host metrics have 4 labels: node_name, device_index, device_uuid, device_type
-	foundMemoryMetric := false
-	foundUtilizationMetric := false
+			if tc.setNodeName {
+				t.Setenv(util.NodeNameEnvName, tc.wantNodeName)
+			} else {
+				// Empty value is equivalent to "unset" for the os.Getenv("") == ""
+				// fallback check in collectGPUInfo.
+				t.Setenv(util.NodeNameEnvName, "")
+			}
+
+			client := fake.NewSimpleClientset()
+			informerFactory := informers.NewSharedInformerFactory(client, 0)
+			podLister := informerFactory.Core().V1().Pods().Lister()
+
+			if tc.legacyMetrics {
+				initLegacyDescriptors()
+			}
+
+			c := &ClusterManager{
+				Zone:            "test-zone",
+				LegacyMetrics:   tc.legacyMetrics,
+				PodLister:       podLister,
+				containerLister: &nvidia.ContainerLister{},
+			}
+			cc := ClusterManagerCollector{ClusterManager: c}
+
+			if err := reg.Register(cc); err != nil {
+				t.Fatalf("Failed to register: %v", err)
+			}
+
+			metrics, err := reg.Gather()
+			if err != nil {
+				t.Fatalf("Gather failed: %v", err)
+			}
+
+			// Metrics may not be present if NVML initialization fails (no GPU
+			// hardware); that's expected in test environments, so absence
+			// doesn't fail the test, but any metric that IS present must
+			// carry the correct node_name label.
+			assertHostMetricNodeLabel(t, metrics, "hami_host_gpu_memory_used_bytes", tc.wantNodeName)
+			assertHostMetricNodeLabel(t, metrics, "hami_host_gpu_utilization_ratio", tc.wantNodeName)
+		})
+	}
+}
+
+func assertHostMetricNodeLabel(t *testing.T, metrics []*dto.MetricFamily, metricName, wantNodeName string) {
+	t.Helper()
 
 	for _, mf := range metrics {
-		if mf.GetName() == "hami_host_gpu_memory_used_bytes" {
-			foundMemoryMetric = true
-			for _, m := range mf.GetMetric() {
-				labels := m.GetLabel()
-				if len(labels) != 4 {
-					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
-				}
+		if mf.GetName() != metricName {
+			continue
+		}
+		for _, m := range mf.GetMetric() {
+			labels := m.GetLabel()
+			if len(labels) != 4 {
+				t.Errorf("%s has %d labels, expected 4", metricName, len(labels))
+			}
 
-				// Verify node_name label exists and has correct value
-				hasNode := false
-				for _, label := range labels {
-					if label.GetName() == "node_name" {
-						hasNode = true
-						if label.GetValue() != nodeName {
-							t.Errorf("node_name label = %s, want %s", label.GetValue(), nodeName)
-						}
+			hasNode := false
+			for _, label := range labels {
+				if label.GetName() == "node_name" {
+					hasNode = true
+					if label.GetValue() != wantNodeName {
+						t.Errorf("node_name label = %s, want %s", label.GetValue(), wantNodeName)
 					}
 				}
-				if !hasNode {
-					t.Errorf("%s missing 'node_name' label", mf.GetName())
-				}
+			}
+			if !hasNode {
+				t.Errorf("%s missing 'node_name' label", metricName)
 			}
 		}
-		if mf.GetName() == "hami_host_gpu_utilization_ratio" {
-			foundUtilizationMetric = true
-			for _, m := range mf.GetMetric() {
-				labels := m.GetLabel()
-				if len(labels) != 4 {
-					t.Errorf("%s has %d labels, expected 4", mf.GetName(), len(labels))
-				}
-
-				// Verify node_name label exists and has correct value
-				hasNode := false
-				for _, label := range labels {
-					if label.GetName() == "node_name" {
-						hasNode = true
-						if label.GetValue() != nodeName {
-							t.Errorf("node_name label = %s, want %s", label.GetValue(), nodeName)
-						}
-					}
-				}
-				if !hasNode {
-					t.Errorf("%s missing 'node_name' label", mf.GetName())
-				}
-			}
-		}
-	}
-
-	// Note: Metrics may not be present if NVML initialization fails (no GPU hardware)
-	// This is expected in test environments, so we don't fail the test
-	if foundMemoryMetric {
-		t.Log("hami_host_gpu_memory_used_bytes found and validated")
-	}
-	if foundUtilizationMetric {
-		t.Log("hami_host_gpu_utilization_ratio found and validated")
+		t.Logf("%s found and validated", metricName)
 	}
 }
