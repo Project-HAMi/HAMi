@@ -476,8 +476,16 @@ func Test_getPodUsage(t *testing.T) {
 test case matrix.
 */
 func Test_Filter(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	s := NewScheduler()
-	t.Cleanup(func() { close(s.stopCh) })
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+		close(s.stopCh)
+	})
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -1383,8 +1391,16 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 }
 
 func Test_ResourceQuota(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	s := NewScheduler()
-	t.Cleanup(func() { close(s.stopCh) })
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+		close(s.stopCh)
+	})
 	client.KubeClient = fake.NewClientset()
 	s.kubeClient = client.KubeClient
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour*1)
@@ -1765,7 +1781,15 @@ func Test_Filter_EvictsStaleEntry(t *testing.T) {
 }
 
 func TestFilterUsesTemplateNodesWithoutSideEffects(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	s := NewScheduler()
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
 	client.KubeClient = fake.NewSimpleClientset()
 	s.kubeClient = client.KubeClient
 	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
@@ -1834,7 +1858,17 @@ func TestFilterUsesTemplateNodesWithoutSideEffects(t *testing.T) {
 }
 
 func TestFilterTemplateNodesDoesNotTouchSchedulingCaches(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	origQuotas := s.quotaManager.Quotas
 	s := NewScheduler()
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+		s.quotaManager.Quotas = origQuotas
+	})
 	client.KubeClient = fake.NewSimpleClientset()
 	s.kubeClient = client.KubeClient
 	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
@@ -1914,7 +1948,15 @@ func TestFilterTemplateNodesDoesNotTouchSchedulingCaches(t *testing.T) {
 }
 
 func TestFilterTemplateNodesReturnsDetailedFailureReason(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	s := NewScheduler()
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
 	client.KubeClient = fake.NewSimpleClientset()
 	s.kubeClient = client.KubeClient
 	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
@@ -1971,7 +2013,15 @@ func TestFilterTemplateNodesReturnsDetailedFailureReason(t *testing.T) {
 }
 
 func TestFilterTemplateNodesMissingRegisterAnnotation(t *testing.T) {
+	origKubeClient := client.KubeClient
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	s := NewScheduler()
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
 	client.KubeClient = fake.NewSimpleClientset()
 	s.kubeClient = client.KubeClient
 	s.podLister = informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour).Core().V1().Pods().Lister()
@@ -2088,6 +2138,7 @@ func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 }
 
 func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
+	origKubeClient := client.KubeClient
 	podUID := types.UID("test-uid-1")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2098,7 +2149,10 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
-	t.Cleanup(func() { close(s.stopCh) })
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		close(s.stopCh)
+	})
 	scheme := runtime.NewScheme()
 	_ = corev1.AddToScheme(scheme)
 	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
@@ -2130,6 +2184,7 @@ func Test_Bind_DelPodOnGetPodFailure(t *testing.T) {
 }
 
 func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
+	origKubeClient := client.KubeClient
 	podUID := types.UID("test-uid-2")
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2140,13 +2195,13 @@ func Test_Bind_DelPodOnGetNodeFailure(t *testing.T) {
 	}
 
 	s := NewScheduler()
-	t.Cleanup(func() { close(s.stopCh) })
-	scheme := runtime.NewScheme()
-	_ = corev1.AddToScheme(scheme)
-	s.eventRecorder = record.NewBroadcaster().NewRecorder(scheme, corev1.EventSource{})
-
 	fakeClient := fake.NewSimpleClientset()
+	client.KubeClient = fakeClient
 	s.kubeClient = fakeClient
+	t.Cleanup(func() {
+		client.KubeClient = origKubeClient
+		close(s.stopCh)
+	})
 
 	_, err := fakeClient.CoreV1().Pods(pod.Namespace).Create(
 		context.Background(), pod, metav1.CreateOptions{})
@@ -2217,11 +2272,13 @@ func setupBindLockRetryTest(t *testing.T, retryTimeout time.Duration, pod *corev
 	config.NodeLockRetryTimeout = retryTimeout
 	oldDevicesMap := device.DevicesMap
 	device.DevicesMap = map[string]device.Devices{"bind-lock-mock": mock}
+	oldKubeClient := client.KubeClient
 
 	s := NewScheduler()
 	cleanup := func() {
 		config.NodeLockRetryTimeout = oldRetry
 		device.DevicesMap = oldDevicesMap
+		client.KubeClient = oldKubeClient
 		select {
 		case <-s.stopCh:
 		default:
