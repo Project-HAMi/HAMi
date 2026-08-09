@@ -99,6 +99,17 @@ func TestHandle(t *testing.T) {
 }
 
 func TestPodHasNodeName(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 	config.ForceOverwriteDefaultScheduler = true
 	sConfig := &config.Config{
@@ -176,6 +187,15 @@ func TestPodHasNodeName(t *testing.T) {
 }
 
 func TestPodHasDifferentScheduler(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 
 	sConfig := &config.Config{
@@ -248,6 +268,15 @@ func TestPodHasDifferentScheduler(t *testing.T) {
 }
 
 func TestFitResourceQuota(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 
 	sConfig := &config.Config{
@@ -456,6 +485,15 @@ func mluPod(ns string, vmemory, vcore string) *corev1.Pod {
 // Quota used to be checked for NVIDIA only, so a namespace limit on any other
 // vendor's memory or cores was silently ignored.
 func TestFitResourceQuotaNonNvidia(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 
 	sConfig := &config.Config{
@@ -569,6 +607,15 @@ func TestFitResourceQuotaNonNvidia(t *testing.T) {
 
 // A pod asking for two MLUs consumes twice the per-device memory.
 func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 
 	sConfig := &config.Config{
@@ -609,6 +656,15 @@ func TestFitResourceQuotaCountsEveryDevice(t *testing.T) {
 // Ascend applies a configurable factor to the memory it records, so the limit
 // has to be raised by the same factor or pods that are within quota get denied.
 func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
+	prevSchedulerName := config.SchedulerName
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
+	t.Cleanup(func() {
+		config.SchedulerName = prevSchedulerName
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
+	})
+
 	config.SchedulerName = "hami-scheduler"
 
 	fs := flag.NewFlagSet("ascend-quota-test", flag.ContinueOnError)
@@ -690,9 +746,13 @@ func TestFitResourceQuotaAscendMemoryFactor(t *testing.T) {
 func TestNonGPUPodAllowedAdmission(t *testing.T) {
 	prevSchedulerName := config.SchedulerName
 	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	t.Cleanup(func() {
 		config.SchedulerName = prevSchedulerName
 		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
 	})
 
 	config.SchedulerName = "hami-scheduler"
@@ -811,9 +871,13 @@ func TestEmptyContainersDenied(t *testing.T) {
 func TestSchedulerNameEmptyNoOverwrite(t *testing.T) {
 	prevSchedulerName := config.SchedulerName
 	prevForceOverwrite := config.ForceOverwriteDefaultScheduler
+	prevDevicesMap := device.DevicesMap
+	prevDevicesToHandle := device.DevicesToHandle
 	t.Cleanup(func() {
 		config.SchedulerName = prevSchedulerName
 		config.ForceOverwriteDefaultScheduler = prevForceOverwrite
+		device.DevicesMap = prevDevicesMap
+		device.DevicesToHandle = prevDevicesToHandle
 	})
 
 	config.SchedulerName = "hami-scheduler"
