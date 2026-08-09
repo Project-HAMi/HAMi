@@ -76,6 +76,12 @@ type Scheduler struct {
 	eventRecorder  record.EventRecorder
 	started        uint32 // 0 = false, 1 = true
 
+	// filterMutex synchronizes capacity checks (Fit/FitQuota) and allocation commits
+	// (AddPod/AddUsage) in Filter() across concurrent Extender calls, preventing
+	// over-allocation of node devices and namespace quotas (upstream #1330).
+	// It also ensures symmetric rollback on annotation failure (upstream #1896).
+	filterMutex sync.Mutex
+
 	lock   sync.RWMutex
 	synced bool
 }
@@ -147,9 +153,11 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodInTerminatedState(pod) {
+		s.filterMutex.Lock()
 		if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 			s.quotaManager.RmUsage(pod, pi.Devices)
 		}
+		s.filterMutex.Unlock()
 		return
 	}
 	if util.IsPodTerminating(pod) {
@@ -162,9 +170,15 @@ func (s *Scheduler) onAddPod(obj any) {
 		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
+	s.filterMutex.Lock()
+	// AddPod returns true only if the pod was not already present in podManager cache.
+	// If the pod was already tracked (e.g., allocated previously by Filter()), AddPod
+	// updates the cached pod devices in-place and returns false, preventing onAddPod
+	// from double-counting quota usage via AddUsage.
 	if s.podManager.AddPod(pod, nodeID, podDev) {
 		s.quotaManager.AddUsage(pod, podDev)
 	}
+	s.filterMutex.Unlock()
 }
 
 func (s *Scheduler) onUpdatePod(_, newObj any) {
@@ -195,9 +209,11 @@ func (s *Scheduler) onDelPod(obj any) {
 	if !ok {
 		return
 	}
+	s.filterMutex.Lock()
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
+	s.filterMutex.Unlock()
 }
 
 // onDelNode handles node delete events. It removes any in-memory per-node
@@ -796,10 +812,18 @@ func (s *Scheduler) getPodUsage() (map[string]device.PodUseDeviceStat, error) {
 	return podUsageStat, nil
 }
 
-func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
+// cleanupStalePodAllocationLocked removes any existing cache entry for pod
+// and adjusts quota usage. Caller MUST hold s.filterMutex.
+func (s *Scheduler) cleanupStalePodAllocationLocked(pod *corev1.Pod) {
 	if pi, ok := s.podManager.TakeAndDeletePod(pod); ok && len(pi.Devices) > 0 {
 		s.quotaManager.RmUsage(pod, pi.Devices)
 	}
+}
+
+func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
+	s.filterMutex.Lock()
+	defer s.filterMutex.Unlock()
+	s.cleanupStalePodAllocationLocked(pod)
 }
 
 func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
@@ -915,6 +939,53 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 	return &extenderv1.ExtenderBindingResult{Error: ""}, nil
 }
 
+// tryAllocate holds s.filterMutex to perform capacity check and allocation atomically (upstream #1330).
+// It returns (filterResult, bestNode, error). If filterResult or error is non-nil, allocation was not made.
+func (s *Scheduler) tryAllocate(args extenderv1.ExtenderArgs, resourceReqs device.PodDeviceRequests) (*extenderv1.ExtenderFilterResult, *policy.NodeScore, error) {
+	s.filterMutex.Lock()
+	defer s.filterMutex.Unlock()
+
+	s.cleanupStalePodAllocationLocked(args.Pod)
+
+	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
+	if err != nil {
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		return nil, nil, err
+	}
+	if len(failedNodes) != 0 {
+		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
+	}
+	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
+	if err != nil {
+		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+		return nil, nil, err
+	}
+	if len((*nodeScores).NodeList) == 0 {
+		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
+		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
+		return &extenderv1.ExtenderFilterResult{
+			FailedNodes: failedNodes,
+		}, nil, nil
+	}
+	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
+	sort.Sort(nodeScores)
+	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
+
+	if s.podManager.AddPod(args.Pod, m.NodeID, m.Devices) {
+		s.quotaManager.AddUsage(args.Pod, m.Devices)
+	}
+
+	return nil, m, nil
+}
+
+// rollbackAllocation rolls back podManager and quotaManager allocations on annotation patch failure (upstream #1896).
+func (s *Scheduler) rollbackAllocation(pod *corev1.Pod) {
+	s.filterMutex.Lock()
+	defer s.filterMutex.Unlock()
+	s.cleanupStalePodAllocationLocked(pod)
+}
+
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
@@ -953,65 +1024,36 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		"pod", klog.KObj(args.Pod),
 		"reason", "request does not contain full nodes",
 		"nodeNamesLen", nodeNamesLen(args.NodeNames))
-	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
-		s.quotaManager.RmUsage(args.Pod, pi.Devices)
+
+	filterRes, bestNode, err := s.tryAllocate(args, resourceReqs)
+	if err != nil || filterRes != nil {
+		return filterRes, err
 	}
-	nodeUsage, _, failedNodes, err := s.getNodesUsage(args.NodeNames, args.Pod)
-	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		return nil, err
-	}
-	if len(failedNodes) != 0 {
-		klog.V(5).InfoS("Nodes failed during usage retrieval",
-			"nodes", failedNodes)
-	}
-	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
-	if err != nil {
-		err := fmt.Errorf("calcScore failed %v for pod %v", err, args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		return nil, err
-	}
-	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).InfoS("No available nodes meet the required scores",
-			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
-		return &extenderv1.ExtenderFilterResult{
-			FailedNodes: failedNodes,
-		}, nil
-	}
-	klog.V(4).Infoln("nodeScores_len=", len((*nodeScores).NodeList))
-	sort.Sort(nodeScores)
-	m := (*nodeScores).NodeList[len((*nodeScores).NodeList)-1]
+
 	klog.InfoS("Scheduling pod to node",
 		"podNamespace", args.Pod.Namespace,
 		"podName", args.Pod.Name,
-		"nodeID", m.NodeID,
-		"devices", m.Devices)
+		"nodeID", bestNode.NodeID,
+		"devices", bestNode.Devices)
 	annotations := make(map[string]string)
-	annotations[util.AssignedNodeAnnotations] = m.NodeID
+	annotations[util.AssignedNodeAnnotations] = bestNode.NodeID
 	annotations[util.AssignedTimeAnnotations] = strconv.FormatInt(time.Now().Unix(), 10)
 
 	for _, val := range device.GetDevices() {
-		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
+		val.PatchAnnotations(args.Pod, &annotations, bestNode.Devices)
 	}
 
-	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
-	if added {
-		s.quotaManager.AddUsage(args.Pod, m.Devices)
-	}
-
+	// PatchPodAnnotations performs K8s API network call, executed outside filterMutex.
+	// If it fails, roll back both podManager and quotaManager under filterMutex (upstream #1896).
 	err = util.PatchPodAnnotations(args.Pod, annotations)
 	if err != nil {
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		if added {
-			s.quotaManager.RmUsage(args.Pod, m.Devices)
-		}
-		s.podManager.DelPod(args.Pod)
+		s.rollbackAllocation(args.Pod)
 		return nil, err
 	}
-	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
+	successMsg := genSuccessMsg(len(*args.NodeNames), bestNode.NodeID, []*policy.NodeScore{bestNode})
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
-	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
+	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{bestNode.NodeID}}
 	return &res, nil
 }
 
