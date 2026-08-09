@@ -84,7 +84,7 @@ type ContainerLister struct {
 	containerPath string
 	containers    map[string]*ContainerUsage
 	mutex         sync.Mutex
-	clientset     *kubernetes.Clientset
+	clientset     kubernetes.Interface
 	nodeName      string
 
 	// Fields for the informer-based pod cache mechanism
@@ -157,7 +157,15 @@ func (l *ContainerLister) ListContainers() map[string]*ContainerUsage {
 	return l.containers
 }
 
-func (l *ContainerLister) Clientset() *kubernetes.Clientset {
+// NewContainerListerWithClientset creates a ContainerLister initialized with the given clientset.
+func NewContainerListerWithClientset(clientset kubernetes.Interface) *ContainerLister {
+	return &ContainerLister{
+		containers: make(map[string]*ContainerUsage),
+		clientset:  clientset,
+	}
+}
+
+func (l *ContainerLister) Clientset() kubernetes.Interface {
 	return l.clientset
 }
 

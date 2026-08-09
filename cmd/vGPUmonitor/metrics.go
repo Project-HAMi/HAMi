@@ -362,7 +362,10 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 }
 
 func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheus.Metric) error {
-	nodeName := os.Getenv(util.NodeNameEnvName)
+	nodeName := cc.ClusterManager.NodeName
+	if nodeName == "" {
+		nodeName = os.Getenv(util.NodeNameEnvName)
+	}
 	if nodeName == "" {
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
@@ -584,10 +587,12 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 		ClusterID:       clusterID,
 	}
 
-	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
-	c.PodLister = informerFactory.Core().V1().Pods().Lister()
-	stopCh := make(chan struct{})
-	informerFactory.Start(stopCh)
+	if containerLister != nil && containerLister.Clientset() != nil {
+		informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
+		c.PodLister = informerFactory.Core().V1().Pods().Lister()
+		stopCh := make(chan struct{})
+		informerFactory.Start(stopCh)
+	}
 
 	cc := ClusterManagerCollector{ClusterManager: c}
 	labels := prometheus.Labels{

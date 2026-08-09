@@ -71,7 +71,9 @@ func TestDescribeCollectSync(t *testing.T) {
 
 func TestNewClusterManagerNodeAndClusterIDLabels(t *testing.T) {
 	reg := prometheus.NewRegistry()
-	c := NewClusterManager("vGPU", reg, &nvidia.ContainerLister{}, false, "node-1", "cluster-1")
+	client := fake.NewSimpleClientset()
+	containerLister := nvidia.NewContainerListerWithClientset(client)
+	c := NewClusterManager("vGPU", reg, containerLister, false, "node-1", "cluster-1")
 	if c.NodeName != "node-1" {
 		t.Errorf("expected NodeName node-1, got %s", c.NodeName)
 	}
@@ -79,4 +81,3 @@ func TestNewClusterManagerNodeAndClusterIDLabels(t *testing.T) {
 		t.Errorf("expected ClusterID cluster-1, got %s", c.ClusterID)
 	}
 }
-
