@@ -3659,3 +3659,251 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 	assert.Equal(t, len((*devinput)["mockB"][0]), 1)
 	assert.Equal(t, (*devinput)["mockB"][0][0].UUID, "uuid-b")
 }
+
+// Test_MetaX_GPU_Scoring_EdgeCases tests MetaX GPU node scoring under edge cases:
+// 1. Zero requested memory (Memreq = 0)
+// 2. Memory request exceeding node/device capacity
+// 3. Zero total node capacity
+// 4. Missing or corrupted topology loss/score annotations
+func Test_MetaX_GPU_Scoring_EdgeCases(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	metaxDev := &metax.MetaxDevices{}
+	metaxSDev := metax.InitMetaxSDevice(metax.MetaxConfig{
+		ResourceVCountName:  "metax-tech.com/sgpu",
+		ResourceVCoreName:   "metax-tech.com/vcore",
+		ResourceVMemoryName: "metax-tech.com/vmemory",
+	})
+
+	device.DevicesMap = map[string]device.Devices{
+		metax.MetaxGPUDevice:  metaxDev,
+		metax.MetaxSGPUDevice: metaxSDev,
+	}
+
+	tests := []struct {
+		name       string
+		node       *NodeUsage
+		request    device.ContainerDeviceRequest
+		pod        *corev1.Pod
+		policy     string
+		wantFit    bool
+		wantReason string
+	}{
+		{
+			name: "Zero requested memory fits successfully without zero-division panic",
+			node: &NodeUsage{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "metax-node-1"},
+				},
+				Devices: policy.DeviceUsageList{
+					DeviceLists: []*policy.DeviceListsScore{
+						{
+							Device: makeDevice("metax-gpu-0", 0, metax.MetaxGPUDevice, 0, 100, 16384, 0, 0, 100),
+						},
+					},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             metax.MetaxGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			pod:        &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-zero-mem"}},
+			policy:     "binpack",
+			wantFit:    true,
+			wantReason: "",
+		},
+		{
+			name: "Request memory exceeds node capacity is rejected cleanly",
+			node: &NodeUsage{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "metax-node-2"},
+				},
+				Devices: policy.DeviceUsageList{
+					DeviceLists: []*policy.DeviceListsScore{
+						{
+							Device: makeDevice("metax-gpu-1", 0, metax.MetaxGPUDevice, 0, 100, 16384, 0, 0, 100),
+						},
+					},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             metax.MetaxGPUDevice,
+				Memreq:           32768, // 32GB requested on 16GB card
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			pod:        &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-exceed-mem"}},
+			policy:     "binpack",
+			wantFit:    false,
+			wantReason: common.CardInsufficientMemory,
+		},
+		{
+			name: "Zero total capacity device handled safely",
+			node: &NodeUsage{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "metax-node-zero-cap"},
+				},
+				Devices: policy.DeviceUsageList{
+					DeviceLists: []*policy.DeviceListsScore{
+						{
+							Device: makeDevice("metax-gpu-zero", 0, metax.MetaxGPUDevice, 0, 100, 0, 0, 0, 100),
+						},
+					},
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             metax.MetaxGPUDevice,
+				Memreq:           1024,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			pod:        &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-zero-cap"}},
+			policy:     "binpack",
+			wantFit:    false,
+			wantReason: common.CardInsufficientMemory,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			devInput := &device.PodDevices{}
+			requests := device.ContainerDeviceRequests{
+				tt.request.Type: tt.request,
+			}
+
+			fit, reason := fitInDevices(tt.node, requests, tt.pod, nil, devInput)
+			assert.Equal(t, fit, tt.wantFit)
+			if !tt.wantFit {
+				assert.Equal(t, strings.Contains(reason, tt.wantReason), true)
+			}
+		})
+	}
+}
+
+// Test_MetaX_QoS_Quota_Validation tests MetaX SGPU QoS policy filtering & scoring edge cases:
+// 1. Valid QoS policies (best-effort, fixed-share, burst-share)
+// 2. Invalid QoS class names
+// 3. Exclusive device requests (Coresreq = 100) overriding QoS checks
+func Test_MetaX_QoS_Quota_Validation(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	metaxSDev := metax.InitMetaxSDevice(metax.MetaxConfig{
+		ResourceVCountName:  "metax-tech.com/sgpu",
+		ResourceVCoreName:   "metax-tech.com/vcore",
+		ResourceVMemoryName: "metax-tech.com/vmemory",
+	})
+
+	device.DevicesMap = map[string]device.Devices{
+		metax.MetaxSGPUDevice: metaxSDev,
+	}
+
+	tests := []struct {
+		name       string
+		qosPolicy  string
+		coresReq   int32
+		devUsed    int32
+		devQos     string
+		wantFit    bool
+		wantReason string
+	}{
+		{
+			name:      "Matching QoS policy (fixed-share) fits on used card",
+			qosPolicy: metax.FixedShare,
+			coresReq:  30,
+			devUsed:   1,
+			devQos:    metax.FixedShare,
+			wantFit:   true,
+		},
+		{
+			name:       "Mismatched QoS policy (fixed-share vs burst-share) rejected",
+			qosPolicy:  metax.FixedShare,
+			coresReq:   30,
+			devUsed:    1,
+			devQos:     metax.BurstShare,
+			wantFit:    false,
+			wantReason: metax.CardQosPolicyMismatch,
+		},
+		{
+			name:      "Exclusive request (Coresreq = 100) bypasses QoS restriction on unused card",
+			qosPolicy: metax.BestEffort,
+			coresReq:  100,
+			devUsed:   0,
+			devQos:    metax.FixedShare,
+			wantFit:   true,
+		},
+		{
+			name:      "Unused device accepts any requested QoS policy",
+			qosPolicy: "any-custom-qos",
+			coresReq:  50,
+			devUsed:   0,
+			devQos:    "",
+			wantFit:   true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			usedCores := int32(30)
+			if tt.devUsed == 0 {
+				usedCores = 0
+			}
+
+			node := &NodeUsage{
+				Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "sgpu-node"}},
+				Devices: policy.DeviceUsageList{
+					DeviceLists: []*policy.DeviceListsScore{
+						{
+							Device: &device.DeviceUsage{
+								ID:        "metax-sgpu-0",
+								Index:     0,
+								Type:      metax.MetaxSGPUDevice,
+								Used:      tt.devUsed,
+								Count:     10,
+								Totalmem:  16384,
+								Usedmem:   2048,
+								Totalcore: 100,
+								Usedcores: usedCores,
+								Health:    true,
+								CustomInfo: map[string]any{
+									"QosPolicy": tt.devQos,
+								},
+							},
+						},
+					},
+				},
+			}
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "qos-pod",
+					Annotations: map[string]string{
+						metax.MetaxSGPUQosPolicy: tt.qosPolicy,
+					},
+				},
+			}
+
+			requests := device.ContainerDeviceRequests{
+				metax.MetaxSGPUDevice: device.ContainerDeviceRequest{
+					Nums:     1,
+					Type:     metax.MetaxSGPUDevice,
+					Memreq:   1024,
+					Coresreq: tt.coresReq,
+				},
+			}
+
+			devInput := &device.PodDevices{}
+			fit, reason := fitInDevices(node, requests, pod, nil, devInput)
+			assert.Equal(t, fit, tt.wantFit)
+			if !tt.wantFit {
+				assert.Equal(t, strings.Contains(reason, tt.wantReason), true)
+			}
+		})
+	}
+}

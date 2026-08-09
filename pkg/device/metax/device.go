@@ -183,6 +183,10 @@ func parseMetaxAnnos(annos string, index int) float32 {
 }
 
 func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
+	if node == nil || node.Annotations == nil {
+		return 0
+	}
+
 	sum := 0
 	for _, dev := range podDevices {
 		sum += len(dev)

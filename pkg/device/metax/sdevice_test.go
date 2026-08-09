@@ -2903,3 +2903,169 @@ func TestScoreOnlineDevices(t *testing.T) {
 		})
 	}
 }
+
+func TestMetaxSDevices_ScoreNode_EdgeCases(t *testing.T) {
+	sdev := &MetaxSDevices{
+		jqCache: NewJitteryQosCache(),
+	}
+
+	tests := []struct {
+		name       string
+		node       *corev1.Node
+		podDevices device.PodSingleDevice
+		previous   []*device.DeviceUsage
+		policy     string
+		want       float32
+	}{
+		{
+			name:       "nil node and empty devices score return zero without panic",
+			node:       nil,
+			podDevices: device.PodSingleDevice{},
+			previous:   []*device.DeviceUsage{},
+			policy:     "binpack",
+			want:       0,
+		},
+		{
+			name: "online app class scoring with empty previous devices returns zero",
+			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-1"}},
+			podDevices: device.PodSingleDevice{
+				{
+					{
+						UUID: "dev-0",
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUAppClass: Online,
+							},
+						},
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{},
+			policy:   "binpack",
+			want:     0,
+		},
+		{
+			name: "topology aware scoring spread policy",
+			node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node-2"}},
+			podDevices: device.PodSingleDevice{
+				{
+					{
+						UUID:      "dev-0",
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+							"LinkZone": int32(1),
+						},
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{
+				{
+					ID:   "dev-0",
+					Used: 0,
+					CustomInfo: map[string]any{
+						"LinkZone": int32(1),
+					},
+				},
+			},
+			policy: "spread",
+			want:   0,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := sdev.ScoreNode(tt.node, tt.podDevices, tt.previous, tt.policy)
+			if got != tt.want {
+				t.Errorf("ScoreNode() got %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestMetaxSDevices_Fit_ZeroAndExceedMemory(t *testing.T) {
+	config := MetaxConfig{
+		ResourceVCountName:  "metax-tech.com/sgpu",
+		ResourceVCoreName:   "metax-tech.com/vcore",
+		ResourceVMemoryName: "metax-tech.com/vmemory",
+	}
+	sdev := InitMetaxSDevice(config)
+
+	tests := []struct {
+		name       string
+		devices    []*device.DeviceUsage
+		request    device.ContainerDeviceRequest
+		pod        *corev1.Pod
+		wantFit    bool
+		wantReason string
+	}{
+		{
+			name: "zero memory request (Memreq=0, MemPercentagereq=0) fits safely",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  16384,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    true,
+			wantReason: "",
+		},
+		{
+			name: "request memory exceeds total device memory fails with insufficient memory",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  8192,
+					Totalcore: 100,
+					Usedcores: 0,
+					Type:      MetaxSGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           16384,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             MetaxSGPUDevice,
+			},
+			pod:        &corev1.Pod{},
+			wantFit:    false,
+			wantReason: "1/1 CardInsufficientMemory",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fit, _, reason := sdev.Fit(tt.devices, tt.request, tt.pod, &device.NodeInfo{}, &device.PodDevices{})
+			if fit != tt.wantFit {
+				t.Errorf("Fit() fit = %v, want %v", fit, tt.wantFit)
+			}
+			if reason != tt.wantReason {
+				t.Errorf("Fit() reason = %v, want %v", reason, tt.wantReason)
+			}
+		})
+	}
+}

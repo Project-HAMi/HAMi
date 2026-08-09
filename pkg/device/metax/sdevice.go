@@ -289,20 +289,25 @@ func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSin
 }
 
 func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
+	if n == nil || ctr == nil {
+		return nil
+	}
 	n.Used++
 	n.Usedcores += ctr.Usedcores
 	n.Usedmem += ctr.Usedmem
 
-	if pod.Annotations[MetaxSGPUAppClass] != Online {
-		if value, ok := n.CustomInfo["QosPolicy"]; ok {
-			if qos, ok := value.(string); ok {
-				expectedQos := pod.Annotations[MetaxSGPUQosPolicy]
-				if ctr.Usedcores == 100 {
-					expectedQos = ""
-				}
+	if pod != nil && pod.Annotations != nil && pod.Annotations[MetaxSGPUAppClass] != Online {
+		if n.CustomInfo != nil {
+			if value, ok := n.CustomInfo["QosPolicy"]; ok {
+				if qos, ok := value.(string); ok {
+					expectedQos := pod.Annotations[MetaxSGPUQosPolicy]
+					if ctr.Usedcores == 100 {
+						expectedQos = ""
+					}
 
-				n.CustomInfo["QosPolicy"] = expectedQos
-				klog.Infof("device[%s] temp changed qos [%s] to [%s]", n.ID, qos, expectedQos)
+					n.CustomInfo["QosPolicy"] = expectedQos
+					klog.Infof("device[%s] temp changed qos [%s] to [%s]", n.ID, qos, expectedQos)
+				}
 			}
 		}
 	}
@@ -317,10 +322,18 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	reason := make(map[string]int)
 	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
 	candidateDevices := []*device.DeviceUsage{}
+	podAnnos := map[string]string{}
+	if pod != nil {
+		podAnnos = pod.GetAnnotations()
+	}
+
 	for i, v := range slices.Backward(devices) {
 		dev := v
+		if dev == nil {
+			continue
+		}
 
-		if !mats.checkType(pod.GetAnnotations(), *dev, request) {
+		if !mats.checkType(podAnnos, *dev, request) {
 			reason[common.CardTypeMismatch]++
 			klog.V(5).InfoS(common.CardTypeMismatch, "pod", klog.KObj(pod), "device", dev.ID, dev.Type, request.Type)
 			continue
@@ -332,7 +345,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		appClass := pod.GetAnnotations()[MetaxSGPUAppClass]
+		appClass := podAnnos[MetaxSGPUAppClass]
 		if !checkAppClass(appClass, *dev) {
 			reason[CardAppClassMismatch]++
 			klog.V(5).InfoS(CardAppClassMismatch, "pod", klog.KObj(pod), "device", dev.ID, "appClass request", appClass)
@@ -340,14 +353,14 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		}
 
 		if appClass != Online {
-			if !mats.checkDeviceQos(pod.GetAnnotations()[MetaxSGPUQosPolicy], *dev, request) {
+			if !mats.checkDeviceQos(podAnnos[MetaxSGPUQosPolicy], *dev, request) {
 				reason[CardQosPolicyMismatch]++
-				klog.V(5).InfoS(CardQosPolicyMismatch, "pod", klog.KObj(pod), "device", dev.ID, "qos request", pod.GetAnnotations()[MetaxSGPUQosPolicy])
+				klog.V(5).InfoS(CardQosPolicyMismatch, "pod", klog.KObj(pod), "device", dev.ID, "qos request", podAnnos[MetaxSGPUQosPolicy])
 				continue
 			}
 		}
 
-		if !device.CheckUUID(pod.GetAnnotations(), dev.ID, MetaxUseUUID, MetaxNoUseUUID, mats.CommonWord()) {
+		if !device.CheckUUID(podAnnos, dev.ID, MetaxUseUUID, MetaxNoUseUUID, mats.CommonWord()) {
 			reason[common.CardUUIDMismatch]++
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", dev.ID, "current device info is:", *dev)
 			continue
@@ -367,7 +380,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		memreq := int32(0)
 		if request.Memreq > 0 {
 			memreq = request.Memreq
-		} else {
+		} else if request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
 			memreq = dev.Totalmem * request.MemPercentagereq / 100
 		}
 
@@ -420,7 +433,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	// prioritize device
 	bestDevices := candidateDevices[0:request.Nums]
 	if len(candidateDevices) > int(request.Nums) {
-		if appClass, ok := pod.GetAnnotations()[MetaxSGPUAppClass]; ok {
+		if appClass, ok := podAnnos[MetaxSGPUAppClass]; ok {
 			// online Pod need additional logic to prioritize devices,
 			// offline Pod follow hami gpu scheduling policy
 			if appClass == Online {
@@ -441,7 +454,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	containerDevices := device.ContainerDevices{}
 
 	coreReq := request.Coresreq
-	if pod.GetAnnotations()[MetaxSGPUAppClass] == Online {
+	if podAnnos[MetaxSGPUAppClass] == Online {
 		coreReq = 0
 	}
 
@@ -449,7 +462,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		memreq := int32(0)
 		if request.Memreq > 0 {
 			memreq = request.Memreq
-		} else {
+		} else if request.MemPercentagereq > 0 && request.MemPercentagereq <= 100 {
 			memreq = dev.Totalmem * request.MemPercentagereq / 100
 		}
 
@@ -466,7 +479,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 		if ctrDevice.CustomInfo == nil {
 			ctrDevice.CustomInfo = make(map[string]any)
 		}
-		ctrDevice.CustomInfo["Pod.Annotations"] = pod.Annotations
+		ctrDevice.CustomInfo["Pod.Annotations"] = podAnnos
 
 		containerDevices = append(containerDevices, ctrDevice)
 	}
@@ -518,9 +531,12 @@ func (sdev *MetaxSDevices) checkDeviceQos(reqQos string, usage device.DeviceUsag
 	}
 
 	devQos := ""
-	if qos, ok := sdev.jqCache.Get(usage.ID); ok {
-		devQos = qos
-	} else {
+	if sdev != nil && sdev.jqCache != nil {
+		if qos, ok := sdev.jqCache.Get(usage.ID); ok {
+			devQos = qos
+		}
+	}
+	if devQos == "" && usage.CustomInfo != nil {
 		if value, ok := usage.CustomInfo["QosPolicy"]; ok {
 			if qos, ok := value.(string); ok {
 				devQos = qos
@@ -725,6 +741,9 @@ func checkAppClass(requestClass string, dev device.DeviceUsage) bool {
 	devOffline := false
 	devOnline := false
 	for idx, podinfo := range dev.PodInfos {
+		if podinfo == nil {
+			continue
+		}
 		appClass := podinfo.GetAnnotations()[MetaxSGPUAppClass]
 		switch appClass {
 		case Online:
@@ -758,7 +777,10 @@ func checkAppClass(requestClass string, dev device.DeviceUsage) bool {
 func appClassOnlineEnable(podDevices device.PodSingleDevice) bool {
 	for _, ctrDevices := range podDevices {
 		for _, device := range ctrDevices {
-			if annotations, ok := device.CustomInfo["Pod.Annotations"].(map[string]string); ok {
+			if device.CustomInfo == nil {
+				continue
+			}
+			if annotations, ok := device.CustomInfo["Pod.Annotations"].(map[string]string); ok && annotations != nil {
 				if annotations[MetaxSGPUAppClass] == Online {
 					return true
 				}
@@ -776,24 +798,34 @@ func prioritizeOnlineDevices(candidateDevices []*device.DeviceUsage, require int
 
 	sort.Slice(candidateDevices, func(i, j int) bool {
 		iOnlineCount, iOfflineCount := 0, 0
-		for _, pi := range candidateDevices[i].PodInfos {
-			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
-			switch appClass {
-			case Online:
-				iOnlineCount++
-			case Offline:
-				iOfflineCount++
+		if candidateDevices[i] != nil {
+			for _, pi := range candidateDevices[i].PodInfos {
+				if pi == nil {
+					continue
+				}
+				appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
+				switch appClass {
+				case Online:
+					iOnlineCount++
+				case Offline:
+					iOfflineCount++
+				}
 			}
 		}
 
 		jOnlineCount, jOfflineCount := 0, 0
-		for _, pi := range candidateDevices[j].PodInfos {
-			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
-			switch appClass {
-			case Online:
-				jOnlineCount++
-			case Offline:
-				jOfflineCount++
+		if candidateDevices[j] != nil {
+			for _, pi := range candidateDevices[j].PodInfos {
+				if pi == nil {
+					continue
+				}
+				appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
+				switch appClass {
+				case Online:
+					jOnlineCount++
+				case Offline:
+					jOfflineCount++
+				}
 			}
 		}
 
@@ -829,12 +861,18 @@ func scoreOnlineDevices(podDevices device.PodSingleDevice, previous []*device.De
 
 	result := 0
 	for _, dev := range previous {
+		if dev == nil {
+			continue
+		}
 		if _, ok := deviceSet[dev.ID]; !ok {
 			continue
 		}
 
 		onlineCount, offlineCount := 0, 0
 		for _, pi := range dev.PodInfos {
+			if pi == nil {
+				continue
+			}
 			appClass := pi.GetAnnotations()[MetaxSGPUAppClass]
 			switch appClass {
 			case Online:
