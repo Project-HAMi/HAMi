@@ -695,8 +695,10 @@ func (dev *NvidiaGPUDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 						}
 						ctr.Usedmem = n.MigUsage.UsageList[usageListIdx].Memory
 						ctr.Usedcores = n.MigUsage.UsageList[usageListIdx].Core
+						// Stamp the flattened UsageList offset (what ExtractMigTemplatesFromUUID
+						// and getNodesUsage read back), not the geometry item index.
 						if !strings.Contains(ctr.UUID, "[") {
-							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(idx) + "]"
+							ctr.UUID = ctr.UUID + "[" + fmt.Sprint(tidx) + "-" + fmt.Sprint(usageListIdx) + "]"
 						}
 						n.MigUsage.Index = int32(tidx)
 						n.MigUsage.UsageList[usageListIdx].InUse = true

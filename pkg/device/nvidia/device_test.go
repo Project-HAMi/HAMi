@@ -1383,7 +1383,7 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			},
 			ctr: &device.ContainerDevice{
 				UUID:    "dev-3",
-				Usedmem: 8000, // Requires 8GB, matches second template (idx=1) which should be at UsageList[2]
+				Usedmem: 8000, // matches 2g.10gb at flattened UsageList index 2 (preceded by 1g.5gb x2)
 			},
 			wantUsage: &device.DeviceUsage{
 				Used:      1,
@@ -1393,7 +1393,7 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			wantErr:    false,
 			checkMig:   true,
 			wantMigIdx: 0,
-			wantUUID:   "dev-3[0-1]",
+			wantUUID:   "dev-3[0-2]",
 		},
 	}
 	for _, tt := range tests {
@@ -1420,22 +1420,14 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 					if tt.ctr.UUID != tt.wantUUID {
 						t.Errorf("expected UUID: %s, got %s", tt.wantUUID, tt.ctr.UUID)
 					}
-					// Verify that the entry at the corresponding index in UsageList is marked as InUse
-					// According to the modified code, should calculate usageListIdx by summing Count of all templates before idx
+					// The suffix's second field is already the flattened UsageList
+					// offset, so use it directly to find the reserved slot.
 					expectedUsageListIdx := -1
 					if strings.Contains(tt.wantUUID, "[") {
 						parts := strings.Split(strings.TrimSuffix(strings.Split(tt.wantUUID, "[")[1], "]"), "-")
 						if len(parts) == 2 {
-							if tidx, err1 := strconv.Atoi(parts[0]); err1 == nil {
-								if idx, err2 := strconv.Atoi(parts[1]); err2 == nil {
-									// Calculate usageListIdx by summing Count of all templates before idx
-									if tidx >= 0 && tidx < len(tt.deviceUsage.MigTemplate) {
-										expectedUsageListIdx = 0
-										for i := 0; i < idx && i < len(tt.deviceUsage.MigTemplate[tidx]); i++ {
-											expectedUsageListIdx += int(tt.deviceUsage.MigTemplate[tidx][i].Count)
-										}
-									}
-								}
+							if pos, err := strconv.Atoi(parts[1]); err == nil {
+								expectedUsageListIdx = pos
 							}
 						}
 					}
@@ -2712,6 +2704,35 @@ func TestAddResourceUsage_MigResetNoFit(t *testing.T) {
 	assert.Equal(t, usage.Usedmem, int32(0))
 	assert.Equal(t, usage.Used, int32(0))
 	assert.Assert(t, !strings.Contains(ctr.UUID, "["))
+}
+
+func TestAddResourceUsage_MigFreshTemplateStampsFlattenedIndex(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{})
+	// An item with Count>1 precedes the one that fits, so the geometry index
+	// and the flattened UsageList offset diverge.
+	usage := &device.DeviceUsage{
+		Mode: MigMode,
+		MigTemplate: []device.Geometry{
+			{
+				{Name: "1g.5gb", Memory: 5120, Core: 14, Count: 2},
+				{Name: "2g.10gb", Memory: 10240, Core: 28, Count: 1},
+			},
+		},
+	}
+	// 6GB only fits the 2g.10gb item (geometry index 1, flattened index 2).
+	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 6144}
+	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
+	assert.NilError(t, err)
+	assert.Assert(t, usage.MigUsage.UsageList[2].InUse)
+	assert.Assert(t, !usage.MigUsage.UsageList[0].InUse)
+	assert.Assert(t, !usage.MigUsage.UsageList[1].InUse)
+	assert.Equal(t, ctr.Usedmem, int32(10240))
+
+	// The suffix must round-trip to the slot actually reserved.
+	tidx, pos, err := device.ExtractMigTemplatesFromUUID(ctr.UUID)
+	assert.NilError(t, err)
+	assert.Equal(t, tidx, 0)
+	assert.Equal(t, pos, 2)
 }
 
 func TestCustomFilterRule_MigEmptyUsageWithTemplate(t *testing.T) {
