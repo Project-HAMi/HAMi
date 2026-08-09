@@ -230,7 +230,14 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(files) > 2 {
+	matchedFiles := 0
+	for _, val := range files {
+		if strings.Contains(val.Name(), "libvgpu.so") ||
+			strings.Contains(val.Name(), ".cache") {
+			matchedFiles++
+		}
+	}
+	if matchedFiles > 2 {
 		return nil, errors.New("cache num not matched")
 	}
 	if len(files) == 0 {

@@ -217,6 +217,19 @@ func Test_loadCache(t *testing.T) {
 		assert.ErrorContains(t, err, "cache num not matched")
 	})
 
+	t.Run("ignores unrelated files when one cache file exists", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		writeCacheFile(t, dir, "notes.txt", []byte("x"))
+		writeCacheFile(t, dir, "debug.log", []byte("x"))
+
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.Info != nil)
+		defer func() { _ = syscall.Munmap(usage.data) }()
+	})
+
 	t.Run("empty directory", func(t *testing.T) {
 		usage, err := loadCache(t.TempDir())
 		assert.NilError(t, err)
