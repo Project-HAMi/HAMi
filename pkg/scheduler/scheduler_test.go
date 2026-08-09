@@ -2450,7 +2450,7 @@ func Test_Filter_Bug1896_QuotaRollbackOnPatchFailure(t *testing.T) {
 // This is a regression test for upstream bug #1330.
 //
 // The test loops 100 times to make any surviving race statistically visible.
-// Run with: go test ./pkg/scheduler/... -race -run Test_Filter_Bug1330
+// Run with: go test ./pkg/scheduler/... -race -run Test_Filter_Bug1330.
 func Test_Filter_Bug1330_NoConcurrentOverAllocation(t *testing.T) {
 	setupNvidiaConfigForTest(t)
 
@@ -2461,11 +2461,11 @@ func Test_Filter_Bug1330_NoConcurrentOverAllocation(t *testing.T) {
 
 	const (
 		ns          = "race-test-ns"
-		concurrency = 5  // pods racing to claim the only GPU slot
-		iterations  = 100 // repeat to expose statistical races
+		concurrency = 5   // Pods racing to claim the only GPU slot.
+		iterations  = 100 // Repeat to expose statistical races.
 	)
 
-	for iter := 0; iter < iterations; iter++ {
+	for iter := range iterations {
 		// Fresh scheduler per iteration.
 		s := NewScheduler()
 
@@ -2692,7 +2692,7 @@ func Test_Filter_FitFailureReleasesLockCleanly(t *testing.T) {
 	acquired := make(chan struct{})
 	go func() {
 		s.filterMutex.Lock()
-		s.filterMutex.Unlock()
+		s.filterMutex.Unlock() //nolint:staticcheck // SA2001: intentional synchronization point to verify filterMutex was cleanly unlocked after Fit failure
 		close(acquired)
 	}()
 
@@ -2718,7 +2718,7 @@ func BenchmarkFilter(b *testing.B) {
 	informerFactory.WaitForCacheSync(s.stopCh)
 
 	nodeNames := make([]string, nodeCount)
-	for i := 0; i < nodeCount; i++ {
+	for i := range nodeCount {
 		name := fmt.Sprintf("bench-node-%d", i)
 		nodeNames[i] = name
 		s.addNode(name, &device.NodeInfo{
