@@ -31,6 +31,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/validation"
 	"k8s.io/klog/v2"
 )
 
@@ -173,8 +174,12 @@ func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
 	p.Metadata.Annotations = annotations
 	label := make(map[string]string)
 	if v, ok := annotations[AssignedNodeAnnotations]; ok && v != "" {
-		label[AssignedNodeAnnotations] = v
-		p.Metadata.Labels = label
+		if errs := validation.IsValidLabelValue(v); len(errs) == 0 {
+			label[AssignedNodeAnnotations] = v
+			p.Metadata.Labels = label
+		} else {
+			klog.Warningf("Node name %s is not a valid label value (errs: %v), omitting label %s for pod %s/%s", v, errs, AssignedNodeAnnotations, pod.Namespace, pod.Name)
+		}
 	}
 
 	bytes, err := json.Marshal(p)

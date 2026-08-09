@@ -18,6 +18,7 @@ package util
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -328,51 +329,92 @@ func TestGetAllocatePodByNode(t *testing.T) {
 func TestPatchPodAnnotations(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 
-	// Create test pod
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "test-pod",
-			Namespace: "default",
-		},
-	}
-
-	client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+	longNodeName := "node-" + strings.Repeat("a", 60) // 65 chars > 63
+	invalidCharNodeName := "invalid_node_name!"       // <= 63 chars but contains invalid label character '!'
 
 	tests := []struct {
-		name        string
-		pod         *corev1.Pod
-		annotations map[string]string
-		wantErr     bool
+		name         string
+		podName      string
+		annotations  map[string]string
+		wantErr      bool
+		wantLabel    bool
+		expectedNode string
 	}{
 		{
-			name: "patch with valid annotations",
-			pod:  pod,
+			name:    "normal short node name",
+			podName: "pod-short",
 			annotations: map[string]string{
 				"test-key":              "test-value",
 				AssignedNodeAnnotations: "node1",
 			},
-			wantErr: false,
+			wantErr:      false,
+			wantLabel:    true,
+			expectedNode: "node1",
 		},
 		{
-			name: "patch non-existent pod",
-			pod: &corev1.Pod{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      "non-existent",
-					Namespace: "default",
-				},
+			name:    "node name > 63 chars",
+			podName: "pod-long",
+			annotations: map[string]string{
+				AssignedNodeAnnotations: longNodeName,
 			},
+			wantErr:      false,
+			wantLabel:    false,
+			expectedNode: longNodeName,
+		},
+		{
+			name:    "node name with invalid label characters but <= 63 chars",
+			podName: "pod-invalid",
+			annotations: map[string]string{
+				AssignedNodeAnnotations: invalidCharNodeName,
+			},
+			wantErr:      false,
+			wantLabel:    false,
+			expectedNode: invalidCharNodeName,
+		},
+		{
+			name:    "patch non-existent pod",
+			podName: "non-existent",
 			annotations: map[string]string{
 				"test-key": "test-value",
 			},
-			wantErr: true,
+			wantErr:   true,
+			wantLabel: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			err := PatchPodAnnotations(tt.pod, tt.annotations)
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      tt.podName,
+					Namespace: "default",
+				},
+			}
+			if !tt.wantErr {
+				client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), pod, metav1.CreateOptions{})
+			}
+
+			err := PatchPodAnnotations(pod, tt.annotations)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("PatchPodAnnotations() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr {
+				updatedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.TODO(), pod.Name, metav1.GetOptions{})
+				if err != nil {
+					t.Fatalf("failed to get pod after patch: %v", err)
+				}
+				if tt.expectedNode != "" {
+					assert.Equal(t, updatedPod.Annotations[AssignedNodeAnnotations], tt.expectedNode)
+				}
+				if tt.wantLabel {
+					assert.Equal(t, updatedPod.Labels[AssignedNodeAnnotations], tt.expectedNode)
+				} else {
+					if updatedPod.Labels != nil {
+						_, exists := updatedPod.Labels[AssignedNodeAnnotations]
+						assert.Equal(t, exists, false)
+					}
+				}
 			}
 		})
 	}
