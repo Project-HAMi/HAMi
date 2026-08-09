@@ -894,12 +894,12 @@ func TestPatchNodeAnnotations(t *testing.T) {
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
 
 	t.Run("patch nil node", func(t *testing.T) {
-		err := PatchNodeAnnotations(nil, map[string]string{"foo": "bar"})
+		err := PatchNodeAnnotations(nil, map[string]string{"hami.io/foo": "bar"})
 		assert.ErrorContains(t, err, "node is nil")
 	})
 
 	t.Run("patch valid node", func(t *testing.T) {
-		err := PatchNodeAnnotations(node, map[string]string{"foo": "bar"})
+		err := PatchNodeAnnotations(node, map[string]string{"hami.io/foo": "bar"})
 		assert.NilError(t, err)
 	})
 }
@@ -914,12 +914,12 @@ func TestRemoveNodeAnnotation(t *testing.T) {
 	client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{})
 
 	t.Run("remove nil node", func(t *testing.T) {
-		err := RemoveNodeAnnotation(nil, "foo")
+		err := RemoveNodeAnnotation(nil, "hami.io/foo")
 		assert.ErrorContains(t, err, "node is nil")
 	})
 
 	t.Run("remove valid node", func(t *testing.T) {
-		err := RemoveNodeAnnotation(node, "foo")
+		err := RemoveNodeAnnotation(node, "hami.io/foo")
 		assert.NilError(t, err)
 	})
 }
