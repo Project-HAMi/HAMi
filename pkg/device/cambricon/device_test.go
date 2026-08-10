@@ -1142,6 +1142,79 @@ func TestDevices_Fit(t *testing.T) {
 	}
 }
 
+// TestDevices_Fit_ResourceQuotaWholeCardRequest reproduces
+// https://github.com/Project-HAMi/HAMi/issues/2468: a pod that omits the
+// memory resource (which resolves to a MemPercentagereq of 100, i.e. a whole
+// card) carried a Memreq of 0, and Fit only checked device capacity, never
+// the namespace ResourceQuota. That let a single pod consume an entire card's
+// worth of quota while never being charged against it, so the ResourceQuota
+// was left permanently unusable for every other pod in the namespace. This
+// asserts Fit now denies the same request once it is resolved against the
+// quota, matching how a request carrying an equivalent explicit Memreq
+// already behaved.
+func TestDevices_Fit_ResourceQuotaWholeCardRequest(t *testing.T) {
+	config := CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	}
+	dev := InitMLUDevice(config)
+	device.DevicesMap = map[string]device.Devices{CambriconMLUDevice: dev}
+
+	ns := "cambricon-quota-test-ns"
+	qm := device.NewQuotaManager()
+	qm.AddQuota(&corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Name: "mlu-quota", Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.cambricon.com/mlu.smlu.vmemory"): resource.MustParse("50"),
+			},
+		},
+	})
+	t.Cleanup(func() {
+		qm.DelQuota(&corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: "mlu-quota", Namespace: ns},
+			Spec: corev1.ResourceQuotaSpec{
+				Hard: corev1.ResourceList{
+					corev1.ResourceName("limits.cambricon.com/mlu.smlu.vmemory"): resource.MustParse("50"),
+				},
+			},
+		})
+	})
+
+	devices := []*device.DeviceUsage{{
+		ID:        "dev-0",
+		Index:     0,
+		Used:      0,
+		Count:     100,
+		Usedmem:   0,
+		Totalmem:  40960,
+		Totalcore: 100,
+		Usedcores: 0,
+		Numa:      0,
+		Type:      CambriconMLUDevice,
+		Health:    true,
+	}}
+	// No Memreq set: this is what GenerateResourceRequests returns for a pod
+	// that omits the memory field entirely, i.e. an implicit whole-card ask.
+	request := device.ContainerDeviceRequest{
+		Nums:             1,
+		Memreq:           0,
+		MemPercentagereq: 100,
+		Coresreq:         10,
+		Type:             CambriconMLUDevice,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+	fit, _, reason := dev.Fit(devices, request, pod, &device.NodeInfo{}, &device.PodDevices{})
+	if fit {
+		t.Errorf("expected whole-card request exceeding the namespace's ResourceQuota to be denied, but Fit admitted it (reason=%q)", reason)
+	}
+	if reason != "1/1 ResourceQuotaNotFit" {
+		t.Errorf("expected reason %q, got %q", "1/1 ResourceQuotaNotFit", reason)
+	}
+}
+
 func TestDevices_AddResourceUsage(t *testing.T) {
 	tests := []struct {
 		name        string
