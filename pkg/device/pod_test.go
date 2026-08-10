@@ -318,7 +318,7 @@ func TestAddPod_UpdateExistingDevices(t *testing.T) {
 
 	pi, ok := podManager.GetPod(pod)
 	assert.True(t, ok)
-	assert.Equal(t, "node1", pi.NodeID, "NodeID should be unchanged on update")
+	assert.Equal(t, "node2", pi.NodeID, "NodeID should be refreshed with the latest pod state")
 	assert.Equal(t, PodDevices{"device1": {{{UUID: "GPU-1"}}}}, pi.Devices, "Devices should be replaced with the new value")
 }
 
@@ -391,6 +391,30 @@ func TestListPodsUID(t *testing.T) {
 	}
 	assert.True(t, gotUIDs[pod1.UID], "expected pod1's UID to be present")
 	assert.True(t, gotUIDs[pod2.UID], "expected pod2's UID to be present")
+}
+
+func TestAddPodRefreshesExistingPodObject(t *testing.T) {
+	podManager := NewPodManager()
+	uid := k8stypes.UID("uid1")
+	original := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Namespace: "default",
+		Name:      "pod1",
+		UID:       uid,
+		Annotations: map[string]string{
+			"hami.io/vgpu-mig-allocations": `[{"profile":"1g.5gb"}]`,
+		},
+	}}
+	assert.True(t, podManager.AddPod(original, "node1", PodDevices{"device1": {{}}}))
+
+	updated := original.DeepCopy()
+	updated.Annotations["hami.io/vgpu-mig-allocations"] = `[{"profile":"1g.5gb","placement":{"start":6,"size":1}}]`
+	devices := PodDevices{"device1": {{{UUID: "GPU-1"}}}}
+	assert.False(t, podManager.AddPod(updated, "node1", devices), "refreshing an existing pod must not add quota usage again")
+
+	cached, ok := podManager.GetPod(updated)
+	assert.True(t, ok)
+	assert.Equal(t, updated.Annotations, cached.Annotations)
+	assert.Equal(t, devices, cached.Devices)
 }
 
 func TestUpdatePod(t *testing.T) {

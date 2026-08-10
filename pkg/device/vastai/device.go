@@ -249,7 +249,11 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	}
 	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, _ := va.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++

@@ -380,6 +380,21 @@ func TestMarshalNodeDevices(t *testing.T) {
 	}
 }
 
+func TestMigProfileUsesCompactWireFormat(t *testing.T) {
+	raw, err := json.Marshal(MigProfile{
+		Name:          "1g.5gb",
+		MemoryMB:      4864,
+		Core:          15,
+		SliceCount:    1,
+		InstanceCount: 7,
+		Placements:    []MigPlacement{{Start: 6, Size: 1}},
+	})
+	assert.NilError(t, err)
+
+	want := `{"name":"1g.5gb","memoryMB":4864,"core":15,"sliceCount":1,"placements":[{"start":6,"size":1}]}`
+	assert.Equal(t, string(raw), want)
+}
+
 func TestUnMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		str string

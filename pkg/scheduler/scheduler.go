@@ -93,8 +93,6 @@ func NewScheduler() *Scheduler {
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
 	s.quotaManager = device.NewQuotaManager()
-	// Use dummy leader manager when leaderElect is disabled
-	// This ensures IsLeader() always returns true and synced will not be set to false
 	s.leaderManager = leaderelection.NewDummyLeaderManager(true)
 	if config.LeaderElect {
 		callbacks := leaderelection.LeaderCallbacks{
@@ -157,18 +155,71 @@ func (s *Scheduler) onAddPod(obj any) {
 		s.podManager.UpdatePod(pod)
 		return
 	}
-	podDev, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+
+	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
 	if err != nil {
 		klog.ErrorS(err, "failed to decode pod devices", "pod", klog.KObj(pod))
 		return
 	}
-	if s.podManager.AddPod(pod, nodeID, podDev) {
-		s.quotaManager.AddUsage(pod, podDev)
+
+	effectiveDevices := device.CollapseInitContainerUsage(pod, rawDevices)
+
+	if s.podManager.AddPod(pod, nodeID, effectiveDevices) {
+		s.quotaManager.AddUsage(pod, effectiveDevices)
 	}
 }
 
-func (s *Scheduler) onUpdatePod(_, newObj any) {
-	s.onAddPod(newObj)
+func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
+	newPod, ok := newObj.(*corev1.Pod)
+	if !ok {
+		return
+	}
+
+	klog.V(5).InfoS("Pod updated", "pod", klog.KObj(newPod))
+
+	if _, ok := newPod.Annotations[util.AssignedNodeAnnotations]; !ok {
+		return
+	}
+
+	if util.IsPodInTerminatedState(newPod) {
+		if pi, ok := s.podManager.TakeAndDeletePod(newPod); ok {
+			s.quotaManager.RmUsage(newPod, pi.Devices)
+		}
+		return
+	}
+
+	if util.IsPodTerminating(newPod) {
+		s.podManager.UpdatePod(newPod)
+		return
+	}
+
+	pi, exists := s.podManager.GetPod(newPod)
+	if !exists {
+		s.onAddPod(newPod)
+		return
+	}
+
+	s.podManager.UpdatePod(newPod)
+
+	if !pi.InitContainerResourceReleased && util.AllInitContainersSucceeded(newPod) {
+		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
+		if err != nil {
+			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
+			return
+		}
+
+		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
+
+		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, appOnlyDevices)
+		if ok {
+			s.quotaManager.ReplaceUsage(newPod, oldDevices, appOnlyDevices)
+			klog.InfoS("Init containers completed, shrunk usage",
+				"pod", klog.KObj(newPod),
+				"oldUsage", oldDevices,
+				"newUsage", appOnlyDevices,
+			)
+		}
+	}
 }
 
 func (s *Scheduler) onDelPod(obj any) {
@@ -429,7 +480,14 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 					klog.V(5).InfoS("Skipping device cleanup for vendor not present in scheduler cache", "nodeName", val.Name, "deviceVendor", devhandsk)
 					continue
 				}
-				klog.Warning("Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
+				// klog.Warning does plain fmt.Print-style concatenation of its arguments -
+				// klog v2 has no structured WarningS variant. Passing alternating
+				// "key", value pairs to it (as if it were InfoS/ErrorS) produces a garbled,
+				// unstructured log line instead of the intended structured fields. Use
+				// ErrorS (nil error is fine here; this is a detected condition, not a Go
+				// error) to match the structured logging used throughout the rest of this
+				// file.
+				klog.ErrorS(nil, "Device is unhealthy, cleaning up node", "nodeName", val.Name, "deviceVendor", devhandsk)
 				err := devInstance.NodeCleanUp(val.Name)
 				if err != nil {
 					klog.ErrorS(err, "Node cleanup failed", "nodeName", val.Name, "deviceVendor", devhandsk)
@@ -585,19 +643,15 @@ func buildNodeUsage(node *device.NodeInfo, task *corev1.Pod) *NodeUsage {
 			nodeUsage.Devices.DeviceLists = append(nodeUsage.Devices.DeviceLists, &policy.DeviceListsScore{
 				Score: 0,
 				Device: &device.DeviceUsage{
-					ID:        d.ID,
-					Index:     d.Index,
-					Used:      0,
-					Count:     d.Count,
-					Usedmem:   0,
-					Totalmem:  d.Devmem,
-					Totalcore: d.Devcore,
-					Usedcores: 0,
-					MigUsage: device.MigInUse{
-						Index:     0,
-						UsageList: make(device.MIGS, 0),
-					},
-					MigTemplate: d.MIGTemplate,
+					ID:          d.ID,
+					Index:       d.Index,
+					Used:        0,
+					Count:       d.Count,
+					Usedmem:     0,
+					Totalmem:    d.Devmem,
+					Totalcore:   d.Devcore,
+					Usedcores:   0,
+					MigProfiles: d.MIGProfiles,
 					Mode:        d.Mode,
 					Type:        d.Type,
 					Numa:        d.Numa,
@@ -646,6 +700,21 @@ func nodeListLen(nodes *corev1.NodeList) int {
 	return len(nodes.Items)
 }
 
+func migAllocationUsage(allocation nvidia.MigAllocation) device.MigAllocation {
+	usage := device.MigAllocation{
+		Profile: allocation.Profile, Placement: allocation.Placement,
+		MigUUID:      allocation.MigUUID,
+		RuntimeReady: allocation.MigUUID != "" && allocation.GPUInstanceID != nil && allocation.ComputeInstanceID != nil,
+	}
+	if allocation.GPUInstanceID != nil {
+		usage.GPUInstanceID = *allocation.GPUInstanceID
+	}
+	if allocation.ComputeInstanceID != nil {
+		usage.ComputeInstanceID = *allocation.ComputeInstanceID
+	}
+	return usage
+}
+
 // returns all nodes and its device memory usage, and we filter it with nodeSelector, taints, nodeAffinity
 // unschedulerable and nodeName.
 func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[string]*NodeUsage, *map[string]*NodeUsage, map[string]string, error) {
@@ -663,6 +732,14 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 
 	podsInfo := s.podManager.ListPodsInfo()
 	for _, p := range podsInfo {
+		allocationsByGPU := map[string][]nvidia.MigAllocation{}
+		if slotRaw, ok := p.Annotations[nvidia.MigAllocationsAnnotation]; ok {
+			if allocations, err := nvidia.DecodeMigAllocations(slotRaw); err == nil {
+				for _, allocation := range allocations {
+					allocationsByGPU[allocation.GPUUUID] = append(allocationsByGPU[allocation.GPUUUID], allocation)
+				}
+			}
+		}
 		node, ok := overallnodeMap[p.NodeID]
 		if !ok {
 			klog.V(5).InfoS("pod allocated unknown node resources",
@@ -674,44 +751,58 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 				for _, udevice := range ctrdevs {
 					for _, d := range node.Devices.DeviceLists {
 						deviceID := udevice.UUID
-						if strings.Contains(deviceID, "[") {
-							deviceID = strings.Split(deviceID, "[")[0]
-						}
 						if d.Device.ID == deviceID {
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
 
-							if strings.Contains(udevice.UUID, "[") {
+							if allocations := allocationsByGPU[udevice.UUID]; len(allocations) > 0 {
 								if strings.Compare(d.Device.Mode, "hami-core") == 0 {
 									klog.Errorf("found a mig task running on a hami-core GPU\n")
 									d.Device.Health = false
 									continue
 								}
-								tmpIdx, instanceIdx, err := device.ExtractMigTemplatesFromUUID(udevice.UUID)
-								if err != nil {
-									klog.Errorf("failed to extract mig templates from uuid %s: %v", udevice.UUID, err)
-									continue
-								}
-								if tmpIdx < 0 || tmpIdx >= len(d.Device.MigTemplate) {
-									klog.Errorf("invalid mig template index %d in uuid %s (templates length: %d)", tmpIdx, udevice.UUID, len(d.Device.MigTemplate))
-									continue
-								}
-								if len(d.Device.MigUsage.UsageList) == 0 {
-									device.PlatternMIG(&d.Device.MigUsage, d.Device.MigTemplate, tmpIdx)
-								} else if tmpIdx != int(d.Device.MigUsage.Index) {
-									klog.Errorf("mig template index mismatch in uuid %s: expected %d, got %d", udevice.UUID, d.Device.MigUsage.Index, tmpIdx)
-									continue
-								}
-								if instanceIdx < 0 || instanceIdx >= len(d.Device.MigUsage.UsageList) {
-									klog.Errorf("invalid mig instance in uuid %s", udevice.UUID)
-									continue
-								}
-								d.Device.MigUsage.UsageList[instanceIdx].InUse = true
-								klog.V(5).Infoln("add mig usage", d.Device.MigUsage, "template=", d.Device.MigTemplate, "uuid=", d.Device.ID)
+								allocation := allocations[0]
+								allocationsByGPU[udevice.UUID] = allocations[1:]
+								d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocationUsage(allocation))
+								continue
+							}
+							if d.Device.Mode == nvidia.MigMode {
+								klog.ErrorS(nil, "MIG Pod lacks a matching profile/placement reservation", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", udevice.UUID)
+								d.Device.Health = false
 							}
 						}
+					}
+				}
+			}
+		}
+		for gpuUUID, allocations := range allocationsByGPU {
+			if len(allocations) == 0 {
+				continue
+			}
+			matched := false
+			for _, d := range node.Devices.DeviceLists {
+				if d.Device.ID != gpuUUID {
+					continue
+				}
+				matched = true
+				if d.Device.Mode != nvidia.MigMode {
+					klog.ErrorS(nil, "unconsumed MIG reservations reference a non-MIG device", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+					d.Device.Health = false
+					break
+				}
+				for _, allocation := range allocations {
+					d.Device.MigAllocationsInUse = append(d.Device.MigAllocationsInUse, migAllocationUsage(allocation))
+				}
+				klog.InfoS("restored MIG reservations missing from cached Pod devices", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+				break
+			}
+			if !matched {
+				klog.ErrorS(nil, "unconsumed MIG reservations reference an unknown device", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", gpuUUID, "reservations", len(allocations))
+				for _, d := range node.Devices.DeviceLists {
+					if d.Device.Mode == nvidia.MigMode {
+						d.Device.Health = false
 					}
 				}
 			}
@@ -918,23 +1009,18 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFilterResult, error) {
 	klog.InfoS("Starting schedule filter process", "pod", args.Pod.Name, "uuid", args.Pod.UID, "namespace", args.Pod.Namespace)
 	resourceReqs := device.Resourcereqs(args.Pod)
-	resourceReqTotal := 0
-	for _, n := range resourceReqs {
-		for _, k := range n {
-			resourceReqTotal += int(k.Nums)
+
+	hasHAMiResource := false
+
+	for _, reqMap := range resourceReqs {
+		if len(reqMap) > 0 {
+			hasHAMiResource = true
+			break
 		}
 	}
-	if resourceReqTotal == 0 {
-		klog.V(1).InfoS("Pod does not request any resources",
-			"pod", args.Pod.Name)
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("does not request any resource"))
-		if args.Nodes != nil {
-			return &extenderv1.ExtenderFilterResult{
-				Nodes:       args.Nodes,
-				FailedNodes: nil,
-				Error:       "",
-			}, nil
-		}
+
+	if !hasHAMiResource {
+		klog.V(1).InfoS("Pod does not request any resources", "pod", args.Pod.Name)
 		return &extenderv1.ExtenderFilterResult{
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
@@ -942,17 +1028,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		}, nil
 	}
 	if args.Nodes != nil {
-		klog.V(2).InfoS("Choosing simulation filter path",
-			"pod", klog.KObj(args.Pod),
-			"reason", "request contains full nodes",
-			"nodesLen", nodeListLen(args.Nodes),
-			"nodeNamesLen", nodeNamesLen(args.NodeNames))
 		return s.filterSimulation(args, resourceReqs)
 	}
-	klog.V(2).InfoS("Choosing live filter path",
-		"pod", klog.KObj(args.Pod),
-		"reason", "request does not contain full nodes",
-		"nodeNamesLen", nodeNamesLen(args.NodeNames))
+
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
 	}
@@ -962,8 +1040,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len(failedNodes) != 0 {
-		klog.V(5).InfoS("Nodes failed during usage retrieval",
-			"nodes", failedNodes)
+		klog.V(5).InfoS("Nodes failed during usage retrieval", "nodes", failedNodes)
 	}
 	nodeScores, err := s.calcScore(nodeUsage, resourceReqs, args.Pod, failedNodes)
 	if err != nil {
@@ -972,8 +1049,7 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		return nil, err
 	}
 	if len((*nodeScores).NodeList) == 0 {
-		klog.V(4).InfoS("No available nodes meet the required scores",
-			"pod", args.Pod.Name)
+		klog.V(4).InfoS("No available nodes meet the required scores", "pod", args.Pod.Name)
 		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", fmt.Errorf("no available node, %d nodes do not meet", len(*args.NodeNames)))
 		return &extenderv1.ExtenderFilterResult{
 			FailedNodes: failedNodes,
@@ -995,20 +1071,24 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 		val.PatchAnnotations(args.Pod, &annotations, m.Devices)
 	}
 
-	added := s.podManager.AddPod(args.Pod, m.NodeID, m.Devices)
-	if added {
-		s.quotaManager.AddUsage(args.Pod, m.Devices)
+	rawDevices := m.Devices
+	effectiveDevices := device.CollapseInitContainerUsage(args.Pod, rawDevices)
+	if args.Nodes == nil {
+		added := s.podManager.AddPod(args.Pod, m.NodeID, effectiveDevices)
+		if added {
+			s.quotaManager.AddUsage(args.Pod, effectiveDevices) // use collapsed
+		}
+		err = util.PatchPodAnnotations(args.Pod, annotations)
+		if err != nil {
+			s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
+			if added {
+				s.quotaManager.RmUsage(args.Pod, effectiveDevices)
+			}
+			s.podManager.DelPod(args.Pod)
+			return nil, err
+		}
 	}
 
-	err = util.PatchPodAnnotations(args.Pod, annotations)
-	if err != nil {
-		s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringFailed, "", err)
-		if added {
-			s.quotaManager.RmUsage(args.Pod, m.Devices)
-		}
-		s.podManager.DelPod(args.Pod)
-		return nil, err
-	}
 	successMsg := genSuccessMsg(len(*args.NodeNames), m.NodeID, nodeScores.NodeList)
 	s.recordScheduleFilterResultEvent(args.Pod, EventReasonFilteringSucceed, successMsg, nil)
 	res := extenderv1.ExtenderFilterResult{NodeNames: &[]string{m.NodeID}}
