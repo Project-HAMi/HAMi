@@ -194,9 +194,9 @@ func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *te
 	want := `
 # HELP hami_gpu_core_limit_ratio Device core limit for a certain GPU
 # TYPE hami_gpu_core_limit_ratio gauge
-hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 2
-hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 2
-hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 2
+hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 100
+hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 100
+hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 100
 # HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
 # TYPE hami_node_gpu_memory_allocated_ratio gauge
 hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node="node-1"} 0.25

@@ -52,12 +52,11 @@ type ClusterManagerCollector struct {
 
 const normalizedCoreLimit = 100
 
-// normalizeAMDCoreMetrics converts AMD physical CU counts to the percentage
-// unit used by HAMi's core ratio metrics. Other devices keep their existing
-// metric values.
-func normalizeAMDCoreMetrics(deviceType string, total, allocated int32) (float64, float64) {
-	if !strings.HasPrefix(strings.ToUpper(deviceType), "AMD") || total <= 0 {
-		return float64(total), float64(allocated)
+// normalizeCoreMetrics converts core counts to the percentage
+// unit used by HAMi's core ratio metrics (0-100).
+func normalizeCoreMetrics(total, allocated int32) (float64, float64) {
+	if total <= 0 {
+		return 0, 0
 	}
 	return normalizedCoreLimit, math.Ceil(float64(allocated) / float64(total) * normalizedCoreLimit)
 }
@@ -190,7 +189,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	nu := cc.metricsProvider.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
-			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
+			coreLimit, coreAllocated := normalizeCoreMetrics(devs.Device.Totalcore, devs.Device.Usedcores)
 			if devs.Device.Mode == "mig" {
 				for idx, migs := range devs.Device.MigUsage.UsageList {
 					klog.V(3).Infoln("mig instances=", devs.Device.MigUsage)
@@ -289,22 +288,30 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 							val.Namespace, val.Name, ctridx, val.NodeID)
 						continue
 					}
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
-						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
-					}
-					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
-						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
-					}
-					if legacy {
-						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
-					}
 					var totaldev int32
+					var totalcore int32
 					found := false
 					for _, ni := range *nu {
 						for _, nodedev := range ni.Devices.DeviceLists {
-							if strings.Compare(nodedev.Device.ID, ctrdevval.UUID) == 0 {
+							// Strip any "-mig" or suffix from the UUID for lookup
+							nodedevID := nodedev.Device.ID
+							ctrdevID := ctrdevval.UUID
+							if strings.HasPrefix(nodedevID, "MIG-") {
+								parts := strings.SplitN(nodedevID, "-", 2)
+								if len(parts) == 2 {
+									nodedevID = parts[0]
+								}
+							}
+							if strings.HasPrefix(ctrdevID, "MIG-") {
+								parts := strings.SplitN(ctrdevID, "-", 2)
+								if len(parts) == 2 {
+									ctrdevID = parts[0]
+								}
+							}
+
+							if strings.Compare(nodedevID, ctrdevID) == 0 || strings.HasPrefix(nodedevID, ctrdevID) || strings.HasPrefix(ctrdevID, nodedevID) {
 								totaldev = nodedev.Device.Totalmem
+								totalcore = nodedev.Device.Totalcore
 								found = true
 								break
 							}
@@ -312,6 +319,19 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 						if found {
 							break
 						}
+					}
+					
+					_, ctrCoreAllocated := normalizeCoreMetrics(totalcore, ctrdevval.Usedcores)
+
+					if err := sendMetric(ch, ctrvGPUdeviceAllocatedMemoryDesc, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
+						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedMemoryDesc metric: %v", err)
+					}
+					if err := sendMetric(ch, ctrvGPUdeviceAllocatedCoreDesc, prometheus.GaugeValue, ctrCoreAllocated, val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID); err != nil {
+						klog.V(4).Infof("Failed to send ctrvGPUdeviceAllocatedCoreDesc metric: %v", err)
+					}
+					if legacy {
+						sendLegacyMetric(ch, legacyAllocatedMemory, prometheus.GaugeValue, float64(ctrdevval.Usedmem)*float64(1024)*float64(1024), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
+						sendLegacyMetric(ch, legacyAllocatedCore, prometheus.GaugeValue, float64(ctrdevval.Usedcores), val.Namespace, val.NodeID, val.Name, fmt.Sprint(ctridx), ctrdevval.UUID)
 					}
 					klog.V(4).InfoS("Total memory for device",
 						"deviceUUID", ctrdevval.UUID,
