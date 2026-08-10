@@ -190,6 +190,8 @@ extenders:
   - urlPrefix: https://hami-scheduler.kube-system.svc
     filterVerb: filter
     enableHTTPS: true
+    tlsConfig:
+      caFile: /etc/hami/tls/ca.crt
     nodeCacheCapable: false
     ignorable: false
     httpTimeout: 30s
@@ -202,17 +204,21 @@ extenders:
         ignoredByScheduler: true
 ```
 
+`caFile` points to the CA bundle mounted in the CA Pod and used to verify HAMi's server certificate. A deployment can embed the same bundle with `caData` instead. `enableHTTPS: true` is not sufficient by itself: when neither `caFile` nor `caData` is set, kube-scheduler skips server certificate verification.
+
+`serverName` defaults to the hostname in `urlPrefix` and only needs to be set when the server certificate uses a different DNS name. `certFile` and `keyFile` are needed only when the HAMi server requires mTLS.
+
 `ignoredByScheduler` only determines whether the extender, rather than `NodeResourcesFit`, evaluates a resource. It does not create a device inventory for a template node, nor does it give a cold-zero node group a `hami.io/node-*-register` annotation.
 
 The CA implementation must:
 
 - create HTTP extenders from the scheduler configuration;
-- call an extender only for a Pod that requests one of its `managedResources`;
+- call an extender for every Pod when `managedResources` is omitted or empty; otherwise, call it only when the Pod requests at least one listed resource;
 - configure `NodeResourcesFitArgs.IgnoredResources` before creating the framework;
 - collect every candidate that passes the framework filters before calling extenders;
 - pass each extender's result set to the next extender in configuration order;
 - use `ignorable` to decide whether an extender error rejects the evaluation or is ignored; and
-- preserve fast paths for ordinary Pods and unrelated extenders.
+- preserve the fast path only when no filter extender is interested in the current Pod; an extender with an empty `managedResources` list is interested in every Pod.
 
 ## HAMi-Side Design
 
@@ -407,7 +413,7 @@ The work should proceed in this order:
 
 | Priority | Work | Completion criteria |
 | --- | --- | --- |
-| P0 | Migrate scheduler extender and `ignoredByScheduler` support to the new Cluster Autoscaler upstream repository. | Upstream tests cover extender order, error handling, fast paths for ordinary Pods, and node-level failure reasons. |
+| P0 | Migrate scheduler extender and `ignoredByScheduler` support to the new Cluster Autoscaler upstream repository. | Upstream tests cover extender order, error handling, calls for every Pod when `managedResources` is empty, the fast path when no extender is interested, and node-level failure reasons. |
 | P0 | Add a separate HAMi simulation endpoint with request validation, side-effect isolation, and an explicit readiness definition. | A regular kube-scheduler using `nodeCacheCapable: false` is not mistaken for a simulation caller; invalid requests neither write state nor cause nil-pointer failures. |
 | P0 | Correct filter results and failure handling. | HAMi returns every node that passes `Fit()`; HAMi and CA retain diagnosable failure types and node-level reasons. |
 | P0 | Add a warm-node-group integration regression and define production deployment constraints. | A documented combination of CA, Kubernetes, provider, and HAMi versions reproduces scale-up reliably; endpoint reachability, concurrency behavior, and observability are explicitly defined. |
