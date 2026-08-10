@@ -100,14 +100,22 @@ func parseInterconnection() [][]int {
 	var interconnection [][]int
 	pairs := strings.Split(InterGroupConnection, ",")
 	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
+		parts := strings.Split(pair, "-")
+		if len(parts) != 2 {
+			continue
+		}
+		lw, _ := strconv.Atoi(parts[0])
+		rw, _ := strconv.Atoi(parts[1])
 		interconnection = append(interconnection, []int{lw, rw})
 	}
 	pairs = strings.Split(GroupConnection, ",")
 	for _, pair := range pairs {
-		lw, _ := strconv.Atoi(strings.Split(pair, "-")[0])
-		rw, _ := strconv.Atoi(strings.Split(pair, "-")[1])
+		parts := strings.Split(pair, "-")
+		if len(parts) != 2 {
+			continue
+		}
+		lw, _ := strconv.Atoi(parts[0])
+		rw, _ := strconv.Atoi(parts[1])
 		interconnection = append(interconnection, []int{lw, rw})
 	}
 	return interconnection
@@ -139,8 +147,12 @@ func interconnect(devices []*device.DeviceUsage, request device.ContainerDeviceR
 					continue
 				}
 				for p := range strings.SplitSeq(InterGroupConnection, ",") {
-					lw, _ := strconv.Atoi(strings.Split(p, "-")[0])
-					rw, _ := strconv.Atoi(strings.Split(p, "-")[1])
+					parts := strings.Split(p, "-")
+					if len(parts) != 2 {
+						continue
+					}
+					lw, _ := strconv.Atoi(parts[0])
+					rw, _ := strconv.Atoi(parts[1])
 					klog.V(5).InfoS("interconnect", "lw", lw, "rw", rw, "left device", val.Index, "right device", val2.Index)
 					if lw == int(val.Index) && rw == int(val2.Index) || lw == int(val2.Index) && rw == int(val.Index) {
 						return []int{int(val.Index), int(val2.Index)}

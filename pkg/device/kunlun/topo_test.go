@@ -399,3 +399,22 @@ func TestParseInterconnection2_Structure(t *testing.T) {
 		}
 	}
 }
+
+func TestParseInterconnection_InvalidString(t *testing.T) {
+	origInter := InterGroupConnection
+	origGroup := GroupConnection
+	defer func() {
+		InterGroupConnection = origInter
+		GroupConnection = origGroup
+	}()
+
+	InterGroupConnection = "0-4,invalid,1-5,"
+	GroupConnection = "0-1,invalid,2-3,"
+
+	// Should not panic, should skip invalid pairs
+	got := parseInterconnection()
+
+	if len(got) != 4 {
+		t.Errorf("Expected 4 valid pairs, got %d", len(got))
+	}
+}

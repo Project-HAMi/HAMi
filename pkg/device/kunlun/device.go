@@ -34,6 +34,9 @@ const (
 	KunlunDeviceSelection = "BAIDU_COM_DEVICE_IDX"
 	KunlunUseUUID         = "baidu.com/use-gpuuuid"
 	KunlunNoUseUUID       = "baidu.com/nouse-gpuuuid"
+)
+
+var (
 	InterGroupConnection  = "0-4,1-5,2-6,3-7"
 	InterGroupConnection2 = "0-1-4-5,2-3-6-7,0-2-4-6,1-3-5-7,0-3-4-7,1-2-5-6"
 	GroupConnection       = "0-1,0-2,0-3,1-2,1-3,2-3,4-5,4-6,4-7,5-6,5-7,6-7"
