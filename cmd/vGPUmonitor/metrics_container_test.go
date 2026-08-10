@@ -158,8 +158,6 @@ func TestCollectContainerMetricsSkipsInvalidUTF8UUID(t *testing.T) {
 // TestCollectContainerMetricsLegacyOffsetNoUnderflow verifies that the legacy
 // device-memory offset label uses the recorded value without uint64 underflow.
 func TestCollectContainerMetricsLegacyOffsetNoUnderflow(t *testing.T) {
-	// This test ensures that the legacy metric for device memory offset is emitted correctly, even when the total memory is smaller than the sum of context, module, and buffer sizes. It checks that the offset label reflects the actual recorded offset without wrapping or underflowing.
-	prev := legacyCtrDeviceMemorydesc
 	legacyCtrDeviceMemorydesc = prometheus.NewDesc(
 		"Device_memory_desc_of_container",
 		"Container device memory description",
