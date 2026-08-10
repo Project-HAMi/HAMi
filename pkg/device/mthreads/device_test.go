@@ -65,6 +65,65 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "count over one without pod annotations",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+		},
+		{
+			name: "count over one requested without limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "count one requested without limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"mthreads.com/vgpu": *resource.NewQuantity(1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{},
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "don't set to count limit",
 			args: struct {
 				ctr *corev1.Container
@@ -935,7 +994,7 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    1,
 			wantDevIDs: []string{},
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
@@ -997,6 +1056,77 @@ func TestDevices_Fit(t *testing.T) {
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
 		},
+		{
+			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",
+			devices: []*device.DeviceUsage{
+				{
+					ID:        "dev-0",
+					Index:     0,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      MthreadsGPUDevice,
+					Health:    true,
+				},
+				{
+					ID:        "dev-1",
+					Index:     1,
+					Used:      0,
+					Count:     100,
+					Usedmem:   0,
+					Totalmem:  1280,
+					Totalcore: 100,
+					Usedcores: 0,
+					Numa:      0,
+					Type:      MthreadsGPUDevice,
+					Health:    true,
+				},
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             3,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         20,
+				Type:             MthreadsGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    2,
+			wantDevIDs: []string{},
+			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      MthreadsGPUDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             MthreadsGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
+		},
 	}
 
 	for _, test := range tests {
@@ -1011,10 +1141,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[MthreadsGPUDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MthreadsGPUDevice]))
+			}
 			if test.wantFit {
-				if len(result[MthreadsGPUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MthreadsGPUDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[MthreadsGPUDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[MthreadsGPUDevice][idx].UUID)

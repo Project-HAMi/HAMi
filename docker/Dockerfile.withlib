@@ -8,7 +8,6 @@ ARG GOPROXY=https://goproxy.cn,direct
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM nvidia/cuda:13.3.1-base-ubuntu22.04@sha256:ea2a388e99273207c6389b3098a61ebca5ab41d31168dfc4350d0cfa614703e4
 RUN apt-get update && \
@@ -26,7 +25,6 @@ LABEL version="$VERSION"
 LABEL maintainer="info@dynamia.ai"
 COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
-COPY --from=GOBUILD /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 COPY ./lib /k8s-vgpu/lib

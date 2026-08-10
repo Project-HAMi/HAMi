@@ -185,8 +185,13 @@ func (l *ContainerLister) Update() error {
 		if !entry.IsDir() {
 			continue
 		}
+		parts := strings.SplitN(entry.Name(), "_", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			klog.Warningf("Skipping dir with unexpected name format: %s", entry.Name())
+			continue
+		}
 		dirName := filepath.Join(l.containerPath, entry.Name())
-		podUID := strings.Split(entry.Name(), "_")[0]
+		podUID := parts[0]
 		if !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
 			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
@@ -209,11 +214,10 @@ func (l *ContainerLister) Update() error {
 			continue
 		}
 		if usage == nil {
-			// no cuInit in container
 			continue
 		}
 		usage.PodUID = podUID
-		usage.ContainerName = strings.Split(entry.Name(), "_")[1]
+		usage.ContainerName = parts[1]
 		l.containers[entry.Name()] = usage
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
 	}
@@ -226,7 +230,14 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(files) > 2 {
+	matchedFiles := 0
+	for _, val := range files {
+		if strings.Contains(val.Name(), "libvgpu.so") ||
+			strings.HasSuffix(val.Name(), ".cache") {
+			matchedFiles++
+		}
+	}
+	if matchedFiles > 2 {
 		return nil, errors.New("cache num not matched")
 	}
 	if len(files) == 0 {
@@ -237,7 +248,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		if strings.Contains(val.Name(), "libvgpu.so") {
 			continue
 		}
-		if !strings.Contains(val.Name(), ".cache") {
+		if !strings.HasSuffix(val.Name(), ".cache") {
 			continue
 		}
 		cacheFile = filepath.Join(fpath, val.Name())

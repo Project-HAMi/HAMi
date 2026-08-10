@@ -142,10 +142,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
-	// Construct cluster managers. In real code, we would assign them to
-	// variables to then do something with them.
 	NewClusterManager("vGPU", reg, containerLister, legacyMetrics)
-	//NewClusterManager("ca", reg)
 
 	// Uncomment to add the standard process and Go metrics to the custom registry.
 	//reg.MustRegister(

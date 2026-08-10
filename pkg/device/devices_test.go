@@ -380,6 +380,21 @@ func TestMarshalNodeDevices(t *testing.T) {
 	}
 }
 
+func TestMigProfileUsesCompactWireFormat(t *testing.T) {
+	raw, err := json.Marshal(MigProfile{
+		Name:          "1g.5gb",
+		MemoryMB:      4864,
+		Core:          15,
+		SliceCount:    1,
+		InstanceCount: 7,
+		Placements:    []MigPlacement{{Start: 6, Size: 1}},
+	})
+	assert.NilError(t, err)
+
+	want := `{"name":"1g.5gb","memoryMB":4864,"core":15,"sliceCount":1,"placements":[{"start":6,"size":1}]}`
+	assert.Equal(t, string(raw), want)
+}
+
 func TestUnMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		str string
@@ -462,7 +477,62 @@ func Test_DecodeNodeDevices(t *testing.T) {
 		}
 	}{
 		{
-			name: "args is invalid",
+			name: "args is empty",
+			args: "",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args is only delimiter",
+			args: ":",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args is multiple delimiters",
+			args: "::",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args missing delimiter with comma",
+			args: ",",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args has comma and delimiter but empty fields",
+			args: ",:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 2 in node annotation"),
+			},
+		},
+		{
+			name: "args is invalid format missing split symbol",
 			args: "a",
 			want: struct {
 				di  []*DeviceInfo
@@ -472,6 +542,7 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				err: errors.New("node annotation missing device separator"),
 			},
 		},
+
 		{
 			name: "str is old format",
 			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:",
@@ -1459,6 +1530,26 @@ func TestCheckType(t *testing.T) {
 			cardType: "NVIDIA-A100",
 			want:     false,
 		},
+		// Regression: a trailing/leading/double comma leaves an empty split member, and
+		// strings.Contains(cardType, "") is always true, so it must not match every card.
+		{
+			name:     "nouse with trailing comma only excludes named type",
+			annos:    map[string]string{noUseKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "nouse with leading comma only excludes named type",
+			annos:    map[string]string{noUseKey: ",V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use with trailing comma matches named type only",
+			annos:    map[string]string{useKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1629,4 +1720,129 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 		// Must never panic on arbitrary pod-annotation input.
 		_, _ = DecodeContainerDevices(str)
 	})
+}
+
+func FuzzDecodeNodeDevices(f *testing.F) {
+	f.Add("")
+	f.Add("GPU-00552014-5c87-89ac-b1a6-7b53aa24b0ec,10,32768,100,NVIDIA-Tesla V100-PCIE-32GB,0,true:")
+	f.Add("GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true,1,hami-core:")
+	f.Add("garbage:")
+	f.Add(",,,,,:")
+	f.Fuzz(func(t *testing.T, str string) {
+		// Must never panic on arbitrary node-annotation input.
+		_, _ = DecodeNodeDevices(str)
+	})
+}
+
+func FuzzDecodePodDevices(f *testing.F) {
+	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
+	f.Add("")
+	f.Add("GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:;")
+	f.Add("GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:;GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,5000,0:;")
+	f.Add("uuid,type,100:;")
+	f.Add(",,,;")
+	f.Fuzz(func(t *testing.T, annoValue string) {
+		// Must never panic on arbitrary pod-annotation input.
+		annos := map[string]string{checklist["NVIDIA"]: annoValue}
+		_, _ = DecodePodDevices(checklist, annos)
+	})
+}
+
+func TestEncodeDecodeNodeDevicesRoundtrip(t *testing.T) {
+	tests := []struct {
+		name  string
+		dlist []*DeviceInfo
+	}{
+		{
+			name: "single device, index 0",
+			dlist: []*DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   0,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla P4",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+		},
+		{
+			name: "single device, index 1",
+			dlist: []*DeviceInfo{
+				{
+					ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+					Index:   1,
+					Count:   10,
+					Devmem:  7680,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla P4",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+		},
+		{
+			name: "multiple devices",
+			dlist: []*DeviceInfo{
+				{
+					ID:      "GPU-00552014-5c87-89ac-b1a6-7b53aa24b0ec",
+					Index:   0,
+					Count:   10,
+					Devmem:  32768,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla V100-PCIE-32GB",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+				{
+					ID:      "GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448",
+					Index:   1,
+					Count:   10,
+					Devmem:  32768,
+					Devcore: 100,
+					Type:    "NVIDIA-Tesla V100-PCIE-32GB",
+					Mode:    "hami-core",
+					Numa:    0,
+					Health:  true,
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded := EncodeNodeDevices(tt.dlist)
+			decoded, err := DecodeNodeDevices(encoded)
+			assert.NilError(t, err)
+			assert.DeepEqual(t, tt.dlist, decoded)
+		})
+	}
+}
+
+// TestDecodeNodeDevicesLegacyFormat exercises the legacy 7-field decode branch
+// directly. EncodeNodeDevices always writes the 9-field form, so the encode ->
+// decode roundtrip above never reaches this path. A literal 7-field annotation
+// must decode successfully and receive the default Index (0) and Mode
+// ("hami-core") values.
+func TestDecodeNodeDevicesLegacyFormat(t *testing.T) {
+	decoded, err := DecodeNodeDevices("GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:")
+	assert.NilError(t, err)
+	assert.DeepEqual(t, []*DeviceInfo{
+		{
+			ID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
+			Index:   0,
+			Count:   10,
+			Devmem:  7680,
+			Devcore: 100,
+			Type:    "NVIDIA-Tesla P4",
+			Mode:    "hami-core",
+			Numa:    0,
+			Health:  true,
+		},
+	}, decoded)
 }

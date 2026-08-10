@@ -17,6 +17,7 @@ package device
 
 import (
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
@@ -126,8 +127,8 @@ func TestFitQuota(t *testing.T) {
 	coreName := "nvidia.com/gpucore"
 
 	qm.Quotas[ns] = &DeviceQuota{
-		memName:  &Quota{Used: 1000, Limit: 2000},
-		coreName: &Quota{Used: 200, Limit: 400},
+		memName:  &Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	// Should fit
@@ -157,6 +158,26 @@ func TestFitQuota(t *testing.T) {
 	// Should fit if device not present
 	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
+	}
+}
+
+func TestFitQuotaExplicitZeroBlocks(t *testing.T) {
+	initTest()
+	qm := &QuotaManager{Quotas: make(map[string]*DeviceQuota)}
+	ns := "team-zero"
+	memName := "nvidia.com/gpumem"
+
+	// An operator sets a ResourceQuota of "0" to block all GPU memory in the namespace.
+	rq := &corev1.ResourceQuota{}
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName): *resource.NewQuantity(0, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+
+	// The explicit zero must block any positive request, not be read as "unlimited".
+	if qm.FitQuota(ns, 500, 1, 0, "NVIDIA") {
+		t.Error(`FitQuota admitted a 500 request under limits.nvidia.com/gpumem: "0"; an explicit zero quota must block`)
 	}
 }
 
@@ -250,5 +271,132 @@ func TestAddQuotaAndDelQuota(t *testing.T) {
 	}
 	if (*qm.Quotas[ns])[coreName].Limit != 0 {
 		t.Errorf("DelQuota: expected core limit 0, got %d", (*qm.Quotas[ns])[coreName].Limit)
+	}
+}
+
+func TestDelQuotaNonLimitsKey(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "testns"
+	memName := "nvidia.com/gpumem"
+	coreName := "nvidia.com/gpucore"
+
+	rq := &corev1.ResourceQuota{}
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName):  *resource.NewQuantity(100, resource.DecimalSI),
+		corev1.ResourceName("limits." + coreName): *resource.NewQuantity(10, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+
+	// Quota with non-limits keys (including 7-character prefix key).
+	unrelatedQuota := &corev1.ResourceQuota{}
+	unrelatedQuota.Namespace = ns
+	unrelatedQuota.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("requests." + memName): *resource.NewQuantity(50, resource.DecimalSI),
+		corev1.ResourceName("0123456" + memName):   *resource.NewQuantity(50, resource.DecimalSI),
+	}
+
+	// DelQuota on non-limits keys should NOT reset active quota limits.
+	qm.DelQuota(unrelatedQuota)
+	if (*qm.Quotas[ns])[memName].Limit != 100 {
+		t.Errorf("DelQuota: expected memory limit 100 after deleting non-limits quota, got %d", (*qm.Quotas[ns])[memName].Limit)
+	}
+}
+
+// A ResourceQuota update must never leave the limits zeroed, even briefly.
+// FitQuota reads a zero limit as no limit, so a check landing mid-update would
+// be waved through. The kube quota controller rewrites status.used on every pod
+// event, so updates arrive exactly when pods are being scheduled.
+func TestUpdateQuotaKeepsLimitEnforced(t *testing.T) {
+	initTest()
+	ns := "update-window"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	quota := &corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: ns},
+		Spec: corev1.ResourceQuotaSpec{
+			Hard: corev1.ResourceList{
+				corev1.ResourceName("limits.nvidia.com/gpumem"): *resource.NewQuantity(1000, resource.DecimalSI),
+			},
+		},
+	}
+	qm.AddQuota(quota)
+	// The namespace is already at its limit, so every answer below must be false.
+	(*qm.Quotas[ns])["nvidia.com/gpumem"].Used = 1000
+
+	var wrongAdmits int64
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				qm.UpdateQuota(quota, quota)
+			}
+		}
+	})
+
+	wg.Go(func() {
+		for range 50000 {
+			if qm.FitQuota(ns, 1, 1, 0, "NVIDIA") {
+				atomic.AddInt64(&wrongAdmits, 1)
+			}
+		}
+		close(stop)
+	})
+
+	wg.Wait()
+	if wrongAdmits > 0 {
+		t.Errorf("quota went unenforced for %d checks while updates were in flight", wrongAdmits)
+	}
+}
+
+func TestUpdateQuota(t *testing.T) {
+	initTest()
+	ns := "update-apply"
+	qm := NewQuotaManager()
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	quotaWith := func(mem, core int64) *corev1.ResourceQuota {
+		hard := corev1.ResourceList{}
+		if mem > 0 {
+			hard["limits.nvidia.com/gpumem"] = *resource.NewQuantity(mem, resource.DecimalSI)
+		}
+		if core > 0 {
+			hard["limits.nvidia.com/gpucore"] = *resource.NewQuantity(core, resource.DecimalSI)
+		}
+		return &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Namespace: ns},
+			Spec:       corev1.ResourceQuotaSpec{Hard: hard},
+		}
+	}
+
+	old := quotaWith(1000, 100)
+	qm.AddQuota(old)
+
+	// Raising the memory limit and dropping the core one entirely.
+	qm.UpdateQuota(old, quotaWith(2000, 0))
+
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 2000 {
+		t.Errorf("memory limit = %d, want 2000", got)
+	}
+	// A key the new quota no longer carries is released, not left at its old value.
+	if got := (*qm.Quotas[ns])["nvidia.com/gpucore"].Limit; got != 0 {
+		t.Errorf("core limit = %d, want 0 now that the new quota drops it", got)
+	}
+
+	// Usage already recorded survives an update.
+	(*qm.Quotas[ns])["nvidia.com/gpumem"].Used = 500
+	qm.UpdateQuota(quotaWith(2000, 0), quotaWith(3000, 0))
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Used; got != 500 {
+		t.Errorf("used = %d, want 500 preserved across the update", got)
+	}
+	if got := (*qm.Quotas[ns])["nvidia.com/gpumem"].Limit; got != 3000 {
+		t.Errorf("memory limit = %d, want 3000", got)
 	}
 }

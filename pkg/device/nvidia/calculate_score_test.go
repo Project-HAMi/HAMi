@@ -17,13 +17,55 @@ limitations under the License.
 package nvidia
 
 import (
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
 )
 
+// Test_calculateGPUPairScore_asymmetric covers the one-sided NVLink case identified in
+// the bug investigation: dev0 has both a PCIe topology entry and an NVLink entry toward
+// dev1, but dev1 only has a PCIe topology entry toward dev0. This reflects a real hardware
+// or driver state where NVLink state is enabled on only one side.
+func Test_calculateGPUPairScore_asymmetric(t *testing.T) {
+	dev0 := &Device{
+		Index:       0,
+		nvlibDevice: nvlibDevice{UUID: "gpu0"},
+		Links: map[int][]P2PLink{
+			1: {
+				{Type: P2PLinkSameCPU},  // PCIe topology entry
+				{Type: FourNVLINKLinks}, // NVLink entry — only present on this side
+			},
+		},
+	}
+	dev1 := &Device{
+		Index:       1,
+		nvlibDevice: nvlibDevice{UUID: "gpu1"},
+		Links: map[int][]P2PLink{
+			0: {
+				{Type: P2PLinkSameCPU}, // PCIe topology entry only — NVLink absent
+			},
+		},
+	}
+
+	var score int
+	var asymmetric bool
+	assert.NilError(t, func() (err error) {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("unexpected panic: %v", r)
+			}
+		}()
+		score, asymmetric = calculateGPUPairScore(dev0, dev1)
+		return nil
+	}())
+
+	assert.Equal(t, score, 0, "asymmetric pair must score 0")
+	assert.Equal(t, asymmetric, true, "asymmetric flag must be set")
+}
+
 func Test_CalculateGPUScore(t *testing.T) {
-	score, err := CalculateGPUScore([]string{"GPU-ebe7c3f7-303d-558d-435e-99a160631fe4"})
+	score, _, err := CalculateGPUScore([]string{"GPU-ebe7c3f7-303d-558d-435e-99a160631fe4"})
 	t.Log(score)
 	t.Log(err)
 }
@@ -118,7 +160,8 @@ func Test_calculateGPUScore(t *testing.T) {
 					if i == j {
 						continue
 					}
-					score[gpuJ.UUID] = calculateGPUPairScore(gpuI, gpuJ)
+					s, _ := calculateGPUPairScore(gpuI, gpuJ)
+					score[gpuJ.UUID] = s
 				}
 				scoreList[i] = DeviceScore{
 					UUID:  gpuI.UUID,

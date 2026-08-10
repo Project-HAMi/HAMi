@@ -188,7 +188,7 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	if len(alloc) == 0 {
 		reason[common.NumaNotFit]++
 		klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
-		return false, tmpDevs, common.GenReason(reason, len(reason))
+		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 
 	for _, dev := range alloc {
@@ -217,5 +217,5 @@ func (dev *KunlunDevices) GetResourceNames() device.ResourceNames {
 }
 
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
-	return device.Used == 0
+	return device.Used == 0 && device.Health
 }

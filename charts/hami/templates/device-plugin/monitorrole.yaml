@@ -24,6 +24,14 @@ rules:
       - update
       - list
       - patch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - list
+      - create
+      - update
 {{- end -}}
     
     

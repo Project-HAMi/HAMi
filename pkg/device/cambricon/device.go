@@ -54,6 +54,9 @@ const (
 	DsmluProfile          = "CAMBRICON_DSMLU_PROFILE"
 	DsmluResourceAssigned = "CAMBRICON_DSMLU_ASSIGNED"
 	retry                 = 5
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. One cambricon.com/mlu.smlu.vmemory is 256 MiB.
+	MemoryFactor = 256
 )
 
 var (
@@ -198,7 +201,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Index:        uint(i),
 			ID:           n.Name + "-cambricon-mlu-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * 256 * 100 / cards),
+			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
 			Devcore:      100,
 			Type:         CambriconMLUDevice,
 			Numa:         0,
@@ -251,7 +254,7 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				memnums, ok := mem.AsInt64()
 				klog.Infoln("mluResourceMem", mem, memnums)
 				if ok {
-					memnum = int(memnums) * 256
+					memnum = int(memnums) * MemoryFactor
 				}
 			}
 			corenum := int32(100)
@@ -318,6 +321,39 @@ func (dev *CambriconDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceU
 	return nil
 }
 
+// fitQuota resolves the pod's hypothetical total usage (this candidate device
+// plus whatever is already tentatively allocated) and checks it against the
+// namespace ResourceQuota. It mirrors the equivalent helper in the nvidia
+// backend so that quota is enforced against the same resolved memory value
+// (including percentage/whole-card requests) that fitResourceQuota misses at
+// admission time, rather than only against explicit vmemory requests.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, devUUID string, memreq int64, coresreq int64) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[CambriconMLUDevice]...)
+	cur = append(cur, device.ContainerDevice{
+		UUID:      devUUID,
+		Type:      CambriconMLUDevice,
+		Usedmem:   int32(memreq),
+		Usedcores: int32(coresreq),
+	})
+	hypo[CambriconMLUDevice] = append(hypo[CambriconMLUDevice], cur)
+
+	var mem, core int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[CambriconMLUDevice] {
+		for _, val := range ctrDevs {
+			mem += int64(val.Usedmem)
+			core += int64(val.Usedcores)
+		}
+	}
+
+	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, CambriconMLUDevice)
+}
+
 func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -330,7 +366,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, numa := cam.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -339,7 +379,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -374,6 +414,11 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if k.MemPercentagereq != 101 && k.Memreq == 0 {
 			//This incurs an issue
 			memreq = dev.Totalmem * k.MemPercentagereq / 100
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memreq), int64(k.Coresreq)) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memreq, "coresreq", k.Coresreq)
+			continue
 		}
 		if dev.Totalmem-dev.Usedmem < memreq {
 			reason[common.CardInsufficientMemory]++
@@ -414,9 +459,9 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
@@ -426,5 +471,6 @@ func (dev *CambriconDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MLUResourceCount,
 		ResourceMemoryName: MLUResourceMemory,
 		ResourceCoreName:   MLUResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }
