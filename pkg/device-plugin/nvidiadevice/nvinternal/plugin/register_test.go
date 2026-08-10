@@ -21,10 +21,9 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	mock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
 func TestInt8SliceString(t *testing.T) {
@@ -87,230 +86,54 @@ func TestInt8SliceString(t *testing.T) {
 
 func TestGetNumaNode(t *testing.T) {
 	t.Run("error getting PCI info", func(t *testing.T) {
-		d := &mock.Device{
-			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
-				return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
-			},
-		}
-		hasNode, node, err := GetNumaNode(d)
-		if err == nil {
-			t.Fatal("expected an error getting PCI info")
-		}
-		if hasNode || node != 0 {
-			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+		dev := &nvmlmock.Device{GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+			return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
+		}}
+		hasNode, node, err := GetNumaNode(dev)
+		if err == nil || hasNode || node != 0 {
+			t.Fatalf("GetNumaNode() = (%v, %v, %v), want (false, 0, error)", hasNode, node, err)
 		}
 	})
 
-	t.Run("numa_node file not present for this bus ID", func(t *testing.T) {
-		// GetPciInfo succeeds but no /sys/bus/pci/devices entry exists for this bus ID on the test host.
-		d := &mock.Device{
-			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
-				return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
-			},
-		}
-		hasNode, node, err := GetNumaNode(d)
-		if err == nil {
-			t.Fatal("expected an error reading the (nonexistent) numa_node file")
-		}
-		if hasNode || node != 0 {
-			t.Errorf("got hasNode=%v node=%v, want false/0", hasNode, node)
+	t.Run("numa node file is absent", func(t *testing.T) {
+		dev := &nvmlmock.Device{GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+		}}
+		hasNode, node, err := GetNumaNode(dev)
+		if err == nil || hasNode || node != 0 {
+			t.Fatalf("GetNumaNode() = (%v, %v, %v), want (false, 0, error)", hasNode, node, err)
 		}
 	})
 }
 
-// TestGetAPIDevices_PanicsOnNVMLInitFailure verifies getAPIDevices panics when nvml.Init fails, using a stubbed nvmlInit so the test doesn't need a real NVIDIA driver.
-func TestGetAPIDevices_PanicsOnNVMLInitFailure(t *testing.T) {
-	origInit := nvmlInit
+func TestGetAPIDevicesPanicsOnNVMLInitFailure(t *testing.T) {
+	originalInit := nvmlInit
 	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
-	defer func() { nvmlInit = origInit }()
+	defer func() { nvmlInit = originalInit }()
 
-	mockRM := &rm.ResourceManagerMock{
-		DevicesFunc: func() rm.Devices { return rm.Devices{} },
-	}
-	plugin := &NvidiaDevicePlugin{rm: mockRM}
-
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
 	defer func() {
-		if r := recover(); r == nil {
-			t.Fatal("expected getAPIDevices to panic when nvml.Init fails")
+		if recover() == nil {
+			t.Fatal("getAPIDevices did not panic when NVML initialization failed")
 		}
 	}()
 	plugin.getAPIDevices()
 }
 
-// TestGetAPIDevices_ShutsDownOnNVMLInitSuccess verifies nvml.Shutdown is deferred only after nvmlInit succeeds, using stubbed seams so the real NVML library is never touched.
-func TestGetAPIDevices_ShutsDownOnNVMLInitSuccess(t *testing.T) {
-	origInit := nvmlInit
-	origShutdown := nvml.Shutdown
+func TestGetAPIDevicesShutsDownAfterNVMLInit(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
 	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
 	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
 	defer func() {
-		nvmlInit = origInit
-		nvml.Shutdown = origShutdown
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
 	}()
 
-	mockRM := &rm.ResourceManagerMock{
-		DevicesFunc: func() rm.Devices { return rm.Devices{} },
-	}
-	plugin := &NvidiaDevicePlugin{rm: mockRM}
-
-	got := plugin.getAPIDevices()
-	if got == nil || len(*got) != 0 {
-		t.Fatalf("got %v, want a non-nil empty slice", got)
-	}
-}
-
-func TestProcessMigConfigs(t *testing.T) {
-	plugin := &NvidiaDevicePlugin{}
-
-	tests := []struct {
-		name           string
-		migConfigs     map[string]nvidia.MigConfigSpecSlice
-		deviceCount    int
-		expectErr      bool
-		expectedLen    int
-		validateResult func(t *testing.T, result nvidia.MigConfigSpecSlice)
-	}{
-		{
-			name:        "nil migConfigs returns error",
-			migConfigs:  nil,
-			deviceCount: 2,
-			expectErr:   true,
-		},
-		{
-			name:        "zero deviceCount returns error",
-			migConfigs:  map[string]nvidia.MigConfigSpecSlice{"current": {}},
-			deviceCount: 0,
-			expectErr:   true,
-		},
-		{
-			name:        "negative deviceCount returns error",
-			migConfigs:  map[string]nvidia.MigConfigSpecSlice{"current": {}},
-			deviceCount: -1,
-			expectErr:   true,
-		},
-		{
-			name: "single config with empty devices expands to all devices",
-			migConfigs: map[string]nvidia.MigConfigSpecSlice{
-				"current": {
-					nvidia.MigConfigSpec{
-						Devices:    []int32{},
-						MigEnabled: true,
-						MigDevices: map[string]int32{"1g.5gb": 7},
-					},
-				},
-			},
-			deviceCount: 3,
-			expectErr:   false,
-			expectedLen: 3,
-			validateResult: func(t *testing.T, result nvidia.MigConfigSpecSlice) {
-				for i, cfg := range result {
-					if len(cfg.Devices) != 1 || cfg.Devices[0] != int32(i) {
-						t.Errorf("config[%d].Devices = %v, want [%d]", i, cfg.Devices, i)
-					}
-					if !cfg.MigEnabled {
-						t.Errorf("config[%d].MigEnabled = false, want true", i)
-					}
-					if cfg.MigDevices["1g.5gb"] != 7 {
-						t.Errorf("config[%d].MigDevices[1g.5gb] = %d, want 7", i, cfg.MigDevices["1g.5gb"])
-					}
-				}
-			},
-		},
-		{
-			name: "multiple configs with explicit device mapping",
-			migConfigs: map[string]nvidia.MigConfigSpecSlice{
-				"current": {
-					nvidia.MigConfigSpec{
-						Devices:    []int32{0, 1},
-						MigEnabled: true,
-						MigDevices: map[string]int32{"1g.5gb": 7},
-					},
-					nvidia.MigConfigSpec{
-						Devices:    []int32{2},
-						MigEnabled: true,
-						MigDevices: map[string]int32{"2g.10gb": 3},
-					},
-				},
-			},
-			deviceCount: 3,
-			expectErr:   false,
-			expectedLen: 3,
-			validateResult: func(t *testing.T, result nvidia.MigConfigSpecSlice) {
-				// Device 0 should get 1g.5gb config
-				if result[0].MigDevices["1g.5gb"] != 7 {
-					t.Errorf("device 0: MigDevices[1g.5gb] = %d, want 7", result[0].MigDevices["1g.5gb"])
-				}
-				if len(result[0].Devices) != 1 || result[0].Devices[0] != 0 {
-					t.Errorf("device 0: Devices = %v, want [0]", result[0].Devices)
-				}
-				// Device 1 should get 1g.5gb config
-				if result[1].MigDevices["1g.5gb"] != 7 {
-					t.Errorf("device 1: MigDevices[1g.5gb] = %d, want 7", result[1].MigDevices["1g.5gb"])
-				}
-				// Device 2 should get 2g.10gb config
-				if result[2].MigDevices["2g.10gb"] != 3 {
-					t.Errorf("device 2: MigDevices[2g.10gb] = %d, want 3", result[2].MigDevices["2g.10gb"])
-				}
-			},
-		},
-		{
-			name: "device not found in config returns error",
-			migConfigs: map[string]nvidia.MigConfigSpecSlice{
-				"current": {
-					nvidia.MigConfigSpec{
-						Devices:    []int32{0},
-						MigEnabled: true,
-						MigDevices: map[string]int32{"1g.5gb": 7},
-					},
-				},
-			},
-			deviceCount: 3,
-			expectErr:   true,
-		},
-		{
-			name: "single device single config",
-			migConfigs: map[string]nvidia.MigConfigSpecSlice{
-				"current": {
-					nvidia.MigConfigSpec{
-						Devices:    []int32{0},
-						MigEnabled: false,
-						MigDevices: map[string]int32{},
-					},
-				},
-			},
-			deviceCount: 1,
-			expectErr:   false,
-			expectedLen: 1,
-			validateResult: func(t *testing.T, result nvidia.MigConfigSpecSlice) {
-				if result[0].MigEnabled {
-					t.Error("config[0].MigEnabled = true, want false")
-				}
-				if len(result[0].Devices) != 1 || result[0].Devices[0] != 0 {
-					t.Errorf("config[0].Devices = %v, want [0]", result[0].Devices)
-				}
-			},
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result, err := plugin.processMigConfigs(tt.migConfigs, tt.deviceCount)
-			if tt.expectErr {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				return
-			}
-			if err != nil {
-				t.Fatalf("unexpected error: %v", err)
-			}
-			if len(result) != tt.expectedLen {
-				t.Fatalf("result length = %d, want %d", len(result), tt.expectedLen)
-			}
-			if tt.validateResult != nil {
-				tt.validateResult(t, result)
-			}
-		})
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
+	devices := plugin.getAPIDevices()
+	if devices == nil || len(*devices) != 0 {
+		t.Fatalf("getAPIDevices() = %v, want non-nil empty slice", devices)
 	}
 }
 

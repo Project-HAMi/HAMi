@@ -1,5 +1,7 @@
 # NVIDIA GPU MPS and MIG dynamic slice plugin
 
+> **Legacy design:** This document describes the `knownMigGeometries` implementation on the `master` branch. The current topology-aware implementation discovers MIG capability through NVML and uses `migProfileAllowlist`. See [Migrating to HAMi Dynamic MIG](./dynamic-mig-migration.md) for operational guidance and [Dynamic MIG Architecture](./mig-dynamic-deallocate.md) for the current design.
+
 ## Special Thanks
 
 This feature will not be implemented without the help of @sailorvii.
@@ -169,4 +171,3 @@ If you submit the example on an empty A100-PCIE-40GB node, then it will select a
 ```
 
 Then start the container with 2g.10gb instances * 2
-
