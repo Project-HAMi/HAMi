@@ -162,19 +162,36 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 
 	trimMem := dev.config.MemoryAllocatable
+	snappedMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
 	if ok {
 		if isHAMiCore {
 			trimMem = memory.Value()
+			snappedMem = trimMem
 		} else {
-			trimMem, _ = dev.trimMemory(memory.Value())
-			if trimMem <= 0 {
-				return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, memory.Value())
+			rawMem := memory.Value()
+			scaledMem := rawMem
+			if dev.config.MemoryFactor > 1 {
+				scaledMem = rawMem * int64(dev.config.MemoryFactor)
+			}
+			snappedMem, _ = dev.trimMemory(scaledMem)
+			if snappedMem <= 0 {
+				return false, fmt.Errorf("%s %d is invalid", dev.config.ResourceMemoryName, rawMem)
+			}
+			// GenerateResourceRequests scales whatever ends up in this field by
+			// MemoryFactor again before trimming it against the same templates.
+			// When a factor is configured, keep the raw (pre-factor) value here
+			// so it isn't scaled a second time downstream; otherwise preserve
+			// the existing behavior of snapping to the matched template/capacity.
+			if dev.config.MemoryFactor > 1 {
+				trimMem = rawMem
+			} else {
+				trimMem = snappedMem
 			}
 		}
 	}
 	if count.Value() > 1 && !isHAMiCore {
-		if trimMem != dev.config.MemoryAllocatable {
+		if snappedMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
 	}

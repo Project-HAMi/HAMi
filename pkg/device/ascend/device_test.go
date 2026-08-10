@@ -1439,6 +1439,63 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 	}
 }
 
+// Test_MutateAdmission_Then_GenerateResourceRequests_WithFactor is a
+// regression test for the MutateAdmission -> GenerateResourceRequests
+// pipeline (mutating webhook mutates the container first, then the
+// scheduler reads the mutated container) when MemoryFactor > 1 is
+// configured. Both functions must agree on the matched template: if
+// MutateAdmission snaps the container's memory field to the
+// already-scaled-and-trimmed internal value, GenerateResourceRequests
+// would scale it a second time and overflow every template, silently
+// falling back to a whole-device (100%) request.
+func Test_MutateAdmission_Then_GenerateResourceRequests_WithFactor(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:         "Ascend910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  int64(32768),
+			MemoryCapacity:     int64(32768),
+			MemoryFactor:       int32(100),
+			Templates: []Template{
+				{Name: "vir02", Memory: int64(2184), AICore: int32(2)},
+				{Name: "vir04", Memory: int64(4369), AICore: int32(4)},
+				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
+				{Name: "vir16", Memory: int64(17476), AICore: int32(16)},
+			},
+		},
+	}
+
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("128"),
+			},
+		},
+	}
+	pod := corev1.Pod{}
+
+	found, err := dev.MutateAdmission(&ctr, &pod)
+	assert.NilError(t, err)
+	assert.Equal(t, found, true)
+
+	// The field must still hold the raw, pre-factor value the user
+	// requested so GenerateResourceRequests can scale it exactly once.
+	mem := ctr.Resources.Limits["huawei.com/Ascend910A-memory"]
+	assert.Equal(t, mem.Value(), int64(128))
+
+	got := dev.GenerateResourceRequests(&ctr)
+	want := device.ContainerDeviceRequest{
+		Nums:             int32(1),
+		Type:             "Ascend910A",
+		Memreq:           int32(17476),
+		MemPercentagereq: int32(0),
+		Coresreq:         int32(0),
+	}
+	assert.Equal(t, got, want)
+}
+
 func TestDevices_LockNode(t *testing.T) {
 	tests := []struct {
 		name        string
