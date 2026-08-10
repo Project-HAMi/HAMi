@@ -741,6 +741,13 @@ func Test_SetDeviceSmLimit(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999, smLimit: [16]uint64{}}}
+		s.SetDeviceSmLimit(500)
+		want := [16]uint64{500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500}
+		assert.DeepEqual(t, s.sr.smLimit, want)
+	})
 }
 
 func Test_IsValidUUID(t *testing.T) {
@@ -971,6 +978,13 @@ func Test_SetDeviceMemoryLimit(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999}}
+		s.SetDeviceMemoryLimit(750)
+		want := [16]uint64{750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750}
+		assert.DeepEqual(t, s.sr.limit, want)
+	})
 }
 
 func Test_LastKernelTime(t *testing.T) {

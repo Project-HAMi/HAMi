@@ -147,8 +147,8 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceSmLimit(l uint64) {
-	n := s.sr.num
-	for idx := uint64(0); idx < n; idx++ {
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
 		atomic.StoreUint64(&s.sr.smLimit[idx], l)
 	}
 }
@@ -166,8 +166,8 @@ func (s Spec) DeviceMemoryLimit(idx int) uint64 {
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
-	n := s.sr.num
-	for idx := uint64(0); idx < n; idx++ {
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
 		atomic.StoreUint64(&s.sr.limit[idx], l)
 	}
 }
