@@ -1,0 +1,176 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "metaxsGPUTopologyAware": {
+      "type": "string",
+      "enum": ["true", "false"]
+    },
+    "device-config": {
+      "type": "object"
+    },
+    "scheduler": {
+      "type": "object",
+      "properties": {
+        "forceOverwriteDefaultScheduler": {
+          "type": "boolean"
+        },
+        "livenessProbe": {
+          "type": "boolean"
+        },
+        "leaderElect": {
+          "type": "boolean"
+        },
+        "kubeScheduler": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "overwriteEnv": {
+          "type": "string",
+          "enum": ["true", "false"]
+        },
+        "replicas": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admissionWebhook": {
+          "type": "object",
+          "properties": {
+            "customURL": {
+              "type": "object",
+              "properties": {
+                "port": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "httpPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "schedulerPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "monitorPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "monitorTargetPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            },
+            "httpTargetPort": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65535
+            }
+          }
+        }
+      }
+    },
+    "devicePlugin": {
+      "type": "object",
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "hostPID": {
+          "type": "boolean"
+        },
+        "hostNetwork": {
+          "type": "boolean"
+        },
+        "gpuOperatorToolkitReady": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "deviceSplitCount": {
+          "type": "integer"
+        },
+        "deviceMemoryScaling": {
+          "anyOf": [
+            { "type": "number", "minimum": 0 },
+            { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
+          ]
+        },
+        "deviceCoreScaling": {
+          "anyOf": [
+            { "type": "number", "minimum": 0 },
+            { "type": "string", "pattern": "^[0-9]+(\\.[0-9]+)?$" }
+          ]
+        },
+        "preConfiguredDeviceMemory": {
+          "type": "integer"
+        },
+        "disablecorelimit": {
+          "type": "string",
+          "enum": ["true", "false"]
+        },
+        "nvidiaHookPath": {
+          "type": ["string", "null"]
+        },
+        "nvidiaDriverRoot": {
+          "type": ["string", "null"]
+        },
+        "gdrcopyEnabled": {
+          "type": ["boolean", "null"]
+        },
+        "gdsEnabled": {
+          "type": ["boolean", "null"]
+        },
+        "mofedEnabled": {
+          "type": ["boolean", "null"]
+        },
+        "pluginPort": {
+          "type": "object",
+          "properties": {
+            "httpPort": {
+              "type": "integer"
+            }
+          }
+        },
+        "service": {
+          "type": "object",
+          "properties": {
+            "httpPort": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "devices": {
+      "type": "object",
+      "properties": {
+        "amd": { "type": "object" },
+        "awsneuron": { "type": "object" },
+        "nvidia": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "kunlun": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "enflame": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "mthreads": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "vastai": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "biren": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "ascend": { "type": "object", "properties": { "enabled": { "type": "boolean" } } },
+        "iluvatar": { "type": "object", "properties": { "enabled": { "type": "boolean" } } }
+      }
+    }
+  }
+}
