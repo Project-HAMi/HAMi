@@ -92,8 +92,18 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.V(3).Info("Starting to collect metrics for scheduler")
 	legacy := cc.ClusterManager.LegacyMetrics
+	// A single snapshot is shared by the node- and container-level collectors so
+	// they observe a consistent cluster state within one scrape.
+	nu := cc.metricsProvider.InspectAllNodesUsage()
+	cc.collectNodeMetrics(ch, nu, legacy)
+	cc.collectQuotaMetrics(ch, legacy)
+	cc.collectContainerMetrics(ch, nu, legacy)
+}
 
-	// New metric descriptors
+// collectNodeMetrics emits node-level GPU metrics (memory/core limits and
+// allocations, sharing counts, MIG instances and overview) for every device on
+// every node. AMD core values are normalized to a percentage.
+func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric, nu *map[string]*schedulerpkg.NodeUsage, legacy bool) {
 	nodevGPUMemoryLimitDesc := prometheus.NewDesc(
 		"hami_gpu_memory_limit_bytes",
 		"Device memory limit for a certain GPU",
@@ -145,9 +155,6 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		legacyOverview            *prometheus.Desc
 		legacyMemoryPercentage    *prometheus.Desc
 		legacyMigInstance         *prometheus.Desc
-		legacyAllocatedMemory     *prometheus.Desc
-		legacyAllocatedCore       *prometheus.Desc
-		legacyQuotaUsed           *prometheus.Desc
 	)
 	if legacy {
 		legacyMemoryLimitDesc = prometheus.NewDesc(
@@ -190,24 +197,8 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			"GPU Sharing mode. 0 for hami-core, 1 for mig, 2 for mps",
 			[]string{"nodeid", "deviceuuid", "deviceidx", "migname"}, nil,
 		)
-		legacyAllocatedMemory = prometheus.NewDesc(
-			"vGPUMemoryAllocated",
-			"vGPU memory allocated from a container",
-			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
-		)
-		legacyAllocatedCore = prometheus.NewDesc(
-			"vGPUCoreAllocated",
-			"vGPU core allocated from a container",
-			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
-		)
-		legacyQuotaUsed = prometheus.NewDesc(
-			"QuotaUsed",
-			"resourcequota usage for a certain device",
-			[]string{"quotanamespace", "quotaName", "limit"}, nil,
-		)
 	}
 
-	nu := cc.metricsProvider.InspectAllNodesUsage()
 	for nodeID, val := range *nu {
 		for _, devs := range val.Devices.DeviceLists {
 			coreLimit, coreAllocated := normalizeAMDCoreMetrics(devs.Device.Type, devs.Device.Totalcore, devs.Device.Usedcores)
@@ -265,7 +256,39 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 			}
 		}
 	}
+}
 
+// collectQuotaMetrics emits per-namespace resource quota usage.
+func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metric, legacy bool) {
+	quotaUsedDesc := prometheus.NewDesc(
+		"hami_resource_quota_used",
+		"resourcequota usage for a certain device",
+		[]string{"namespace", "quota_name", "limit"}, nil,
+	)
+	var legacyQuotaUsed *prometheus.Desc
+	if legacy {
+		legacyQuotaUsed = prometheus.NewDesc(
+			"QuotaUsed",
+			"resourcequota usage for a certain device",
+			[]string{"quotanamespace", "quotaName", "limit"}, nil,
+		)
+	}
+	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
+		for quotaname, q := range *val {
+			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
+				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
+			}
+			if legacy {
+				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))
+			}
+		}
+	}
+}
+
+// collectContainerMetrics emits per-container vGPU metrics for all scheduled
+// pods. AMD core allocations are normalized to a percentage via
+// normalizeAMDCoreMetrics (issue #2518); legacy metrics keep raw values.
+func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.Metric, nu *map[string]*schedulerpkg.NodeUsage, legacy bool) {
 	ctrvGPUdeviceAllocatedMemoryDesc := prometheus.NewDesc(
 		"hami_vgpu_memory_allocated_bytes",
 		"vGPU memory allocated from a container",
@@ -276,20 +299,21 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 		"vGPU core allocated from a container",
 		[]string{"namespace", "node", "pod", "container_index", "device_uuid"}, nil,
 	)
-	quotaUsedDesc := prometheus.NewDesc(
-		"hami_resource_quota_used",
-		"resourcequota usage for a certain device",
-		[]string{"namespace", "quota_name", "limit"}, nil,
+	var (
+		legacyAllocatedMemory *prometheus.Desc
+		legacyAllocatedCore   *prometheus.Desc
 	)
-	for ns, val := range cc.metricsProvider.GetQuotaManager().GetResourceQuota() {
-		for quotaname, q := range *val {
-			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
-				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
-			}
-			if legacy {
-				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))
-			}
-		}
+	if legacy {
+		legacyAllocatedMemory = prometheus.NewDesc(
+			"vGPUMemoryAllocated",
+			"vGPU memory allocated from a container",
+			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		)
+		legacyAllocatedCore = prometheus.NewDesc(
+			"vGPUCoreAllocated",
+			"vGPU core allocated from a container",
+			[]string{"podnamespace", "nodename", "podname", "containeridx", "deviceuuid"}, nil,
+		)
 	}
 	schedpods, _ := cc.metricsProvider.GetPodManager().GetScheduledPods()
 	for _, val := range schedpods {
