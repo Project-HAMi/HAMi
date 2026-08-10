@@ -994,7 +994,7 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    1,
 			wantDevIDs: []string{},
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
@@ -1095,9 +1095,37 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    2,
 			wantDevIDs: []string{},
 			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      MthreadsGPUDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             MthreadsGPUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -1113,10 +1141,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[MthreadsGPUDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MthreadsGPUDevice]))
+			}
 			if test.wantFit {
-				if len(result[MthreadsGPUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[MthreadsGPUDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[MthreadsGPUDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[MthreadsGPUDevice][idx].UUID)
