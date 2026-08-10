@@ -68,3 +68,33 @@ func TestDescribeCollectSync(t *testing.T) {
 		t.Errorf("Gather failed (legacy): %v", err)
 	}
 }
+
+func TestDescribeRegistersMemoryControllerUtilization(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	client := fake.NewSimpleClientset()
+	informerFactory := informers.NewSharedInformerFactory(client, 0)
+	podLister := informerFactory.Core().V1().Pods().Lister()
+
+	c := &ClusterManager{
+		Zone:            "test-zone",
+		LegacyMetrics:   false,
+		PodLister:       podLister,
+		containerLister: &nvidia.ContainerLister{},
+	}
+	cc := ClusterManagerCollector{ClusterManager: c}
+
+	descCh := make(chan *prometheus.Desc, 32)
+	cc.Describe(descCh)
+	close(descCh)
+
+	found := false
+	for desc := range descCh {
+		if desc == hostGPUMemoryUtilizationdesc {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Error("Describe did not emit hostGPUMemoryUtilizationdesc; hami_host_gpu_memory_controller_utilization_ratio will be missing from scrape output")
+	}
+}
