@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -339,6 +340,13 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						memnum = int(memnums)
 					} else {
 						m, _ := dev.trimMemory(memnums)
+						if m <= 0 {
+							// No template and not the whole card can serve this
+							// request. Carry the requested value through so Fit
+							// rejects it, rather than letting the zero fall
+							// through to the whole-card default below.
+							m = min(memnums, math.MaxInt32)
+						}
 						memnum = int(m)
 					}
 				}

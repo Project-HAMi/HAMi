@@ -1211,6 +1211,24 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(0),
 			},
 		},
+		{
+			name: "resourcememoryname larger than MemoryCapacity is carried through, not defaulted to the whole card",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("65536"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(65536),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
