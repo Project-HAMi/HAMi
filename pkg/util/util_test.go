@@ -234,6 +234,59 @@ func TestGetPendingPod(t *testing.T) {
 	}
 }
 
+// TestGetPendingPod_MultipleCandidatesPicksEarliestBindTime covers the case
+// where two or more pods are concurrently mid-bind on the same node, so more
+// than one satisfies every GetPendingPod filter. The pods are created in an
+// order that does not match bind-time order, so a selection that just took
+// whatever the list returned first would not reliably resolve to the pod
+// that actually started binding first.
+func TestGetPendingPod_MultipleCandidatesPicksEarliestBindTime(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+
+	makeCandidate := func(name, bindTime string) *corev1.Pod {
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      name,
+				Namespace: "default",
+				Annotations: map[string]string{
+					BindTimeAnnotations:     bindTime,
+					DeviceBindPhase:         DeviceBindAllocating,
+					AssignedNodeAnnotations: "test-node-multi",
+				},
+			},
+			Spec:   corev1.PodSpec{NodeName: "test-node-multi"},
+			Status: corev1.PodStatus{Phase: corev1.PodPending},
+		}
+	}
+
+	// Names are deliberately in the opposite order from bind-time, since the
+	// fake clientset's List() returns items name-sorted: a fix that just took
+	// the first list entry would pass by coincidence if candidate names and
+	// bind-time order matched, so this pins the earliest bind-time to the
+	// alphabetically-last name.
+	podLatest := makeCandidate("pod-a-latest", "300")
+	podMiddle := makeCandidate("pod-m-middle", "200")
+	podEarliest := makeCandidate("pod-z-earliest", "100")
+	for _, p := range []*corev1.Pod{podLatest, podEarliest, podMiddle} {
+		if _, err := client.KubeClient.CoreV1().Pods("default").Create(context.TODO(), p, metav1.CreateOptions{}); err != nil {
+			t.Fatalf("failed to create pod %s: %v", p.Name, err)
+		}
+	}
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node-multi", Annotations: map[string]string{}}}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), node, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	got, err := GetPendingPod(context.TODO(), "test-node-multi")
+	if err != nil {
+		t.Fatalf("GetPendingPod() error = %v", err)
+	}
+	if got.Name != podEarliest.Name {
+		t.Fatalf("expected the earliest-binding candidate %q, got %q", podEarliest.Name, got.Name)
+	}
+}
+
 func TestGetAllocatePodByNode(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 

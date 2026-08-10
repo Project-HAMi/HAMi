@@ -21,6 +21,9 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
+	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -90,7 +93,9 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 	if err != nil {
 		return nil, err
 	}
-	for _, p := range podlist.Items {
+	var candidates []*corev1.Pod
+	for i := range podlist.Items {
+		p := &podlist.Items[i]
 		if p.Status.Phase != corev1.PodPending {
 			continue
 		}
@@ -108,13 +113,43 @@ func GetPendingPod(ctx context.Context, node string) (*corev1.Pod, error) {
 		}
 		if n, ok := p.Annotations[AssignedNodeAnnotations]; !ok {
 			continue
-		} else {
-			if strings.Compare(n, node) == 0 {
-				return &p, nil
-			}
+		} else if strings.Compare(n, node) != 0 {
+			continue
 		}
+		candidates = append(candidates, p)
 	}
-	return nil, fmt.Errorf("no binding pod found on node %s", node)
+	if len(candidates) == 0 {
+		return nil, fmt.Errorf("no binding pod found on node %s", node)
+	}
+	// List() order isn't a stable ordering guarantee, so with more than one
+	// candidate mid-bind on the same node at once, picking "whichever came
+	// back first" is non-deterministic across calls. Break ties by which pod
+	// started binding first (smallest hami.io/bind-time), falling back to
+	// namespace/name so the choice stays deterministic even if a bind-time
+	// value fails to parse.
+	sort.Slice(candidates, func(i, j int) bool {
+		ti, iok := parseBindTime(candidates[i])
+		tj, jok := parseBindTime(candidates[j])
+		if iok && jok && ti != tj {
+			return ti < tj
+		}
+		if iok != jok {
+			return iok
+		}
+		if candidates[i].Namespace != candidates[j].Namespace {
+			return candidates[i].Namespace < candidates[j].Namespace
+		}
+		return candidates[i].Name < candidates[j].Name
+	})
+	return candidates[0], nil
+}
+
+func parseBindTime(p *corev1.Pod) (int64, bool) {
+	t, err := strconv.ParseInt(p.Annotations[BindTimeAnnotations], 10, 64)
+	if err != nil {
+		return math.MaxInt64, false
+	}
+	return t, true
 }
 
 func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, error) {
