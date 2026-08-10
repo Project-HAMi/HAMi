@@ -707,6 +707,86 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_NilRequests(t *testing.T) {
+	// Regression test: a pod that declares only limits (no requests block)
+	// must not panic when MutateAdmission writes the trimmed memory request.
+	tests := []struct {
+		name       string
+		ctr        corev1.Container
+		wantMemory string
+	}{
+		{
+			name: "memory limit set, requests block absent",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("8738"),
+					},
+				},
+			},
+			wantMemory: "8738",
+		},
+		{
+			name: "count only, no memory limit, requests block absent",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A": resource.MustParse("1"),
+					},
+				},
+			},
+			wantMemory: "32768", // defaults to whole-card MemoryAllocatable
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			}
+			pod := corev1.Pod{}
+			result, err := dev.MutateAdmission(&test.ctr, &pod)
+			if err != nil {
+				t.Fatalf("exec MutateAdmission method expect no error, but got %v", err)
+			}
+			if !result {
+				t.Fatalf("exec MutateAdmission method expect return is true, but got is false")
+			}
+			got, ok := test.ctr.Resources.Requests[corev1.ResourceName("huawei.com/Ascend910A-memory")]
+			if !ok {
+				t.Fatalf("expect memory request to be set, but it is absent")
+			}
+			if got.String() != test.wantMemory {
+				t.Fatalf("expect memory request %s, but got %s", test.wantMemory, got.String())
+			}
+		})
+	}
+}
+
 func Test_MutateAdmission910C(t *testing.T) {
 	tests := []struct {
 		name   string
