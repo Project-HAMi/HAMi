@@ -463,7 +463,8 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
-		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
+		// Send legacy metric with additional memory details
+		memoryOffset := c.Info.DeviceMemoryOffset(i) // Get the memory offset for the device
 		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
 		sendLegacyMetric(ch, legacyCtrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...)
 
