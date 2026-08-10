@@ -798,11 +798,11 @@ func TestSpec_ConcurrentAtomicAccess(t *testing.T) {
 	goroutines := 50
 	iterations := 200
 
-	for i := 0; i < goroutines; i++ {
+	for i := range goroutines {
 		wg.Add(1)
 		go func(id int) {
 			defer wg.Done()
-			for j := 0; j < iterations; j++ {
+			for j := range iterations {
 				val := uint64(id*iterations + j)
 				s.SetDeviceMemoryLimit(val)
 				s.SetDeviceSmLimit(val)
