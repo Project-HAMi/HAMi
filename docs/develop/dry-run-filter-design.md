@@ -175,7 +175,7 @@ The current design therefore depends on a deployment convention:
 - HAMi's kube-scheduler keeps `nodeCacheCapable: true`, so real scheduling sends `NodeNames`.
 - CA uses `nodeCacheCapable: false`, so scale-up simulation sends `Nodes`.
 
-This convention allows both request types to share `/filter`, but it is also the main interface risk in the current implementation. See [Risks](#risks).
+This convention allows both request types to share `/filter`, but it is also the main interface risk in the current implementation. See [The simulation path needs a separate contract](#the-simulation-path-needs-a-separate-contract).
 
 ### CA-side configuration
 
@@ -265,7 +265,7 @@ The simulation filter calls `calcScoreWithOptions()` with the following behavior
 - `NodeUsage.NodeInfo` points to the temporary device information, so the calculation does not look up the template node in the node manager; and
 - the simulation and live filters share the same vendor `Fit()` implementations instead of maintaining separate device-matching rules.
 
-The current implementation still uses the live filter's scoring and sorting path and returns only the highest-scoring node. An extender filter response may contain any subset of the input, so this works at the API level, but it removes other feasible nodes too early. The consequences are described in [Risks](#risks).
+The current implementation still uses the live filter's scoring and sorting path and returns only the highest-scoring node. An extender filter response may contain any subset of the input, so this works at the API level, but it removes other feasible nodes too early. The consequences are described in [Filter results and failure details must be preserved](#filter-results-and-failure-details-must-be-preserved).
 
 ### Side-effect boundary
 
@@ -367,100 +367,54 @@ The current implementation covers fresh-node feasibility for one Pod in a warm n
 | Cold-zero node group, one Pod | Provider or separate device profile | Empty-node device usage | Unsupported; a missing annotation returns `node unregistered`. |
 | Cold-zero node group, multiple Pods | Provider or separate device profile | Device profile and hypothetical allocations from earlier Pods | Unsupported. |
 
-Turning the current validation into a releasable HAMi autoscaling capability requires the following work:
+The following issues define both the current capability boundary and the work required before the integration can be released.
 
-| Priority | Area | Work | Completion criteria |
-| --- | --- | --- | --- |
-| P0 | Cluster Autoscaler | Migrate scheduler extender and `ignoredByScheduler` support to the new upstream repository. | Upstream tests cover extender order, error handling, fast paths for ordinary Pods, and node-level failure reasons. |
-| P0 | HAMi | Add a separate simulation endpoint and validate `Pod`, `Nodes`, and candidate-field exclusivity. | A regular kube-scheduler using `nodeCacheCapable: false` cannot be mistaken for a simulation caller. |
-| P0 | HAMi | Return every node that passes `Fit()` instead of retaining only the highest-scoring node during filtering. | Multi-node and multi-extender tests show that the operation only filters the candidate set. |
-| P0 | HAMi | Distinguish oversized requests, invalid JSON, missing device profiles, and parser errors. | Error responses, logs, and metrics expose the actual failure type. |
-| P0 | Integration validation | Add a warm-node-group regression test that covers delayed device-plugin registration. | A documented combination of CA, Kubernetes, provider, and HAMi versions reproduces scale-up reliably. |
-| P1 | HAMi and CA | Define a multi-Pod simulation-state contract. | Consecutive Pods simulated on one template node keep HAMi usage consistent with the CA snapshot and support retries and rollback. |
-| P1 | HAMi and provider | Define a node-group device profile and new-node registration checks. | Cold-zero groups can build trustworthy templates, with explicit handling when the actual device inventory differs from the profile. |
-| P1 | Deployment and chart | Define the Service, NetworkPolicy, TLS, request limits, rate limiting, and observability metrics. | Only the intended CA can reach the simulation endpoint, and failures and latency are observable. |
+### The simulation path needs a separate contract
+
+The current implementation uses `args.Nodes != nil` to distinguish simulation from live scheduling, even though `Nodes` in Kubernetes only means that the extender does not cache Node objects. A regular kube-scheduler configured with `nodeCacheCapable: false` also sends `Nodes`. HAMi then mistakes real scheduling for simulation and skips Pod annotations, quota usage, and allocation reservation.
+
+The shared path has other problems. A request with no device resources can still write an Event. `PredicateRoute` does not validate `ExtenderArgs.Pod` or enforce that `Nodes` and `NodeNames` are mutually exclusive. Simulation depends only on the Nodes in the request, but it still inherits the leader and live-cache `synced` requirements.
+
+The long-term design should expose a separate `/filter-simulation` endpoint, validate the request before entering scheduler logic, keep every path free of side effects, and define readiness from the state simulation actually uses. A separate path establishes call semantics; it does not provide authentication or traffic isolation.
+
+### Filter results and failure details must be preserved
+
+A filter is responsible for removing infeasible nodes. The current simulation path reuses live-scheduling scoring and sorting, then returns only the highest-scoring node. This overrides CA's node ordering. With multiple extenders, other feasible nodes removed by HAMi cannot participate in later filtering. The simulation filter should return every node that passes the vendor `Fit()` checks.
+
+Failure details are also lost on both sides. HAMi ignores parser errors from `GetNodeDevices()`, so a missing annotation, malformed JSON, and a parse failure can all appear as `node unregistered`. The experimental CA branch then drops `FailedNodes` and `FailedAndUnresolvableNodes` from the final scheduling error. A complete implementation must distinguish malformed requests, missing device profiles, and vendor parser failures, while retaining node-level failure reasons in CA.
+
+### Multi-Pod simulation needs state across requests
+
+CA's estimator adds multiple Pods to the cluster snapshot in sequence, but standard `ExtenderArgs` contains only the current Pod and candidate Nodes. It does not contain Pods already placed hypothetically on those Nodes or their HAMi allocations.
+
+HAMi reconstructs device state with `Used=0` for every request. A later Pod cannot see device memory or compute shares hypothetically consumed by an earlier Pod, so CA may underestimate the number of nodes to add. An anonymous in-process cache cannot safely provide this state. The cross-request contract must cover simulation sessions, template nodes, allocations, retries, and rollback, with complete isolation from live scheduling.
+
+### Template nodes need stable device descriptions
+
+A cold-zero node group has no existing Node. Its provider-generated template usually lacks the registration annotation produced by the HAMi device plugin, so the current implementation can only return `node unregistered`.
+
+A warm template may copy the registration annotation, but device IDs, health, NUMA placement, MIG configuration, and device-pair scores describe the sampled node's runtime state. A failed device on that node, or differences in device model, topology, and device-plugin configuration within the group, can make the template misstate the capacity of a new node.
+
+A complete design needs a stable mapping from node groups to device profiles, with explicit rules for homogeneity, sample selection, and dynamic fields. After a new node registers, its actual inventory must be checked against the profile.
+
+### Production deployment and upstream release work remain
+
+Only the intended CA should be able to reach the simulation endpoint. The deployment must define TLS, NetworkPolicy, timeouts, rate limiting, and observability metrics. The endpoint also cannot depend on request ordering or a shared simulation cache. Concurrency tests and `go test -race` are needed for shared state used by vendor parsers and `Fit()` implementations.
+
+CA-side extender support has not entered an upstream release. Upgrading HAMi alone does not invoke the simulation filter; the call is also absent if the scheduler configuration, network path, or TLS configuration is missing. Until a corresponding CA version is available, HAMi documentation and release notes should not describe this as a ready-to-use autoscaling integration.
+
+The work should proceed in this order:
+
+| Priority | Work | Completion criteria |
+| --- | --- | --- |
+| P0 | Migrate scheduler extender and `ignoredByScheduler` support to the new Cluster Autoscaler upstream repository. | Upstream tests cover extender order, error handling, fast paths for ordinary Pods, and node-level failure reasons. |
+| P0 | Add a separate HAMi simulation endpoint with request validation, side-effect isolation, and an explicit readiness definition. | A regular kube-scheduler using `nodeCacheCapable: false` is not mistaken for a simulation caller; invalid requests neither write state nor cause nil-pointer failures. |
+| P0 | Correct filter results and failure handling. | HAMi returns every node that passes `Fit()`; HAMi and CA retain diagnosable failure types and node-level reasons. |
+| P0 | Add a warm-node-group integration regression and define production deployment constraints. | A documented combination of CA, Kubernetes, provider, and HAMi versions reproduces scale-up reliably; endpoint reachability, concurrency behavior, and observability are explicitly defined. |
+| P1 | Define a multi-Pod simulation-state contract. | Consecutive Pods simulated on one template node keep HAMi usage consistent with the CA snapshot and support retries and rollback. |
+| P1 | Define a node-group device profile and new-node registration checks. | Cold-zero groups can build trustworthy templates; warm-template dynamic fields have explicit handling rules; mismatches between the actual inventory and the profile have a defined outcome. |
 
 Completing P0 would provide maintainable support for one Pod on a warm node group. Multi-Pod estimation and cold-zero groups require new cross-project contracts; they cannot be completed by extending the current handler alone.
-
-## Risks
-
-### `/filter` infers caller intent from request fields
-
-The current implementation treats `args.Nodes != nil` as a simulation request. In the Kubernetes contract, it only means that the extender does not cache Nodes. Any regular kube-scheduler configured with `nodeCacheCapable: false` sends `Nodes`, causing HAMi to mistake real scheduling for simulation and skip Pod annotations, quota usage, and allocation reservation.
-
-The current deployment avoids this conflict by having HAMi's kube-scheduler send `NodeNames` while CA sends `Nodes`. The long-term design should expose a separate `/filter-simulation` endpoint and configure CA with `filterVerb: filter-simulation`. A separate path establishes call semantics, but authentication and traffic isolation still need their own controls.
-
-### Simulation returns only the highest-scoring node
-
-A filter should remove infeasible nodes from its input set. The current simulation path continues through live scheduling score calculation and returns only the highest-scoring node. This overrides CA's existing node ordering.
-
-The effect is more pronounced with multiple extenders. After HAMi removes other feasible nodes, a later extender may reject the highest-scoring node. A different node that could have passed every filter is no longer available. The simulation filter should return every node that passes the vendor `Fit()` checks.
-
-### Multi-Pod simulation does not accumulate HAMi usage
-
-CA's estimator places multiple Pods into the cluster snapshot in sequence. Standard `ExtenderArgs` contains only the current Pod and candidate Nodes. It does not include Pods already placed hypothetically on those Nodes or their HAMi allocations.
-
-HAMi rebuilds device state from the registration annotation with `Used=0` for every request. A second Pod therefore cannot see the device memory or compute shares hypothetically consumed by the first Pod, and CA may underestimate how many nodes it needs to add.
-
-An anonymous in-process cache in HAMi cannot safely solve this problem. Cross-request state needs a protocol for simulation sessions, template nodes, allocations, retries, and rollback, with complete isolation from real scheduling.
-
-### Cold-zero groups have no device profile
-
-A cold-zero node group has no existing Node. The provider's template usually includes the instance type, standard capacity, labels, and taints, but not the registration annotation produced by the HAMi device plugin. HAMi returns `node unregistered` for such a template.
-
-A complete design needs a stable mapping from node groups to device profiles. A profile must not depend on temporary device IDs from one machine. After a new node registers, its actual inventory also needs to be checked against the profile.
-
-### Warm templates copy runtime inventory
-
-The annotation in a warm template comes from an actual node and may include device IDs, `health=false`, NUMA placement, MIG configuration, and device-pair scores. These fields describe the sampled node at a particular time and may not represent a newly created node in the group.
-
-A failed device on the sampled node can make the template underestimate capacity. Differences in device model, topology, or device-plugin configuration within a node group can make it overestimate capacity. The warm path needs explicit rules for node group homogeneity, sample selection, and handling dynamic fields.
-
-### The shared entry point still has side effects and validation gaps
-
-`Filter()` handles requests with no device resources before it checks `args.Nodes`, and it calls `recordScheduleFilterResultEvent()`. A request that carries `Nodes` but does not request a HAMi device can therefore still write an Event.
-
-`PredicateRoute` validates only the body and JSON decoding, not `ExtenderArgs.Pod`. A missing `Pod` causes a nil-pointer dereference in the shared entry point. If a HAMi device is requested but both `Nodes` and `NodeNames` are absent, the live filter's no-node path may also dereference a nil `NodeNames`. A simulation request with non-empty `Nodes` does not pass through the latter dereference.
-
-A separate simulation handler should validate the request structure before entering scheduler logic and ensure that a request with no device resources does not write cluster state.
-
-### Simulation inherits live-cache readiness
-
-`PredicateRoute` waits for the scheduler's `synced` state before calling `Scheduler.Filter()`. Although the main simulation calculation depends only on the Nodes in the request, a CA request still waits or fails during a leader transition or before the live cache has synchronized.
-
-A separate endpoint should define only the readiness conditions it actually needs. Whether it should require leadership and every informer cache to be ready depends on the state used by the simulation implementation.
-
-### Device parsing errors are hidden
-
-`buildTransientNodeInfo()` ignores errors returned by each backend's `GetNodeDevices()`. A missing annotation, invalid JSON, and a parser error can all appear as `node unregistered`. If some backends succeed, the node may also be evaluated with an incomplete device inventory.
-
-The handler needs per-vendor parsing results and clear rules for which errors reject one node and which fail the entire request. Logs must avoid including complete registration annotations.
-
-### A complete NodeList may exceed the request limit
-
-`PredicateRoute` uses an `io.LimitReader` capped at 1 MiB. With `nodeCacheCapable: false`, the request carries a complete NodeList, and HAMi registration annotations add JSON data to every Node. A sufficiently large candidate set can be truncated and reported as a JSON decoding error.
-
-The existing `TestMaxRequestSize` sends `maxRequestSize + 100` spaces and checks for `EOF` or `unexpected EOF`. It does not construct a realistic `ExtenderArgs` or large NodeList, and it does not verify an HTTP 413 response. The request limit should be based on measurements of realistic payloads, made configurable, and reported with a distinct error.
-
-### Endpoint exposure and concurrency behavior are undefined
-
-The HAMi scheduler registers `/filter`, `/bind`, and `/webhook` on the same `http.Server`. Its TLS configuration loads a server certificate but provides no application-level authentication or client-certificate verification. The Helm chart also exposes the scheduler Service as a `NodePort` by default.
-
-A production deployment must restrict simulation calls to the intended CA. At minimum, it should limit the Service's reachability and add a NetworkPolicy. If simulation needs different authentication, request limits, timeouts, or rate limits, it should use a separate listener or a controlled proxy. Adding a path alone does not create an identity boundary.
-
-The migrated CA experiment calls extenders in order within one scheduling attempt, but the Go HTTP server can process different requests concurrently. The simulation handler cannot rely on request ordering or shared simulation caches. Concurrency tests and `go test -race` are also needed for shared state used by vendor parsers and `Fit()` implementations.
-
-### CA does not retain node-level failure reasons
-
-The experimental CA branch narrows the candidate set according to extender results, but `runExtenderFilters()` does not carry `FailedNodes` or `FailedAndUnresolvableNodes` into the final scheduling error. A `CardInsufficientMemory` reason in HAMi's HTTP response may surface at a higher CA layer only as a generic statement that no node passed filtering.
-
-This does not change whether the candidate set is empty, but it makes diagnosis and failure classification harder. CA should retain node-level reasons and cover the related logs and metrics with tests.
-
-### CA support has not been released upstream
-
-Upgrading HAMi alone does not make a standard CA build call the simulation filter. The call is absent if any one of the upstream changes, scheduler configuration, network path, or TLS configuration is missing.
-
-Until the corresponding CA version is available, HAMi documentation and release notes should not describe this as a ready-to-use autoscaling integration.
 
 ## Terminology
 
