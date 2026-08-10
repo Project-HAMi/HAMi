@@ -144,6 +144,11 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 		"Realized MIG instance identity and scheduler placement",
 		[]string{"node", "device_uuid", "device_index", "mig_uuid", "profile", "gpu_instance_id", "compute_instance_id", "placement_start", "placement_size"}, nil,
 	)
+	nodeGPUDeviceHealthDesc := prometheus.NewDesc(
+		"hami_gpu_device_health",
+		"GPU device health status (1=healthy, 0=unhealthy)",
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
+	)
 
 	// Legacy metric descriptors (only created when legacy mode is enabled)
 	var (
@@ -264,6 +269,16 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index)); err != nil {
 					klog.V(4).Infof("Failed to send nodeGPUMemoryPercentage metric: %v", err)
 				}
+			}
+
+			healthVal := float64(0)
+			if devs.Device.Health {
+				healthVal = 1
+			}
+			if err := sendMetric(ch, nodeGPUDeviceHealthDesc, prometheus.GaugeValue,
+				healthVal, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type,
+			); err != nil {
+				klog.V(4).Infof("Failed to send nodeGPUDeviceHealthDesc metric: %v", err)
 			}
 
 			if legacy {

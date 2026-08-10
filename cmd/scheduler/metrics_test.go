@@ -477,3 +477,57 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 		}
 	})
 }
+
+func TestCollectNodeMetricsDeviceHealth(t *testing.T) {
+	nodeUsage := map[string]*schedulerpkg.NodeUsage{
+		"node-1": {
+			Devices: policy.DeviceUsageList{
+				DeviceLists: []*policy.DeviceListsScore{
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-healthy-0",
+							Index:     0,
+							Totalmem:  8192,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+							Health:    true,
+						},
+					},
+					{
+						Device: &device.DeviceUsage{
+							ID:        "GPU-unhealthy-1",
+							Index:     1,
+							Totalmem:  8192,
+							Totalcore: 100,
+							Type:      "NVIDIA",
+							Health:    false,
+						},
+					},
+				},
+			},
+		},
+	}
+
+	collector := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: false},
+		metricsProvider: &fakeMetricsProvider{
+			nodeUsage:    nodeUsage,
+			quotaManager: device.NewQuotaManager(),
+			podManager:   device.NewPodManager(),
+		},
+	}
+
+	want := `
+# HELP hami_gpu_device_health GPU device health status (1=healthy, 0=unhealthy)
+# TYPE hami_gpu_device_health gauge
+hami_gpu_device_health{device_index="0",device_type="NVIDIA",device_uuid="GPU-healthy-0",node="node-1"} 1
+hami_gpu_device_health{device_index="1",device_type="NVIDIA",device_uuid="GPU-unhealthy-1",node="node-1"} 0
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_gpu_device_health",
+	); err != nil {
+		t.Fatalf("unexpected collecting result:\n%s", err)
+	}
+}
