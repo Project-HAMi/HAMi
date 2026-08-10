@@ -1211,6 +1211,26 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(0),
 			},
 		},
+		{
+			// Over-capacity memory under requests only must not become whole-card.
+			// Regression for https://github.com/Project-HAMi/HAMi/issues/2532
+			name: "over-capacity memory in requests only is not whole-card default",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("65536"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(65536),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1246,6 +1266,41 @@ func Test_GenerateResourceRequests(t *testing.T) {
 
 			assert.Equal(t, result, test.want)
 		})
+	}
+}
+
+func Test_MutateAdmission_RequestsOnlyOverCapacityMemory(t *testing.T) {
+	// https://github.com/Project-HAMi/HAMi/issues/2532
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:         "Ascend910A",
+			ResourceName:       "huawei.com/Ascend910A",
+			ResourceMemoryName: "huawei.com/Ascend910A-memory",
+			MemoryAllocatable:  int64(32768),
+			MemoryCapacity:     int64(32768),
+			Templates: []Template{
+				{Name: "vir02", Memory: int64(2184), AICore: int32(2)},
+				{Name: "vir04", Memory: int64(4369), AICore: int32(4)},
+				{Name: "vir08", Memory: int64(8738), AICore: int32(8)},
+				{Name: "vir16", Memory: int64(17476), AICore: int32(16)},
+			},
+		},
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				"huawei.com/Ascend910A":        resource.MustParse("1"),
+				"huawei.com/Ascend910A-memory": resource.MustParse("65536"),
+			},
+		},
+	}
+	pod := corev1.Pod{}
+	ok, err := dev.MutateAdmission(&ctr, &pod)
+	if err == nil {
+		t.Fatalf("expected over-capacity requests-only memory to fail admission, got ok=%v err=%v", ok, err)
+	}
+	if !strings.Contains(err.Error(), "is invalid") {
+		t.Fatalf("expected invalid memory error, got %v", err)
 	}
 }
 

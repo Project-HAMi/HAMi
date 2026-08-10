@@ -116,7 +116,12 @@ func (dev *Devices) CommonWord() string {
 }
 
 func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
+	// Match GenerateResourceRequests: honor device count on requests when
+	// limits omit it so over-capacity memory checks still run.
 	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceName)]
+	if !ok {
+		count, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceName)]
+	}
 	if !ok {
 		if dev.config.OverwriteEnv {
 			ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -163,6 +168,9 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 
 	trimMem := dev.config.MemoryAllocatable
 	memory, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	if !ok {
+		memory, ok = ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)]
+	}
 	if ok {
 		if isHAMiCore {
 			trimMem = memory.Value()
@@ -178,10 +186,13 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
 	}
-	// Requests may be nil when the pod declares only limits; writing to a
-	// nil map panics.
+	// Requests/Limits may be nil when the pod only set one of them; writing
+	// to a nil map panics.
 	if ctr.Resources.Requests == nil {
 		ctr.Resources.Requests = corev1.ResourceList{}
+	}
+	if ctr.Resources.Limits == nil {
+		ctr.Resources.Limits = corev1.ResourceList{}
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
@@ -313,6 +324,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found AscendDevices devices")
 			memnum := 0
+			memoryRequested := false
 			mem, ok := ctr.Resources.Limits[ascendResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[ascendResourceMem]
@@ -320,6 +332,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					memoryRequested = true
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(dev.config.MemoryFactor)
@@ -339,7 +352,13 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						memnum = int(memnums)
 					} else {
 						m, _ := dev.trimMemory(memnums)
-						memnum = int(m)
+						if m <= 0 {
+							// Over capacity: keep the original size. Collapsing to
+							// 0 would look like "no memory" and default to 100%.
+							memnum = int(memnums)
+						} else {
+							memnum = int(m)
+						}
 					}
 				}
 			}
@@ -354,8 +373,9 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 				}
 			}
 
+			// Whole-card default only when memory was not requested at all.
 			mempnum := 0
-			if memnum == 0 {
+			if !memoryRequested {
 				mempnum = 100
 			}
 
