@@ -19,6 +19,7 @@ package ascend
 import (
 	"errors"
 	"fmt"
+	"math"
 	"strconv"
 	"strings"
 	"testing"
@@ -1225,6 +1226,42 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Nums:             int32(1),
 				Type:             "Ascend910A",
 				Memreq:           int32(65536),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "resourcememoryname larger than MemoryCapacity on the limits path is carried through too",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("65536"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(65536),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "resourcememoryname above int32 max is clamped instead of wrapping to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             "Ascend910A",
+				Memreq:           int32(math.MaxInt32),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
