@@ -233,7 +233,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	matchedFiles := 0
 	for _, val := range files {
 		if strings.Contains(val.Name(), "libvgpu.so") ||
-			strings.Contains(val.Name(), ".cache") {
+			strings.HasSuffix(val.Name(), ".cache") {
 			matchedFiles++
 		}
 	}
@@ -248,7 +248,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		if strings.Contains(val.Name(), "libvgpu.so") {
 			continue
 		}
-		if !strings.Contains(val.Name(), ".cache") {
+		if !strings.HasSuffix(val.Name(), ".cache") {
 			continue
 		}
 		cacheFile = filepath.Join(fpath, val.Name())
