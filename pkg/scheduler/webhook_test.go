@@ -1070,3 +1070,91 @@ func TestPrivilegedContainerDenied(t *testing.T) {
 		})
 	}
 }
+
+func TestInitContainersWebhook(t *testing.T) {
+	config.SchedulerName = "hami-scheduler"
+	config.ForceOverwriteDefaultScheduler = true
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultMemory:                0,
+			DefaultCores:                 0,
+			DefaultGPUNum:                1,
+		},
+	}
+	if err := config.InitDevicesWithConfig(sConfig); err != nil {
+		t.Fatalf("Failed to initialize devices with config: %v", err)
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{
+				{
+					Name: "init-container1",
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hami.io/gpu": resource.MustParse("1"),
+						},
+					},
+				},
+			},
+			Containers: []corev1.Container{
+				{
+					Name: "regular-container",
+				},
+			},
+		},
+	}
+
+	scheme := runtime.NewScheme()
+	corev1.AddToScheme(scheme)
+	codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+	podBytes, err := runtime.Encode(codec, pod)
+	if err != nil {
+		t.Fatalf("Error encoding pod: %v", err)
+	}
+
+	req := admission.Request{
+		AdmissionRequest: admissionv1.AdmissionRequest{
+			UID:       "test-uid",
+			Namespace: "default",
+			Name:      "test-pod",
+			Object: runtime.RawExtension{
+				Raw: podBytes,
+			},
+		},
+	}
+
+	wh, err := NewWebHook()
+	if err != nil {
+		t.Fatalf("Error creating WebHook: %v", err)
+	}
+
+	resp := wh.Handle(context.Background(), req)
+	if !resp.Allowed {
+		t.Errorf("Expected allowed response, but got denied: %v", resp)
+	}
+
+	// Verify that the scheduler name was patched (meaning hasResource was true)
+	if len(resp.Patches) == 0 {
+		t.Errorf("Expected patches for the scheduler name, but got none")
+	}
+
+	hasSchedulerPatch := false
+	for _, p := range resp.Patches {
+		if p.Operation == "add" && p.Path == "/spec/schedulerName" && p.Value == "hami-scheduler" {
+			hasSchedulerPatch = true
+		}
+	}
+	if !hasSchedulerPatch {
+		t.Errorf("Expected scheduler name patch for init containers, got patches: %+v", resp.Patches)
+	}
+}
