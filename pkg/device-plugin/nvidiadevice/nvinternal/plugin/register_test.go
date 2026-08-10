@@ -17,13 +17,21 @@ limitations under the License.
 package plugin
 
 import (
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 func TestInt8SliceString(t *testing.T) {
@@ -168,6 +176,60 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 		// Success: received the ack
 	case <-timeAfter(3 * time.Second):
 		t.Fatal("timed out waiting for disable ack from WatchAndRegister")
+	}
+}
+
+// TestRegisterInAnnotationRetriesAfterPatchFailure verifies that a failed
+// node-annotation patch does not poison deviceCache: the next call must
+// still see the device info as "changed" and retry the patch, instead of
+// silently early-returning forever because deviceCache already matches.
+func TestRegisterInAnnotationRetriesAfterPatchFailure(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	util.NodeName = "test-node"
+	defer func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	}()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	fakeClient := fake.NewSimpleClientset(node)
+	fakeClient.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, fmt.Errorf("simulated patch failure")
+	})
+	client.KubeClient = fakeClient
+
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if err == nil {
+		t.Fatal("RegisterInAnnotation() error = nil, want error from failed patch")
+	}
+	if !changed {
+		t.Fatal("RegisterInAnnotation() changed = false, want true (a patch was attempted)")
+	}
+	if plugin.deviceCache != "" {
+		t.Fatalf("deviceCache = %q after a failed patch, want unchanged (empty)", plugin.deviceCache)
+	}
+
+	// A second call with the same device set must retry the patch (and
+	// surface the same error) rather than treating deviceCache as already
+	// up to date.
+	changed, err = plugin.RegisterInAnnotation()
+	if err == nil {
+		t.Fatal("second RegisterInAnnotation() error = nil, want the retry to also surface the patch failure")
+	}
+	if !changed {
+		t.Fatal("second RegisterInAnnotation() changed = false, want true (patch should be retried, not skipped)")
 	}
 }
 
