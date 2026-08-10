@@ -6,7 +6,7 @@ The architecture of HAMi is shown in the figure above. It is organized in the fo
 
 - MutatingWebhook
 
-The MutatingWebhook checks the validity of each task, and set the "schedulerName" to "HAMi scheduler" if the resource requests have been recognized by HAMi
+The MutatingWebhook checks the validity of each task, and set the "schedulerName" to "HAMi scheduler" if the resource limits have been recognized by HAMi
 If Not, the MutatingWebhook does nothing and pass this task to default-scheduler.
 
 - Scheduler
