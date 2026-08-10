@@ -510,19 +510,25 @@ func Test_FitVXPU_direct(t *testing.T) {
 		},
 		{
 			name:    "idle device always fits",
-			usage:   &device.DeviceUsage{Used: 0, Usedmem: 0, Totalmem: 98304},
+			usage:   &device.DeviceUsage{Health: true, Used: 0, Usedmem: 0, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    true,
 		},
 		{
 			name:    "shared device with matching average memory",
-			usage:   &device.DeviceUsage{Used: 2, Usedmem: 49152, Totalmem: 98304},
+			usage:   &device.DeviceUsage{Health: true, Used: 2, Usedmem: 49152, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    true,
 		},
 		{
 			name:    "shared device with mismatched average memory",
 			usage:   &device.DeviceUsage{Used: 1, Usedmem: 49152, Totalmem: 98304},
+			request: device.ContainerDeviceRequest{Memreq: 24576},
+			want:    false,
+		},
+		{
+			name:    "unhealthy device is rejected",
+			usage:   &device.DeviceUsage{Health: false, Used: 0, Usedmem: 0, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    false,
 		},

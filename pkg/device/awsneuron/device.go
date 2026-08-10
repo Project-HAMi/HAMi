@@ -313,7 +313,7 @@ func continuousDeviceAvailable(devices []*device.DeviceUsage, start int, count i
 	res := []int{}
 	iterator := start
 	for iterator < start+count {
-		if devices[iterator].Used > 0 {
+		if devices[iterator].Used > 0 || !devices[iterator].Health {
 			return []int{}
 		}
 		res = append(res, iterator)
@@ -398,7 +398,11 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 			dev.CustomInfo[AWSUsageInfo] = int(dev.Usedcores)
 		}
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
 		if !strings.Contains(dev.Type, k.Type) {
 			reason[common.CardTypeMismatch]++

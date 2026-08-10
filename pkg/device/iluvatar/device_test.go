@@ -460,6 +460,7 @@ func Test_Fit(t *testing.T) {
 		wantOK     bool
 		wantLen    int
 		wantDevIDs []string
+		wantReason string
 	}{
 		{
 			name: "fit success",
@@ -529,6 +530,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
 		},
 		{
 			name: "fit fail: core not enough",
@@ -556,6 +558,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientMemory",
 		},
 		{
 			name: "fit fail: type mismatch",
@@ -583,6 +586,7 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
 		},
 		{
 			name: "mutex policy rejects used device",
@@ -612,6 +616,35 @@ func Test_Fit(t *testing.T) {
 			wantOK:     false,
 			wantLen:    0,
 			wantDevIDs: []string{},
+			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MR-V100",
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             "MR-V100",
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantOK:     false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -623,7 +656,7 @@ func Test_Fit(t *testing.T) {
 					Annotations: test.annos,
 				},
 			}
-			ok, result, _ := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
+			ok, result, reason := dev.Fit(test.devices, test.request, pod, &device.NodeInfo{}, allocated)
 			if test.wantOK {
 				if len(result["MR-V100"]) != test.wantLen {
 					t.Errorf("expected %d, got %d", test.wantLen, len(result["MR-V100"]))
@@ -643,6 +676,9 @@ func Test_Fit(t *testing.T) {
 				if len(result["MR-V100"]) != test.wantLen {
 					t.Errorf("expected %d, got %d", test.wantLen, len(result["MR-V100"]))
 				}
+			}
+			if reason != test.wantReason {
+				t.Errorf("expected reason: %s, got reason: %s", test.wantReason, reason)
 			}
 		})
 	}

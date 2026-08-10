@@ -437,6 +437,48 @@ func Test_countMaskAvailable(t *testing.T) {
 	}
 }
 
+// makeDeviceUsages builds a 16-element []*device.DeviceUsage slice for use in
+// Test_graphSelect. nodeType is stored in index 0's CustomInfo under AWSNodeType.
+// usedOverrides maps device index to its Used value; all other indices default to 0.
+// health sets the Health field on every entry.
+func makeDeviceUsages(nodeType string, usedOverrides map[int]int32, health bool) []*device.DeviceUsage {
+	devices := make([]*device.DeviceUsage, 16)
+	for i := range 16 {
+		du := &device.DeviceUsage{Index: uint(i), Health: health}
+		if i == 0 {
+			du.CustomInfo = map[string]any{AWSNodeType: nodeType}
+		}
+		if used, ok := usedOverrides[i]; ok {
+			du.Used = used
+		}
+		devices[i] = du
+	}
+	return devices
+}
+
+// makeAWSDeviceUsage constructs a single *device.DeviceUsage for use in TestDevices_Fit.
+// id is the device UUID, index is the device index, used/count are the sharing-slot
+// fields, totalcore/usedcores are the core-mask fields, nodeType goes into
+// CustomInfo[AWSNodeType], and health marks whether the device is schedulable.
+func makeAWSDeviceUsage(id string, index uint, used, count, totalcore, usedcores int32, nodeType string, health bool) *device.DeviceUsage {
+	return &device.DeviceUsage{
+		ID:        id,
+		Index:     index,
+		Used:      used,
+		Count:     count,
+		Usedmem:   0,
+		Totalmem:  0,
+		Totalcore: totalcore,
+		Usedcores: usedcores,
+		Numa:      0,
+		Type:      AWSNeuronDevice,
+		Health:    health,
+		CustomInfo: map[string]any{
+			AWSNodeType: nodeType,
+		},
+	}
+}
+
 func Test_graphSelect(t *testing.T) {
 	tests := []struct {
 		name string
@@ -452,26 +494,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*device.DeviceUsage{
-					{Index: 0, Used: 0, CustomInfo: map[string]any{
-						AWSNodeType: "inf2",
-					}},
-					{Index: 1, Used: 0},
-					{Index: 2, Used: 0},
-					{Index: 3, Used: 0},
-					{Index: 4, Used: 0},
-					{Index: 5, Used: 0},
-					{Index: 6, Used: 0},
-					{Index: 7, Used: 0},
-					{Index: 8, Used: 0},
-					{Index: 9, Used: 0},
-					{Index: 10, Used: 0},
-					{Index: 11, Used: 0},
-					{Index: 12, Used: 0},
-					{Index: 13, Used: 0},
-					{Index: 14, Used: 0},
-					{Index: 15, Used: 0},
-				},
+				d: makeDeviceUsages("inf2", nil, true),
 				c: 16,
 			},
 			want1: []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15},
@@ -482,26 +505,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*device.DeviceUsage{
-					{Index: 0, Used: 0, CustomInfo: map[string]any{
-						AWSNodeType: "trn",
-					}},
-					{Index: 1, Used: 0},
-					{Index: 2, Used: 0},
-					{Index: 3, Used: 0},
-					{Index: 4, Used: 0},
-					{Index: 5, Used: 0},
-					{Index: 6, Used: 0},
-					{Index: 7, Used: 1},
-					{Index: 8, Used: 0},
-					{Index: 9, Used: 0},
-					{Index: 10, Used: 0},
-					{Index: 11, Used: 0},
-					{Index: 12, Used: 0},
-					{Index: 13, Used: 1},
-					{Index: 14, Used: 0},
-					{Index: 15, Used: 0},
-				},
+				d: makeDeviceUsages("trn", map[int]int32{7: 1, 13: 1}, true),
 				c: 8,
 			},
 			want1: []int{},
@@ -512,26 +516,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*device.DeviceUsage{
-					{Index: 0, Used: 0, CustomInfo: map[string]any{
-						AWSNodeType: "trn",
-					}},
-					{Index: 1, Used: 0},
-					{Index: 2, Used: 0},
-					{Index: 3, Used: 0},
-					{Index: 4, Used: 0},
-					{Index: 5, Used: 0},
-					{Index: 6, Used: 0},
-					{Index: 7, Used: 1},
-					{Index: 8, Used: 0},
-					{Index: 9, Used: 0},
-					{Index: 10, Used: 0},
-					{Index: 11, Used: 0},
-					{Index: 12, Used: 0},
-					{Index: 13, Used: 0},
-					{Index: 14, Used: 0},
-					{Index: 15, Used: 0},
-				},
+				d: makeDeviceUsages("trn", map[int]int32{7: 1}, true),
 				c: 8,
 			},
 			want1: []int{8, 9, 10, 11, 12, 13, 14, 15},
@@ -542,26 +527,7 @@ func Test_graphSelect(t *testing.T) {
 				d []*device.DeviceUsage
 				c int
 			}{
-				d: []*device.DeviceUsage{
-					{Index: 0, Used: 0, CustomInfo: map[string]any{
-						AWSNodeType: "inf",
-					}},
-					{Index: 1, Used: 0},
-					{Index: 2, Used: 0},
-					{Index: 3, Used: 0},
-					{Index: 4, Used: 0},
-					{Index: 5, Used: 1},
-					{Index: 6, Used: 0},
-					{Index: 7, Used: 0},
-					{Index: 8, Used: 0},
-					{Index: 9, Used: 0},
-					{Index: 10, Used: 0},
-					{Index: 11, Used: 0},
-					{Index: 12, Used: 0},
-					{Index: 13, Used: 0},
-					{Index: 14, Used: 1},
-					{Index: 15, Used: 0},
-				},
+				d: makeDeviceUsages("inf", map[int]int32{5: 1, 14: 1}, true),
 				c: 8,
 			},
 			want1: []int{6, 7, 8, 9, 10, 11, 12, 13},
@@ -595,38 +561,8 @@ func TestDevices_Fit(t *testing.T) {
 		{
 			name: "fit success",
 			devices: []*device.DeviceUsage{
-				{
-					ID:        "dev-0",
-					Index:     0,
-					Used:      0,
-					Count:     2,
-					Usedmem:   0,
-					Totalmem:  0,
-					Totalcore: 3,
-					Usedcores: 0,
-					Numa:      0,
-					Type:      AWSNeuronDevice,
-					Health:    true,
-					CustomInfo: map[string]any{
-						AWSNodeType: "trn",
-					},
-				},
-				{
-					ID:        "dev-1",
-					Index:     0,
-					Used:      0,
-					Count:     12,
-					Usedmem:   0,
-					Totalmem:  0,
-					Totalcore: 3,
-					Usedcores: 0,
-					Numa:      0,
-					Type:      AWSNeuronDevice,
-					Health:    true,
-					CustomInfo: map[string]any{
-						AWSNodeType: "trn",
-					},
-				},
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+				makeAWSDeviceUsage("dev-1", 0, 0, 12, 3, 0, "trn", true),
 			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -643,22 +579,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: memory not enough",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-0",
-				Index:     0,
-				Used:      0,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 0,
-				Numa:      0,
-				Type:      AWSNeuronDevice,
-				Health:    true,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             2,
 				Memreq:           0,
@@ -674,22 +597,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: core not enough",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-0",
-				Index:     0,
-				Used:      0,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 1,
-				Numa:      0,
-				Type:      AWSNeuronDevice,
-				Health:    true,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 1, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
@@ -705,22 +615,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: type mismatch",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-0",
-				Index:     0,
-				Used:      0,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 0,
-				Numa:      0,
-				Health:    true,
-				Type:      AWSNeuronDevice,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Type:             "OtherType",
@@ -736,22 +633,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign use uuid mismatch",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-1",
-				Index:     0,
-				Used:      0,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 0,
-				Numa:      0,
-				Type:      AWSNeuronDevice,
-				Health:    true,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-1", 0, 0, 2, 3, 0, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
@@ -767,22 +651,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: user assign no use uuid match",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-0",
-				Index:     0,
-				Used:      0,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 0,
-				Numa:      0,
-				Type:      AWSNeuronDevice,
-				Health:    true,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
@@ -798,22 +669,9 @@ func TestDevices_Fit(t *testing.T) {
 		},
 		{
 			name: "fit fail: card overused",
-			devices: []*device.DeviceUsage{{
-				ID:        "dev-0",
-				Index:     0,
-				Used:      2,
-				Count:     2,
-				Usedmem:   0,
-				Totalmem:  0,
-				Totalcore: 3,
-				Usedcores: 0,
-				Numa:      0,
-				Type:      AWSNeuronDevice,
-				Health:    true,
-				CustomInfo: map[string]any{
-					AWSNodeType: "trn",
-				},
-			}},
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 2, 2, 3, 0, "trn", true),
+			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
 				Memreq:           0,
@@ -830,22 +688,7 @@ func TestDevices_Fit(t *testing.T) {
 		{
 			name: "mutex policy rejects used device",
 			devices: []*device.DeviceUsage{
-				{
-					ID:        "dev-0",
-					Index:     0,
-					Used:      1,
-					Count:     2,
-					Usedmem:   0,
-					Totalmem:  0,
-					Totalcore: 3,
-					Usedcores: 0,
-					Numa:      0,
-					Type:      AWSNeuronDevice,
-					Health:    true,
-					CustomInfo: map[string]any{
-						AWSNodeType: "trn",
-					},
-				},
+				makeAWSDeviceUsage("dev-0", 0, 1, 2, 3, 0, "trn", true),
 			},
 			request: device.ContainerDeviceRequest{
 				Nums:             1,
@@ -863,16 +706,8 @@ func TestDevices_Fit(t *testing.T) {
 		{
 			name: "fit fail: NumaNotFit with multiple devices",
 			devices: []*device.DeviceUsage{
-				{
-					ID: "dev-0", Index: 0, Used: 0, Count: 2, Totalcore: 3,
-					Type: AWSNeuronDevice, Health: true,
-					CustomInfo: map[string]any{AWSNodeType: "trn"},
-				},
-				{
-					ID: "dev-1", Index: 1, Used: 0, Count: 2, Totalcore: 3,
-					Type: AWSNeuronDevice, Health: true,
-					CustomInfo: map[string]any{AWSNodeType: "trn"},
-				},
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", true),
+				makeAWSDeviceUsage("dev-1", 1, 0, 2, 3, 0, "trn", true),
 			},
 			request: device.ContainerDeviceRequest{
 				Nums:             2,
@@ -886,6 +721,24 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 			wantReason: "1/2 NumaNotFit",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{
+				makeAWSDeviceUsage("dev-0", 0, 0, 2, 3, 0, "trn", false),
+			},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         2,
+				Type:             AWSNeuronDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -901,10 +754,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[AWSNeuronDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[AWSNeuronDevice]))
+			}
 			if test.wantFit {
-				if len(result[AWSNeuronDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[AWSNeuronDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[AWSNeuronDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[AWSNeuronDevice][idx].UUID)

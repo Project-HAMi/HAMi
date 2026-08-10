@@ -366,6 +366,14 @@ func TestPatchPodAnnotations(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "patch nil pod",
+			pod:  nil,
+			annotations: map[string]string{
+				"test-key": "test-value",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -429,6 +437,11 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -444,6 +457,11 @@ func Test_AllContainersCreated(t *testing.T) {
 		args *corev1.Pod
 		want bool
 	}{
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 		{
 			name: "all containers created",
 			args: &corev1.Pod{
@@ -725,6 +743,11 @@ func Test_IsPodTerminating(t *testing.T) {
 			args: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{},
 			},
+			want: false,
+		},
+		{
+			name: "pod is nil",
+			args: nil,
 			want: false,
 		},
 	}

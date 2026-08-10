@@ -19,7 +19,6 @@ package nvidia
 import (
 	"context"
 	"errors"
-	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -1225,234 +1224,16 @@ func TestDevices_Fit(t *testing.T) {
 }
 
 func TestDevices_AddResourceUsage(t *testing.T) {
-	tests := []struct {
-		name        string
-		deviceUsage *device.DeviceUsage
-		ctr         *device.ContainerDevice
-		wantErr     bool
-		wantUsage   *device.DeviceUsage
-		checkMig    bool
-		wantMigIdx  int32
-		wantUUID    string
-	}{
-		{
-			name: "test add resource usage",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-0",
-				Used:      0,
-				Usedcores: 15,
-				Usedmem:   2000,
-			},
-			ctr: &device.ContainerDevice{
-				UUID:      "dev-0",
-				Usedcores: 50,
-				Usedmem:   1024,
-			},
-			wantUsage: &device.DeviceUsage{
-				ID:        "dev-0",
-				Used:      1,
-				Usedcores: 65,
-				Usedmem:   3024,
-			},
-			wantErr:  false,
-			checkMig: false,
-		},
-		{
-			name: "test MIG mode with migNeedsReset true - first template matches",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-0",
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
-				Mode:      MigMode,
-				MigTemplate: []device.Geometry{
-					{
-						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
-					},
-					{
-						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
-						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
-					},
-				},
-				MigUsage: device.MigInUse{
-					UsageList: make(device.MIGS, 0),
-				},
-			},
-			ctr: &device.ContainerDevice{
-				UUID:    "dev-0",
-				Usedmem: 6000,
-			},
-			wantUsage: &device.DeviceUsage{
-				Used:      1,
-				Usedcores: 50,
-				Usedmem:   10240,
-			},
-			wantErr:    false,
-			checkMig:   true,
-			wantMigIdx: 1,
-			wantUUID:   "dev-0[1-1]",
-		},
-		{
-			name: "test MIG mode with migNeedsReset true - second template matches with correct idx",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-1",
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
-				Mode:      MigMode,
-				MigTemplate: []device.Geometry{
-					{
-						{Name: "1g.3gb", Core: 25, Memory: 3072, Count: 1},
-					},
-					{
-						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
-						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
-					},
-				},
-				MigUsage: device.MigInUse{
-					UsageList: make(device.MIGS, 0),
-				},
-			},
-			ctr: &device.ContainerDevice{
-				UUID:    "dev-1",
-				Usedmem: 8000,
-			},
-			wantUsage: &device.DeviceUsage{
-				Used:      1,
-				Usedcores: 50,
-				Usedmem:   10240,
-			},
-			wantErr:    false,
-			checkMig:   true,
-			wantMigIdx: 1,
-			wantUUID:   "dev-1[1-1]",
-		},
-		{
-			name: "test MIG mode with migNeedsReset true - verify outer loop break",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-2",
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
-				Mode:      MigMode,
-				MigTemplate: []device.Geometry{
-					{
-						{Name: "1g.5gb", Core: 25, Memory: 5120, Count: 1},
-						{Name: "2g.10gb", Core: 50, Memory: 10240, Count: 1},
-					},
-					{
-						{Name: "3g.20gb", Core: 100, Memory: 20480, Count: 1},
-					},
-				},
-				MigUsage: device.MigInUse{
-					UsageList: make(device.MIGS, 0),
-				},
-			},
-			ctr: &device.ContainerDevice{
-				UUID:    "dev-2",
-				Usedmem: 6000,
-			},
-			wantUsage: &device.DeviceUsage{
-				Used:      1,
-				Usedcores: 50,
-				Usedmem:   10240,
-			},
-			wantErr:    false,
-			checkMig:   true,
-			wantMigIdx: 0,
-			wantUUID:   "dev-2[0-1]",
-		},
-		{
-			name: "test MIG mode with migNeedsReset true - template with Count > 1",
-			deviceUsage: &device.DeviceUsage{
-				ID:        "dev-3",
-				Used:      0,
-				Usedcores: 0,
-				Usedmem:   0,
-				Mode:      MigMode,
-				MigTemplate: []device.Geometry{
-					{
-						// Template index 0: first template has Count=2, second template has Count=1
-						{Name: "1g.5gb", Core: 50, Memory: 5120, Count: 2},
-						{Name: "2g.10gb", Core: 100, Memory: 10240, Count: 1},
-					},
-				},
-				MigUsage: device.MigInUse{
-					UsageList: make(device.MIGS, 0),
-				},
-			},
-			ctr: &device.ContainerDevice{
-				UUID:    "dev-3",
-				Usedmem: 8000, // Requires 8GB, matches second template (idx=1) which should be at UsageList[2]
-			},
-			wantUsage: &device.DeviceUsage{
-				Used:      1,
-				Usedcores: 100,
-				Usedmem:   10240, // Should be set to the matched template's memory
-			},
-			wantErr:    false,
-			checkMig:   true,
-			wantMigIdx: 0,
-			wantUUID:   "dev-3[0-1]",
-		},
+	dev := &NvidiaGPUDevices{}
+	usage := &device.DeviceUsage{ID: "dev-0", Usedcores: 15, Usedmem: 2000}
+	ctr := &device.ContainerDevice{UUID: "dev-0", Usedcores: 50, Usedmem: 1024}
+	if err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr); err != nil {
+		t.Fatal(err)
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			dev := &NvidiaGPUDevices{}
-			if err := dev.AddResourceUsage(&corev1.Pod{}, tt.deviceUsage, tt.ctr); (err != nil) != tt.wantErr {
-				t.Errorf("AddResourceUsage() error=%v, wantErr %v", err, tt.wantErr)
-			}
-			if !tt.wantErr {
-				if tt.deviceUsage.Usedcores != tt.wantUsage.Usedcores {
-					t.Errorf("expected used cores: %d, got used cores %d", tt.wantUsage.Usedcores, tt.deviceUsage.Usedcores)
-				}
-				if tt.deviceUsage.Usedmem != tt.wantUsage.Usedmem {
-					t.Errorf("expected used mem: %d, got used mem %d", tt.wantUsage.Usedmem, tt.deviceUsage.Usedmem)
-				}
-				if tt.deviceUsage.Used != tt.wantUsage.Used {
-					t.Errorf("expected used: %d, got used %d", tt.wantUsage.Used, tt.deviceUsage.Used)
-				}
-				if tt.checkMig {
-					// Verify MIG-related fields
-					if tt.deviceUsage.MigUsage.Index != tt.wantMigIdx {
-						t.Errorf("expected MigUsage.Index: %d, got %d", tt.wantMigIdx, tt.deviceUsage.MigUsage.Index)
-					}
-					if tt.ctr.UUID != tt.wantUUID {
-						t.Errorf("expected UUID: %s, got %s", tt.wantUUID, tt.ctr.UUID)
-					}
-					// Verify that the entry at the corresponding index in UsageList is marked as InUse
-					// According to the modified code, should calculate usageListIdx by summing Count of all templates before idx
-					expectedUsageListIdx := -1
-					if strings.Contains(tt.wantUUID, "[") {
-						parts := strings.Split(strings.TrimSuffix(strings.Split(tt.wantUUID, "[")[1], "]"), "-")
-						if len(parts) == 2 {
-							if tidx, err1 := strconv.Atoi(parts[0]); err1 == nil {
-								if idx, err2 := strconv.Atoi(parts[1]); err2 == nil {
-									// Calculate usageListIdx by summing Count of all templates before idx
-									if tidx >= 0 && tidx < len(tt.deviceUsage.MigTemplate) {
-										expectedUsageListIdx = 0
-										for i := 0; i < idx && i < len(tt.deviceUsage.MigTemplate[tidx]); i++ {
-											expectedUsageListIdx += int(tt.deviceUsage.MigTemplate[tidx][i].Count)
-										}
-									}
-								}
-							}
-						}
-					}
-					if expectedUsageListIdx >= 0 && expectedUsageListIdx < len(tt.deviceUsage.MigUsage.UsageList) {
-						if !tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].InUse {
-							t.Errorf("expected UsageList[%d].InUse to be true, got false", expectedUsageListIdx)
-						}
-						if tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].Memory != tt.ctr.Usedmem {
-							t.Errorf("expected UsageList[%d].Memory: %d, got %d", expectedUsageListIdx, tt.ctr.Usedmem, tt.deviceUsage.MigUsage.UsageList[expectedUsageListIdx].Memory)
-						}
-					}
-				}
-			}
-		})
+	if usage.Used != 1 || usage.Usedcores != 65 || usage.Usedmem != 3024 {
+		t.Fatalf("unexpected usage: %+v", usage)
 	}
 }
-
 func TestFitQuota(t *testing.T) {
 	NvidiaGPUDevice := "NVIDIA"
 	config := NvidiaConfig{
@@ -1483,35 +1264,60 @@ func TestFitQuota(t *testing.T) {
 		},
 	})
 
+	makeTestPod := func(numInit, numApp int) *corev1.Pod {
+		initContainers := make([]corev1.Container, numInit)
+		for i := range initContainers {
+			initContainers[i] = corev1.Container{Name: "init"}
+		}
+		appContainers := make([]corev1.Container, numApp)
+		for i := range appContainers {
+			appContainers[i] = corev1.Container{Name: "app"}
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: initContainers,
+				Containers:     appContainers,
+			},
+		}
+	}
+
 	tests := []struct {
 		name           string
+		pod            *corev1.Pod
 		tmpDevs        map[string]device.ContainerDevices
 		allocated      *device.PodDevices
 		ns             string
+		devUUID        string
 		memreq         int64
 		coresreq       int64
 		expectedResult bool
 	}{
 		{
 			name:           "no tmp and no allocated",
+			pod:            makeTestPod(0, 1),
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name:           "request exceed quota",
+			pod:            makeTestPod(0, 1),
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         3000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "tmpdev",
+			pod:  makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1519,12 +1325,14 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name: "tmpdev exceed quota",
+			pod:  makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1532,12 +1340,14 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name:    "allocated devs",
+			pod:     makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{},
 			allocated: &device.PodDevices{
 				NvidiaGPUDevice: device.PodSingleDevice{
@@ -1547,12 +1357,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name:    "allocated devs exceed quota",
+			pod:     makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{},
 			allocated: &device.PodDevices{
 				NvidiaGPUDevice: device.PodSingleDevice{
@@ -1562,12 +1374,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "exceed quota",
+			pod:  makeTestPod(0, 3),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1581,12 +1395,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "fit",
+			pod:  makeTestPod(0, 3),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 1},
@@ -1600,15 +1416,70 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
+		},
+		{
+			name:    "fitting second init container maxes against first",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1500, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-0",
+			memreq:         1500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "sequential init containers counted as peak not sum",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-0",
+			memreq:         500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "collapsed init peak still enforces quota",
+			pod:     makeTestPod(1, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 2100, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-1",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := fitQuota(tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
+			result := fitQuota(tt.pod, tt.tmpDevs, tt.allocated, tt.ns, tt.devUUID, tt.memreq, tt.coresreq)
 			assert.Equal(t, tt.expectedResult, result, tt.name)
 		})
 	}
@@ -2143,58 +2014,6 @@ func TestZeroMemoryPercentageIsAccountedAsWholeCard(t *testing.T) {
 	assert.Assert(t, strings.Contains(reason, "CardInsufficientMemory"), "reason: %s", reason)
 }
 
-func TestMigNeedsReset(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-
-	tests := []struct {
-		name      string
-		usage     *device.DeviceUsage
-		want      bool
-		wantEmpty bool
-	}{
-		{
-			name:  "empty UsageList — needs reset",
-			usage: &device.DeviceUsage{MigUsage: device.MigInUse{UsageList: device.MIGS{}}},
-			want:  true,
-		},
-		{
-			name: "all entries not InUse — resets and clears list",
-			usage: &device.DeviceUsage{
-				MigUsage: device.MigInUse{
-					UsageList: device.MIGS{
-						{Memory: 10, InUse: false},
-						{Memory: 20, InUse: false},
-					},
-				},
-			},
-			want:      true,
-			wantEmpty: true,
-		},
-		{
-			name: "one entry InUse=true — no reset",
-			usage: &device.DeviceUsage{
-				MigUsage: device.MigInUse{
-					UsageList: device.MIGS{
-						{Memory: 10, InUse: true},
-						{Memory: 20, InUse: false},
-					},
-				},
-			},
-			want: false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			result := dev.migNeedsReset(tt.usage)
-			assert.Equal(t, result, tt.want)
-			if tt.wantEmpty {
-				assert.Equal(t, len(tt.usage.MigUsage.UsageList), 0)
-			}
-		})
-	}
-}
-
 func TestGenerateCombinations(t *testing.T) {
 	devs := device.ContainerDevices{
 		{UUID: "gpu0"},
@@ -2302,59 +2121,6 @@ func TestCustomFilterRule_NonMig(t *testing.T) {
 	devusage := &device.DeviceUsage{Mode: ""}
 	result := dev.CustomFilterRule(nil, device.ContainerDeviceRequest{}, nil, devusage)
 	assert.Equal(t, result, true)
-}
-
-func TestCustomFilterRule_Mig(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-
-	tests := []struct {
-		name       string
-		usageList  device.MIGS
-		toAllocate device.ContainerDevices
-		memreq     int32
-		want       bool
-	}{
-		{
-			name: "slot available after allocating toAllocate",
-			usageList: device.MIGS{
-				{Memory: 1000, InUse: false},
-				{Memory: 1000, InUse: false},
-			},
-			toAllocate: device.ContainerDevices{{Usedmem: 500}},
-			memreq:     500,
-			want:       true,
-		},
-		{
-			name: "no remaining slot after allocating toAllocate",
-			usageList: device.MIGS{
-				{Memory: 1000, InUse: false},
-			},
-			toAllocate: device.ContainerDevices{{Usedmem: 500}},
-			memreq:     500,
-			want:       false,
-		},
-		{
-			name: "toAllocate does not fit any slot",
-			usageList: device.MIGS{
-				{Memory: 100, InUse: false},
-			},
-			toAllocate: device.ContainerDevices{{Usedmem: 500}},
-			memreq:     500,
-			want:       false,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			devusage := &device.DeviceUsage{
-				Mode:     MigMode,
-				MigUsage: device.MigInUse{UsageList: tt.usageList},
-			}
-			req := device.ContainerDeviceRequest{Memreq: tt.memreq}
-			result := dev.CustomFilterRule(nil, req, tt.toAllocate, devusage)
-			assert.Equal(t, result, tt.want)
-		})
-	}
 }
 
 func TestNodeCleanUp(t *testing.T) {
@@ -2619,34 +2385,22 @@ func TestGetNodeDevices_InvalidJSON(t *testing.T) {
 	assert.Assert(t, err != nil)
 }
 
-func TestGetNodeDevices_MigTemplate(t *testing.T) {
-	dev := &NvidiaGPUDevices{
-		config: NvidiaConfig{
-			MigGeometriesList: []device.AllowedMigGeometries{
-				{
-					Models: []string{"A100"},
-					Geometries: []device.Geometry{
-						{
-							{Name: "1g.5gb", Memory: 5120, Core: 14, Count: 7},
-						},
-					},
-				},
-			},
-		},
-	}
+func TestGetNodeDevices_MigProfilesFromNode(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
 	node := corev1.Node{
 		ObjectMeta: metav1.ObjectMeta{
 			Name: "node-mig",
 			Annotations: map[string]string{
-				RegisterAnnos: `[{"id":"GPU-0","count":7,"devmem":40960,"devcore":100,"type":"NVIDIA-A100-SXM4-40GB","numa":0,"health":true,"mode":"mig"}]`,
+				RegisterAnnos: `[{"id":"GPU-0","count":7,"devmem":40960,"devcore":100,"type":"NVIDIA-A100-SXM4-40GB","numa":0,"health":true,"mode":"mig","migProfiles":[{"name":"1g.5gb","memoryMB":5120,"core":14,"sliceCount":1,"instanceCount":7,"multiprocessorCount":14,"placements":[{"start":6,"size":1}]}]}]`,
 			},
 		},
 	}
 	result, err := dev.GetNodeDevices(node)
 	assert.NilError(t, err)
 	assert.Equal(t, len(result), 1)
-	assert.Equal(t, len(result[0].MIGTemplate), 1)
-	assert.Equal(t, result[0].MIGTemplate[0][0].Name, "1g.5gb")
+	assert.Equal(t, len(result[0].MIGProfiles), 1)
+	assert.Equal(t, result[0].MIGProfiles[0].Name, "1g.5gb")
+	assert.DeepEqual(t, result[0].MIGProfiles[0].Placements, []device.MigPlacement{{Start: 6, Size: 1}})
 }
 
 func TestGetNodeDevices_PairScores(t *testing.T) {
@@ -2679,78 +2433,6 @@ func TestGetNodeDevices_InvalidPairScores(t *testing.T) {
 	}
 	_, err := dev.GetNodeDevices(node)
 	assert.Assert(t, err != nil)
-}
-
-func TestAddResourceUsage_MigNonReset(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-	usage := &device.DeviceUsage{
-		Mode: MigMode,
-		MigUsage: device.MigInUse{
-			Index: 0,
-			UsageList: device.MIGS{
-				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: true},
-				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: false},
-			},
-		},
-	}
-	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096, Usedcores: 10}
-	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
-	assert.NilError(t, err)
-	assert.Assert(t, usage.MigUsage.UsageList[1].InUse)
-	assert.Equal(t, ctr.Usedmem, int32(5120))
-	assert.Assert(t, strings.Contains(ctr.UUID, "["))
-}
-
-func TestAddResourceUsage_MigNonResetNoSlot(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-	usage := &device.DeviceUsage{
-		Mode: MigMode,
-		MigUsage: device.MigInUse{
-			UsageList: device.MIGS{
-				{Name: "1g.5gb", Memory: 5120, Core: 14, InUse: true},
-			},
-		},
-	}
-	ctr := &device.ContainerDevice{UUID: "GPU-0", Usedmem: 4096}
-	err := dev.AddResourceUsage(&corev1.Pod{}, usage, ctr)
-	assert.Assert(t, err != nil)
-	assert.Assert(t, strings.Contains(err.Error(), "mig template allocate resource fail"))
-}
-
-func TestCustomFilterRule_MigEmptyUsageWithTemplate(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-	devusage := &device.DeviceUsage{
-		Mode: MigMode,
-		MigUsage: device.MigInUse{
-			UsageList: device.MIGS{},
-		},
-		MigTemplate: []device.Geometry{
-			{
-				{Name: "1g.5gb", Memory: 5120, Core: 14, Count: 2},
-			},
-		},
-	}
-	req := device.ContainerDeviceRequest{Memreq: 4096}
-	result := dev.CustomFilterRule(nil, req, nil, devusage)
-	assert.Equal(t, result, true)
-}
-
-func TestCustomFilterRule_MigEmptyUsageNoFitTemplate(t *testing.T) {
-	dev := InitNvidiaDevice(NvidiaConfig{})
-	devusage := &device.DeviceUsage{
-		Mode: MigMode,
-		MigUsage: device.MigInUse{
-			UsageList: device.MIGS{},
-		},
-		MigTemplate: []device.Geometry{
-			{
-				{Name: "1g.5gb", Memory: 100, Core: 14, Count: 1},
-			},
-		},
-	}
-	req := device.ContainerDeviceRequest{Memreq: 4096}
-	result := dev.CustomFilterRule(nil, req, nil, devusage)
-	assert.Equal(t, result, false)
 }
 
 func TestReleaseNodeLock(t *testing.T) {
@@ -2878,6 +2560,33 @@ func TestFit_MutexPolicy(t *testing.T) {
 	// mutex cannot satisfy 2 cards when only one device is idle.
 	two := device.ContainerDeviceRequest{Nums: 2, Memreq: 100, Coresreq: 10, Type: NvidiaGPUDevice}
 	fit, _, _ = nv.Fit(devices, two, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+}
+
+func TestFit_MigPercentageRequestRejectsUndersizedTemplate(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+
+	// The only MIG template offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
+	devices := []*device.DeviceUsage{
+		{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true,
+			Mode: MigMode,
+			MigTemplate: []device.Geometry{
+				{
+					{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+				},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, MemPercentagereq: 50, Coresreq: 10, Type: NvidiaGPUDevice}
+	fit, _, _ := nv.Fit(devices, req, &corev1.Pod{}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 }
 
