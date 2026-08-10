@@ -1937,6 +1937,10 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 	}
 	result := dev.GenerateResourceRequests(ctr)
 	assert.Equal(t, result.Memreq, int32(2048))
+
+	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1Gi")
+	result = dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
 func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
