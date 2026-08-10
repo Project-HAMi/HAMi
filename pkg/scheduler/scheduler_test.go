@@ -1077,11 +1077,12 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 }
 
 type registerMockDevice struct {
-	nodeDevices   []*device.DeviceInfo
-	getNodeErr    error
-	health        bool
-	needUpdate    bool
-	nodeCleanedUp int
+	nodeDevices        []*device.DeviceInfo
+	getNodeErr         error
+	getNodeDevicesFunc func(node corev1.Node) ([]*device.DeviceInfo, error)
+	health             bool
+	needUpdate         bool
+	nodeCleanedUp      int
 }
 
 func (m *registerMockDevice) CommonWord() string { return "mock-vendor" }
@@ -1096,7 +1097,10 @@ func (m *registerMockDevice) NodeCleanUp(_ string) error {
 	return nil
 }
 func (m *registerMockDevice) GetResourceNames() device.ResourceNames { return device.ResourceNames{} }
-func (m *registerMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+func (m *registerMockDevice) GetNodeDevices(node corev1.Node) ([]*device.DeviceInfo, error) {
+	if m.getNodeDevicesFunc != nil {
+		return m.getNodeDevicesFunc(node)
+	}
 	return m.nodeDevices, m.getNodeErr
 }
 func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
@@ -1198,6 +1202,169 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	assert.Equal(t, ok, true)
 	_, ok = nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, ok, false)
+}
+
+func Test_register_StaleDeviceVendorRemoval(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	vendorA := &registerMockDevice{
+		getNodeDevicesFunc: func(node corev1.Node) ([]*device.DeviceInfo, error) {
+			if node.Name == "node-1" {
+				return []*device.DeviceInfo{
+					{
+						ID:           "gpu-1",
+						DeviceVendor: "vendor-A",
+						Health:       true,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		health:     true,
+		needUpdate: true,
+	}
+	vendorB := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{},
+		health:      true,
+		needUpdate:  true,
+	}
+	vendorC := &registerMockDevice{
+		getNodeDevicesFunc: func(node corev1.Node) ([]*device.DeviceInfo, error) {
+			if node.Name == "node-1" {
+				return []*device.DeviceInfo{
+					{
+						ID:           "gpu-3",
+						DeviceVendor: "vendor-C",
+						Health:       true,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		health:     true,
+		needUpdate: true,
+	}
+	vendorD := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{},
+		health:      true,
+		needUpdate:  true,
+	}
+
+	device.DevicesMap = map[string]device.Devices{
+		"vendor-A": vendorA,
+		"vendor-B": vendorB,
+		"vendor-C": vendorC,
+		"vendor-D": vendorD,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	// node-1: present in k8s indexer and pre-populated in scheduler cache
+	node1 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-1",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node1, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node1)
+	require.NoError(t, err)
+
+	// node-absent: present in k8s indexer but absent from scheduler cache (exercises GetNode() error branch)
+	nodeAbsent := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-absent",
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Nodes().Create(context.Background(), nodeAbsent, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(nodeAbsent)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Initial cache state: node-1 has vendor-A, vendor-B, and vendor-C (vendor-D is untracked)
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: node1.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"vendor-A": {{
+				ID:           "gpu-1",
+				DeviceVendor: "vendor-A",
+				Health:       true,
+			}},
+			"vendor-B": {{
+				ID:           "gpu-2",
+				DeviceVendor: "vendor-B",
+				Health:       true,
+			}},
+			"vendor-C": {{
+				ID:           "gpu-3",
+				DeviceVendor: "vendor-C",
+				Health:       true,
+			}},
+		},
+	})
+
+	// Verify initial state has vendor-A, vendor-B, and vendor-C, but not vendor-D
+	nodeInfo, err := s.GetNode("node-1")
+	require.NoError(t, err)
+	require.Contains(t, nodeInfo.Devices, "vendor-A")
+	require.Contains(t, nodeInfo.Devices, "vendor-B")
+	require.Contains(t, nodeInfo.Devices, "vendor-C")
+	require.NotContains(t, nodeInfo.Devices, "vendor-D")
+
+	atomic.StoreUint32(&s.started, 1)
+
+	// Execute register cycle:
+	// - For node-1: vendor-B (0 devices) is removed from cache (exercises ok == true branch);
+	//   vendor-D (0 devices) is not in cache (exercises ok == false branch).
+	// - For node-absent: node is absent from scheduler cache (exercises GetNode error branch).
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Expect vendor-B to be removed from node-1 cache, while vendor-A and vendor-C remain
+	nodeInfo, err = s.GetNode("node-1")
+	require.NoError(t, err)
+	_, hasVendorA := nodeInfo.Devices["vendor-A"]
+	_, hasVendorB := nodeInfo.Devices["vendor-B"]
+	_, hasVendorC := nodeInfo.Devices["vendor-C"]
+	assert.Equal(t, hasVendorA, true, "vendor-A should remain in node cache")
+	assert.Equal(t, hasVendorB, false, "stale vendor-B should be removed from node cache")
+	assert.Equal(t, hasVendorC, true, "vendor-C should remain in node cache")
+
+	// Confirm node-absent was never added to scheduler cache
+	_, err = s.GetNode("node-absent")
+	require.Error(t, err)
 }
 
 func Test_ResourceQuota(t *testing.T) {

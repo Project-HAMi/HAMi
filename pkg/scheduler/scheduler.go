@@ -504,6 +504,19 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 				s.rmNodeDevices(val.Name, devhandsk)
 				continue
 			}
+			// GetNodeDevices succeeded but reported zero devices: the vendor plugin
+			// is healthy but no longer advertising devices on this node. Remove any
+			// stale entry so the scheduler does not keep offering capacity that no
+			// longer exists.
+			if len(nodedevices) == 0 {
+				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
+					if _, ok := existingNode.Devices[devhandsk]; ok {
+						klog.V(5).InfoS("Vendor reports zero devices, removing stale cache entry", "nodeName", val.Name, "deviceVendor", devhandsk)
+						s.rmNodeDevices(val.Name, devhandsk)
+					}
+				}
+				continue
+			}
 			if !needUpdate {
 				klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 				continue
