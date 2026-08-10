@@ -1483,35 +1483,60 @@ func TestFitQuota(t *testing.T) {
 		},
 	})
 
+	makeTestPod := func(numInit, numApp int) *corev1.Pod {
+		initContainers := make([]corev1.Container, numInit)
+		for i := range initContainers {
+			initContainers[i] = corev1.Container{Name: "init"}
+		}
+		appContainers := make([]corev1.Container, numApp)
+		for i := range appContainers {
+			appContainers[i] = corev1.Container{Name: "app"}
+		}
+		return &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{Name: "test", Namespace: "default"},
+			Spec: corev1.PodSpec{
+				InitContainers: initContainers,
+				Containers:     appContainers,
+			},
+		}
+	}
+
 	tests := []struct {
 		name           string
+		pod            *corev1.Pod
 		tmpDevs        map[string]device.ContainerDevices
 		allocated      *device.PodDevices
 		ns             string
+		devUUID        string
 		memreq         int64
 		coresreq       int64
 		expectedResult bool
 	}{
 		{
 			name:           "no tmp and no allocated",
+			pod:            makeTestPod(0, 1),
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name:           "request exceed quota",
+			pod:            makeTestPod(0, 1),
 			tmpDevs:        map[string]device.ContainerDevices{},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         3000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "tmpdev",
+			pod:  makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1519,12 +1544,14 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name: "tmpdev exceed quota",
+			pod:  makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1532,12 +1559,14 @@ func TestFitQuota(t *testing.T) {
 			},
 			allocated:      nil,
 			ns:             "default",
+			devUUID:        "gpu-0",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name:    "allocated devs",
+			pod:     makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{},
 			allocated: &device.PodDevices{
 				NvidiaGPUDevice: device.PodSingleDevice{
@@ -1547,12 +1576,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
 		},
 		{
 			name:    "allocated devs exceed quota",
+			pod:     makeTestPod(0, 2),
 			tmpDevs: map[string]device.ContainerDevices{},
 			allocated: &device.PodDevices{
 				NvidiaGPUDevice: device.PodSingleDevice{
@@ -1562,12 +1593,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         2000,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "exceed quota",
+			pod:  makeTestPod(0, 3),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 5},
@@ -1581,12 +1614,14 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: false,
 		},
 		{
 			name: "fit",
+			pod:  makeTestPod(0, 3),
 			tmpDevs: map[string]device.ContainerDevices{
 				NvidiaGPUDevice: {
 					{UUID: "gpu-1", Type: NvidiaGPUDevice, Usedmem: 100, Usedcores: 1},
@@ -1600,15 +1635,70 @@ func TestFitQuota(t *testing.T) {
 				},
 			},
 			ns:             "default",
+			devUUID:        "gpu-1",
 			memreq:         100,
 			coresreq:       1,
 			expectedResult: true,
+		},
+		{
+			name:    "fitting second init container maxes against first",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1500, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-0",
+			memreq:         1500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "sequential init containers counted as peak not sum",
+			pod:     makeTestPod(2, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 1024, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-0",
+			memreq:         500,
+			coresreq:       1,
+			expectedResult: true,
+		},
+		{
+			name:    "collapsed init peak still enforces quota",
+			pod:     makeTestPod(1, 1),
+			tmpDevs: map[string]device.ContainerDevices{},
+			allocated: &device.PodDevices{
+				NvidiaGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{UUID: "gpu-0", Type: NvidiaGPUDevice, Usedmem: 2100, Usedcores: 2},
+					},
+				},
+			},
+			ns:             "default",
+			devUUID:        "gpu-1",
+			memreq:         100,
+			coresreq:       1,
+			expectedResult: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			result := fitQuota(tt.tmpDevs, tt.allocated, tt.ns, tt.memreq, tt.coresreq)
+			result := fitQuota(tt.pod, tt.tmpDevs, tt.allocated, tt.ns, tt.devUUID, tt.memreq, tt.coresreq)
 			assert.Equal(t, tt.expectedResult, result, tt.name)
 		})
 	}

@@ -28,8 +28,9 @@ import (
 
 type PodInfo struct {
 	*corev1.Pod
-	NodeID  string
-	Devices PodDevices
+	NodeID                        string
+	Devices                       PodDevices
+	InitContainerResourceReleased bool
 }
 
 // PodUseDeviceStat counts pod use device info.
@@ -51,6 +52,8 @@ func NewPodManager() *PodManager {
 	return pm
 }
 
+// AddPod stores the effective (collapsed) device usage for the pod.
+// The devices parameter must already be collapsed (caller's responsibility).
 func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) bool {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
@@ -58,9 +61,10 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 	_, exists := m.pods[pod.UID]
 	if !exists {
 		pi := &PodInfo{
-			Pod:     pod,
-			NodeID:  nodeID,
-			Devices: devices,
+			Pod:                           pod,
+			NodeID:                        nodeID,
+			Devices:                       devices,
+			InitContainerResourceReleased: false,
 		}
 		m.pods[pod.UID] = pi
 		klog.InfoS("Pod added",
@@ -69,26 +73,49 @@ func (m *PodManager) AddPod(pod *corev1.Pod, nodeID string, devices PodDevices) 
 			"devices", devices,
 		)
 	} else {
-		m.pods[pod.UID].Devices = devices
-		klog.V(5).InfoS("Pod devices updated",
-			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"devices", devices,
-		)
+		pi := m.pods[pod.UID]
+		pi.Pod = pod
+		if pi.InitContainerResourceReleased {
+			// Usage was already shrunk after init containers finished; a re-add
+			// (e.g. an informer resync decoding the full annotation) must not
+			// re-inflate it back to the peak value.
+			klog.V(5).InfoS("Pod already exists; keeping shrunk devices",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+			)
+		} else {
+			pi.Devices = devices
+			klog.V(5).InfoS("Pod already exists; devices updated",
+				"pod", klog.KRef(pod.Namespace, pod.Name),
+			)
+		}
 	}
 
 	return !exists
 }
 
+// UpdatePod updates only the pod object (used for termination state).
 func (m *PodManager) UpdatePod(pod *corev1.Pod) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
 
 	if pi, exists := m.pods[pod.UID]; exists {
 		pi.Pod = pod
-		klog.V(5).InfoS("Pod object updated in cache (terminating state)",
+		klog.V(5).InfoS("Pod object updated in cache",
 			"pod", klog.KRef(pod.Namespace, pod.Name),
-			"deletionTimestamp", pod.DeletionTimestamp,
 		)
+	}
+}
+
+// DeepCopy must include the new field.
+func (p *PodInfo) DeepCopy() *PodInfo {
+	if p == nil {
+		return nil
+	}
+	return &PodInfo{
+		Pod:                           p.Pod.DeepCopy(),
+		NodeID:                        p.NodeID,
+		Devices:                       p.Devices.DeepCopy(),
+		InitContainerResourceReleased: p.InitContainerResourceReleased,
 	}
 }
 
@@ -130,6 +157,23 @@ func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	return pi, ok
 }
 
+func (m *PodManager) UpdatePodDevice(pod *corev1.Pod, newDevices PodDevices) (oldDevices PodDevices, ok bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, exists := m.pods[pod.UID]
+	if !exists {
+		return nil, false
+	}
+	oldDevices = pi.Devices
+	pi.Devices = newDevices
+	pi.InitContainerResourceReleased = true
+	klog.V(4).InfoS("Init container resources released",
+		"pod", klog.KRef(pod.Namespace, pod.Name),
+	)
+	return oldDevices, true
+}
+
 func (m *PodManager) ListPodsUID() ([]*corev1.Pod, error) {
 	m.mutex.RLock()
 	defer m.mutex.RUnlock()
@@ -165,17 +209,6 @@ func (m *PodManager) ListPodsInfo() []*PodInfo {
 		"podCount", len(pods),
 	)
 	return pods
-}
-
-func (p *PodInfo) DeepCopy() *PodInfo {
-	if p == nil {
-		return nil
-	}
-	return &PodInfo{
-		Pod:     p.Pod.DeepCopy(),
-		NodeID:  p.NodeID,
-		Devices: p.Devices.DeepCopy(),
-	}
 }
 
 func (pd PodDevices) DeepCopy() PodDevices {
