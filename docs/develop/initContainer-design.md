@@ -264,3 +264,17 @@ recomputed on every reconcile directly from `pod.Status.Phase`:
 
     if pod.Status.Phase in (Succeeded, Failed):
         usage = 0
+
+## Interaction with Kubernetes ResourceQuota
+
+If the namespace has a `ResourceQuota` (like `requests.nvidia.com/gpumem`), the
+kube-apiserver checks it first, before the pod reaches HAMi. The apiserver uses the
+same formula `max(sum(app), max(init))`, but it charges this value only once, when
+the pod is created, and it keeps the charge until the pod is deleted. It does not
+know when init containers finish, so the shrink in this design only frees capacity
+inside HAMi. The apiserver quota is never released early.
+
+Because of this, the same pods can run fine without a quota but fail when a quota is
+set. Example: quota is 10000. Pod A (init 8000, app 5000) is charged 8000 for its
+whole lifetime. Pod B (effective 5000) gets rejected with `exceeded quota: ... used: 8k` before HAMi even sees it. This is normal Kubernetes
+behavior and HAMi cannot change it.
