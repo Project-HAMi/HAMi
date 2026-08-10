@@ -1304,6 +1304,42 @@ func Test_MutateAdmission_RequestsOnlyOverCapacityMemory(t *testing.T) {
 	}
 }
 
+// SuperPod reqNum==1 writes Limits; requests-only pods must not panic on a nil Limits map.
+func Test_MutateAdmission_SuperPodRequestsOnlyNoPanic(t *testing.T) {
+	dev := Devices{
+		config: VNPUConfig{
+			CommonWord:         Ascend910CType,
+			ResourceName:       "huawei.com/Ascend910C",
+			ResourceMemoryName: "huawei.com/Ascend910C-memory",
+			MemoryAllocatable:  int64(65536),
+			MemoryCapacity:     int64(65536),
+			SuperPod:           true,
+			Templates: []Template{
+				{Name: "vir02", Memory: int64(8192), AICore: int32(2)},
+			},
+		},
+	}
+	ctr := corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				"huawei.com/Ascend910C": resource.MustParse("1"),
+			},
+		},
+	}
+	pod := corev1.Pod{}
+	ok, err := dev.MutateAdmission(&ctr, &pod)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !ok {
+		t.Fatalf("expected admission to handle device request")
+	}
+	// SuperPod rounds 1 -> 2 and writes Limits even when only Requests were set.
+	if got := ctr.Resources.Limits["huawei.com/Ascend910C"]; got.Value() != 2 {
+		t.Fatalf("expected SuperPod to set Limits device count to 2, got %v", got)
+	}
+}
+
 func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 	tests := []struct {
 		name string

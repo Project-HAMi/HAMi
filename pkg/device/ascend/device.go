@@ -132,6 +132,15 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		return false, nil
 	}
 
+	// Requests/Limits may be nil when the pod only set one of them. Init
+	// before SuperPod or memory writes so requests-only pods do not panic.
+	if ctr.Resources.Requests == nil {
+		ctr.Resources.Requests = corev1.ResourceList{}
+	}
+	if ctr.Resources.Limits == nil {
+		ctr.Resources.Limits = corev1.ResourceList{}
+	}
+
 	reqNum := count.Value()
 	if dev.config.CommonWord == Ascend910CType && dev.config.SuperPod {
 		if reqNum == 1 {
@@ -185,14 +194,6 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
-	}
-	// Requests/Limits may be nil when the pod only set one of them; writing
-	// to a nil map panics.
-	if ctr.Resources.Requests == nil {
-		ctr.Resources.Requests = corev1.ResourceList{}
-	}
-	if ctr.Resources.Limits == nil {
-		ctr.Resources.Limits = corev1.ResourceList{}
 	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
