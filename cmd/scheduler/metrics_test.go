@@ -182,19 +182,21 @@ func TestFindNodeDeviceUsage(t *testing.T) {
 
 	tests := []struct {
 		name           string
+		nodeID         string
 		uuid           string
 		wantTotalcore  int32
 		wantDeviceType string
 		wantOk         bool
 	}{
-		{name: "found on first node", uuid: "AMD-1", wantTotalcore: 64, wantDeviceType: "AMDGPU", wantOk: true},
-		{name: "found on second node", uuid: "AMD-2", wantTotalcore: 304, wantDeviceType: "AMDGPU", wantOk: true},
-		{name: "non-AMD device", uuid: "NVIDIA-1", wantTotalcore: 100, wantDeviceType: "NVIDIA", wantOk: true},
-		{name: "unknown device returns not ok", uuid: "missing", wantTotalcore: 0, wantDeviceType: "", wantOk: false},
+		{name: "found on first node", nodeID: "node-1", uuid: "AMD-1", wantTotalcore: 64, wantDeviceType: "AMDGPU", wantOk: true},
+		{name: "found on second node", nodeID: "node-2", uuid: "AMD-2", wantTotalcore: 304, wantDeviceType: "AMDGPU", wantOk: true},
+		{name: "non-AMD device", nodeID: "node-1", uuid: "NVIDIA-1", wantTotalcore: 100, wantDeviceType: "NVIDIA", wantOk: true},
+		{name: "MIG device with suffix", nodeID: "node-1", uuid: "NVIDIA-1-mig", wantTotalcore: 100, wantDeviceType: "NVIDIA", wantOk: true},
+		{name: "unknown device returns not ok", nodeID: "node-1", uuid: "missing", wantTotalcore: 0, wantDeviceType: "", wantOk: false},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			gotTotalcore, gotDeviceType, gotOk := findNodeDeviceUsage(&nodeUsage, tc.uuid)
+			gotTotalcore, gotDeviceType, gotOk := findNodeDeviceUsage(&nodeUsage, tc.nodeID, tc.uuid)
 			if gotTotalcore != tc.wantTotalcore || gotDeviceType != tc.wantDeviceType || gotOk != tc.wantOk {
 				t.Errorf("findNodeDeviceUsage(%q) = (%d, %q, %v), want (%d, %q, %v)",
 					tc.uuid, gotTotalcore, gotDeviceType, gotOk, tc.wantTotalcore, tc.wantDeviceType, tc.wantOk)
@@ -267,10 +269,10 @@ func TestAMDCoreAllocatedRatioNormalization(t *testing.T) {
 	newWant := `
 # HELP hami_gpu_core_allocated_ratio Device core allocated for a certain GPU
 # TYPE hami_gpu_core_allocated_ratio gauge
-hami_gpu_core_allocated_ratio{device_index="0",device_type="AMDGPU",device_uuid="AMD-1",node="node-1"} 50
+hami_gpu_core_allocated_ratio{device_index="0",device_type="AMDGPU",device_uuid="AMD-1",node="node-1"} 0.5
 # HELP hami_vgpu_core_allocated_ratio vGPU core allocated from a container
 # TYPE hami_vgpu_core_allocated_ratio gauge
-hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 50
+hami_vgpu_core_allocated_ratio{container_index="0",device_uuid="AMD-1",namespace="default",node="node-1",pod="amd-pod"} 0.5
 `
 	if err := promtestutil.CollectAndCompare(
 		newCollector,
@@ -356,9 +358,9 @@ func TestClusterManagerCollectorSkipsMemoryRatioWithNonPositiveTotalMemory(t *te
 	want := `
 # HELP hami_gpu_core_limit_ratio Device core limit for a certain GPU
 # TYPE hami_gpu_core_limit_ratio gauge
-hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 100
-hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 100
-hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 100
+hami_gpu_core_limit_ratio{device_index="0",device_type="AWSNeuron",device_uuid="zero-memory",node="node-1"} 1
+hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid="negative-memory",node="node-1"} 1
+hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 1
 # HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
 # TYPE hami_node_gpu_memory_allocated_ratio gauge
 hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node="node-1"} 0.25

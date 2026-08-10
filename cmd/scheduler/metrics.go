@@ -19,7 +19,6 @@ package main
 import (
 	"fmt"
 	"log"
-	"math"
 	"net/http"
 	"strings"
 	"time"
@@ -50,42 +49,25 @@ type ClusterManagerCollector struct {
 	metricsProvider schedulerMetricsProvider
 }
 
-const normalizedCoreLimit = 100
-
-// normalizeCoreMetrics converts core counts to the percentage
-// unit used by HAMi's core ratio metrics (0-100).
+// normalizeCoreMetrics converts core counts to the mathematical ratio
+// unit used by HAMi's core ratio metrics (0.0-1.0).
 func normalizeCoreMetrics(total, allocated int32) (float64, float64) {
 	if total <= 0 {
 		return 0, 0
 	}
-	return normalizedCoreLimit, math.Ceil(float64(allocated) / float64(total) * normalizedCoreLimit)
+	return 1.0, float64(allocated) / float64(total)
 }
 
 // findNodeDeviceUsage looks up a device by UUID across every node's usage and
 // returns its total core capacity and type. ok is false when no node advertises
 // the device, in which case the caller falls back to emitting raw values.
-func findNodeDeviceUsage(nu *map[string]*schedulerpkg.NodeUsage, uuid string) (totalcore int32, deviceType string, ok bool) {
-	ctrdevID := uuid
-	if strings.HasPrefix(ctrdevID, "MIG-") {
-		parts := strings.SplitN(ctrdevID, "-", 2)
-		if len(parts) == 2 {
-			ctrdevID = parts[0]
-		}
-	}
+func findNodeDeviceUsage(nu *map[string]*schedulerpkg.NodeUsage, nodeID, uuid string) (totalcore int32, deviceType string, ok bool) {
+	ctrdevID := strings.TrimSuffix(uuid, "-mig")
 
-	for _, ni := range *nu {
-		for _, dls := range ni.Devices.DeviceLists {
-			if dls.Device != nil {
-				nodedevID := dls.Device.ID
-				if strings.HasPrefix(nodedevID, "MIG-") {
-					parts := strings.SplitN(nodedevID, "-", 2)
-					if len(parts) == 2 {
-						nodedevID = parts[0]
-					}
-				}
-				if strings.Compare(nodedevID, ctrdevID) == 0 || strings.HasPrefix(nodedevID, ctrdevID) || strings.HasPrefix(ctrdevID, nodedevID) {
-					return dls.Device.Totalcore, dls.Device.Type, true
-				}
+	if nodeUsage, ok := (*nu)[nodeID]; ok {
+		for _, dls := range nodeUsage.Devices.DeviceLists {
+			if dls.Device != nil && dls.Device.ID == ctrdevID {
+				return dls.Device.Totalcore, dls.Device.Type, true
 			}
 		}
 	}
@@ -372,9 +354,9 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 							val.Namespace, val.Name, ctridx, val.NodeID)
 						continue
 					}
-					
-					totalcore, _, found := findNodeDeviceUsage(nu, ctrdevval.UUID)
-					
+
+					totalcore, _, found := findNodeDeviceUsage(nu, val.NodeID, ctrdevval.UUID)
+
 					klog.V(4).InfoS("Resolved device for container metric",
 						"deviceUUID", ctrdevval.UUID,
 						"totalCore", totalcore,
