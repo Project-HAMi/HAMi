@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -1493,13 +1494,13 @@ func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testi
 	require.NoError(t, err)
 
 	_, hasHealthy := nodeInfo.Devices["vendor-healthy"]
-	assert.True(t, hasHealthy, "healthy vendor should remain")
+	assert.Equal(t, true, hasHealthy, "healthy vendor should remain")
 
 	_, hasUnhealthyErr := nodeInfo.Devices["vendor-unhealthy-err"]
-	assert.False(t, hasUnhealthyErr, "unhealthy vendor should be cleaned up")
+	assert.Equal(t, false, hasUnhealthyErr, "unhealthy vendor should be cleaned up")
 
 	_, hasHealthyErr := nodeInfo.Devices["vendor-healthy-err"]
-	assert.True(t, hasHealthyErr, "healthy-err vendor should be preserved")
+	assert.Equal(t, true, hasHealthyErr, "healthy-err vendor should be preserved")
 }
 
 func Test_ResourceQuota(t *testing.T) {
