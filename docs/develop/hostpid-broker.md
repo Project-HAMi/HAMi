@@ -16,7 +16,7 @@ The host PID broker returns the caller's own host PID from Linux `SO_PEERCRED`. 
 
 3. The workload must use a HAMi-core build that supports protocol version 1 and the `LIBVGPU_HOSTPID_BROKER` gate.
 
-4. The container runtime must support the read only nested bind mount used for `/tmp/vgpulock/hostpid`.
+4. The container runtime must support the read-only nested bind mount used for `/tmp/vgpulock/hostpid`.
 
 5. The shared `/tmp/vgpulock` parent must be owned by root and use mode `01777`. The sticky bit allows legacy lock creation while preventing an ordinary workload user from replacing an entry owned by another user.
 
@@ -41,13 +41,13 @@ When enabled, the chart does four things:
 
 3. The device plugin creates `/var/run/hami/hostpid/broker.sock` and serves protocol version 1.
 
-4. Each allocation that receives HAMi-core also receives `LIBVGPU_HOSTPID_BROKER=1` and a read only mount from `/var/run/hami/hostpid` to `/tmp/vgpulock/hostpid`.
+4. Each allocation that receives HAMi-core also receives `LIBVGPU_HOSTPID_BROKER=1` and a read-only mount from `/var/run/hami/hostpid` to `/tmp/vgpulock/hostpid`.
 
 The device plugin prepares `/tmp/vgpulock` with mode `01777` before returning an allocation. This also applies when the broker is disabled and HAMi-core uses the existing fallback. Allocation fails if the directory cannot be prepared safely.
 
-Preparation opens `/tmp` without following a symlink, verifies its owner and sticky rule, then creates and opens `vgpulock` relative to that descriptor. The first `mkdirat()` requests mode `01777`. A descriptor based `chmod` restores bits removed by the process umask. A final identity and mode check rejects replacement during preparation.
+Preparation opens `/tmp` without following a symlink, verifies its owner and sticky rule, then creates and opens `vgpulock` relative to that descriptor. The first `mkdirat()` requests mode `01777`. A descriptor-based `chmod` restores bits removed by the process umask. A final identity and mode check rejects replacement during preparation.
 
-The allocation response contains one writable parent mount at `/tmp/vgpulock`. When the broker is enabled, it also contains one read only broker mount at `/tmp/vgpulock/hostpid`. The integration replaces duplicate or path equivalent entries with these canonical mounts and preserves unrelated mounts. It lists the parent before the nested broker mount so the parent does not hide the broker mount when the runtime applies the response.
+The allocation response contains one writable parent mount at `/tmp/vgpulock`. When the broker is enabled, it also contains one read-only broker mount at `/tmp/vgpulock/hostpid`. The integration replaces duplicate or path-equivalent entries with these canonical mounts and preserves unrelated mounts. It lists the parent before the nested broker mount so the parent does not hide the broker mount when the runtime applies the response.
 
 Before applying the current gate, the allocation helper clears the reserved broker environment key. When the broker is disabled, it also removes stale broker mounts while preserving the writable parent mount and unrelated mounts.
 
@@ -76,13 +76,13 @@ The server reads the peer credentials from the connected socket after validating
 
 3. The shared lock parent is owned by root with mode `01777`. Allocation rejects an unsafe owner, object type, symlink, or final mode.
 
-4. A root owned `0600` lock file prevents two brokers from replacing each other.
+4. A root-owned `0600` lock file prevents two brokers from replacing each other.
 
 5. The server rejects symlink directories, symlink lock files, regular file collisions, sockets owned by another UID, and active sockets.
 
 6. The server removes only a stale socket owned by the expected UID. During shutdown it removes the path only if its device and inode still match the socket it created.
 
-7. The workload sees the broker directory through a read only mount. The HAMi-core client checks the directory owner, directory write bits, socket type, socket owner, read only mount flag, and connected peer UID before trusting a response.
+7. The workload sees the broker directory through a read-only mount. The HAMi-core client checks the directory owner, directory write bits, socket type, socket owner, read-only mount flag, and connected peer UID before trusting a response.
 
 8. A caller can request only its own PID. The kernel supplies that identity through `SO_PEERCRED` in the broker's host PID namespace.
 
