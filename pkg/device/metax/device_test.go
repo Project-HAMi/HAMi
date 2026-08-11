@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -398,87 +399,97 @@ func Test_CustomFilterRule(t *testing.T) {
 }
 
 func Test_ScoreNode(t *testing.T) {
+	// twoDevices requests two GPUs, so the topology annotations are looked up
+	// with index 2.
+	twoDevices := device.PodSingleDevice{
+		device.ContainerDevices{
+			{Idx: 0, UUID: "test-0", Type: MetaxGPUDevice, Usedmem: 1000, Usedcores: 1},
+			{Idx: 1, UUID: "test-1", Type: MetaxGPUDevice, Usedmem: 1000, Usedcores: 1},
+		},
+	}
+
 	tests := []struct {
-		name string
-		args struct {
-			node       *corev1.Node
-			podDevices device.PodSingleDevice
-			policy     string
-		}
-		want float32
+		name       string
+		node       *corev1.Node
+		podDevices device.PodSingleDevice
+		want       float32
 	}{
 		{
-			name: "policy is binpack",
-			args: struct {
-				node       *corev1.Node
-				podDevices device.PodSingleDevice
-				policy     string
-			}{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.losses": "{\"1\":100,\"2\":200}",
-						},
+			name: "scores annotation is used directly",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "{\"1\":100,\"2\":200}",
 					},
 				},
-				podDevices: device.PodSingleDevice{
-					device.ContainerDevices{
-						{
-							Idx:       int(0),
-							UUID:      "test-0",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-						{
-							Idx:       int(1),
-							UUID:      "test-1",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-					},
-				},
-				policy: "binpack",
 			},
-			want: float32(1800),
+			podDevices: twoDevices,
+			want:       float32(200),
 		},
 		{
-			name: "policy is spread",
-			args: struct {
-				node       *corev1.Node
-				podDevices device.PodSingleDevice
-				policy     string
-			}{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.scores": "{\"1\":100,\"2\":200}",
-						},
+			name: "losses annotation is used when scores is absent",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationLoss: "{\"1\":100,\"2\":200}",
 					},
 				},
-				podDevices: device.PodSingleDevice{
-					device.ContainerDevices{
-						{
-							Idx:       int(0),
-							UUID:      "test-0",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-					},
-				},
-				policy: "spread",
 			},
-			want: float32(1900),
+			podDevices: twoDevices,
+			want:       float32(1800),
 		},
+		{
+			name: "scores is preferred over losses when both are present",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "{\"2\":200}",
+						MetaxAnnotationLoss:  "{\"2\":50}",
+					},
+				},
+			},
+			podDevices: twoDevices,
+			want:       float32(200),
+		},
+		{
+			name:       "no topology annotation scores zero",
+			node:       &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			podDevices: twoDevices,
+			want:       float32(0),
+		},
+	}
+
+	// ScoreNode must be policy-independent: the same inputs produce the same
+	// score regardless of the scheduling policy. The shared scheduler policy
+	// layer (OverrideScore) is responsible for adapting the score to binpack or
+	// spread.
+	policies := []string{
+		util.NodeSchedulerPolicyBinpack.String(),
+		util.NodeSchedulerPolicySpread.String(),
+		"",
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*device.DeviceUsage{}, test.args.policy)
-			assert.DeepEqual(t, result, test.want)
+			for _, policy := range policies {
+				result := dev.ScoreNode(test.node, test.podDevices, []*device.DeviceUsage{}, policy)
+				assert.DeepEqual(t, result, test.want)
+			}
 		})
+	}
+}
+
+// TestMetaxDevicesImplementsPolicyNeutralScorer verifies that MetaxDevices
+// exposes the PolicyNeutralScore marker method, which is how the shared
+// scheduler policy layer detects that ScoreNode is policy-independent and
+// applies the weight and Spread sign inversion.
+func TestMetaxDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev any = &MetaxDevices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("MetaxDevices does not implement the PolicyNeutralScore marker")
 	}
 }
 

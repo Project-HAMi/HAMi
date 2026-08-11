@@ -182,36 +182,45 @@ func parseMetaxAnnos(annos string, index int) float32 {
 	return float32(res)
 }
 
+// ScoreNode returns a policy-independent score for the node following a
+// "higher score is a better node" convention. The shared scheduler policy layer
+// is responsible for weighting this score and adapting it to the active
+// scheduling policy (for example, inverting it under the Spread policy).
+//
+// Metax publishes two topology annotations for the requested device count: a
+// "scores" map where higher is better and a "losses" map where lower is better.
+// The scores annotation is used directly; when it is absent the losses
+// annotation is converted onto the same "higher is better" scale. This keeps a
+// node's topology preference effective regardless of which of the two
+// annotations it publishes.
 func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	sum := 0
 	for _, dev := range podDevices {
 		sum += len(dev)
 	}
 
-	res := float32(0)
-	if policy == string(util.NodeSchedulerPolicyBinpack) {
-		lossAnno, ok := node.Annotations[MetaxAnnotationLoss]
-		if ok {
-			// it's preferred to select the node with lower loss
-			loss := parseMetaxAnnos(lossAnno, sum)
-			res = 2000 - loss
-
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
-		}
-	} else if policy == string(util.NodeSchedulerPolicySpread) {
-		scoreAnno, ok := node.Annotations[MetaxAnnotationScore]
-		if ok {
-			// it's preferred to select the node with higher score
-			// But we have to give it a smaller value because of Spread policy
-			score := parseMetaxAnnos(scoreAnno, sum)
-			res = 2000 - score
-
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
-		}
+	if scoreAnno, ok := node.Annotations[MetaxAnnotationScore]; ok {
+		// it's preferred to select the node with higher score
+		score := parseMetaxAnnos(scoreAnno, sum)
+		klog.InfoS("Detected annotations", "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
+		return score
 	}
 
-	return res
+	if lossAnno, ok := node.Annotations[MetaxAnnotationLoss]; ok {
+		// it's preferred to select the node with lower loss, so convert the
+		// loss onto a "higher is better" scale.
+		loss := parseMetaxAnnos(lossAnno, sum)
+		klog.InfoS("Detected annotations", "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
+		return 2000 - loss
+	}
+
+	return 0
 }
+
+// PolicyNeutralScore marks MetaxDevices as returning a policy-independent score
+// from ScoreNode, so the shared scheduler policy layer owns the weighting and
+// Spread-policy sign inversion.
+func (dev *MetaxDevices) PolicyNeutralScore() {}
 
 func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
