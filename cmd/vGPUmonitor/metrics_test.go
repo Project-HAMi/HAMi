@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -66,5 +67,31 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 	if _, err := regLegacy.Gather(); err != nil {
 		t.Errorf("Gather failed (legacy): %v", err)
+	}
+}
+
+func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
+	initLegacyDescriptors()
+
+	// Verify standard host GPU descriptors include "node" label
+	hostGPUString := hostGPUdesc.String()
+	if !strings.Contains(hostGPUString, `"node"`) && !strings.Contains(hostGPUString, `node`) {
+		t.Errorf("hostGPUdesc does not contain 'node' label: %s", hostGPUString)
+	}
+
+	hostGPUUtilString := hostGPUUtilizationdesc.String()
+	if !strings.Contains(hostGPUUtilString, `"node"`) && !strings.Contains(hostGPUUtilString, `node`) {
+		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilString)
+	}
+
+	// Verify legacy host GPU descriptors include "nodeid" label
+	legacyHostGPUString := legacyHostGPUdesc.String()
+	if !strings.Contains(legacyHostGPUString, `"nodeid"`) && !strings.Contains(legacyHostGPUString, `nodeid`) {
+		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUString)
+	}
+
+	legacyHostGPUUtilString := legacyHostGPUUtilizationdesc.String()
+	if !strings.Contains(legacyHostGPUUtilString, `"nodeid"`) && !strings.Contains(legacyHostGPUUtilString, `nodeid`) {
+		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilString)
 	}
 }
