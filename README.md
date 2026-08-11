@@ -45,7 +45,7 @@ HAMi provides a Kubernetes-native layer for:
 - Increase GPU utilization in shared Kubernetes AI clusters.
 - Run multi-tenant notebook, training, and inference workloads on the same accelerator pool.
 - Build private cloud AI platforms with fair device allocation and quota control.
-- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, MetaX, Moore Threads, and other vendors.
+- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, Kunlunxin, MetaX, Moore Threads, and other vendors.
 - Combine HAMi with Kubernetes schedulers such as kube-scheduler and Volcano for batch AI workloads.
 
 ## How It Works
