@@ -941,10 +941,7 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
 				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
 		}
-		delay := backoff.Step()
-		if delay > remaining {
-			delay = remaining
-		}
+		delay := min(backoff.Step(), remaining)
 		if delay <= 0 {
 			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
 				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
