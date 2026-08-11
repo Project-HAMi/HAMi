@@ -1445,9 +1445,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 // to 0 on the soft-partitioning path, which made the scheduler's memory fit
 // check pass against any device.
 func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
-	// Soft-partitioning layout: requesting a core count makes
-	// GenerateResourceRequests use the raw memory value instead of trimming it
-	// to a template, which is where the int32 wrap used to happen.
+	// Soft-partitioning (a core request) uses the raw memory value instead of trimming, which is where the int32 wrap happened.
 	coreModeConfig := VNPUConfig{
 		CommonWord:         "Ascend910B3",
 		ResourceName:       "huawei.com/Ascend910B3",
@@ -1487,6 +1485,20 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"huawei.com/Ascend910B3":        resource.MustParse("1"),
 						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// -1m returns ok=false from AsInt64, so it must be rejected by sign before defaulting to a 100% request.
+			name: "negative fractional memory request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("-1m"),
 					},
 				},
 			},
@@ -1539,9 +1551,8 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 	}
 }
 
-// Test_GenerateResourceRequests_MemoryFactorOverflow covers a raw memory request
-// that fits in int32 on its own but overflows once MemoryFactor is applied.
-// 300000000 fits in int32, but 300000000 * 10 exceeds math.MaxInt32.
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a raw memory value that
+// fits in int32 but overflows once MemoryFactor is applied (300000000 * 10 > math.MaxInt32).
 func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	tests := []struct {
 		name string

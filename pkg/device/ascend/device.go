@@ -323,20 +323,22 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 				mem, ok = ctr.Resources.Requests[ascendResourceMem]
 			}
 			if ok {
+				// Negative quantities such as -1m return ok=false from AsInt64, so reject by sign first.
+				if mem.Sign() < 0 {
+					klog.ErrorS(nil, "ascend device memory request is negative", "container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
+					return device.ContainerDeviceRequest{}
+				}
 				memnums, ok := mem.AsInt64()
 				if ok {
-					// Ascend memory is expressed in MB, so a byte-suffixed quantity such as
-					// 16Gi is several orders of magnitude past the int32 request field and is
-					// almost always a wrong-unit mistake rather than a real request.
-					if memnums < 0 || memnums > math.MaxInt32 {
+					// Ascend memory is in MB, so an over-int32 value such as a byte quantity 16Gi is a wrong-unit mistake.
+					if memnums > math.MaxInt32 {
 						klog.ErrorS(nil, "ascend device memory request is out of range; memory unit is treated as MB not Byte, so a quantity such as 16Gi is invalid, request 16384 for 16GB instead",
 							"container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
 						return device.ContainerDeviceRequest{}
 					}
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
-						// memnums is already bounded by math.MaxInt32 and MemoryFactor is an
-						// int32, so this product cannot overflow int64 before it is checked.
+						// memnums is bounded by math.MaxInt32 and MemoryFactor is int32, so this product cannot overflow int64.
 						memnums = memnums * int64(dev.config.MemoryFactor)
 						if memnums > math.MaxInt32 {
 							klog.ErrorS(nil, "ascend device memory request overflows int32 after applying memory factor; memory unit is treated as MB not Byte",
