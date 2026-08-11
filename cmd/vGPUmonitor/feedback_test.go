@@ -18,6 +18,7 @@ package main
 
 import (
 	"testing"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
@@ -165,5 +166,33 @@ func TestObserve(t *testing.T) {
 	// Call Observe with an empty lister to cover the missing lines for codecov
 	// and to ensure no panics occur with locking/unlocking.
 	lister := &nvidia.ContainerLister{}
-	Observe(lister)
+
+	// Test that Observe actually acquires the lock.
+	lister.Lock()
+	
+	done := make(chan struct{})
+	go func() {
+		Observe(lister)
+		close(done)
+	}()
+	
+	// Observe should be blocked waiting for the lock, so it shouldn't complete yet.
+	select {
+	case <-done:
+		t.Fatal("Observe completed while lock was held by another goroutine, indicating it did not acquire the lock!")
+	// A small delay to ensure the goroutine has time to schedule and block
+	case <-time.After(50 * time.Millisecond):
+		// Expected: Observe is blocked
+	}
+	
+	// Release the lock
+	lister.UnLock()
+	
+	// Now Observe should complete
+	select {
+	case <-done:
+		// Success
+	case <-time.After(1 * time.Second):
+		t.Fatal("Observe did not complete after lock was released")
+	}
 }
