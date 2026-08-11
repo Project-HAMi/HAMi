@@ -26,7 +26,7 @@ container to be `Terminated`. A sidecar never terminates, so pods with one
 never release their init containers' memory. Case 4 of the init design
 stops working.
 
-**3. A bug waiting to happen — `AppContainersOnlyDeviceUsage`.** The shrink
+**3. A bug waiting to happen. `AppContainersOnlyDeviceUsage`.** The shrink
 target skips all init containers, sidecars included — unreachable today
 only because gate (2) never opens. Fix the gate but not the target, and a
 running sidecar's usage gets dropped from accounting. The two have to
@@ -36,7 +36,7 @@ change together.
 
 The upstream formula (what the apiserver itself charges):
 
-```
+```text
 effective = max( max over non-sidecar init_i ( init_i + sum(sidecars started before init_i) ),
                  sum(apps) + sum(all sidecars) )
 ```
@@ -45,17 +45,19 @@ effective = max( max over non-sidecar init_i ( init_i + sum(sidecars started bef
 `sum(all sidecars)` instead of the ordering-aware term. Per device UUID
 and resource (count, mem, cores):
 
-```
+```text
 effective[uuid] = sidecar_sum[uuid] + max( init_peak[uuid], app_sum[uuid] )
 ```
 
-where `init_peak` is the max over non-sidecar init containers. Sidecars are
-just a floor on top of the existing formula. It can only over-reserve, and
-only during the init phase in an ordering corner case.
+where `init_peak` is the max over non-sidecar init containers. If there are
+none, `init_peak` is 0, and a missing per-UUID entry also counts as 0
+before the `max()` and addition. Sidecars are just a floor on top of the
+existing formula. It can only over-reserve, and only during the init phase
+in an ordering corner case.
 
 **Classification:**
 
-```
+```text
 isSidecar(c) := c ∈ spec.initContainers && c.RestartPolicy != nil &&
                 *c.RestartPolicy == corev1.ContainerRestartPolicyAlways
 ```
@@ -77,8 +79,13 @@ behavior stays exactly as today. No version gating, no new config.
   symmetry stays as it is.
 
 Annotations don't change, but a sidecar keeps its position in the init
-range of `hami.io/vgpu-devices-allocated`. Readers (device plugin
-`Allocate`, WebUI) must classify through `pod.Spec`, not by index.
+range of `hami.io/vgpu-devices-allocated`, and the annotation itself
+carries no sidecar identity. Position `i` maps to
+`pod.Spec.InitContainers[i]` when `i < len(InitContainers)`, otherwise to
+`pod.Spec.Containers[i - len(InitContainers)]`; readers
+(`CollapseInitContainerUsage`, device plugin `Allocate`, WebUI — which
+already holds the Pod object) then check that container's `restartPolicy`,
+never the position alone.
 
 ### Cases (one node, single 24Gi GPU)
 
@@ -97,15 +104,19 @@ to steady-state usage (apps + sidecars) once non-sidecar inits exit 0;
 hold on non-zero exit; zero at terminal phase. A sidecar can crash-loop
 through `Terminated` states; since sidecars are out of the gate entirely,
 restarts don't affect it — worth a test. If all init containers are
-sidecars, the gate is satisfied immediately and the shrink recomputes the
-stored value (delta 0). `initContainerResourceReleased` keeps its
-semantics. Rename `AppContainersOnlyDeviceUsage` (e.g.
-`SteadyStateDeviceUsage`) so an un-migrated caller fails to compile instead
-of silently dropping sidecar usage.
+sidecars (`init_peak = 0`), the gate is satisfied immediately and the
+shrink recomputes the stored value (delta 0).
+`initContainerResourceReleased` keeps its semantics. Rename
+`AppContainersOnlyDeviceUsage` (e.g. `SteadyStateDeviceUsage`) so an
+un-migrated caller fails to compile instead of silently dropping sidecar
+usage.
 
 ## Interaction with Kubernetes ResourceQuota
 
-The apiserver already charges the sidecar-aware formula, so both sides
-agree at admission. As before, the shrink only frees capacity inside
-HAMi — fine, since the sidecar's share has to be held until the pod ends
-anyway.
+The apiserver charges the ordering-aware upstream formula, so HAMi's
+simplified value is equal or slightly higher. In the shrink-restored case
+above, if the sidecar is declared after the init container, the apiserver
+charges 20Gi while HAMi accounts 22Gi — a pod near the quota limit can
+pass the apiserver and still be rejected by HAMi, only in that ordering
+corner case. As before, the shrink only frees capacity inside HAMi — fine,
+since the sidecar's share has to be held until the pod ends anyway.
