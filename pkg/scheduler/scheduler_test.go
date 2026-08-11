@@ -1278,10 +1278,10 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {
 
 	assert.Equal(t, 1, mockDev.nodeCleanedUp, "NodeCleanUp should be invoked when device is unhealthy even on discovery error")
 
-	nodeInfo, err := s.GetNode("node-1")
-	require.NoError(t, err)
-	_, ok := nodeInfo.Devices["mock-vendor"]
-	assert.Equal(t, false, ok, "unhealthy mock-vendor device should be removed from scheduler cache")
+	// mock-vendor was the only vendor on node-1; rmNodeDevices deletes the node
+	// entry entirely when no vendors remain. GetNode must return an error.
+	_, err = s.GetNode("node-1")
+	assert.ErrorContains(t, err, "not found", "node-1 should be removed from scheduler cache after last vendor cleanup")
 }
 
 func TestRegisterHealthReconciliationOnDiscoveryError_Healthy(t *testing.T) {
