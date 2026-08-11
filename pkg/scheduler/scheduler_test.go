@@ -22,6 +22,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2461,10 +2462,9 @@ func benchAcquireContention(b *testing.B, numPods int) {
 	}()
 
 	// Simulate a shared node lock: only one pod can hold it at a time.
-	var lockHolder atomic.Int32
 	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "bench-node"}}
 
-	mock := &sharedLockMockDevice{lockHolder: &lockHolder}
+	mock := &sharedLockMockDevice{}
 	device.DevicesMap = map[string]device.Devices{"shared-lock-mock": mock}
 
 	done := make(chan struct{})
@@ -2480,7 +2480,10 @@ func benchAcquireContention(b *testing.B, numPods int) {
 					Labels: map[string]string{util.PodGroupLabel: "bench-gang"},
 				},
 			}
-			_ = s.acquireNodeLocks(node, pod)
+			if err := s.acquireNodeLocks(node, pod); err == nil {
+				time.Sleep(5 * time.Millisecond)
+				s.releaseAllDevices(node, pod)
+			}
 			done <- struct{}{}
 		}()
 	}
@@ -2490,19 +2493,28 @@ func benchAcquireContention(b *testing.B, numPods int) {
 }
 
 // sharedLockMockDevice simulates a real shared lock: only one caller at a time succeeds.
+// Tracks the holder by pod UID so that only the holder can release.
 type sharedLockMockDevice struct {
 	registerMockDevice
-	lockHolder *atomic.Int32
+	mu     sync.Mutex
+	holder types.UID
 }
 
 func (m *sharedLockMockDevice) CommonWord() string { return "shared-lock-mock" }
-func (m *sharedLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
-	if m.lockHolder.CompareAndSwap(0, 1) {
+func (m *sharedLockMockDevice) LockNode(_ *corev1.Node, pod *corev1.Pod) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.holder == "" || m.holder == pod.UID {
+		m.holder = pod.UID
 		return nil
 	}
 	return fmt.Errorf("busy: %w", nodelockutil.ErrNodeLockContention)
 }
-func (m *sharedLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
-	m.lockHolder.Store(0)
+func (m *sharedLockMockDevice) ReleaseNodeLock(_ *corev1.Node, pod *corev1.Pod) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.holder == pod.UID {
+		m.holder = ""
+	}
 	return nil
 }

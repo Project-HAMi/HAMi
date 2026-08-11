@@ -936,13 +936,18 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 		if !nodelockutil.IsNodeLockContention(err) {
 			return err
 		}
-		if time.Now().After(deadline) {
+		remaining := time.Until(deadline)
+		if remaining <= 0 {
 			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
 				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
 		}
 		delay := backoff.Step()
-		if remaining := time.Until(deadline); delay > remaining {
+		if delay > remaining {
 			delay = remaining
+		}
+		if delay <= 0 {
+			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
+				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
 		}
 		step++
 		klog.V(4).InfoS("Node lock contended, backing off",
