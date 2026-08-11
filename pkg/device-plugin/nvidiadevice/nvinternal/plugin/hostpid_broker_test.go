@@ -104,12 +104,13 @@ func TestPrepareDefaultHostPIDLockParentAsRoot(t *testing.T) {
 }
 
 func TestPrepareHostPIDLockParentRejectsUntrustedObjects(t *testing.T) {
-	t.Run("owner", func(t *testing.T) {
+	t.Run("parent owner", func(t *testing.T) {
 		directory := filepath.Join(t.TempDir(), "vgpulock")
 		require.NoError(t, os.Mkdir(directory, 0o700))
 
-		require.Error(t, prepareHostPIDLockParent(directory,
-			uint32(os.Geteuid()+1)))
+		err := prepareHostPIDLockParent(directory, uint32(os.Geteuid()+1))
+		require.ErrorContains(t, err,
+			"parent directory is not owned by trusted UID")
 	})
 
 	t.Run("regular file", func(t *testing.T) {
