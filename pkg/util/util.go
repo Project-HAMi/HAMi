@@ -282,8 +282,10 @@ func AllContainersCreated(pod *corev1.Pod) bool {
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }
 
-// EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.
-func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow time.Duration) {
+// EmitNodeWarningEvent emits a Warning event on the given Node.
+// If an existing event with the same node and reason is found, the
+// count is incremented via Patch to avoid creating duplicates.
+func EmitNodeWarningEvent(node *corev1.Node, reason, message string) {
 	c := client.GetClient()
 	if c == nil {
 		klog.Warningf("cannot emit node event for %s: Kubernetes client not initialized", node.Name)
@@ -292,22 +294,21 @@ func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
+
 	fieldSel := fmt.Sprintf(
-		"involvedObject.kind=Node,involvedObject.name=%s,involvedObject.uid=%s,reason=%s",
-		node.Name, string(node.UID), reason,
+		"involvedObject.kind=Node,involvedObject.name=%s,reason=%s",
+		node.Name, reason,
 	)
 	existing, err := c.CoreV1().Events(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{
 		FieldSelector: fieldSel,
 	})
 	if err != nil {
-		klog.Warningf("failed to list events for node %s: %v; will attempt create", node.Name, err)
+		klog.Warningf("failed to list events for node %s: %v", node.Name, err)
 	}
 
 	now := metav1.Now()
 
-	if err == nil && len(existing.Items) > 0 {
-		// Client-side filter: the field selector is a server-side optimization; re-check
-		// here so the function is correct even against fake clients or non-compliant servers.
+	if err == nil {
 		var latest *corev1.Event
 		for i := range existing.Items {
 			ev := &existing.Items[i]
@@ -318,12 +319,13 @@ func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow
 				latest = ev
 			}
 		}
-		if latest != nil && now.Sub(latest.LastTimestamp.Time) <= dedupWindow {
-			latest.Count++
-			latest.LastTimestamp = now
-			latest.Message = message
-			if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Update(ctx, latest, metav1.UpdateOptions{}); err != nil {
-				klog.Warningf("failed to update node event for %s: %v", node.Name, err)
+		if latest != nil {
+			patch := []byte(fmt.Sprintf(
+				`{"count":%d,"lastTimestamp":"%s","message":"%s"}`,
+				latest.Count+1, now.UTC().Format(time.RFC3339), message))
+			if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Patch(
+				ctx, latest.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+				klog.Warningf("failed to patch node event for %s: %v", node.Name, err)
 			}
 			return
 		}

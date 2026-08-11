@@ -224,8 +224,7 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		if hasAsymmetry {
 			util.EmitNodeWarningEvent(node, "AsymmetricGPUP2PLink",
 				"One or more GPU pairs on this node have asymmetric P2P link data; "+
-					"affected pairs scored 0 (possible NVLink hardware or driver issue)",
-				time.Hour)
+					"affected pairs scored 0 (possible NVLink hardware or driver issue)")
 		}
 		data, err = json.Marshal(gpuScore)
 		if err != nil {
