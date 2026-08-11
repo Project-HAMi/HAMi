@@ -35,6 +35,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -966,6 +967,16 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 
 func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	t.Setenv(hostpid.EnvironmentVariable, "1")
+	prepareCalls := 0
+	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
+	prepareHostPIDLockParentForAllocation = func() error {
+		prepareCalls++
+		return nil
+	}
+	defer func() {
+		prepareHostPIDLockParentForAllocation =
+			previousPrepareHostPIDLockParent
+	}()
 	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
 	enableGetPreferredAllocation = true
 	defer func() {
@@ -1037,19 +1048,56 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 
 	response, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
+	require.Equal(t, 1, prepareCalls)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
 	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.EnvironmentVariable])
-	brokerMountFound := false
-	for _, mount := range response.ContainerResponses[0].Mounts {
+	brokerMountCount := 0
+	brokerMountIndex := -1
+	fallbackParentMountCount := 0
+	fallbackParentMountIndex := -1
+	for mountIndex, mount := range response.ContainerResponses[0].Mounts {
 		if mount.ContainerPath == hostpid.ContainerDirectory {
 			require.Equal(t, hostpid.ServerDirectory, mount.HostPath)
 			require.True(t, mount.ReadOnly)
-			brokerMountFound = true
+			brokerMountIndex = mountIndex
+			brokerMountCount++
+		}
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackParentMountIndex = mountIndex
+			fallbackParentMountCount++
 		}
 	}
-	require.True(t, brokerMountFound)
+	require.Equal(t, 1, brokerMountCount)
+	require.Equal(t, 1, fallbackParentMountCount)
+	require.Less(t, fallbackParentMountIndex, brokerMountIndex)
+
+	t.Setenv(hostpid.EnvironmentVariable, "")
+	disabledResponse, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, 2, prepareCalls)
+	require.NotContains(t, disabledResponse.ContainerResponses[0].Envs,
+		hostpid.EnvironmentVariable)
+	fallbackMountCount := 0
+	for _, mount := range disabledResponse.ContainerResponses[0].Mounts {
+		require.NotEqual(t, hostpid.ContainerDirectory, mount.ContainerPath)
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackMountCount++
+		}
+	}
+	require.Equal(t, 1, fallbackMountCount)
+
+	prepareHostPIDLockParentForAllocation = func() error {
+		return errors.New("parent preparation fixture")
+	}
+	failedResponse, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, failedResponse)
+	require.ErrorContains(t, err, "failed to prepare host PID lock parent")
 }
 
 func TestAllocateReleasesNodeLockWhenNonMIGAllocateResponseFails(t *testing.T) {
