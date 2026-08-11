@@ -9,6 +9,10 @@ After the pods start, verify their assigned SCC:
   oc get pods -n {{ $namespace }} \
     -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc'
 {{- if .Values.openshift.securityContextConstraints.name }}
+{{- if .Values.openshift.securityContextConstraints.create }}
+The chart creates the `{{ .Values.openshift.securityContextConstraints.name }}`
+SecurityContextConstraints resource.
+{{- end }}
 The chart grants the `{{ .Values.openshift.securityContextConstraints.name }}`
 SecurityContextConstraints resource to the enabled device plugin service accounts
 in this namespace. The scheduler and admission service accounts are not granted
@@ -27,8 +31,4 @@ The device plugin relabels shared vGPU host directories under
 /tmp/vgpulock for SELinux access. These operations also create or update host
 directory permissions. Uninstalling this Helm release does not restore the host
 SELinux labels or directory permissions; restore them manually if required.
-{{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
-The NVIDIA driver root {{ .Values.devicePlugin.nvidiaDriverRoot }} is also recursively
-relabelled. Uninstalling this Helm release does not restore those host SELinux labels.
-{{- end }}
 {{- end }}

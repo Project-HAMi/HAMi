@@ -26,8 +26,10 @@ platform:
 
 openshift:
   securityContextConstraints:
-    # Leave empty to manage SCC grants outside this chart.
-    # Set to privileged only as an explicit opt-in.
+    # Leave disabled and empty to manage SCC grants outside this chart.
+    # Set create=true with a custom name to create the HAMi device-plugin SCC,
+    # or keep create=false and set name=privileged to use OpenShift's built-in SCC.
+    create: false
     name: ""
 
 # SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
@@ -277,8 +279,8 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
-    # Leave unset to let the platform allocate a UID (required by OpenShift SCC).
-    runAsUser: null
+    # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
+    runAsUser: 2000
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
     httpPort: 443   # HTTP port
@@ -426,7 +428,6 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
-  hostNetwork: false
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true
@@ -438,8 +439,7 @@ devicePlugin:
   # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
   tolerations:
     - key: nvidia.com/gpu
-      operator: Equal
-      value: "true"
+      operator: Exists
       effect: NoSchedule
   updateStrategy:
     type: RollingUpdate

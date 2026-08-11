@@ -41,7 +41,6 @@ spec:
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
-      hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
@@ -62,10 +61,6 @@ spec:
               chmod 1777 /host/hami/tmp/vgpulock
               chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
                 /host/hami/vgpu /host/hami/containers /host/hami/tmp/vgpulock
-              {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
-              chcon -R -t "${SELINUX_TYPE}" -l "${SELINUX_LEVEL}" \
-                /host/hami/driver-root
-              {{- end }}
           env:
             - name: SELINUX_TYPE
               value: {{ .Values.selinux.type | quote }}
@@ -78,10 +73,6 @@ spec:
               mountPath: /host/hami/containers
             - name: hosttmp
               mountPath: /host/hami/tmp
-            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
-            - name: driver-root
-              mountPath: /host/hami/driver-root
-            {{- end }}
         {{- end }}
         {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
         - name: toolkit-validation
