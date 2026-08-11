@@ -17,6 +17,8 @@ limitations under the License.
 package kunlun
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -510,4 +512,97 @@ func Test_ScoreNode(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+}
+
+// baidu.com/use-gpuuuid and nouse-gpuuuid were defined but never consulted, so
+// a pod asking for a specific XPU was scheduled onto any of them.
+func TestKunlunDevices_Fit_UseUUID(t *testing.T) {
+	dev := &KunlunDevices{}
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{
+			Index:     uint(i),
+			ID:        fmt.Sprintf("xpu-%d", i),
+			Count:     1,
+			Totalmem:  KunlunMaxMemory,
+			Totalcore: 100,
+			Health:    true,
+		}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: KunlunGPUDevice}
+
+	podWith := func(annos map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
+	}
+
+	fit, res, _ := dev.Fit(devices, req, podWith(map[string]string{
+		KunlunUseUUID: "xpu-5",
+	}), &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(res[KunlunGPUDevice]), 1)
+	assert.Equal(t, res[KunlunGPUDevice][0].UUID, "xpu-5")
+
+	// asking for a card that is not on the node must not fall back to another
+	fit, _, reason := dev.Fit(devices, req, podWith(map[string]string{
+		KunlunUseUUID: "xpu-99",
+	}), &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
+}
+
+func TestKunlunDevices_Fit_NoUseUUID(t *testing.T) {
+	dev := &KunlunDevices{}
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{
+			Index:     uint(i),
+			ID:        fmt.Sprintf("xpu-%d", i),
+			Count:     1,
+			Totalmem:  KunlunMaxMemory,
+			Totalcore: 100,
+			Health:    true,
+		}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: KunlunGPUDevice}
+
+	// exclude every card and nothing should be allocatable
+	all := make([]string, 0, 8)
+	for i := range devices {
+		all = append(all, fmt.Sprintf("xpu-%d", i))
+	}
+	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			KunlunNoUseUUID: strings.Join(all, ","),
+		}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
+}
+
+func TestKunlunVDevices_Fit_UUIDAnnotations(t *testing.T) {
+	dev := &KunlunVDevices{}
+	devices := make([]*device.DeviceUsage, 8)
+	for i := range devices {
+		devices[i] = &device.DeviceUsage{
+			Index:     uint(i),
+			ID:        fmt.Sprintf("xpu-%d", i),
+			Count:     10,
+			Totalmem:  KunlunMaxMemory,
+			Totalcore: 100,
+			Health:    true,
+		}
+	}
+	req := device.ContainerDeviceRequest{Nums: 1, Type: XPUDevice, Memreq: KunlunMaxMemory}
+
+	fit, res, _ := dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{KunlunUseUUID: "xpu-3"}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, res[XPUDevice][0].UUID, "xpu-3")
+
+	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{KunlunNoUseUUID: "xpu-0,xpu-1,xpu-2,xpu-3,xpu-4,xpu-5,xpu-6,xpu-7"}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
 }
