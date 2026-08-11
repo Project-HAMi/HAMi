@@ -160,3 +160,10 @@ func TestCheckBlocking_MultiDevice(t *testing.T) {
 		})
 	}
 }
+
+func TestObserve(t *testing.T) {
+	// Call Observe with an empty lister to cover the missing lines for codecov
+	// and to ensure no panics occur with locking/unlocking.
+	lister := &nvidia.ContainerLister{}
+	Observe(lister)
+}
