@@ -178,6 +178,11 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			return true, errors.New("vNPU not supported for multiple devices")
 		}
 	}
+	// Requests may be nil when the pod declares only limits; writing to a
+	// nil map panics.
+	if ctr.Resources.Requests == nil {
+		ctr.Resources.Requests = corev1.ResourceList{}
+	}
 	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 

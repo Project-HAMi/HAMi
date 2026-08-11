@@ -152,9 +152,9 @@ func TestClientWithOptions(t *testing.T) {
 // TestClientRealNodePerformance tests the performance with a real Kubernetes cluster if available.
 func TestClientRealNodePerformance(t *testing.T) {
 
-	skipRealClusterTest := true
+	skipRealClusterTest := os.Getenv("TEST_WITH_REAL_CLUSTER") != "true"
 	// Skip this test by default as it requires a real Kubernetes cluster.
-	if skipRealClusterTest == true {
+	if skipRealClusterTest {
 		t.Skip("Skipping real cluster test. Set TEST_WITH_REAL_CLUSTER=true to run this test.")
 	}
 

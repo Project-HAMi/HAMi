@@ -2903,3 +2903,107 @@ func TestScoreOnlineDevices(t *testing.T) {
 		})
 	}
 }
+
+// TestScoreNodePolicyIndependence verifies that MetaxSDevices.ScoreNode returns
+// a score that does not depend on the scheduler policy string. The shared
+// scheduler policy layer (policy.OverrideScore) is responsible for weighting and
+// adapting this score to the active policy, so ScoreNode itself must produce the
+// same value regardless of the policy passed in.
+func TestScoreNodePolicyIndependence(t *testing.T) {
+	sdev := &MetaxSDevices{}
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+
+	for _, ts := range []struct {
+		name       string
+		podDevices device.PodSingleDevice
+		previous   []*device.DeviceUsage
+	}{
+		{
+			name: "topology-aware exclusive allocation",
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{
+						UUID:      "GPU-3",
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"LinkZone": int32(1),
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+					{
+						UUID:      "GPU-4",
+						Usedcores: 100,
+						CustomInfo: map[string]any{
+							"LinkZone": int32(1),
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUTopologyAware: "true",
+							},
+						},
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{
+				{ID: "GPU-1", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-2", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-3", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+				{ID: "GPU-4", Used: 0, CustomInfo: map[string]any{"LinkZone": int32(1)}},
+			},
+		},
+		{
+			name: "online allocation",
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{
+						UUID: "GPU-1",
+						CustomInfo: map[string]any{
+							"Pod.Annotations": map[string]string{
+								MetaxSGPUAppClass: Online,
+							},
+						},
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{
+				{ID: "GPU-1", Used: 0},
+				{ID: "GPU-2", Used: 0},
+			},
+		},
+		{
+			name: "no topology or online hint scores zero",
+			podDevices: device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{UUID: "GPU-1", Usedcores: 50},
+				},
+			},
+			previous: []*device.DeviceUsage{
+				{ID: "GPU-1", Used: 0},
+			},
+		},
+	} {
+		t.Run(ts.name, func(t *testing.T) {
+			binpack := sdev.ScoreNode(node, ts.podDevices, ts.previous, "binpack")
+			spread := sdev.ScoreNode(node, ts.podDevices, ts.previous, "spread")
+			empty := sdev.ScoreNode(node, ts.podDevices, ts.previous, "")
+
+			if binpack != spread || binpack != empty {
+				t.Errorf("ScoreNode is policy-dependent: binpack=%v, spread=%v, empty=%v",
+					binpack, spread, empty)
+			}
+		})
+	}
+}
+
+// TestMetaxSDevicesImplementsPolicyNeutralScorer ensures MetaxSDevices exposes
+// the PolicyNeutralScore marker method, which is how the shared policy layer
+// discovers that ScoreNode is policy-independent and must be weighted.
+func TestMetaxSDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev device.Devices = &MetaxSDevices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("MetaxSDevices does not implement the PolicyNeutralScore marker")
+	}
+}
