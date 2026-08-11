@@ -1439,6 +1439,170 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 	}
 }
 
+// Test_GenerateResourceRequests_OutOfRangeValues covers requests whose values do
+// not fit the int32 fields of ContainerDeviceRequest. Before the range guards
+// these narrowed silently: a byte-suffixed memory quantity such as 16Gi wrapped
+// to 0 on the soft-partitioning path, which made the scheduler's memory fit
+// check pass against any device.
+func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
+	// Soft-partitioning layout: requesting a core count makes
+	// GenerateResourceRequests use the raw memory value instead of trimming it
+	// to a template, which is where the int32 wrap used to happen.
+	coreModeConfig := VNPUConfig{
+		CommonWord:         "Ascend910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceCoreName:   "huawei.com/Ascend910B3-core",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  int64(65536),
+		MemoryCapacity:     int64(65536),
+	}
+
+	tests := []struct {
+		name string
+		dev  Devices
+		args corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			// 16Gi is 17179869184, which wrapped to 0 when narrowed to int32.
+			// Ascend memory is denominated in MB, so this is a wrong-unit request.
+			name: "memory requested in bytes exceeds int32 range on soft-partitioning path",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "memory requested in bytes exceeds int32 range on trim path",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized device count exceeds int32 range",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative core request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":      resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized core request exceeds int32 range",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":      resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&test.args)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a raw memory request
+// that fits in int32 on its own but overflows once MemoryFactor is applied.
+// 300000000 fits in int32, but 300000000 * 10 exceeds math.MaxInt32.
+func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
+	tests := []struct {
+		name string
+		dev  Devices
+		args corev1.Container
+	}{
+		{
+			// Soft-partitioning keeps the scaled value, so this narrowed to a
+			// negative Memreq before the guard.
+			name: "scaled memory overflows int32 on soft-partitioning path",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					MemoryAllocatable:  int64(65536),
+					MemoryCapacity:     int64(65536),
+					MemoryFactor:       int32(10),
+				},
+			},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("300000000"),
+					},
+				},
+			},
+		},
+		{
+			name: "scaled memory overflows int32 on trim path",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(10),
+				},
+			},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("300000000"),
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&test.args)
+			assert.Equal(t, result, device.ContainerDeviceRequest{})
+		})
+	}
+}
+
 func TestDevices_LockNode(t *testing.T) {
 	tests := []struct {
 		name        string

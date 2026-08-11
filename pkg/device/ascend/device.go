@@ -21,6 +21,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -312,6 +313,10 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 		klog.V(3).Infof("Counting %s devices", dev.config.CommonWord)
 		if n, ok := v.AsInt64(); ok {
 			klog.Info("Found AscendDevices devices")
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "ascend device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[ascendResourceMem]
 			if !ok {
@@ -320,9 +325,24 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					// Ascend memory is expressed in MB, so a byte-suffixed quantity such as
+					// 16Gi is several orders of magnitude past the int32 request field and is
+					// almost always a wrong-unit mistake rather than a real request.
+					if memnums < 0 || memnums > math.MaxInt32 {
+						klog.ErrorS(nil, "ascend device memory request is out of range; memory unit is treated as MB not Byte, so a quantity such as 16Gi is invalid, request 16384 for 16GB instead",
+							"container", ctr.Name, "request", mem.String(), "device", dev.config.CommonWord)
+						return device.ContainerDeviceRequest{}
+					}
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
+						// memnums is already bounded by math.MaxInt32 and MemoryFactor is an
+						// int32, so this product cannot overflow int64 before it is checked.
 						memnums = memnums * int64(dev.config.MemoryFactor)
+						if memnums > math.MaxInt32 {
+							klog.ErrorS(nil, "ascend device memory request overflows int32 after applying memory factor; memory unit is treated as MB not Byte",
+								"container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", dev.config.MemoryFactor)
+							return device.ContainerDeviceRequest{}
+						}
 						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
 					// If "core" is requested, it explicitly indicates the use of soft-partitioning.
@@ -347,10 +367,17 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 			// Process Core Resources
 			corenum := int32(0)
 			if ascendResourceCore != "" {
-				if cv, ok := ctr.Resources.Limits[ascendResourceCore]; ok {
-					corenum = int32(cv.Value())
-				} else if cv, ok := ctr.Resources.Requests[ascendResourceCore]; ok {
-					corenum = int32(cv.Value())
+				cv, ok := ctr.Resources.Limits[ascendResourceCore]
+				if !ok {
+					cv, ok = ctr.Resources.Requests[ascendResourceCore]
+				}
+				if ok {
+					corenums := cv.Value()
+					if corenums < 0 || corenums > math.MaxInt32 {
+						klog.ErrorS(nil, "ascend device core request is out of range", "container", ctr.Name, "request", cv.String())
+						return device.ContainerDeviceRequest{}
+					}
+					corenum = int32(corenums)
 				}
 			}
 
