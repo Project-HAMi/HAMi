@@ -41,6 +41,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -733,6 +734,46 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 	return aligned, nil
 }
 
+// overrideEnvKeys is the set of environment variables whose values must be
+// re-injected into processes that do not inherit the container env (e.g. sshd
+// login shells, cron/at jobs, exec'd binaries). The device plugin writes them
+// to an /overrideEnv file mounted into the container; libvgpu re-reads it via
+// load_env_from_file() before joining the shared region so that every process
+// is bounded by the same vGPU memory/SM ceiling.
+var overrideEnvKeys = []string{
+	"CUDA_DEVICE_MEMORY_LIMIT",
+	"CUDA_DEVICE_SM_LIMIT",
+	"CUDA_DEVICE_MEMORY_SHARED_CACHE",
+	"CUDA_VISIBLE_DEVICES",
+	"CUDA_OVERSUBSCRIBE",
+	"GPU_CORE_UTILIZATION_POLICY",
+	"ACTIVE_OOM_KILLER",
+	"LIBCUDA_LOG_LEVEL",
+}
+
+// buildOverrideEnv renders the HAMi-relevant subset of envs (plus per-device
+// indexed variants like CUDA_DEVICE_MEMORY_LIMIT_0) as KEY=VALUE lines.
+func buildOverrideEnv(envs map[string]string) string {
+	var keys []string
+	for k := range envs {
+		for _, p := range overrideEnvKeys {
+			if k == p || strings.HasPrefix(k, p+"_") {
+				keys = append(keys, k)
+				break
+			}
+		}
+	}
+	sort.Strings(keys)
+	var sb strings.Builder
+	for _, k := range keys {
+		sb.WriteString(k)
+		sb.WriteByte('=')
+		sb.WriteString(envs[k])
+		sb.WriteByte('\n')
+	}
+	return sb.String()
+}
+
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
 	// Kubelet may issue Allocate calls concurrently. The pending-pod
@@ -842,6 +883,20 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				os.Chmod(cacheFileHostDirectory, 0777)
 				os.MkdirAll("/tmp/vgpulock", 0777)
 				os.Chmod("/tmp/vgpulock", 0777)
+
+				// Persist the HAMi allocation env to an /overrideEnv file mounted
+				// into the container. Processes that do not inherit the kubelet
+				// injected env (sshd login shells, cron/at jobs, exec'd binaries)
+				// re-read this file via libvgpu so they still join the container's
+				// shared region and are bounded by its memory/SM ceiling.
+				overrideEnvHostPath := filepath.Join(cacheFileHostDirectory, "overrideEnv")
+				overrideEnvContent := buildOverrideEnv(response.Envs)
+				if len(overrideEnvContent) > 0 {
+					if err := os.WriteFile(overrideEnvHostPath, []byte(overrideEnvContent), 0644); err != nil {
+						klog.ErrorS(err, "failed to write overrideEnv for container", "path", overrideEnvHostPath)
+					}
+				}
+
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
@@ -852,6 +907,9 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
 						HostPath: "/tmp/vgpulock",
 						ReadOnly: false},
+					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/overrideEnv",
+						HostPath: overrideEnvHostPath,
+						ReadOnly: true},
 				)
 				found := false
 				for _, val := range currentCtr.Env {
