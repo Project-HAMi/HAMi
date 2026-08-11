@@ -1,3 +1,7 @@
+> **HAMi Helm Chart Repository**
+>
+> This site hosts the official HAMi Helm chart repository. For maintained installation guides, configuration, and project documentation, visit [project-hami.io/docs](https://project-hami.io/docs).
+
 English version | [中文版](README_cn.md)
 
 <img src="imgs/hami-horizontal-colordark.png" width="600px">
