@@ -2285,3 +2285,224 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
 }
+
+// --- acquireNodeLocks backoff tests ---
+
+// backoffTimingMockDevice records the time of each LockNode call for analysis.
+type backoffTimingMockDevice struct {
+	registerMockDevice
+	lockTimes    []time.Time
+	releaseCalls atomic.Int32
+	succeedAfter int32
+	callCount    atomic.Int32
+}
+
+func (m *backoffTimingMockDevice) CommonWord() string { return "backoff-timing-mock" }
+func (m *backoffTimingMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	n := m.callCount.Add(1)
+	m.lockTimes = append(m.lockTimes, time.Now())
+	if m.succeedAfter > 0 && n >= m.succeedAfter {
+		return nil
+	}
+	return fmt.Errorf("busy: %w", nodelockutil.ErrNodeLockContention)
+}
+func (m *backoffTimingMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	m.releaseCalls.Add(1)
+	return nil
+}
+
+func setupAcquireNodeLocksTest(t *testing.T, retryTimeout time.Duration, mock *backoffTimingMockDevice) (*Scheduler, *corev1.Node, *corev1.Pod, func()) {
+	t.Helper()
+
+	oldRetry := config.NodeLockRetryTimeout
+	config.NodeLockRetryTimeout = retryTimeout
+	oldDevicesMap := device.DevicesMap
+	device.DevicesMap = map[string]device.Devices{"backoff-timing-mock": mock}
+
+	s := NewScheduler()
+	cleanup := func() {
+		config.NodeLockRetryTimeout = oldRetry
+		device.DevicesMap = oldDevicesMap
+		close(s.stopCh)
+	}
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-gang", Namespace: "default", UID: types.UID("uid-gang"),
+			Labels: map[string]string{util.PodGroupLabel: "my-training-job"},
+		},
+	}
+	return s, node, pod, cleanup
+}
+
+func TestAcquireNodeLocks_BackoffCap(t *testing.T) {
+	mock := &backoffTimingMockDevice{succeedAfter: 0} // never succeeds
+	s, node, pod, cleanup := setupAcquireNodeLocksTest(t, 5*time.Second, mock)
+	defer cleanup()
+
+	_ = s.acquireNodeLocks(node, pod)
+
+	// Verify no inter-retry gap exceeds the 1s cap + a generous margin for scheduling jitter.
+	// The cap is 1s, jitter adds up to 50% of the computed duration, so max theoretical
+	// sleep is 1.5s. We use 1.8s to account for OS scheduling delays.
+	const maxAllowedGap = 1800 * time.Millisecond
+	for i := 1; i < len(mock.lockTimes); i++ {
+		gap := mock.lockTimes[i].Sub(mock.lockTimes[i-1])
+		require.LessOrEqual(t, gap, maxAllowedGap,
+			"gap between attempt %d and %d was %v, exceeds cap", i-1, i, gap)
+	}
+}
+
+func TestAcquireNodeLocks_BackoffBudget(t *testing.T) {
+	mock := &backoffTimingMockDevice{succeedAfter: 0} // never succeeds
+	s, node, pod, cleanup := setupAcquireNodeLocksTest(t, 3*time.Second, mock)
+	defer cleanup()
+
+	start := time.Now()
+	err := s.acquireNodeLocks(node, pod)
+	elapsed := time.Since(start)
+
+	require.Error(t, err)
+	require.True(t, nodelockutil.IsNodeLockContention(err))
+
+	// With exponential backoff (100, 200, 400, 800, 1000, 1000, ...) the number of
+	// attempts in 3s should be significantly less than 30 (which fixed 100ms would give).
+	// Exponential: ~100+200+400+800+1000+1000 = ~3.5s worth of sleep in ~6 steps.
+	// Accounting for jitter, expect roughly 5-12 attempts.
+	calls := int(mock.callCount.Load())
+	require.Less(t, calls, 20,
+		"expected fewer than 20 attempts with exponential backoff in 3s, got %d", calls)
+	require.Greater(t, calls, 2,
+		"expected more than 2 attempts, got %d", calls)
+
+	// Elapsed time should be close to the 3s deadline.
+	require.InDelta(t, 3.0, elapsed.Seconds(), 0.5,
+		"elapsed time should be close to the 3s timeout")
+}
+
+func TestAcquireNodeLocks_BackoffDesync(t *testing.T) {
+	// Run multiple acquireNodeLocks calls sequentially and verify that the jitter
+	// produces meaningfully different inter-retry intervals across runs.
+	// This confirms that concurrent pods would desynchronize in practice.
+	const numRuns = 6
+	const retryTimeout = 1500 * time.Millisecond
+
+	type runResult struct {
+		gaps []time.Duration
+	}
+	results := make([]runResult, numRuns)
+
+	for i := range numRuns {
+		mock := &backoffTimingMockDevice{succeedAfter: 0}
+		s, node, pod, cleanup := setupAcquireNodeLocksTest(t, retryTimeout, mock)
+		pod.Name = fmt.Sprintf("pod-%d", i)
+		pod.UID = types.UID(fmt.Sprintf("uid-desync-%d", i))
+
+		_ = s.acquireNodeLocks(node, pod)
+		cleanup()
+
+		var gaps []time.Duration
+		for j := 1; j < len(mock.lockTimes); j++ {
+			gaps = append(gaps, mock.lockTimes[j].Sub(mock.lockTimes[j-1]))
+		}
+		results[i] = runResult{gaps: gaps}
+	}
+
+	// Check that at gap index 2 (the 3rd retry interval, where backoff has grown to ~400ms
+	// base with ±50% jitter), the intervals differ across runs.
+	const checkIdx = 2
+	var intervals []time.Duration
+	for _, r := range results {
+		if len(r.gaps) > checkIdx {
+			intervals = append(intervals, r.gaps[checkIdx])
+		}
+	}
+	if len(intervals) < 3 {
+		t.Skip("not enough data points for desync check")
+	}
+
+	minD, maxD := intervals[0], intervals[0]
+	for _, d := range intervals[1:] {
+		if d < minD {
+			minD = d
+		}
+		if d > maxD {
+			maxD = d
+		}
+	}
+	spread := maxD - minD
+
+	// With 50% jitter on a ~400ms base, the spread across 6 runs should be > 50ms.
+	require.Greater(t, spread, 50*time.Millisecond,
+		"retry intervals at gap %d should vary due to jitter, but spread was only %v (intervals: %v)",
+		checkIdx, spread, intervals)
+}
+
+func BenchmarkAcquireNodeLocksContention(b *testing.B) {
+	for _, numPods := range []int{2, 4, 8, 16} {
+		b.Run(fmt.Sprintf("pods=%d", numPods), func(b *testing.B) {
+			for range b.N {
+				benchAcquireContention(b, numPods)
+			}
+		})
+	}
+}
+
+func benchAcquireContention(b *testing.B, numPods int) {
+	b.Helper()
+
+	oldRetry := config.NodeLockRetryTimeout
+	config.NodeLockRetryTimeout = 10 * time.Second
+	oldDevicesMap := device.DevicesMap
+	defer func() {
+		config.NodeLockRetryTimeout = oldRetry
+		device.DevicesMap = oldDevicesMap
+	}()
+
+	// Simulate a shared node lock: only one pod can hold it at a time.
+	var lockHolder atomic.Int32
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "bench-node"}}
+
+	mock := &sharedLockMockDevice{lockHolder: &lockHolder}
+	device.DevicesMap = map[string]device.Devices{"shared-lock-mock": mock}
+
+	done := make(chan struct{})
+	for i := range numPods {
+		go func() {
+			s := NewScheduler()
+			defer close(s.stopCh)
+
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: fmt.Sprintf("pod-%d", i), Namespace: "default",
+					UID:    types.UID(fmt.Sprintf("uid-bench-%d", i)),
+					Labels: map[string]string{util.PodGroupLabel: "bench-gang"},
+				},
+			}
+			_ = s.acquireNodeLocks(node, pod)
+			done <- struct{}{}
+		}()
+	}
+	for range numPods {
+		<-done
+	}
+}
+
+// sharedLockMockDevice simulates a real shared lock: only one caller at a time succeeds.
+type sharedLockMockDevice struct {
+	registerMockDevice
+	lockHolder *atomic.Int32
+}
+
+func (m *sharedLockMockDevice) CommonWord() string { return "shared-lock-mock" }
+func (m *sharedLockMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	if m.lockHolder.CompareAndSwap(0, 1) {
+		return nil
+	}
+	return fmt.Errorf("busy: %w", nodelockutil.ErrNodeLockContention)
+}
+func (m *sharedLockMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	m.lockHolder.Store(0)
+	return nil
+}

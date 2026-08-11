@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"maps"
+	"math"
 	"os"
 	"sort"
 	"strconv"
@@ -910,12 +911,22 @@ func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
 	}
 }
 
+var nodeLockRetryBackoff = wait.Backoff{
+	Duration: 100 * time.Millisecond,
+	Factor:   2.0,
+	Jitter:   0.5,
+	Steps:    math.MaxInt32,
+	Cap:      1 * time.Second,
+}
+
 func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 	if !util.IsPodGroupMember(pod) || config.NodeLockRetryTimeout <= 0 {
 		return s.lockAllDevices(node, pod)
 	}
 
 	deadline := time.Now().Add(config.NodeLockRetryTimeout)
+	backoff := nodeLockRetryBackoff
+	step := 0
 	for {
 		err := s.lockAllDevices(node, pod)
 		if err == nil {
@@ -929,10 +940,17 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 			return fmt.Errorf("timed out after %v waiting for node %s to be unlocked: %w",
 				config.NodeLockRetryTimeout, node.Name, nodelockutil.ErrNodeLockContention)
 		}
+		delay := backoff.Step()
+		if remaining := time.Until(deadline); delay > remaining {
+			delay = remaining
+		}
+		step++
+		klog.V(4).InfoS("Node lock contended, backing off",
+			"node", node.Name, "pod", klog.KObj(pod), "attempt", step, "delay", delay)
 		select {
 		case <-s.stopCh:
 			return fmt.Errorf("scheduler shutting down while waiting for node lock: %w", nodelockutil.ErrNodeLockContention)
-		case <-time.After(100 * time.Millisecond):
+		case <-time.After(delay):
 		}
 	}
 }
