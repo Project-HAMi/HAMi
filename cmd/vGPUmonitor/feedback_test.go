@@ -169,22 +169,22 @@ func TestObserve(t *testing.T) {
 
 	// Test that Observe actually acquires the lock deterministically.
 	lister.Lock()
-	
+
 	reachedLock := make(chan struct{})
 	observeTestHook = func() {
 		close(reachedLock)
 	}
 	defer func() { observeTestHook = nil }()
-	
+
 	done := make(chan struct{})
 	go func() {
 		Observe(lister)
 		close(done)
 	}()
-	
+
 	// Wait until Observe reaches the lock boundary
 	<-reachedLock
-	
+
 	// Ensure Observe is now blocked on the lock
 	select {
 	case <-done:
@@ -192,10 +192,10 @@ func TestObserve(t *testing.T) {
 	default:
 		// Expected: Observe is blocked
 	}
-	
+
 	// Release the lock
 	lister.UnLock()
-	
+
 	// Now Observe should complete
 	select {
 	case <-done:
