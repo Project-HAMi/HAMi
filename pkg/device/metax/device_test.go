@@ -26,6 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -100,56 +101,82 @@ func TestGetNodeDevices(t *testing.T) {
 
 func TestParseMetaxAnnos(t *testing.T) {
 	tests := []struct {
-		name  string
-		index int
-		value float32
+		name      string
+		index     int
+		value     float32
+		wantFound bool
 	}{
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 1,
-			value: 0,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     1,
+			value:     0,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 2,
-			value: 110,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     2,
+			value:     110,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 3,
-			value: 270,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     3,
+			value:     270,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 4,
-			value: 540,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     4,
+			value:     540,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 5,
-			value: 580,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     5,
+			value:     580,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 6,
-			value: 730,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     6,
+			value:     730,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 7,
-			value: 930,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     7,
+			value:     930,
+			wantFound: true,
 		},
 		{
-			name:  "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
-			index: 8,
-			value: 1240,
+			name:      "{\"1\":0,\"2\":110,\"3\":270,\"4\":540,\"5\":580,\"6\":730,\"7\":930,\"8\":1240}",
+			index:     8,
+			value:     1240,
+			wantFound: true,
+		},
+		{
+			// index not present in the map: not found, neutral value.
+			name:      "{\"1\":0,\"2\":110}",
+			index:     3,
+			value:     0,
+			wantFound: false,
+		},
+		{
+			// malformed JSON: not found, neutral value.
+			name:      "not-json",
+			index:     1,
+			value:     0,
+			wantFound: false,
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value := parseMetaxAnnos(tt.name, tt.index)
+			value, found := parseMetaxAnnos(tt.name, tt.index)
 			if value != tt.value {
-				t.Errorf("Expected index %f, got %f", tt.value, value)
+				t.Errorf("Expected value %f, got %f", tt.value, value)
+			}
+			if found != tt.wantFound {
+				t.Errorf("Expected found %v, got %v", tt.wantFound, found)
 			}
 		})
 	}
@@ -398,87 +425,142 @@ func Test_CustomFilterRule(t *testing.T) {
 }
 
 func Test_ScoreNode(t *testing.T) {
+	// twoDevices requests two GPUs, so the topology annotations are looked up
+	// with index 2.
+	twoDevices := device.PodSingleDevice{
+		device.ContainerDevices{
+			{Idx: 0, UUID: "test-0", Type: MetaxGPUDevice, Usedmem: 1000, Usedcores: 1},
+			{Idx: 1, UUID: "test-1", Type: MetaxGPUDevice, Usedmem: 1000, Usedcores: 1},
+		},
+	}
+
 	tests := []struct {
-		name string
-		args struct {
-			node       *corev1.Node
-			podDevices device.PodSingleDevice
-			policy     string
-		}
-		want float32
+		name       string
+		node       *corev1.Node
+		podDevices device.PodSingleDevice
+		want       float32
 	}{
 		{
-			name: "policy is binpack",
-			args: struct {
-				node       *corev1.Node
-				podDevices device.PodSingleDevice
-				policy     string
-			}{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.losses": "{\"1\":100,\"2\":200}",
-						},
+			name: "scores annotation is used directly",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "{\"1\":100,\"2\":200}",
 					},
 				},
-				podDevices: device.PodSingleDevice{
-					device.ContainerDevices{
-						{
-							Idx:       int(0),
-							UUID:      "test-0",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-						{
-							Idx:       int(1),
-							UUID:      "test-1",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-					},
-				},
-				policy: "binpack",
 			},
-			want: float32(1800),
+			podDevices: twoDevices,
+			want:       float32(200),
 		},
 		{
-			name: "policy is spread",
-			args: struct {
-				node       *corev1.Node
-				podDevices device.PodSingleDevice
-				policy     string
-			}{
-				node: &corev1.Node{
-					ObjectMeta: metav1.ObjectMeta{
-						Annotations: map[string]string{
-							"metax-tech.com/gpu.topology.scores": "{\"1\":100,\"2\":200}",
-						},
+			name: "losses annotation is used when scores is absent",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationLoss: "{\"1\":100,\"2\":200}",
 					},
 				},
-				podDevices: device.PodSingleDevice{
-					device.ContainerDevices{
-						{
-							Idx:       int(0),
-							UUID:      "test-0",
-							Type:      MetaxGPUDevice,
-							Usedmem:   int32(1000),
-							Usedcores: int32(1),
-						},
-					},
-				},
-				policy: "spread",
 			},
-			want: float32(1900),
+			podDevices: twoDevices,
+			want:       float32(1800),
 		},
+		{
+			name: "scores is preferred over losses when both are present",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "{\"2\":200}",
+						MetaxAnnotationLoss:  "{\"2\":50}",
+					},
+				},
+			},
+			podDevices: twoDevices,
+			want:       float32(200),
+		},
+		{
+			// A scores annotation that has no entry for the requested count must
+			// not suppress a usable losses annotation.
+			name: "falls back to losses when scores lacks the requested count",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "{\"4\":200}",
+						MetaxAnnotationLoss:  "{\"2\":50}",
+					},
+				},
+			},
+			podDevices: twoDevices,
+			want:       float32(1950),
+		},
+		{
+			// A malformed scores annotation must not suppress a usable losses
+			// annotation.
+			name: "falls back to losses when scores is malformed",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationScore: "not-json",
+						MetaxAnnotationLoss:  "{\"2\":50}",
+					},
+				},
+			},
+			podDevices: twoDevices,
+			want:       float32(1950),
+		},
+		{
+			// A losses annotation with no usable value must score a neutral 0,
+			// not the maximum (metaxTopologyLossBase - 0), so a node with no
+			// topology data never outranks one that has it.
+			name: "losses without the requested count scores neutral zero",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Annotations: map[string]string{
+						MetaxAnnotationLoss: "{\"4\":50}",
+					},
+				},
+			},
+			podDevices: twoDevices,
+			want:       float32(0),
+		},
+		{
+			name:       "no topology annotation scores zero",
+			node:       &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}},
+			podDevices: twoDevices,
+			want:       float32(0),
+		},
+	}
+
+	// ScoreNode must be policy-independent: the same inputs produce the same
+	// score regardless of the scheduling policy. The shared scheduler policy
+	// layer (OverrideScore) is responsible for adapting the score to binpack or
+	// spread.
+	policies := []string{
+		util.NodeSchedulerPolicyBinpack.String(),
+		util.NodeSchedulerPolicySpread.String(),
+		"",
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := MetaxDevices{}
-			result := dev.ScoreNode(test.args.node, test.args.podDevices, []*device.DeviceUsage{}, test.args.policy)
-			assert.DeepEqual(t, result, test.want)
+			for _, policy := range policies {
+				result := dev.ScoreNode(test.node, test.podDevices, []*device.DeviceUsage{}, policy)
+				assert.DeepEqual(t, result, test.want)
+			}
 		})
+	}
+}
+
+// TestMetaxDevicesImplementsPolicyNeutralScorer verifies that MetaxDevices
+// exposes the PolicyNeutralScore marker method, which is how the shared
+// scheduler policy layer detects that ScoreNode is policy-independent and
+// applies the weight and Spread sign inversion.
+func TestMetaxDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+	var dev any = &MetaxDevices{}
+	if _, ok := dev.(policyNeutralScorer); !ok {
+		t.Errorf("MetaxDevices does not implement the PolicyNeutralScore marker")
 	}
 }
 
