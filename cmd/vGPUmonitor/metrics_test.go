@@ -17,8 +17,10 @@ limitations under the License.
 package main
 
 import (
+	"strings"
 	"testing"
 
+	dto "github.com/prometheus/client_model/go"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -29,12 +31,10 @@ import (
 
 func TestDescribeCollectSync(t *testing.T) {
 	reg := prometheus.NewPedanticRegistry()
-
 	t.Setenv(util.NodeNameEnvName, "test-node")
 	client := fake.NewSimpleClientset()
 	informerFactory := informers.NewSharedInformerFactory(client, 0)
 	podLister := informerFactory.Core().V1().Pods().Lister()
-
 	c := &ClusterManager{
 		Zone:            "test-zone",
 		LegacyMetrics:   false,
@@ -42,15 +42,12 @@ func TestDescribeCollectSync(t *testing.T) {
 		containerLister: &nvidia.ContainerLister{},
 	}
 	cc := ClusterManagerCollector{ClusterManager: c}
-
 	if err := reg.Register(cc); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (non-legacy): %v", err)
 	}
-
 	if _, err := reg.Gather(); err != nil {
 		t.Errorf("Gather failed (non-legacy): %v", err)
 	}
-
 	regLegacy := prometheus.NewPedanticRegistry()
 	cLegacy := &ClusterManager{
 		Zone:            "test-zone-legacy",
@@ -60,7 +57,6 @@ func TestDescribeCollectSync(t *testing.T) {
 	}
 	initLegacyDescriptors()
 	ccLegacy := ClusterManagerCollector{ClusterManager: cLegacy}
-
 	if err := regLegacy.Register(ccLegacy); err != nil {
 		t.Fatalf("Failed to register ClusterManagerCollector (legacy): %v", err)
 	}
@@ -70,31 +66,38 @@ func TestDescribeCollectSync(t *testing.T) {
 }
 
 func TestDescribeRegistersMemoryControllerUtilization(t *testing.T) {
-	t.Setenv(util.NodeNameEnvName, "test-node")
-	client := fake.NewSimpleClientset()
-	informerFactory := informers.NewSharedInformerFactory(client, 0)
-	podLister := informerFactory.Core().V1().Pods().Lister()
-
-	c := &ClusterManager{
-		Zone:            "test-zone",
-		LegacyMetrics:   false,
-		PodLister:       podLister,
-		containerLister: &nvidia.ContainerLister{},
-	}
+	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
 	cc := ClusterManagerCollector{ClusterManager: c}
-
 	descCh := make(chan *prometheus.Desc, 32)
 	cc.Describe(descCh)
 	close(descCh)
-
-	found := false
-	for desc := range descCh {
-		if desc == hostGPUMemoryUtilizationdesc {
-			found = true
-			break
+	for d := range descCh {
+		if strings.Contains(d.String(), "hami_host_gpu_memory_controller_utilization_ratio") {
+			return
 		}
 	}
-	if !found {
-		t.Error("Describe did not emit hostGPUMemoryUtilizationdesc; hami_host_gpu_memory_controller_utilization_ratio will be missing from scrape output")
+	t.Error("hami_host_gpu_memory_controller_utilization_ratio not found in Describe output")
+}
+
+func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
+	const wantVal = float64(73)
+	m, err := prometheus.NewConstMetric(
+		hostGPUMemoryUtilizationdesc,
+		prometheus.GaugeValue,
+		wantVal,
+		"0", "GPU-abc123", "NVIDIA-A100",
+	)
+	if err != nil {
+		t.Fatalf("NewConstMetric: %v", err)
+	}
+	var dm dto.Metric
+	if err := m.Write(&dm); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+	if dm.Gauge == nil {
+		t.Fatal("expected gauge metric, got nil")
+	}
+	if *dm.Gauge.Value != wantVal {
+		t.Fatalf("want %v, got %v", wantVal, *dm.Gauge.Value)
 	}
 }
