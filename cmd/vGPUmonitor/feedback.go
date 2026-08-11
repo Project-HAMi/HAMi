@@ -72,6 +72,9 @@ func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 }
 
 func Observe(lister *nvidia.ContainerLister) {
+	lister.Lock()
+	defer lister.UnLock()
+
 	utSwitchOn := map[string]UtilizationPerDevice{}
 	containers := lister.ListContainers()
 
