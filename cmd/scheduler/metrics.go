@@ -190,7 +190,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 		legacyMemoryPercentage = prometheus.NewDesc(
 			"nodeGPUMemoryPercentage",
 			"GPU Memory Allocated Percentage on a certain GPU",
-			[]string{"nodeid", "deviceuuid", "deviceidx", "devicetype"}, nil,
+			[]string{"nodeid", "deviceuuid", "deviceidx"}, nil,
 		)
 		legacyMigInstance = prometheus.NewDesc(
 			"nodeGPUMigInstance",
@@ -274,7 +274,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 				sendLegacyMetric(ch, legacyCoreAllocatedDesc, prometheus.GaugeValue, float64(devs.Device.Usedcores), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
 				sendLegacyMetric(ch, legacyOverview, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), fmt.Sprint(devs.Device.Totalmem), devs.Device.Type)
 				if devs.Device.Totalmem > 0 {
-					sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type)
+					sendLegacyMetric(ch, legacyMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index))
 				}
 			}
 		}

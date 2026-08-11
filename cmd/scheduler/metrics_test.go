@@ -364,7 +364,7 @@ hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="nor
 hami_node_gpu_memory_allocated_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 0.25
 # HELP nodeGPUMemoryPercentage GPU Memory Allocated Percentage on a certain GPU
 # TYPE nodeGPUMemoryPercentage gauge
-nodeGPUMemoryPercentage{deviceidx="2",devicetype="NVIDIA",deviceuuid="normal-memory",nodeid="node-1"} 0.25
+nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"} 0.25
 `
 
 	if err := promtestutil.CollectAndCompare(
