@@ -167,8 +167,14 @@ func TestObserve(t *testing.T) {
 	// and to ensure no panics occur with locking/unlocking.
 	lister := &nvidia.ContainerLister{}
 
-	// Test that Observe actually acquires the lock.
+	// Test that Observe actually acquires the lock deterministically.
 	lister.Lock()
+	
+	reachedLock := make(chan struct{})
+	observeTestHook = func() {
+		close(reachedLock)
+	}
+	defer func() { observeTestHook = nil }()
 	
 	done := make(chan struct{})
 	go func() {
@@ -176,12 +182,14 @@ func TestObserve(t *testing.T) {
 		close(done)
 	}()
 	
-	// Observe should be blocked waiting for the lock, so it shouldn't complete yet.
+	// Wait until Observe reaches the lock boundary
+	<-reachedLock
+	
+	// Ensure Observe is now blocked on the lock
 	select {
 	case <-done:
 		t.Fatal("Observe completed while lock was held by another goroutine, indicating it did not acquire the lock!")
-	// A small delay to ensure the goroutine has time to schedule and block
-	case <-time.After(50 * time.Millisecond):
+	default:
 		// Expected: Observe is blocked
 	}
 	
