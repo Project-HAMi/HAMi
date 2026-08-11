@@ -471,8 +471,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 
 			nodedevices, err := devInstance.GetNodeDevices(*val)
 			if err != nil {
-				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				continue
+				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk, "error", err)
 			}
 
 			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
@@ -502,6 +501,9 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 				}
 
 				s.rmNodeDevices(val.Name, devhandsk)
+				continue
+			}
+			if err != nil {
 				continue
 			}
 			if !needUpdate {
