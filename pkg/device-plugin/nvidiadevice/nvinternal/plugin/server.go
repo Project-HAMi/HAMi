@@ -838,10 +838,23 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
 				os.RemoveAll(cacheFileHostDirectory)
 
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
-				os.MkdirAll("/tmp/vgpulock", 0777)
-				os.Chmod("/tmp/vgpulock", 0777)
+				if err := os.MkdirAll(cacheFileHostDirectory, 0777); err != nil {
+					klog.Errorf("Failed to create cache directory: %v", err)
+					return nil, err
+				}
+				if info, err := os.Lstat(cacheFileHostDirectory); err == nil && info.Mode().IsDir() && info.Mode()&os.ModeSymlink == 0 {
+					_ = os.Chmod(cacheFileHostDirectory, 0777)
+				}
+
+				if err := os.MkdirAll("/tmp/vgpulock", 0777); err != nil {
+					klog.Errorf("Failed to create lock directory: %v", err)
+					return nil, err
+				}
+				if info, err := os.Lstat("/tmp/vgpulock"); err == nil && info.Mode().IsDir() && info.Mode()&os.ModeSymlink == 0 {
+					_ = os.Chmod("/tmp/vgpulock", 0777)
+				} else if err == nil {
+					return nil, fmt.Errorf("/tmp/vgpulock is a symlink or not a directory")
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),

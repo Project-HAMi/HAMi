@@ -56,6 +56,10 @@ import (
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
+func init() {
+	hostHookPath = os.TempDir()
+}
+
 func ptr[T any](value T) *T {
 	return &value
 }
