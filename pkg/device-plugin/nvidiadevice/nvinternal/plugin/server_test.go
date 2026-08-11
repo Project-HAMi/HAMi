@@ -49,9 +49,11 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 )
 
@@ -1028,10 +1030,6 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
 	defer func() { getPendingPod = previousGetPendingPod }()
 
-	previousEraseNextDeviceTypeFromAnnotation := eraseNextDeviceTypeFromAnnotation
-	eraseNextDeviceTypeFromAnnotation = func(string, corev1.Pod) error { return nil }
-	defer func() { eraseNextDeviceTypeFromAnnotation = previousEraseNextDeviceTypeFromAnnotation }()
-
 	previousPodAllocationFailed := podAllocationFailed
 	podAllocationFailed = func(string, *corev1.Pod, string) {}
 	defer func() { podAllocationFailed = previousPodAllocationFailed }()
@@ -1039,6 +1037,11 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	previousPodAllocationTrySuccess := podAllocationTrySuccess
 	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
 	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	// Provide a fake K8s client so the real patchErasedAnnotation can patch
+	previousKubeClient := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(pod)
+	defer func() { client.KubeClient = previousKubeClient }()
 
 	request := &kubeletdevicepluginv1beta1.AllocateRequest{
 		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{{
@@ -1076,6 +1079,9 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	require.Less(t, fallbackParentMountIndex, brokerMountIndex)
 
 	t.Setenv(hostpid.EnvironmentVariable, "")
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
 	disabledResponse, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
 	require.Equal(t, 2, prepareCalls)
@@ -1095,6 +1101,9 @@ func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
 	prepareHostPIDLockParentForAllocation = func() error {
 		return errors.New("parent preparation fixture")
 	}
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
 	failedResponse, err := plugin.Allocate(context.Background(), request)
 	require.Nil(t, failedResponse)
 	require.ErrorContains(t, err, "failed to prepare host PID lock parent")
