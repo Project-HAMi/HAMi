@@ -512,6 +512,8 @@ func Test_ScoreNode(t *testing.T) {
 	}
 }
 
+// TestKunlunDevices_PatchAnnotations tests the PatchAnnotations function for Kunlun devices
+// to ensure that it correctly encodes multi-container device indices.
 func TestKunlunDevices_PatchAnnotations(t *testing.T) {
 	dev := &KunlunDevices{}
 	pod := &corev1.Pod{}

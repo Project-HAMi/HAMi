@@ -1211,6 +1211,8 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 	}
 }
 
+// TestMthreadsDevices_PatchAnnotations tests the PatchAnnotations function for Mthreads devices
+// to ensure that it correctly encodes multi-container device indices and propagates annotations.
 func TestMthreadsDevices_PatchAnnotations(t *testing.T) {
 	dev := &MthreadsDevices{}
 	pod := &corev1.Pod{}
