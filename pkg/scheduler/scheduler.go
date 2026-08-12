@@ -760,7 +760,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					for _, d := range node.Devices.DeviceLists {
 						deviceID := udevice.UUID
 						if d.Device.ID == deviceID {
-							d.Device.Used++
+							slots := udevice.Slots
+							if slots < 1 {
+								slots = 1
+							}
+							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							d.Device.PodInfos = append(d.Device.PodInfos, p)

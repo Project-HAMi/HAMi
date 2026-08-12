@@ -150,7 +150,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -158,7 +158,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -169,10 +169,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -180,10 +180,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -194,8 +194,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -203,8 +203,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},

@@ -29,6 +29,7 @@ type deviceKey struct {
 type usage struct {
 	mem   int32
 	cores int32
+	slots int32
 }
 
 // CollapseInitContainerUsage returns the effective device usage for a pod.
@@ -52,11 +53,15 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 					if dev.Usedcores > cur.cores {
 						cur.cores = dev.Usedcores
 					}
+					// Init containers run sequentially: peak concurrency is one slot per device.
+					cur.slots = 1
 					initPeak[key] = cur
 				} else {
 					cur := appSum[key]
 					cur.mem += dev.Usedmem
 					cur.cores += dev.Usedcores
+					// App containers run concurrently: each occurrence is an additional slot.
+					cur.slots++
 					appSum[key] = cur
 				}
 			}
@@ -86,12 +91,17 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 
 			effMem := max(initU.mem, appU.mem)
 			effCores := max(initU.cores, appU.cores)
+			effSlots := max(initU.slots, appU.slots)
+			if effSlots < 1 {
+				effSlots = 1
+			}
 
 			containerDevs = append(containerDevs, ContainerDevice{
 				UUID:      uuid,
 				Type:      devType,
 				Usedmem:   effMem,
 				Usedcores: effCores,
+				Slots:     effSlots,
 			})
 		}
 		sort.Slice(containerDevs, func(i, j int) bool {
@@ -122,6 +132,7 @@ func AppContainersOnlyDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 				s := sums[dev.UUID]
 				s.mem += dev.Usedmem
 				s.cores += dev.Usedcores
+				s.slots++ // each concurrent app container occurrence is one slot
 				sums[dev.UUID] = s
 			}
 		}
@@ -133,6 +144,7 @@ func AppContainersOnlyDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 				Type:      devType,
 				Usedmem:   s.mem,
 				Usedcores: s.cores,
+				Slots:     s.slots,
 			})
 		}
 		sort.Slice(containerDevs, func(i, j int) bool {

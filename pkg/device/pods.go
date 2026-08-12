@@ -260,6 +260,7 @@ func (c ContainerDevice) DeepCopy() ContainerDevice {
 		Type:      c.Type,
 		Usedmem:   c.Usedmem,
 		Usedcores: c.Usedcores,
+		Slots:     c.Slots,
 	}
 	if c.CustomInfo != nil {
 		dup.CustomInfo = make(map[string]any, len(c.CustomInfo))
