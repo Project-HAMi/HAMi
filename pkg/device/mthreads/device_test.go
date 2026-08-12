@@ -1217,7 +1217,7 @@ func TestMthreadsDevices_PatchAnnotations(t *testing.T) {
 	anno := map[string]string{
 		util.AssignedNodeAnnotations: "test-node",
 	}
-	
+
 	// Test multi-container encoding with middle-empty and trailing-empty container groups
 	pd := device.PodDevices{
 		MthreadsGPUDevice: {
@@ -1226,23 +1226,23 @@ func TestMthreadsDevices_PatchAnnotations(t *testing.T) {
 			{},         // Container 3 (empty)
 		},
 	}
-	
+
 	dev.PatchAnnotations(pod, &anno, pd)
-	
+
 	val, ok := anno[MthreadsAssignedGPUIndex]
 	if !ok {
 		t.Fatalf("expected annotation %s to be set", MthreadsAssignedGPUIndex)
 	}
-	
+
 	expected := "0;1;"
 	if val != expected {
 		t.Errorf("expected %s, got %s", expected, val)
 	}
-	
+
 	if anno[MthreadsPredicateTime] == "" {
 		t.Errorf("expected %s to be non-empty", MthreadsPredicateTime)
 	}
-	
+
 	if anno[MthreadsAssignedNode] != "test-node" {
 		t.Errorf("expected %s to be propagated, got %s", MthreadsAssignedNode, anno[MthreadsAssignedNode])
 	}
