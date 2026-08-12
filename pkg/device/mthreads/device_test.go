@@ -21,6 +21,7 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
@@ -1207,5 +1208,44 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestMthreadsDevices_PatchAnnotations tests the PatchAnnotations function for Mthreads devices
+// to ensure that it correctly encodes multi-container device indices and propagates annotations.
+func TestMthreadsDevices_PatchAnnotations(t *testing.T) {
+	dev := &MthreadsDevices{}
+	pod := &corev1.Pod{}
+	anno := map[string]string{
+		util.AssignedNodeAnnotations: "test-node",
+	}
+
+	// Test multi-container encoding with middle-empty and trailing-empty container groups
+	pd := device.PodDevices{
+		MthreadsGPUDevice: {
+			{{Idx: 0}}, // Container 1
+			{{Idx: 1}}, // Container 2
+			{},         // Container 3 (empty)
+		},
+	}
+
+	dev.PatchAnnotations(pod, &anno, pd)
+
+	val, ok := anno[MthreadsAssignedGPUIndex]
+	if !ok {
+		t.Fatalf("expected annotation %s to be set", MthreadsAssignedGPUIndex)
+	}
+
+	expected := "0;1;"
+	if val != expected {
+		t.Errorf("expected %s, got %s", expected, val)
+	}
+
+	if anno[MthreadsPredicateTime] == "" {
+		t.Errorf("expected %s to be non-empty", MthreadsPredicateTime)
+	}
+
+	if anno[MthreadsAssignedNode] != "test-node" {
+		t.Errorf("expected %s to be propagated, got %s", MthreadsAssignedNode, anno[MthreadsAssignedNode])
 	}
 }
