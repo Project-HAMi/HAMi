@@ -326,6 +326,10 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
 	util, nvret := hdev.GetUtilizationRates()
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Utilization rates not supported for device %d, skipping", index)
+		return nil
+	}
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
 	}
