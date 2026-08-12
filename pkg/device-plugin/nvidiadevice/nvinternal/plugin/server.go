@@ -136,7 +136,7 @@ func readFromConfigFile(sConfig *nvidia.NvidiaConfig, path string) (string, erro
 	if err != nil {
 		return "", err
 	}
-	klog.Infof("Device Plugin Configs: %v", fmt.Sprintf("%v", deviceConfigs))
+	klog.Infof("Device Plugin Configs: %v", deviceConfigs)
 	for _, val := range deviceConfigs.Nodeconfig {
 		if os.Getenv(util.NodeNameEnvName) == val.Name {
 			klog.Infof("Reading config from file %s", val.Name)
