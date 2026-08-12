@@ -167,12 +167,12 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
 		nodes := []string{"node1"}
 		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
-		assert.NoError(t, err)
+		assert.NilError(t, err)
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
 		assert.Equal(t, int32(0), dev.Used)
-		assert.False(t, dev.Health, "device health should be false for stale allocation")
+		assert.Assert(t, !dev.Health, "device health should be false for stale allocation")
 	})
 
 	t.Run("ValidOnly", func(t *testing.T) {
@@ -212,14 +212,14 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
 		nodes := []string{"node1"}
 		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
-		assert.NoError(t, err)
+		assert.NilError(t, err)
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
 		assert.Equal(t, int32(1), dev.Used)
 		assert.Equal(t, int32(200), dev.Usedmem)
 		assert.Equal(t, int32(20), dev.Usedcores)
-		assert.True(t, dev.Health, "device health should be true for valid allocation")
+		assert.Assert(t, dev.Health, "device health should be true for valid allocation")
 	})
 
 	t.Run("MixedStaleAndValid", func(t *testing.T) {
@@ -269,14 +269,14 @@ func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
 		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
 		nodes := []string{"node1"}
 		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
-		assert.NoError(t, err)
+		assert.NilError(t, err)
 		v := (*cachenodeMap)["node1"]
 		dev := v.Devices.DeviceLists[0].Device
 		assert.Equal(t, "GPU-B", dev.ID)
 		assert.Equal(t, int32(1), dev.Used)
 		assert.Equal(t, int32(200), dev.Usedmem)
 		assert.Equal(t, int32(20), dev.Usedcores)
-		assert.False(t, dev.Health, "device health should be false due to presence of stale allocation")
+		assert.Assert(t, !dev.Health, "device health should be false due to presence of stale allocation")
 	})
 }
 
