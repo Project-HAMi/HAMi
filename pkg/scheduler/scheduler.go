@@ -757,9 +757,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
+					matched := false
 					for _, d := range node.Devices.DeviceLists {
 						deviceID := udevice.UUID
 						if d.Device.ID == deviceID {
+							matched = true
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
@@ -780,6 +782,12 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 								klog.ErrorS(nil, "MIG Pod lacks a matching profile/placement reservation", "pod", klog.KRef(p.Namespace, p.Name), "gpuUUID", udevice.UUID)
 								d.Device.Health = false
 							}
+						}
+					}
+					if !matched {
+						klog.ErrorS(nil, "pod allocated unknown or stale device resources", "pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID, "gpuUUID", udevice.UUID)
+						for _, d := range node.Devices.DeviceLists {
+							d.Device.Health = false
 						}
 					}
 				}

@@ -129,6 +129,157 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
 }
 
+func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
+	t.Run("StaleOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NoError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(0), dev.Used)
+		assert.False(t, dev.Health, "device health should be false for stale allocation")
+	})
+
+	t.Run("ValidOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NoError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.True(t, dev.Health, "device health should be true for valid allocation")
+	})
+
+	t.Run("MixedStaleAndValid", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NoError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.False(t, dev.Health, "device health should be false due to presence of stale allocation")
+	})
+}
+
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
 	t.Cleanup(func() { close(s.stopCh) })
