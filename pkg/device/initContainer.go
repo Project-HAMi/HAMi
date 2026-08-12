@@ -91,10 +91,8 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 
 			effMem := max(initU.mem, appU.mem)
 			effCores := max(initU.cores, appU.cores)
-			effSlots := max(initU.slots, appU.slots)
-			if effSlots < 1 {
-				effSlots = 1
-			}
+			// Raw entries carry no slot count; clamp to at least one.
+			effSlots := max(initU.slots, appU.slots, 1)
 
 			containerDevs = append(containerDevs, ContainerDevice{
 				UUID:      uuid,
