@@ -19,7 +19,6 @@ package cambricon
 import (
 	"context"
 	"flag"
-	"strings"
 	"testing"
 	"time"
 
@@ -31,6 +30,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func Test_GetNodeDevices(t *testing.T) {
@@ -394,80 +394,6 @@ func Test_PatchAnnotations(t *testing.T) {
 	}
 }
 
-func Test_setNodeLock(t *testing.T) {
-	tests := []struct {
-		name      string
-		node      corev1.Node
-		expectErr bool
-		expectMsg string
-	}{
-		{
-			name: "node is locked",
-			node: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name: "node-01",
-					Annotations: map[string]string{
-						"cambricon.com/dsmlu.lock": "test123",
-					},
-				},
-			},
-			expectErr: true,
-			expectMsg: "node node-01 is locked",
-		},
-		{
-			name: "set node lock",
-			node: corev1.Node{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:        "node-02",
-					Annotations: map[string]string{},
-				},
-			},
-			expectErr: false,
-		},
-	}
-
-	client.KubeClient = fake.NewClientset()
-	k8sClient := client.GetClient()
-	if k8sClient != nil {
-
-		for _, tt := range tests {
-			t.Run(tt.name, func(t *testing.T) {
-				ctx := context.Background()
-
-				defer func() {
-					if tt.node.Name != "" {
-						// Delete the node to clean up
-						err := k8sClient.CoreV1().Nodes().Delete(ctx, tt.node.Name, metav1.DeleteOptions{})
-						if err != nil {
-							t.Errorf("failed to delete node %s: %v", tt.node.Name, err)
-						}
-					}
-				}()
-
-				_, err := k8sClient.CoreV1().Nodes().Create(ctx, &tt.node, metav1.CreateOptions{})
-				if err != nil {
-					t.Fatalf("failed to create node %s: %v", tt.node.Name, err)
-				}
-
-				dev := CambriconDevices{}
-				err = dev.setNodeLock(&tt.node)
-
-				if tt.expectErr {
-					if err == nil {
-						t.Errorf("expected error but got none")
-					} else if !strings.Contains(err.Error(), tt.expectMsg) {
-						t.Errorf("expected error to contain '%s' but got '%s'", tt.expectMsg, err.Error())
-					}
-				} else {
-					if err != nil {
-						t.Errorf("did not expect error but got %v", err)
-					}
-				}
-			})
-		}
-	}
-}
-
 // Setup function to initialize resources for each test case.
 func setupTest(t *testing.T) (*corev1.Node, *corev1.Pod, func(), *fake.Clientset) {
 	ctx := context.Background()
@@ -524,9 +450,17 @@ func setupTest(t *testing.T) (*corev1.Node, *corev1.Pod, func(), *fake.Clientset
 }
 
 func Test_LockNode(t *testing.T) {
+	otherPod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "other-pod",
+			Namespace: "default",
+		},
+	}
+
 	tests := []struct {
 		name        string
 		annotations map[string]string
+		existingPod *corev1.Pod
 		wantErr     bool
 	}{
 		{
@@ -535,23 +469,24 @@ func Test_LockNode(t *testing.T) {
 			wantErr:     false,
 		},
 		{
-			name: "node is already locked within 2 minutes",
+			name: "node is locked by another live pod within the timeout",
 			annotations: map[string]string{
-				DsmluLockTime: time.Now().Add(-time.Minute).Format(time.RFC3339),
+				nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(otherPod),
 			},
-			wantErr: true,
+			existingPod: otherPod,
+			wantErr:     true,
 		},
 		{
-			name: "lock time expired (more than 2 minutes)",
+			name: "lock time expired",
 			annotations: map[string]string{
-				DsmluLockTime: time.Now().Add(-time.Hour).Format(time.RFC3339),
+				nodelock.NodeLockKey: time.Now().Add(-2*nodelock.NodeLockTimeout).Format(time.RFC3339) + nodelock.NodeLockSep + "default" + nodelock.NodeLockSep + "other-pod",
 			},
 			wantErr: false,
 		},
 		{
 			name: "invalid lock time format",
 			annotations: map[string]string{
-				DsmluLockTime: "invalid-format",
+				nodelock.NodeLockKey: "invalid-format",
 			},
 			wantErr: true,
 		},
@@ -565,6 +500,16 @@ func Test_LockNode(t *testing.T) {
 
 			// Set up the node with the specified annotations.
 			node.Annotations = tt.annotations
+			_, err := clientset.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+			if err != nil {
+				t.Fatalf("Failed to update node annotations: %v", err)
+			}
+
+			if tt.existingPod != nil {
+				if _, err := clientset.CoreV1().Pods(tt.existingPod.Namespace).Create(context.TODO(), tt.existingPod, metav1.CreateOptions{}); err != nil {
+					t.Fatalf("Failed to create existing pod: %v", err)
+				}
+			}
 
 			dev := InitMLUDevice(CambriconConfig{
 				ResourceCountName:  MLUResourceCount,
@@ -572,7 +517,7 @@ func Test_LockNode(t *testing.T) {
 				ResourceCoreName:   MLUResourceCores,
 			})
 
-			err := dev.LockNode(node, pod)
+			err = dev.LockNode(node, pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LockNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -580,7 +525,7 @@ func Test_LockNode(t *testing.T) {
 			// Optionally check if the node was correctly patched with the lock annotation.
 			if !tt.wantErr {
 				fetchedNode, _ := clientset.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
-				if _, ok := fetchedNode.Annotations[DsmluLockTime]; !ok && !tt.wantErr {
+				if _, ok := fetchedNode.Annotations[nodelock.NodeLockKey]; !ok {
 					t.Error("Expected node to be locked but it wasn't")
 				}
 			}
@@ -633,11 +578,56 @@ func Test_ReleaseNodeLock(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset(&test.args.node)
 			dev := CambriconDevices{}
 			result := dev.ReleaseNodeLock(&test.args.node, &test.args.pod)
 			assert.Equal(t, test.err, result)
 		})
 	}
+}
+
+// Test_ReleaseNodeLock_ReleasesOwnedLock verifies that ReleaseNodeLock
+// delegates to the shared nodelock package and actually clears the lock
+// annotation held by the requesting pod.
+func Test_ReleaseNodeLock_ReleasesOwnedLock(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "owner-pod",
+			Namespace: "default",
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceName(MLUResourceCount): resource.MustParse("1"),
+					},
+				},
+			}},
+		},
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-03",
+			Annotations: map[string]string{
+				nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod),
+			},
+		},
+	}
+	client.KubeClient = fake.NewClientset(node)
+
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  MLUResourceCount,
+		ResourceMemoryName: MLUResourceMemory,
+		ResourceCoreName:   MLUResourceCores,
+	})
+
+	err := dev.ReleaseNodeLock(node, pod)
+	assert.NoError(t, err)
+
+	fetchedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	_, ok := fetchedNode.Annotations[nodelock.NodeLockKey]
+	assert.False(t, ok, "expected lock annotation to be removed")
 }
 
 func TestDevices_Fit(t *testing.T) {
