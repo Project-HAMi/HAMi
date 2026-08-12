@@ -365,7 +365,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	if k.Nums > 1 {
 		alloc := graphSelect(devices, int(request.Nums))
 		if len(alloc) == 0 {

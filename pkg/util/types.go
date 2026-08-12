@@ -78,6 +78,8 @@ const (
 	GPUSchedulerPolicyTopology SchedulerPolicyName = "topology-aware"
 	// GPUSchedulerPolicyMutex is GPU use mutex scheduler, only idle GPUs are allocated.
 	GPUSchedulerPolicyMutex SchedulerPolicyName = "mutex"
+	// GPUSchedulerPolicyNuma is GPU use numa scheduler, chained as a sort key alongside binpack/spread.
+	GPUSchedulerPolicyNuma SchedulerPolicyName = "numa"
 )
 
 const (

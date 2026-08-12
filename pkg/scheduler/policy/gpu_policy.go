@@ -17,6 +17,8 @@ limitations under the License.
 package policy
 
 import (
+	"strings"
+
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 
@@ -45,7 +47,43 @@ func (l DeviceUsageList) Swap(i, j int) {
 	l.DeviceLists[i], l.DeviceLists[j] = l.DeviceLists[j], l.DeviceLists[i]
 }
 
+// gpuSortKeyOrder lists the recognized sort-key policies, in the priority
+// used when a caller-supplied chain doesn't disambiguate them further.
+var gpuSortKeyOrder = []util.SchedulerPolicyName{
+	util.GPUSchedulerPolicyBinpack,
+	util.GPUSchedulerPolicySpread,
+	util.GPUSchedulerPolicyNuma,
+}
+
+// gpuSortKeyChain parses policy as a comma-separated ordered list and returns
+// the sort-key policies (binpack/spread/numa) it names, in the order written,
+// deduplicated. mutex and topology-aware are filters consumed via
+// util.PolicyContains in Fit(), not sort keys, so they're dropped here.
+func gpuSortKeyChain(policy string) []util.SchedulerPolicyName {
+	seen := make(map[util.SchedulerPolicyName]bool, len(gpuSortKeyOrder))
+	var chain []util.SchedulerPolicyName
+	for p := range strings.SplitSeq(policy, ",") {
+		name := util.SchedulerPolicyName(strings.TrimSpace(p))
+		for _, key := range gpuSortKeyOrder {
+			if name == key && !seen[key] {
+				chain = append(chain, key)
+				seen[key] = true
+			}
+		}
+	}
+	return chain
+}
+
 func (l DeviceUsageList) Less(i, j int) bool {
+	// Comma-separated policy: chain binpack/spread/numa as sort keys in the
+	// order the caller wrote them. mutex/topology-aware are filters applied
+	// in each device backend's Fit(), not sort keys, so they don't appear here.
+	// Bare "numa" also routes here: it's a chain token, not a legacy value.
+	if strings.Contains(l.Policy, ",") || l.Policy == util.GPUSchedulerPolicyNuma.String() {
+		return l.lessByChain(i, j)
+	}
+
+	// Single policy value: unchanged behavior.
 	si, sj := l.DeviceLists[i].Score, l.DeviceLists[j].Score
 	ni, nj := l.DeviceLists[i].Device.Numa, l.DeviceLists[j].Device.Numa
 	binpack := l.Policy == util.GPUSchedulerPolicyBinpack.String()
@@ -86,6 +124,46 @@ func (l DeviceUsageList) Less(i, j int) bool {
 		return si > sj
 	}
 	return ni < nj
+}
+
+// lessByChain compares devices i and j by the ordered sort-key chain parsed
+// from l.Policy, falling back to spread (today's default policy) when the
+// comma list names no recognized sort key (e.g. "mutex,topology-aware").
+func (l DeviceUsageList) lessByChain(i, j int) bool {
+	chain := gpuSortKeyChain(l.Policy)
+	if len(chain) == 0 {
+		chain = []util.SchedulerPolicyName{util.GPUSchedulerPolicySpread}
+	}
+	// numa-bind requires NUMA groups to stay contiguous for Fit's same-NUMA
+	// accumulation, so force numa as the primary key if the chain omits it.
+	if l.NumaBind && chain[0] != util.GPUSchedulerPolicyNuma {
+		withNuma := []util.SchedulerPolicyName{util.GPUSchedulerPolicyNuma}
+		for _, key := range chain {
+			if key != util.GPUSchedulerPolicyNuma {
+				withNuma = append(withNuma, key)
+			}
+		}
+		chain = withNuma
+	}
+	a, b := l.DeviceLists[i], l.DeviceLists[j]
+	for _, key := range chain {
+		switch key {
+		case util.GPUSchedulerPolicyBinpack:
+			if a.Score != b.Score {
+				return a.Score < b.Score
+			}
+		case util.GPUSchedulerPolicySpread:
+			if a.Score != b.Score {
+				return a.Score > b.Score
+			}
+		case util.GPUSchedulerPolicyNuma:
+			if a.Device.Numa != b.Device.Numa {
+				return a.Device.Numa < b.Device.Numa
+			}
+		}
+	}
+	// Deterministic tiebreak when every chained key is equal.
+	return a.Device.Index < b.Device.Index
 }
 
 func (l DeviceUsageList) DeepCopy() DeviceUsageList {

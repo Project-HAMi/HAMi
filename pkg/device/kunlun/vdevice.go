@@ -233,7 +233,7 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	fitFn := FitFn(FitVXPU)
 	if isMutex {
 		// mutex: only idle devices are eligible, no sharing onto a used device.

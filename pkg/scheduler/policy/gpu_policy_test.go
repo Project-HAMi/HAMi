@@ -277,6 +277,107 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			},
 			expectedLess: true,
 		},
+		{
+			name:   "Bare numa: NUMA is the sort key regardless of score",
+			policy: "numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Bare numa: same NUMA falls to deterministic Index tiebreak",
+			policy: "numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Index: 3, Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Index: 1, Numa: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain binpack,numa: score primary, numa tiebreak when scores equal",
+			policy: "binpack,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain spread,numa: score primary, numa tiebreak when scores equal",
+			policy: "spread,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain numa,spread: numa primary regardless of score",
+			policy: "numa,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain numa,spread: same NUMA falls back to spread (higher score first)",
+			policy: "numa,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain mutex,spread: mutex is a Fit() filter, not a sort key; spread decides order",
+			policy: "mutex,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Used: 5}, Score: 10},
+				{Device: &device.DeviceUsage{Used: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain with only filter tokens (mutex,topology-aware) falls back to spread",
+			policy: "mutex,topology-aware",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain binpack,numa: deterministic Index tiebreak when score and numa both tie",
+			policy: "binpack,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Index: 5, Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Index: 2, Numa: 0}, Score: 10},
+			},
+			expectedLess: false,
+		},
+		{
+			name:     "Chain binpack,spread + NumaBind: numa forced primary to keep groups contiguous",
+			policy:   "binpack,spread",
+			numaBind: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+			},
+			expectedLess: true,
+		},
+		{
+			name:     "Chain spread,numa + NumaBind: numa moved to front, spread breaks same-NUMA ties",
+			policy:   "spread,numa",
+			numaBind: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+			},
+			expectedLess: true,
+		},
 	}
 
 	for _, tt := range tests {

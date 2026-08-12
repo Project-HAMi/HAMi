@@ -317,7 +317,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 
 	// filter device
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	candidateDevices := []*device.DeviceUsage{}
 	for i, v := range slices.Backward(devices) {
 		dev := v
