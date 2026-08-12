@@ -133,12 +133,21 @@ func Observe(lister *nvidia.ContainerLister) {
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, nvmllib nvml.Interface, migLockSignal <-chan bool) error {
 	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+
+	// Guard against a nil NVML interface (e.g. in tests or when NVML is
+	// unavailable). Physical GPU metric collection is skipped; container
+	// observation and the MIG lock signal continue to work normally,
+	// consistent with how collectGPUInfo handles a nil nvmllib in metrics.go.
+	if nvmllib != nil {
+		if nvret := nvmllib.Init(); !errors.Is(nvret, nvml.SUCCESS) {
+			return fmt.Errorf("failed to initialize NVML: %w", nvret)
+		}
+		defer func() { _ = nvmllib.Shutdown() }()
+	} else {
+		klog.Warning("watchAndFeedback: nvmllib is nil, skipping NVML init (degraded mode)")
 	}
-	defer nvml.Shutdown()
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()

@@ -34,6 +34,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
 	"github.com/Project-HAMi/HAMi/pkg/version"
 
+	nvmlgo "github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
@@ -101,7 +102,7 @@ func start() error {
 	// Start the monitoring and feedback service
 	wg.Go(func() {
 		for {
-			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+			if err := watchAndFeedback(ctx, containerLister, nvmlgo.New(), lockChannel); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
@@ -142,7 +143,7 @@ func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) e
 
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
-	NewClusterManager("vGPU", reg, containerLister, legacyMetrics)
+	NewClusterManager("vGPU", reg, containerLister, nvmlgo.New(), legacyMetrics)
 
 	// Uncomment to add the standard process and Go metrics to the custom registry.
 	//reg.MustRegister(

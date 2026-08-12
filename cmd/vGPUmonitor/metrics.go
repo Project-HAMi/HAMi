@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"time"
@@ -44,6 +45,12 @@ type ClusterManager struct {
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
+	// nvmllib is the NVML library interface used to query physical GPU
+	// metrics. Keeping it as an interface (rather than calling package-level
+	// nvml functions directly) avoids CGo symbol references that the
+	// Windows/non-CGo language server cannot resolve, and makes the
+	// collector unit-testable via nvml mock implementations.
+	nvmllib nvml.Interface
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -236,18 +243,23 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 }
 
 func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) error {
-	if err := cc.initNVML(); err != nil {
+	nvmllib := cc.ClusterManager.nvmllib
+	if nvmllib == nil {
+		// No NVML library configured; skip physical GPU metric collection.
+		return nil
+	}
+	if err := cc.initNVML(nvmllib); err != nil {
 		return err
 	}
-	defer nvml.Shutdown()
+	defer func() { _ = nvmllib.Shutdown() }()
 
-	devnum, err := cc.getDeviceCount()
+	devnum, err := cc.getDeviceCount(nvmllib)
 	if err != nil {
 		return err
 	}
 
 	for ii := range devnum {
-		if err := cc.collectGPUDeviceMetrics(ch, ii); err != nil {
+		if err := cc.collectGPUDeviceMetrics(ch, nvmllib, ii); err != nil {
 			klog.Error("Failed to collect metrics for GPU device ", ii, ": ", err)
 		}
 	}
@@ -255,26 +267,26 @@ func (cc ClusterManagerCollector) collectGPUInfo(ch chan<- prometheus.Metric) er
 	return nil
 }
 
-func (cc ClusterManagerCollector) initNVML() error {
-	nvret := nvml.Init()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml Init err: %s", nvml.ErrorString(nvret))
+func (cc ClusterManagerCollector) initNVML(nvmllib nvml.Interface) error {
+	nvret := nvmllib.Init()
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml Init err: %w", nvret)
 	}
 	return nil
 }
 
-func (cc ClusterManagerCollector) getDeviceCount() (int, error) {
-	devnum, nvret := nvml.DeviceGetCount()
-	if nvret != nvml.SUCCESS {
-		return 0, fmt.Errorf("nvml GetDeviceCount err: %s", nvml.ErrorString(nvret))
+func (cc ClusterManagerCollector) getDeviceCount(nvmllib nvml.Interface) (int, error) {
+	devnum, nvret := nvmllib.DeviceGetCount()
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return 0, fmt.Errorf("nvml GetDeviceCount err: %w", nvret)
 	}
 	return devnum, nil
 }
 
-func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, index int) error {
-	hdev, nvret := nvml.DeviceGetHandleByIndex(index)
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml DeviceGetHandleByIndex err: %s", nvml.ErrorString(nvret))
+func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.Metric, nvmllib nvml.Interface, index int) error {
+	hdev, nvret := nvmllib.DeviceGetHandleByIndex(index)
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml DeviceGetHandleByIndex err: %w", nvret)
 	}
 
 	if err := cc.collectGPUMemoryMetrics(ch, hdev, index); err != nil {
@@ -290,22 +302,22 @@ func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.M
 
 func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
 	memory, ret := hdev.GetMemoryInfo()
-	if ret == nvml.ERROR_NOT_SUPPORTED {
+	if errors.Is(ret, nvml.ERROR_NOT_SUPPORTED) {
 		klog.V(3).Infof("Memory metrics not supported for device %d (unified memory architecture), skipping", index)
 		return nil
 	}
-	if ret != nvml.SUCCESS {
-		return fmt.Errorf("nvml get memory error ret=%d", ret)
+	if !errors.Is(ret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml get memory error: %w", ret)
 	}
 
 	uuid, nvret := hdev.GetUUID()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml GetUUID err: %w", nvret)
 	}
 
 	deviceName, nvret := hdev.GetName()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml GetName err: %w", nvret)
 	}
 
 	deviceName = "NVIDIA-" + deviceName
@@ -326,18 +338,18 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
 	util, nvret := hdev.GetUtilizationRates()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml GetUtilizationRates err: %w", nvret)
 	}
 
 	uuid, nvret := hdev.GetUUID()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml GetUUID err: %w", nvret)
 	}
 
 	deviceName, nvret := hdev.GetName()
-	if nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	if !errors.Is(nvret, nvml.SUCCESS) {
+		return fmt.Errorf("nvml GetName err: %w", nvret)
 	}
 
 	deviceName = "NVIDIA-" + deviceName
@@ -573,7 +585,10 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 // NewClusterManager creates a ClusterManager for the given zone, backs its pod
 // lookups with a shared informer, and registers its collector with reg through
 // a wrapping Registerer that adds the zone as a label.
-func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
+//
+// nvmllib is the NVML library interface used to query physical GPU metrics.
+// Pass nvml.New() in production; pass a mock implementation in tests.
+func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, nvmllib nvml.Interface, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()
 	}
@@ -581,6 +596,7 @@ func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *
 		Zone:            zone,
 		containerLister: containerLister,
 		LegacyMetrics:   legacyMetrics,
+		nvmllib:         nvmllib,
 	}
 
 	informerFactory := informers.NewSharedInformerFactoryWithOptions(containerLister.Clientset(), time.Hour*1)
