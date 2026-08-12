@@ -1439,13 +1439,8 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 	}
 }
 
-// Test_GenerateResourceRequests_OutOfRangeValues covers requests whose values do
-// not fit the int32 fields of ContainerDeviceRequest. Before the range guards
-// these narrowed silently: a byte-suffixed memory quantity such as 16Gi wrapped
-// to 0 on the soft-partitioning path, which made the scheduler's memory fit
-// check pass against any device.
+// Test_GenerateResourceRequests_OutOfRangeValues checks that out-of-range values are rejected, not silently wrapped.
 func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
-	// Soft-partitioning (a core request) uses the raw memory value instead of trimming, which is where the int32 wrap happened.
 	coreModeConfig := VNPUConfig{
 		CommonWord:         "Ascend910B3",
 		ResourceName:       "huawei.com/Ascend910B3",
@@ -1462,8 +1457,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 		want device.ContainerDeviceRequest
 	}{
 		{
-			// 16Gi is 17179869184, which wrapped to 0 when narrowed to int32.
-			// Ascend memory is denominated in MB, so this is a wrong-unit request.
+			// 16Gi in bytes wraps to 0 when narrowed to int32; Ascend memory is counted in MB.
 			name: "memory requested in bytes exceeds int32 range on soft-partitioning path",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
@@ -1491,7 +1485,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
-			// -1m returns ok=false from AsInt64, so it must be rejected by sign before defaulting to a 100% request.
+			// -1m makes AsInt64 return ok=false, so it must be rejected by sign, not defaulted to 100%.
 			name: "negative fractional memory request",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
@@ -1551,8 +1545,7 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 	}
 }
 
-// Test_GenerateResourceRequests_MemoryFactorOverflow covers a raw memory value that
-// fits in int32 but overflows once MemoryFactor is applied (300000000 * 10 > math.MaxInt32).
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a value that fits int32 but overflows after MemoryFactor.
 func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 	tests := []struct {
 		name string
@@ -1560,8 +1553,6 @@ func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
 		args corev1.Container
 	}{
 		{
-			// Soft-partitioning keeps the scaled value, so this narrowed to a
-			// negative Memreq before the guard.
 			name: "scaled memory overflows int32 on soft-partitioning path",
 			dev: Devices{
 				config: VNPUConfig{
