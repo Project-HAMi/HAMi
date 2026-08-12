@@ -97,6 +97,10 @@ func profileSliceKey(profile string) string {
 // have MIG mode enabled and all existing GI/CI instances destroyed.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
 	reset := []int{}
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return reset, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
 		if _, busy := inUse[gpuIndex]; busy {
 			continue
@@ -284,6 +288,10 @@ func (m *MigInstanceManager) Release(migUUID string) error {
 	lk := m.gpuLock(key.GPUIndex)
 	lk.Lock()
 	defer lk.Unlock()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
 	m.mu.Lock()
 	inst := m.byAllocation[key]
 	m.mu.Unlock()
@@ -321,6 +329,11 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 		return uuid, false, nil
 	}
 	m.mu.Unlock()
+
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return "", false, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
 
 	if err := ensureMigModeEnabled(gpuIndex); err != nil {
 		return "", false, err
@@ -417,6 +430,10 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
 	defer lk.Unlock()
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
 	dev, err := deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
@@ -476,6 +493,13 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 		keys = append(keys, key)
 	}
 	m.mu.Unlock()
+	if len(keys) == 0 {
+		return nil
+	}
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	defer nvml.Shutdown()
 	for _, key := range keys {
 		if _, ok := active[key]; ok {
 			continue
