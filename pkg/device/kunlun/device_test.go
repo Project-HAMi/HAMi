@@ -511,3 +511,30 @@ func Test_ScoreNode(t *testing.T) {
 		})
 	}
 }
+
+func TestKunlunDevices_PatchAnnotations(t *testing.T) {
+	dev := &KunlunDevices{}
+	pod := &corev1.Pod{}
+	anno := map[string]string{}
+	
+	// Test multi-container encoding
+	pd := device.PodDevices{
+		KunlunGPUDevice: {
+			{{Idx: 0}}, // Container 1
+			{{Idx: 1}}, // Container 2
+			{},         // Container 3 (empty)
+		},
+	}
+	
+	dev.PatchAnnotations(pod, &anno, pd)
+	
+	val, ok := anno[KunlunDeviceSelection]
+	if !ok {
+		t.Fatalf("expected annotation %s to be set", KunlunDeviceSelection)
+	}
+	
+	expected := "0;1;"
+	if val != expected {
+		t.Errorf("expected %s, got %s", expected, val)
+	}
+}
