@@ -311,6 +311,9 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 	deviceName = "NVIDIA-" + deviceName
 
 	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
 
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUdesc,
@@ -328,6 +331,9 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
 	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
 
 	utilRates, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
