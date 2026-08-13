@@ -2458,35 +2458,52 @@ func Test_lockAllDevices_Transactional(t *testing.T) {
 		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
 	})
 
-	// RollbackReleaseError: backend1 acquires its lock, backend2's LockNode fails triggering
-	// rollback, but backend1's ReleaseNodeLock itself returns an error.
+	// RollbackReleaseError: backend1 and backend2 acquire locks, backend3's LockNode fails.
+	// During rollback, backend2's ReleaseNodeLock returns an error, but rollback continues
+	// and backend1's ReleaseNodeLock is still executed.
 	// Verifies:
-	//   - the original LockNode error from backend2 is returned (not swallowed by relErr).
-	//   - ReleaseNodeLock is still called on backend1 exactly once (release is attempted).
-	//   - the release error does not prevent returning the original lock error.
+	//   - backend1: LockNode succeeds (1), ReleaseNodeLock succeeds (1).
+	//   - backend2: LockNode succeeds (1), ReleaseNodeLock returns a release error (1).
+	//   - backend3: LockNode fails with errMockFailed (1), ReleaseNodeLock is NOT called (0).
+	//   - Rollback continues despite backend2's release error.
+	//   - The original LockNode error from backend3 is returned (not overwritten by backend2's release error).
 	t.Run("RollbackReleaseError", func(t *testing.T) {
 		oldDevicesMap := device.DevicesMap
 		defer func() { device.DevicesMap = oldDevicesMap }()
 
 		errRelease := fmt.Errorf("mock release failed")
-		dev1 := &transactionMockDevice{name: "backend1", releaseErr: errRelease}
-		dev2 := &transactionMockDevice{name: "backend2", lockErr: errMockFailed}
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{name: "backend2", releaseErr: errRelease, events: events}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed, events: events}
 		device.DevicesMap = map[string]device.Devices{
 			"backend1": dev1,
 			"backend2": dev2,
+			"backend3": dev3,
 		}
 
 		s := Scheduler{}
 		err := s.lockAllDevices(node, pod)
 
-		// Original LockNode error must be returned, not the release error.
+		// Original LockNode error from backend3 must be returned, not backend2's release error.
 		assert.ErrorIs(t, err, errMockFailed)
-		// backend1 was locked and release was attempted exactly once.
+
+		// Call count assertions:
 		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
 		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
-		// backend2 was attempted but failed; no release on it.
 		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
-		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Verify event sequence: lock1, lock2, lock3(fail), release2(err), release1
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"lock:backend3",
+			"release:backend2",
+			"release:backend1",
+		})
 	})
 
 	// AcquireNodeLocks_RetryLoop_ReleaseCount: exercises the REAL acquireNodeLocks() retry loop
