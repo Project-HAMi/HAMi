@@ -1499,6 +1499,20 @@ func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
 			want: device.ContainerDeviceRequest{},
 		},
 		{
+			// A plain whole -100 passes AsInt64 (ok=true), so it must be rejected by sign before the int32 narrowing.
+			name: "negative whole memory request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("-100"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
 			name: "oversized device count exceeds int32 range",
 			dev:  Devices{config: coreModeConfig},
 			args: corev1.Container{
