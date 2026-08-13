@@ -2304,17 +2304,21 @@ func TestBind_TimeoutStateRecovery(t *testing.T) {
 	fakeClient, ok := s.kubeClient.(*fake.Clientset)
 	require.True(t, ok, "kubeClient should be of type *fake.Clientset")
 
-	// Track get requests to simulate delayed visibility
+	// Track get requests to simulate delayed visibility and intermittent errors
 	getCalls := int32(0)
 	fakeClient.PrependReactor("get", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 		calls := atomic.AddInt32(&getCalls, 1)
-		// On the first read, simulate the pod being unbound
+		// On the first read, simulate a network error reading the pod to hit the getErr != nil branch
 		if calls == 1 {
+			return true, nil, fmt.Errorf("simulated get error")
+		}
+		// On the second read, simulate the pod being unbound to hit the return false branch
+		if calls == 2 {
 			unboundPod := pod.DeepCopy()
 			unboundPod.Spec.NodeName = ""
 			return true, unboundPod, nil
 		}
-		// On subsequent reads, simulate the binding becoming visible
+		// On subsequent reads, simulate the binding becoming visible to hit the true branch
 		return true, pod, nil
 	})
 
