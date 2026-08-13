@@ -462,7 +462,12 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 			klog.Errorf("Failed to send device memory desc: %v", err)
 			return err
 		}
-		memoryOffset := memoryTotal - memoryContextSize - memoryModuleSize - memoryBufferSize
+		// Read the offset recorded by the CUDA hook directly rather than deriving
+		// it from total - context - module - buffer. Those four values are summed
+		// independently across active processes in the shared region and are not an
+		// atomic snapshot, so context+module+buffer can momentarily exceed total,
+		// which underflows the unsigned subtraction to a value near MaxUint64.
+		memoryOffset := c.Info.DeviceMemoryOffset(i)
 		memoryLabels := append(labels, fmt.Sprint(memoryContextSize), fmt.Sprint(memoryModuleSize), fmt.Sprint(memoryBufferSize), fmt.Sprint(memoryOffset))
 		sendLegacyMetric(ch, legacyCtrDeviceMemorydesc, prometheus.GaugeValue, float64(memoryTotal), memoryLabels...)
 

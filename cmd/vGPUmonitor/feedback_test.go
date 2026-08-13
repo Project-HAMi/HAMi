@@ -38,6 +38,7 @@ type stubInfo struct {
 	ctxSize    []uint64
 	modSize    []uint64
 	bufSize    []uint64
+	offset     []uint64
 	smUtil     []uint64
 	lastKernel int64
 }
@@ -60,7 +61,7 @@ func (s *stubInfo) DeviceUUID(i int) string {
 func (s *stubInfo) DeviceMemoryContextSize(i int) uint64 { return slot(s.ctxSize, i) }
 func (s *stubInfo) DeviceMemoryModuleSize(i int) uint64  { return slot(s.modSize, i) }
 func (s *stubInfo) DeviceMemoryBufferSize(i int) uint64  { return slot(s.bufSize, i) }
-func (s *stubInfo) DeviceMemoryOffset(int) uint64        { return 0 }
+func (s *stubInfo) DeviceMemoryOffset(i int) uint64      { return slot(s.offset, i) }
 func (s *stubInfo) DeviceMemoryTotal(i int) uint64       { return slot(s.total, i) }
 func (s *stubInfo) DeviceSmUtil(i int) uint64            { return slot(s.smUtil, i) }
 func (s *stubInfo) SetDeviceSmLimit(uint64)              {}
