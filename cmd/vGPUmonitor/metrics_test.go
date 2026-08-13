@@ -177,24 +177,40 @@ func TestDescribeRegistersMemoryControllerUtilization(t *testing.T) {
 }
 
 func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
-	const wantVal = float64(73)
-	m, err := prometheus.NewConstMetric(
-		hostGPUMemoryUtilizationdesc,
-		prometheus.GaugeValue,
-		wantVal,
-		"0", "GPU-abc123", "NVIDIA-A100",
-	)
-	if err != nil {
-		t.Fatalf("NewConstMetric: %v", err)
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	const wantMemory = uint32(73)
+	mockDev := &nvmlmock.Device{
+		GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) {
+			return nvml.Utilization{Gpu: 10, Memory: wantMemory}, nvml.SUCCESS
+		},
+		GetUUIDFunc: func() (string, nvml.Return) {
+			return "GPU-abc123", nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) {
+			return "A100", nvml.SUCCESS
+		},
 	}
-	var dm dto.Metric
-	if err := m.Write(&dm); err != nil {
-		t.Fatalf("Write: %v", err)
+	ch := make(chan prometheus.Metric, 10)
+	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
+	cc := ClusterManagerCollector{ClusterManager: c}
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUUtilizationMetrics: %v", err)
 	}
-	if dm.Gauge == nil {
-		t.Fatal("expected gauge metric, got nil")
+	close(ch)
+	var found bool
+	for m := range ch {
+		var dm dto.Metric
+		if err := m.Write(&dm); err != nil {
+			continue
+		}
+		if dm.Gauge == nil {
+			continue
+		}
+		if *dm.Gauge.Value == float64(wantMemory) {
+			found = true
+		}
 	}
-	if *dm.Gauge.Value != wantVal {
-		t.Fatalf("want %v, got %v", wantVal, *dm.Gauge.Value)
+	if !found {
+		t.Fatalf("expected memory controller utilization metric with value %v", wantMemory)
 	}
 }
