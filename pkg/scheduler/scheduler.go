@@ -252,8 +252,8 @@ func (s *Scheduler) onDelPod(obj any) {
 }
 
 // onDelNode handles node delete events. It removes any in-memory per-node
-// lock bookkeeping to avoid unbounded growth when nodes are removed by
-// autoscalers or administratively.
+// lock bookkeeping and per-device health bookkeeping to avoid unbounded growth
+// when nodes are removed by autoscalers or administratively.
 func (s *Scheduler) onDelNode(obj any) {
 	// Ensure downstream consumers are notified regardless of decoding success
 	defer s.doNodeNotify()
@@ -279,6 +279,14 @@ func (s *Scheduler) onDelNode(obj any) {
 	nodelockutil.CleanupNodeLock(nodeName)
 	s.rmNode(nodeName)
 	s.cleanupNodeUsage(nodeName)
+	// Clear per-device health bookkeeping for the deleted node.
+	// Devices that track per-node state (e.g. NvidiaGPUDevices) implement
+	// NodeDeleted to prune their internal maps; others are a no-op.
+	for _, devInstance := range device.GetDevices() {
+		if nd, ok := devInstance.(*nvidia.NvidiaGPUDevices); ok {
+			nd.NodeDeleted(nodeName)
+		}
+	}
 }
 
 // cleanupNodeUsage removes the node from overviewstatus maps

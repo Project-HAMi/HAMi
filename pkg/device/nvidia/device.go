@@ -208,7 +208,19 @@ func FilterDeviceToRegister(uuid, indexStr string) bool {
 	return false
 }
 
+// NodeDeleted removes the per-node health bookkeeping entries for nn from
+// ReportedGPUNum and ReportedRegisterAnnos. It must be called whenever a
+// node is permanently removed (deletion or unrecoverable health failure) so
+// that the maps do not retain stale entries and node-name reuse starts clean.
+func (dev *NvidiaGPUDevices) NodeDeleted(nn string) {
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+	delete(dev.ReportedGPUNum, nn)
+	delete(dev.ReportedRegisterAnnos, nn)
+}
+
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
+	dev.NodeDeleted(nn)
 	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 

@@ -285,7 +285,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		_ = syscall.Munmap(usage.data)
 		return nil, fmt.Errorf("cache file magic flag not matched")
 	}
-	if info.Size() == 1197897 {
+	if info.Size() >= int64(v0.MinSize()) && info.Size() < int64(v1.MinSize()) {
 		klog.Infoln("casting......v0")
 		usage.Info = v0.CastSpec(usage.data)
 	} else if head.majorVersion == 1 && info.Size() >= int64(v1.MinSize()) {
