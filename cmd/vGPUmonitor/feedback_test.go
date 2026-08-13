@@ -17,7 +17,11 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"testing"
+
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	"github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
@@ -160,5 +164,70 @@ func TestCheckBlocking_MultiDevice(t *testing.T) {
 				t.Errorf("CheckPriority: want %v, got %v", test.want, got)
 			}
 		})
+	}
+}
+
+func TestWatchAndFeedback_NilNVML(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Immediately cancel context so watchAndFeedback exits gracefully after initialization check
+
+	lockCh := make(chan bool)
+	err := watchAndFeedback(ctx, &nvidia.ContainerLister{}, nil, lockCh)
+	if err != nil {
+		t.Errorf("watchAndFeedback with nil nvmllib returned unexpected error: %v", err)
+	}
+}
+
+func TestWatchAndFeedback_WithNVMLSuccess(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // Immediately cancel context so watchAndFeedback exits gracefully after initialization check
+
+	mockNVML := &mock.Interface{
+		InitFunc:     func() nvml.Return { return nvml.SUCCESS },
+		ShutdownFunc: func() nvml.Return { return nvml.SUCCESS },
+	}
+
+	lockCh := make(chan bool)
+	err := watchAndFeedback(ctx, &nvidia.ContainerLister{}, mockNVML, lockCh)
+	if err != nil {
+		t.Errorf("watchAndFeedback with mockNVML returned unexpected error: %v", err)
+	}
+}
+
+func TestWatchAndFeedback_WithNVMLError(t *testing.T) {
+	ctx := t.Context()
+
+	mockNVML := &mock.Interface{
+		InitFunc: func() nvml.Return { return nvml.ERROR_UNKNOWN },
+	}
+
+	lockCh := make(chan bool)
+	err := watchAndFeedback(ctx, &nvidia.ContainerLister{}, mockNVML, lockCh)
+	if err == nil {
+		t.Error("watchAndFeedback expected error when NVML init fails, got nil")
+	}
+}
+
+func TestWatchAndFeedback_MigLockSignal(t *testing.T) {
+	ctx := t.Context()
+
+	lockCh := make(chan bool, 1)
+	lockCh <- true
+
+	err := watchAndFeedback(ctx, &nvidia.ContainerLister{}, nil, lockCh)
+	if err != errTemporaryClosed {
+		t.Errorf("watchAndFeedback with migLockSignal expected errTemporaryClosed, got %v", err)
+	}
+}
+
+func TestObserve_EmptyLister(t *testing.T) {
+	Observe(&nvidia.ContainerLister{})
+}
+
+func TestCheckPriority_SamePriorityContention(t *testing.T) {
+	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 2}}
+	c := &nvidia.ContainerUsage{Info: &stubInfo{priority: 1, uuids: []string{"gpu-0"}}}
+	if !CheckPriority(sw, 1, c) {
+		t.Error("CheckPriority: expected true for same priority contention > 1")
 	}
 }

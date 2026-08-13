@@ -23,7 +23,7 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 )
@@ -106,39 +106,48 @@ func Observe(lister *nvidia.ContainerLister) {
 		utilizationSwitch := c.Info.GetUtilizationSwitch()
 		if CheckBlocking(utSwitchOn, priority, c) {
 			if recentKernel >= 0 {
-				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
-				klog.V(5).Infof("Setting Blocking to on %v", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to on %v", idx)
 				c.Info.SetRecentKernel(-1)
 			}
 		} else {
 			if recentKernel < 0 {
-				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
-				klog.V(5).Infof("Setting Blocking to off %v", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting Blocking to off %v", idx)
 				c.Info.SetRecentKernel(0)
 			}
 		}
 		if CheckPriority(utSwitchOn, priority, c) {
 			if utilizationSwitch != 1 {
-				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
-				klog.V(5).Infof("Setting UtilizationSwitch to on %v", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to on %v", idx)
 				c.Info.SetUtilizationSwitch(1)
 			}
 		} else {
 			if utilizationSwitch != 0 {
-				klog.V(5).Infof("utSwitchon=%v", utSwitchOn)
-				klog.V(5).Infof("Setting UtilizationSwitch to off %v", idx)
+				klog.Infof("utSwitchon=%v", utSwitchOn)
+				klog.Infof("Setting UtilizationSwitch to off %v", idx)
 				c.Info.SetUtilizationSwitch(0)
 			}
 		}
 	}
 }
 
-func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, migLockSignal <-chan bool) error {
+func watchAndFeedback(ctx context.Context, lister *nvidia.ContainerLister, nvmllib nvml.Interface, migLockSignal <-chan bool) error {
 	klog.Info("Starting watchAndFeedback")
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("failed to initialize NVML: %s", nvml.ErrorString(nvret))
+
+	// Guard against a nil NVML interface (e.g. in tests or when NVML is
+	// unavailable). Physical GPU metric collection is skipped; container
+	// observation and the MIG lock signal continue to work normally,
+	// consistent with how collectGPUInfo handles a nil nvmllib in metrics.go.
+	if nvmllib != nil {
+		if nvret := nvmllib.Init(); !errors.Is(nvret, nvml.SUCCESS) {
+			return fmt.Errorf("failed to initialize NVML: %w", nvret)
+		}
+		defer func() { _ = nvmllib.Shutdown() }()
+	} else {
+		klog.Warning("watchAndFeedback: nvmllib is nil, skipping NVML init (degraded mode)")
 	}
-	defer nvml.Shutdown()
 
 	ticker := time.NewTicker(time.Second * 5)
 	defer ticker.Stop()

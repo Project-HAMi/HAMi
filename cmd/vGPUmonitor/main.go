@@ -34,11 +34,12 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/flag"
 	"github.com/Project-HAMi/HAMi/pkg/version"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/spf13/cobra"
-	"k8s.io/klog/v2"
+	klog "k8s.io/klog/v2"
 )
 
 var (
@@ -88,12 +89,14 @@ func start() error {
 		return fmt.Errorf("failed to watch lock file: %v", err)
 	}
 
+	nvmllib := nvml.New()
+
 	var wg sync.WaitGroup
 	errCh := make(chan error, 2)
 
 	// Start the metrics service
 	wg.Go(func() {
-		if err := initMetrics(ctx, containerLister); err != nil {
+		if err := initMetrics(ctx, containerLister, nvmllib); err != nil {
 			errCh <- err
 		}
 	})
@@ -101,7 +104,7 @@ func start() error {
 	// Start the monitoring and feedback service
 	wg.Go(func() {
 		for {
-			if err := watchAndFeedback(ctx, containerLister, lockChannel); err != nil {
+			if err := watchAndFeedback(ctx, containerLister, nvmllib, lockChannel); err != nil {
 				// if err is temporary closed, wait for lock file to be removed
 				if errors.Is(err, errTemporaryClosed) {
 					klog.Info("MIG apply lock file detected, waiting for lock file to be removed")
@@ -135,14 +138,14 @@ func start() error {
 	return nil
 }
 
-func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister) error {
+func initMetrics(ctx context.Context, containerLister *nvidia.ContainerLister, nvmllib nvml.Interface) error {
 	klog.V(4).Info("Initializing metrics for vGPUmonitor")
 	reg := prometheus.NewRegistry()
 	//reg := prometheus.NewPedanticRegistry()
 
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
 
-	NewClusterManager("vGPU", reg, containerLister, legacyMetrics)
+	NewClusterManager("vGPU", reg, containerLister, nvmllib, legacyMetrics)
 
 	// Uncomment to add the standard process and Go metrics to the custom registry.
 	//reg.MustRegister(
