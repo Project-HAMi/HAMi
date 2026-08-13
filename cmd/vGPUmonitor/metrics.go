@@ -371,7 +371,7 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 	)
 
 	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
-		float64(util.Memory),
+		float64(utilRates.Memory),
 		fmt.Sprint(index), uuid, deviceName,
 	); err != nil {
 		return fmt.Errorf("nvml send memory controller utilization: %w", err)
