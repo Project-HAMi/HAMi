@@ -1008,14 +1008,23 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 
 		// Verify if the pod was actually bound despite the API error (e.g., due to a network timeout)
-		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-		defer cancel()
-		if actualPod, getErr := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(ctx, args.PodName, metav1.GetOptions{}); getErr == nil {
-			if actualPod.Spec.NodeName == args.Node {
-				klog.InfoS("Pod successfully bound despite API error, retaining node locks", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
-				s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
-				return &extenderv1.ExtenderBindingResult{Error: ""}, nil
+		// We use a retry loop because a single immediate Get might read a stale cache or pre-bind state.
+		errPoll := wait.PollUntilContextTimeout(context.Background(), 500*time.Millisecond, 5*time.Second, true, func(ctx context.Context) (bool, error) {
+			actualPod, getErr := s.kubeClient.CoreV1().Pods(args.PodNamespace).Get(ctx, args.PodName, metav1.GetOptions{})
+			if getErr != nil {
+				return false, nil // Ignore and retry
 			}
+			// Require UID match to avoid keeping locks for a replacement pod with the same name.
+			if actualPod.UID == args.PodUID && actualPod.Spec.NodeName == args.Node {
+				return true, nil
+			}
+			return false, nil
+		})
+
+		if errPoll == nil {
+			klog.InfoS("Pod successfully bound despite API error, retaining node locks", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
+			s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
+			return &extenderv1.ExtenderBindingResult{Error: ""}, nil
 		}
 
 		return fail(err)

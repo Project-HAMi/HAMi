@@ -2303,6 +2303,21 @@ func TestBind_TimeoutStateRecovery(t *testing.T) {
 	// Intercept bindings to simulate a network timeout returning from the Bind API call
 	fakeClient, ok := s.kubeClient.(*fake.Clientset)
 	require.True(t, ok, "kubeClient should be of type *fake.Clientset")
+
+	// Track get requests to simulate delayed visibility
+	getCalls := int32(0)
+	fakeClient.PrependReactor("get", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		calls := atomic.AddInt32(&getCalls, 1)
+		// On the first read, simulate the pod being unbound
+		if calls == 1 {
+			unboundPod := pod.DeepCopy()
+			unboundPod.Spec.NodeName = ""
+			return true, unboundPod, nil
+		}
+		// On subsequent reads, simulate the binding becoming visible
+		return true, pod, nil
+	})
+
 	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 		if action.GetSubresource() == "binding" {
 			return true, nil, fmt.Errorf("simulated network timeout")
@@ -2314,4 +2329,5 @@ func TestBind_TimeoutStateRecovery(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, res.Error, "Bind should recover and return success when pod is actually bound")
 	require.Equal(t, int32(0), mock.releaseCalls.Load(), "ReleaseNodeLock should NOT be called because pod is actually bound")
+	require.GreaterOrEqual(t, getCalls, int32(2), "Expected at least 2 Get calls (one unbound, then bound) due to retry mechanism")
 }
