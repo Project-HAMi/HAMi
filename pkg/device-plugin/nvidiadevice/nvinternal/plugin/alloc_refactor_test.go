@@ -470,6 +470,44 @@ func TestAllocate_MultiContainer_CUDA_DISABLE_CONTROL_FirstContainer(t *testing.
 		"container 1 should have ld.so.preload mounted")
 }
 
+func TestAllocate_WholeGPU_AutoSets_CUDA_DISABLE_CONTROL(t *testing.T) {
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,0:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{
+				{Name: "c0"}, // No explicit CUDA_DISABLE_CONTROL
+			},
+		},
+	}
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+
+	require.Equal(t, "true", response.ContainerResponses[0].Envs["CUDA_DISABLE_CONTROL"],
+		"CUDA_DISABLE_CONTROL should be auto-set to true for whole-GPU allocation")
+	require.False(t, hasLdSoPreloadMount(response.ContainerResponses[0].Mounts),
+		"ld.so.preload should NOT be mounted for whole-GPU allocation")
+}
+
 func TestAllocate_DeviceNumberMismatch(t *testing.T) {
 	setupInRequestDevices(t)
 	plugin := newTestPlugin(t)

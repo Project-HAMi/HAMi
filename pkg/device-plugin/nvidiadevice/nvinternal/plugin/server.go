@@ -820,11 +820,18 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 
 			if plugin.operatingMode != "mig" {
+				isWholeGPU := true
 				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
+					if dev.Usedmem != 0 {
+						isWholeGPU = false
+					}
 				}
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
+				if devreq[0].Usedcores != 0 {
+					isWholeGPU = false
+				}
 				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
@@ -865,6 +872,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						found = true
 						break
 					}
+				}
+				if isWholeGPU && !found {
+					klog.Infof("Whole GPU allocation detected without explicit CUDA_DISABLE_CONTROL, auto-setting to true")
+					found = true
+					response.Envs["CUDA_DISABLE_CONTROL"] = "true"
 				}
 				if !found {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
