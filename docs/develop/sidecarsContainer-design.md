@@ -75,8 +75,11 @@ behavior stays exactly as today. No version gating, no new config.
   each non-sidecar init against a fresh copy pre-charged with the sidecar
   usage; merge per UUID via `max()`.
 - **Usage recording:** `CollapseInitContainerUsage` routes sidecars into
-  the app-sum bucket and adds their sum to the init peak; add/update/delete
-  symmetry stays as it is.
+  the app-sum bucket and adds their sum to the init peak. The same split
+  applies to the per-entry slot count (PR 2623): sidecar slots add like
+  app containers, non-sidecar inits keep their peak of 1. `getNodesUsage`
+  only consumes the stored output, so it needs no change of its own.
+  Add/update/delete symmetry stays as it is.
 
 Annotations don't change, but a sidecar keeps its position in the init
 range of `hami.io/vgpu-devices-allocated`, and the annotation itself
@@ -99,14 +102,18 @@ never the position alone.
 
 ## Shrink Rules
 
-Same three rules as the init design, with **non-sidecar** inserted: shrink
+Same three rules as the init design, with non-sidecar inserted: shrink
 to steady-state usage (apps + sidecars) once non-sidecar inits exit 0;
 hold on non-zero exit; zero at terminal phase. A sidecar can crash-loop
-through `Terminated` states; since sidecars are out of the gate entirely,
-restarts don't affect it — worth a test. If all init containers are
-sidecars (`init_peak = 0`), the gate is satisfied immediately and the
-shrink recomputes the stored value (delta 0).
-`initContainerResourceReleased` keeps its semantics. Rename
+through `Terminated` states; its usage stays counted through the gap and
+never briefly reads zero stored usage only changes at add, at the
+shrink (whose target includes sidecars), or at terminal phase, and a
+restart triggers none of these. But an exit-0 gap can momentarily satisfy
+today's gate and fire the shrink, permanently dropping the sidecar's
+usage; the non-sidecar gate closes that. A test should pin both.
+If all init containers are sidecars (`init_peak = 0`), the gate is
+satisfied immediately and the shrink recomputes the stored value
+(delta 0). `initContainerResourceReleased` keeps its semantics. Rename
 `AppContainersOnlyDeviceUsage` (e.g. `SteadyStateDeviceUsage`) so an
 un-migrated caller fails to compile instead of silently dropping sidecar
 usage.
