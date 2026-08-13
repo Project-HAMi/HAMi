@@ -385,7 +385,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	profile, profileMatch := enf.selectProfileByRequest(devices, k)
 	if !profileMatch {
 		reason[common.ModeNotFit]++
