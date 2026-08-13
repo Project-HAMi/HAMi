@@ -20,6 +20,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	nvmlmock "github.com/NVIDIA/go-nvml/pkg/nvml/mock"
 	"github.com/prometheus/client_golang/prometheus"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
@@ -93,5 +95,34 @@ func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 	legacyHostGPUUtilString := legacyHostGPUUtilizationdesc.String()
 	if !strings.Contains(legacyHostGPUUtilString, `"nodeid"`) && !strings.Contains(legacyHostGPUUtilString, `nodeid`) {
 		t.Errorf("legacyHostGPUUtilizationdesc does not contain 'nodeid' label: %s", legacyHostGPUUtilString)
+	}
+}
+
+func TestHostGPUMetricsMissingNodeName(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "")
+
+	cc := ClusterManagerCollector{}
+
+	// Test collectGPUUtilizationMetrics with missing NODE_NAME
+	err := cc.collectGPUUtilizationMetrics(nil, nil, 0)
+	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from collectGPUUtilizationMetrics, got: %v", err)
+	}
+
+	// Test collectGPUMemoryMetrics with missing NODE_NAME
+	mockDev := &nvmlmock.Device{
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{Used: 100}, nvml.SUCCESS
+		},
+		GetUUIDFunc: func() (string, nvml.Return) {
+			return "GPU-1234", nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) {
+			return "Tesla T4", nvml.SUCCESS
+		},
+	}
+	err = cc.collectGPUMemoryMetrics(nil, mockDev, 0)
+	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from collectGPUMemoryMetrics, got: %v", err)
 	}
 }
