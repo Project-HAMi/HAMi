@@ -20,6 +20,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -340,6 +341,13 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 }
 
 func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
+	scoreStart := time.Now()
+	scoreResult := "success"
+	defer func() {
+		ScoreDuration.WithLabelValues(scoreResult).Observe(time.Since(scoreStart).Seconds())
+		ScoreTotal.WithLabelValues(scoreResult).Inc()
+	}()
+
 	userNodePolicy := resolveNodeSchedulerPolicy(task)
 	res := policy.NodeScoreList{
 		Policy:   userNodePolicy,

@@ -946,6 +946,13 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 }
 
 func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.ExtenderBindingResult, error) {
+	bindStart := time.Now()
+	bindResult := "success"
+	defer func() {
+		BindDuration.WithLabelValues("total", bindResult).Observe(time.Since(bindStart).Seconds())
+		BindTotal.WithLabelValues(bindResult).Inc()
+	}()
+
 	klog.InfoS("Attempting to bind pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 	var res *extenderv1.ExtenderBindingResult
 
@@ -954,8 +961,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		Target:     corev1.ObjectReference{Kind: "Node", Name: args.Node},
 	}
 
+	phaseStart := time.Now()
 	current, err := s.podLister.Pods(args.PodNamespace).Get(args.PodName)
+	BindDuration.WithLabelValues("pod_lookup", ResultLabel(err)).Observe(time.Since(phaseStart).Seconds())
 	if err != nil {
+		bindResult = "error"
 		klog.ErrorS(err, "Failed to get pod from cache", "pod", args.PodName, "namespace", args.PodNamespace)
 		s.cleanupStalePodAllocation(&corev1.Pod{
 			ObjectMeta: metav1.ObjectMeta{
@@ -969,8 +979,11 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 
 	klog.InfoS("Trying to get the target node for pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 
+	phaseStart = time.Now()
 	node, err := s.nodeLister.Get(args.Node)
+	BindDuration.WithLabelValues("node_lookup", ResultLabel(err)).Observe(time.Since(phaseStart).Seconds())
 	if err != nil {
+		bindResult = "error"
 		klog.ErrorS(err, "Failed to get node from cache", "node", args.Node)
 		s.recordScheduleBindingResultEvent(current, EventReasonBindingFailed, []string{}, fmt.Errorf("failed to get node %s", args.Node))
 		s.cleanupStalePodAllocation(current)
@@ -994,20 +1007,32 @@ func (s *Scheduler) Bind(args extenderv1.ExtenderBindingArgs) (*extenderv1.Exten
 		return &extenderv1.ExtenderBindingResult{Error: errStr}, nil
 	}
 
+	phaseStart = time.Now()
 	if err = s.acquireNodeLocks(node, current); err != nil {
+		bindResult = "error"
+		BindDuration.WithLabelValues("node_lock", "error").Observe(time.Since(phaseStart).Seconds())
 		klog.ErrorS(err, "Failed to lock node", "node", args.Node, "pod", klog.KObj(current))
 		return fail(err)
 	}
+	BindDuration.WithLabelValues("node_lock", "success").Observe(time.Since(phaseStart).Seconds())
 
+	phaseStart = time.Now()
 	if err = util.PatchPodAnnotations(current, tmppatch); err != nil {
+		bindResult = "error"
+		BindDuration.WithLabelValues("patch_annotations", "error").Observe(time.Since(phaseStart).Seconds())
 		klog.ErrorS(err, "Failed to patch pod annotations", "pod", klog.KObj(current))
 		return fail(err)
 	}
+	BindDuration.WithLabelValues("patch_annotations", "success").Observe(time.Since(phaseStart).Seconds())
 
+	phaseStart = time.Now()
 	if err = s.kubeClient.CoreV1().Pods(args.PodNamespace).Bind(context.Background(), binding, metav1.CreateOptions{}); err != nil {
+		bindResult = "error"
+		BindDuration.WithLabelValues("apiserver_bind", "error").Observe(time.Since(phaseStart).Seconds())
 		klog.ErrorS(err, "Failed to bind pod", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)
 		return fail(err)
 	}
+	BindDuration.WithLabelValues("apiserver_bind", "success").Observe(time.Since(phaseStart).Seconds())
 
 	s.recordScheduleBindingResultEvent(current, EventReasonBindingSucceed, []string{args.Node}, nil)
 	klog.InfoS("Successfully bound pod to node", "pod", args.PodName, "namespace", args.PodNamespace, "node", args.Node)

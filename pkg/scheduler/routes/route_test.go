@@ -24,6 +24,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/prometheus/client_golang/prometheus/testutil"
 	corev1 "k8s.io/api/core/v1"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
@@ -256,5 +257,21 @@ func TestBind_DecodeError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected a decode error to be reported in the bind result")
+	}
+}
+
+func TestPredicateRoute_MetricsObserved(t *testing.T) {
+	initialCount := testutil.ToFloat64(scheduler.FilterTotal.WithLabelValues("error"))
+
+	req := httptest.NewRequest("POST", "/predicate", strings.NewReader("{invalid-json"))
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PredicateRoute(s)
+	handler(w, req, nil)
+
+	afterCount := testutil.ToFloat64(scheduler.FilterTotal.WithLabelValues("error"))
+	if afterCount <= initialCount {
+		t.Errorf("Expected FilterTotal with result=error to increment, before: %v, after: %v", initialCount, afterCount)
 	}
 }

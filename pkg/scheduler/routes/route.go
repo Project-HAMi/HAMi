@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/klog/v2"
@@ -43,13 +44,20 @@ func checkBody(w http.ResponseWriter, r *http.Request) bool {
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		filterStart := time.Now()
+		filterResult := "success"
+		defer func() {
+			scheduler.FilterDuration.WithLabelValues(filterResult).Observe(time.Since(filterStart).Seconds())
+			scheduler.FilterTotal.WithLabelValues(filterResult).Inc()
+		}()
+
 		klog.V(5).Infoln("Entering Predicate Route handler")
 		if !checkBody(w, r) {
+			filterResult = "error"
 			return
 		}
 
 		var buf bytes.Buffer
-		// Limit the body size to prevent deep nesting/resource exhaustion attacks
 		limitedReader := io.LimitReader(r.Body, maxRequestSize)
 		body := io.TeeReader(limitedReader, &buf)
 
@@ -57,6 +65,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		var extenderFilterResult *extenderv1.ExtenderFilterResult
 
 		if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
+			filterResult = "error"
 			klog.ErrorS(err, "Failed to decode extender arguments")
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
@@ -64,8 +73,8 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 		} else {
 			synced := s.WaitForCacheSync(r.Context())
 			if !synced {
-				// Poll may return false when context is cancelled
 				err := fmt.Errorf("context cancelled")
+				filterResult = "error"
 				klog.ErrorS(err, "Cache not synced, cannot proceed with filtering")
 				extenderFilterResult = &extenderv1.ExtenderFilterResult{
 					Error: err.Error(),
@@ -73,6 +82,7 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			} else {
 				extenderFilterResult, err = s.Filter(extenderArgs)
 				if err != nil {
+					filterResult = "error"
 					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
 					extenderFilterResult = &extenderv1.ExtenderFilterResult{
 						Error: err.Error(),

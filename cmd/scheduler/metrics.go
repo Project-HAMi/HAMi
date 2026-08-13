@@ -404,6 +404,12 @@ func initMetrics(bindAddress string, metricsProvider schedulerMetricsProvider, l
 	klog.Info("Initializing metrics for scheduler")
 	reg := prometheus.NewRegistry()
 	reg.MustRegister(versionmetrics.NewBuildInfoCollector())
+	reg.MustRegister(schedulerpkg.BindDuration)
+	reg.MustRegister(schedulerpkg.BindTotal)
+	reg.MustRegister(schedulerpkg.FilterDuration)
+	reg.MustRegister(schedulerpkg.FilterTotal)
+	reg.MustRegister(schedulerpkg.ScoreDuration)
+	reg.MustRegister(schedulerpkg.ScoreTotal)
 
 	NewClusterManager("vGPU", reg, metricsProvider, legacyMetrics)
 
