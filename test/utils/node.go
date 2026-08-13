@@ -24,6 +24,7 @@ import (
 	v1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes"
+	"k8s.io/client-go/util/retry"
 	"k8s.io/klog/v2"
 )
 
@@ -67,28 +68,59 @@ func UpdateNode(clientSet *kubernetes.Clientset, node *v1.Node) (*v1.Node, error
 }
 
 func AddNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey, labelValue string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var updatedNode *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if node.Labels == nil {
+			node.Labels = make(map[string]string)
+		}
+		
+		if val, ok := node.Labels[labelKey]; ok && val == labelValue {
+			updatedNode = node
+			return nil // Label already set to the desired value
+		}
+		
+		node.Labels[labelKey] = labelValue
+
+		updatedNode, err = UpdateNode(clientSet, node)
+		return err
+	})
+
 	if err != nil {
 		return nil, err
 	}
-
-	if node.Labels == nil {
-		node.Labels = make(map[string]string)
-	}
-	node.Labels[labelKey] = labelValue
-
-	return UpdateNode(clientSet, node)
+	return updatedNode, nil
 }
 
 func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string) (*v1.Node, error) {
-	node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	var updatedNode *v1.Node
+	err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		node, err := clientSet.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			return err
+		}
+
+		if node.Labels != nil {
+			if _, ok := node.Labels[labelKey]; !ok {
+				updatedNode = node
+				return nil // Label already removed
+			}
+			delete(node.Labels, labelKey)
+		} else {
+			updatedNode = node
+			return nil
+		}
+
+		updatedNode, err = UpdateNode(clientSet, node)
+		return err
+	})
+	
 	if err != nil {
 		return nil, err
 	}
-
-	if node.Labels != nil {
-		delete(node.Labels, labelKey)
-	}
-
-	return UpdateNode(clientSet, node)
+	return updatedNode, nil
 }
