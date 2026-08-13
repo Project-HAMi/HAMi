@@ -1403,3 +1403,52 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 		})
 	}
 }
+
+// Test_ReleaseNodeLockUsesPatch pins the verb used to clear the lock. The
+// scheduler ServiceAccount holds get/list/patch/watch on nodes and not update,
+// so a release that reaches for Update is rejected and the lock is never
+// cleared, leaving the node unschedulable for MLU past the expiry. The fake
+// clientset does not enforce RBAC, so the deny has to be injected.
+func Test_ReleaseNodeLockUsesPatch(t *testing.T) {
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  "cambricon.com/mlu",
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+	})
+
+	ctx := context.Background()
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node-verb-01", Annotations: map[string]string{}},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "pod-verb-01", Namespace: "default"},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{
+			Name: "ctr",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+				corev1.ResourceName(MLUResourceCount): resource.MustParse("1"),
+			}},
+		}}},
+	}
+
+	clientset := fake.NewClientset(node)
+	clientset.PrependReactor("update", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+		return true, nil, apierrors.NewForbidden(
+			schema.GroupResource{Resource: "nodes"}, node.Name,
+			fmt.Errorf(`cannot update resource "nodes" in API group "" at the cluster scope`))
+	})
+	client.KubeClient = clientset
+	t.Cleanup(func() { client.KubeClient = nil })
+
+	assert.NoError(t, dev.LockNode(node, pod))
+	locked, err := clientset.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotEmpty(t, locked.Annotations[DsmluLockTime], "setNodeLock should have recorded the lock")
+
+	assert.NoError(t, dev.ReleaseNodeLock(locked, pod), "release must not need the update verb")
+
+	released, err := clientset.CoreV1().Nodes().Get(ctx, node.Name, metav1.GetOptions{})
+	assert.NoError(t, err)
+	assert.NotContains(t, released.Annotations, DsmluLockTime, "lock annotation must be gone from the apiserver")
+
+	assert.NoError(t, dev.LockNode(released, pod), "node should be lockable again after release")
+}
