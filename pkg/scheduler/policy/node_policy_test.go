@@ -256,7 +256,7 @@ func TestOverrideScore(t *testing.T) {
 				},
 			},
 			policy:    "binpack",
-			wantScore: 1679,
+			wantScore: 16790000,
 		},
 		{
 			name: "Device score equal to zero",
@@ -399,6 +399,66 @@ func TestOverrideScore(t *testing.T) {
 			},
 			policy:    "spread",
 			wantScore: -600000,
+		},
+		{
+			// MetaxDevices is policy-neutral, so OverrideScore
+			// weights its raw score by 10000 under Binpack.
+			name: "MetaX-GPU with binpack policy returns weighted score",
+			nodeScore: &NodeScore{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"metax-tech.com/gpu.topology.scores": "{\"2\":100}",
+						},
+					},
+				},
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Metax-GPU": device.PodSingleDevice{
+						device.ContainerDevices{
+							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
+							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
+						},
+					},
+				},
+				Score: 0,
+			},
+			devices: []*device.DeviceUsage{
+				{Count: 4, Totalcore: 8, Totalmem: 4096, Type: "gpu", Used: 0, Usedcores: 0, Usedmem: 0},
+			},
+			policy:    "binpack",
+			wantScore: 1000000,
+		},
+		{
+			// Under Spread the same policy-neutral raw score is inverted
+			// (weight -10000), preserving ranking logic.
+			name: "MetaX-GPU with spread policy returns inverted weighted score",
+			nodeScore: &NodeScore{
+				Node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "node1",
+						Annotations: map[string]string{
+							"metax-tech.com/gpu.topology.scores": "{\"2\":100}",
+						},
+					},
+				},
+				NodeID: "node1",
+				Devices: device.PodDevices{
+					"Metax-GPU": device.PodSingleDevice{
+						device.ContainerDevices{
+							{Idx: 1, UUID: "uuid1", Type: "gpu", Usedmem: 1024, Usedcores: 2},
+							{Idx: 2, UUID: "uuid2", Type: "gpu", Usedmem: 2048, Usedcores: 4},
+						},
+					},
+				},
+				Score: 0,
+			},
+			devices: []*device.DeviceUsage{
+				{Count: 4, Totalcore: 8, Totalmem: 4096, Type: "gpu", Used: 0, Usedcores: 0, Usedmem: 0},
+			},
+			policy:    "spread",
+			wantScore: -1000000,
 		},
 		// Add more test cases here to cover other scenarios and policies.
 	}

@@ -165,22 +165,27 @@ func (dev *MetaxDevices) customFilterRule(allocated *device.PodDevices, request 
 	return true
 }
 
-func parseMetaxAnnos(annos string, index int) float32 {
+func parseMetaxAnnos(annos string, index int) (float32, bool) {
 	scoreMap := map[int]int{}
 	err := json.Unmarshal([]byte(annos), &scoreMap)
 	if err != nil {
 		klog.Warningf("annos[%s] Unmarshal failed, %v", annos, err)
-		return 0
+		return 0, false
 	}
 
 	res, ok := scoreMap[index]
 	if !ok {
 		klog.Warningf("scoreMap[%v] not contains [%d]", scoreMap, index)
-		return 0
+		return 0, false
 	}
 
-	return float32(res)
+	return float32(res), true
 }
+
+// MetaxMaxTopologyLoss is the upper bound of the values published in the
+// "gpu.topology.losses" annotation. It converts a loss (lower is better) onto
+// the same "higher is better" scale used by "gpu.topology.scores".
+const MetaxMaxTopologyLoss = 2000
 
 func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
 	sum := 0
@@ -189,29 +194,30 @@ func (dev *MetaxDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingl
 	}
 
 	res := float32(0)
-	if policy == string(util.NodeSchedulerPolicyBinpack) {
-		lossAnno, ok := node.Annotations[MetaxAnnotationLoss]
-		if ok {
-			// it's preferred to select the node with lower loss
-			loss := parseMetaxAnnos(lossAnno, sum)
-			res = 2000 - loss
 
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
+	if scoreAnno, ok := node.Annotations[MetaxAnnotationScore]; ok {
+		score, valid := parseMetaxAnnos(scoreAnno, sum)
+		if valid {
+			res = score
+			klog.V(4).InfoS("Detected annotations", "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
+			return res
 		}
-	} else if policy == string(util.NodeSchedulerPolicySpread) {
-		scoreAnno, ok := node.Annotations[MetaxAnnotationScore]
-		if ok {
-			// it's preferred to select the node with higher score
-			// But we have to give it a smaller value because of Spread policy
-			score := parseMetaxAnnos(scoreAnno, sum)
-			res = 2000 - score
+	}
 
-			klog.InfoS("Detected annotations", "policy", policy, "key", MetaxAnnotationScore, "value", scoreAnno, "requesting", sum, "extract", score)
+	if lossAnno, ok := node.Annotations[MetaxAnnotationLoss]; ok {
+		loss, valid := parseMetaxAnnos(lossAnno, sum)
+		if valid {
+			res = MetaxMaxTopologyLoss - loss
+			klog.V(4).InfoS("Detected annotations", "key", MetaxAnnotationLoss, "value", lossAnno, "requesting", sum, "extract", loss)
 		}
 	}
 
 	return res
 }
+
+// PolicyNeutralScore marks MetaxDevices as returning a policy-independent
+// score from ScoreNode. See device.PolicyNeutralScorer.
+func (dev *MetaxDevices) PolicyNeutralScore() {}
 
 func (dev *MetaxDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++

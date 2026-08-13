@@ -147,7 +147,7 @@ func TestParseMetaxAnnos(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			value := parseMetaxAnnos(tt.name, tt.index)
+			value, _ := parseMetaxAnnos(tt.name, tt.index)
 			if value != tt.value {
 				t.Errorf("Expected index %f, got %f", tt.value, value)
 			}
@@ -408,7 +408,7 @@ func Test_ScoreNode(t *testing.T) {
 		want float32
 	}{
 		{
-			name: "policy is binpack",
+			name: "topology-aware losses fallback",
 			args: struct {
 				node       *corev1.Node
 				podDevices device.PodSingleDevice
@@ -423,14 +423,14 @@ func Test_ScoreNode(t *testing.T) {
 				},
 				podDevices: device.PodSingleDevice{
 					device.ContainerDevices{
-						{
+						device.ContainerDevice{
 							Idx:       int(0),
 							UUID:      "test-0",
 							Type:      MetaxGPUDevice,
 							Usedmem:   int32(1000),
 							Usedcores: int32(1),
 						},
-						{
+						device.ContainerDevice{
 							Idx:       int(1),
 							UUID:      "test-1",
 							Type:      MetaxGPUDevice,
@@ -444,7 +444,7 @@ func Test_ScoreNode(t *testing.T) {
 			want: float32(1800),
 		},
 		{
-			name: "policy is spread",
+			name: "topology-aware scores preferred",
 			args: struct {
 				node       *corev1.Node
 				podDevices device.PodSingleDevice
@@ -470,7 +470,164 @@ func Test_ScoreNode(t *testing.T) {
 				},
 				policy: "spread",
 			},
+			want: float32(100),
+		},
+		{
+			name: "no topology annotation scores zero",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{},
+					},
+				},
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
+						{
+							Idx:       int(0),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "binpack",
+			},
+			want: float32(0),
+		},
+		{
+			name: "loss above the conversion offset yields a negative score",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							MetaxAnnotationLoss: "{\"2\":2500}",
+						},
+					},
+				},
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
+						{
+							Idx:       int(0),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+						{
+							Idx:       int(1),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "binpack",
+			},
+			want: float32(-500),
+		},
+		{
+			name: "malformed scores annotation falls back to losses",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							MetaxAnnotationScore: "not-json",
+							MetaxAnnotationLoss:  "{\"2\":100}",
+						},
+					},
+				},
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
+						{
+							Idx:       int(0),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+						{
+							Idx:       int(1),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "spread",
+			},
 			want: float32(1900),
+		},
+		{
+			name: "malformed loss annotation scores zero",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							MetaxAnnotationLoss: "not-json",
+						},
+					},
+				},
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
+						device.ContainerDevice{
+							Idx:       int(0),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "binpack",
+			},
+			want: float32(0),
+		},
+		{
+			name: "missing loss key scores zero",
+			args: struct {
+				node       *corev1.Node
+				podDevices device.PodSingleDevice
+				policy     string
+			}{
+				node: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							MetaxAnnotationLoss: "{\"1\":100}", // Missing key "2"
+						},
+					},
+				},
+				podDevices: device.PodSingleDevice{
+					device.ContainerDevices{
+						device.ContainerDevice{
+							Idx:       int(0),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+						device.ContainerDevice{
+							Idx:       int(1),
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(1),
+						},
+					},
+				},
+				policy: "binpack",
+			},
+			want: float32(0),
 		},
 	}
 	for _, test := range tests {
@@ -480,6 +637,59 @@ func Test_ScoreNode(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+}
+
+// TestScoreNodePolicyIndependence verifies that MetaxDevices.ScoreNode returns
+// a score that does not depend on the scheduler policy string.
+func TestMetaxDevicesScoreNodePolicyIndependence(t *testing.T) {
+	dev := &MetaxDevices{}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node1",
+			Annotations: map[string]string{
+				MetaxAnnotationScore: "{\"2\":100}",
+			},
+		},
+	}
+
+	podDevices := device.PodSingleDevice{
+		device.ContainerDevices{
+			{
+				Idx:       int(0),
+				Type:      MetaxGPUDevice,
+				Usedmem:   int32(1000),
+				Usedcores: int32(1),
+			},
+			{
+				Idx:       int(1),
+				Type:      MetaxGPUDevice,
+				Usedmem:   int32(1000),
+				Usedcores: int32(1),
+			},
+		},
+	}
+
+	binpackScore := dev.ScoreNode(node, podDevices, nil, "binpack")
+	spreadScore := dev.ScoreNode(node, podDevices, nil, "spread")
+	emptyPolicyScore := dev.ScoreNode(node, podDevices, nil, "")
+
+	assert.Equal(t, binpackScore, spreadScore)
+	assert.Equal(t, binpackScore, emptyPolicyScore)
+}
+
+func TestMetaxDevicesImplementsPolicyNeutralScorer(t *testing.T) {
+	dev := &MetaxDevices{}
+
+	// We declare the same method signature locally to verify structural typing.
+	type policyNeutralScorer interface {
+		PolicyNeutralScore()
+	}
+
+	_, ok := any(dev).(policyNeutralScorer)
+	assert.Assert(t, ok, "MetaxDevices should implement PolicyNeutralScore()")
+
+	// Call the empty method to satisfy Codecov's 100% coverage requirement.
+	dev.PolicyNeutralScore()
 }
 
 func TestMetaxDevices_Fit(t *testing.T) {
