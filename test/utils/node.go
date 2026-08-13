@@ -78,12 +78,12 @@ func AddNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey, labelValu
 		if node.Labels == nil {
 			node.Labels = make(map[string]string)
 		}
-		
+
 		if val, ok := node.Labels[labelKey]; ok && val == labelValue {
 			updatedNode = node
 			return nil // Label already set to the desired value
 		}
-		
+
 		node.Labels[labelKey] = labelValue
 
 		updatedNode, err = UpdateNode(clientSet, node)
@@ -118,7 +118,7 @@ func RemoveNodeLabel(clientSet *kubernetes.Clientset, nodeName, labelKey string)
 		updatedNode, err = UpdateNode(clientSet, node)
 		return err
 	})
-	
+
 	if err != nil {
 		return nil, err
 	}
