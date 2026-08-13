@@ -41,6 +41,7 @@ import (
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -2284,4 +2285,32 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "apiserver 500")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
+}
+
+func TestBind_TimeoutStateRecovery(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "pod-timeout-test", Namespace: "default", UID: types.UID("uid-timeout"),
+		},
+		Spec: corev1.PodSpec{
+			NodeName: "node1", // simulate that it was actually bound by API server despite timeout
+		},
+	}
+	mock := &bindLockMockDevice{}
+	s, args, cleanup := setupBindLockRetryTest(t, 5*time.Second, pod, mock)
+	defer cleanup()
+
+	// Intercept bindings to simulate a network timeout returning from the Bind API call
+	fakeClient := s.kubeClient.(*fake.Clientset)
+	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
+		if action.GetSubresource() == "binding" {
+			return true, nil, fmt.Errorf("simulated network timeout")
+		}
+		return false, nil, nil
+	})
+
+	res, err := s.Bind(args)
+	require.NoError(t, err)
+	require.Empty(t, res.Error, "Bind should recover and return success when pod is actually bound")
+	require.Equal(t, int32(0), mock.releaseCalls.Load(), "ReleaseNodeLock should NOT be called because pod is actually bound")
 }
