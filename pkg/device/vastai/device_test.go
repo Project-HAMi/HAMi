@@ -30,7 +30,6 @@ import (
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -160,6 +159,11 @@ func Test_GetNodeDevices(t *testing.T) {
 }
 
 func Test_CheckHealth(t *testing.T) {
+	config := VastaiConfig{
+		ResourceCountName: "vastaitech.com/va",
+	}
+	InitVastaiDevice(config)
+
 	tests := []struct {
 		name string
 		args struct {
@@ -170,16 +174,34 @@ func Test_CheckHealth(t *testing.T) {
 		want2 bool
 	}{
 		{
-			name: "Requesting state expired",
+			name: "healthy device",
 			args: struct {
 				devType string
 				n       *corev1.Node
 			}{
-				devType: "vastaitech.com/va",
+				devType: VastaiCommonWord,
 				n: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-va"]: "Requesting_2025-01-07 00:00:00",
+							HandshakeAnnos: "Requesting_2099-01-01 00:00:00",
+						},
+					},
+				},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "failed/unhealthy device state",
+			args: struct {
+				devType string
+				n       *corev1.Node
+			}{
+				devType: VastaiCommonWord,
+				n: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: map[string]string{
+							HandshakeAnnos: "Requesting_2020-01-01 00:00:00",
 						},
 					},
 				},
@@ -188,22 +210,41 @@ func Test_CheckHealth(t *testing.T) {
 			want2: false,
 		},
 		{
-			name: "Unknown state",
+			name: "empty device list",
 			args: struct {
 				devType string
 				n       *corev1.Node
 			}{
-				devType: "vastaitech.com/va",
+				devType: VastaiCommonWord,
 				n: &corev1.Node{
 					ObjectMeta: metav1.ObjectMeta{
 						Annotations: map[string]string{
-							util.HandshakeAnnos["hami.io/node-handshake-va"]: "Unknown",
+							HandshakeAnnos: "Requesting_2020-01-01 00:00:00",
 						},
+					},
+					Status: corev1.NodeStatus{
+						Allocatable: corev1.ResourceList{},
+					},
+				},
+			},
+			want1: false,
+			want2: false,
+		},
+		{
+			name: "device with missing/nil fields",
+			args: struct {
+				devType string
+				n       *corev1.Node
+			}{
+				devType: VastaiCommonWord,
+				n: &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{
+						Annotations: nil,
 					},
 				},
 			},
 			want1: true,
-			want2: true,
+			want2: false,
 		},
 	}
 	for _, test := range tests {
@@ -212,6 +253,110 @@ func Test_CheckHealth(t *testing.T) {
 			result1, result2 := dev.CheckHealth(test.args.devType, test.args.n)
 			assert.Equal(t, result1, test.want1)
 			assert.Equal(t, result2, test.want2)
+		})
+	}
+}
+
+func Test_ScoreNode(t *testing.T) {
+	dev := VastaiDevices{}
+	tests := []struct {
+		name       string
+		node       *corev1.Node
+		podDevices device.PodSingleDevice
+		previous   []*device.DeviceUsage
+		policy     string
+		want       float32
+	}{
+		{
+			name: "normal scoring",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			podDevices: device.PodSingleDevice{
+				{
+					{
+						UUID: "dev-1",
+						CustomInfo: map[string]any{
+							"DeviceStrategy": "die",
+							"AIC":            "aic-1",
+						},
+						Usedmem: 1024,
+					},
+					{
+						UUID: "dev-2",
+						CustomInfo: map[string]any{
+							"DeviceStrategy": "die",
+							"AIC":            "aic-1",
+						},
+						Usedmem: 1024,
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{},
+			policy:   "binpack",
+			want:     1.0,
+		},
+		{
+			name: "zero memory request",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			podDevices: device.PodSingleDevice{
+				{
+					{
+						UUID: "dev-1",
+						CustomInfo: map[string]any{
+							"DeviceStrategy": "die",
+							"AIC":            "aic-1",
+						},
+						Usedmem: 0,
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{},
+			policy:   "binpack",
+			want:     1.0,
+		},
+		{
+			name: "empty device list",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			podDevices: device.PodSingleDevice{},
+			previous:   []*device.DeviceUsage{},
+			policy:     "binpack",
+			want:       0.0,
+		},
+		{
+			name: "non-existent/unknown device UUID in request",
+			node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test-node",
+				},
+			},
+			podDevices: device.PodSingleDevice{
+				{
+					{
+						UUID:       "unknown-uuid",
+						CustomInfo: nil,
+					},
+				},
+			},
+			previous: []*device.DeviceUsage{},
+			policy:   "binpack",
+			want:     0.0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := dev.ScoreNode(test.node, test.podDevices, test.previous, test.policy)
+			assert.Equal(t, result, test.want)
 		})
 	}
 }
