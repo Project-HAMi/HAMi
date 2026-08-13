@@ -860,25 +860,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						HostPath: "/tmp/vgpulock",
 						ReadOnly: false},
 				)
-				found := false
+				hasControlSetting := false
+				controlDisabled := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
-						// if env existed but is set to false or can not be parsed, ignore
-						t, _ := strconv.ParseBool(val.Value)
-						if !t {
-							continue
-						}
-						// only env existed and set to true, we mark it "found"
-						found = true
+						hasControlSetting = true
+						controlDisabled, _ = strconv.ParseBool(val.Value)
 						break
 					}
 				}
-				if isWholeGPU && !found {
+				if isWholeGPU && !hasControlSetting {
 					klog.Infof("Whole GPU allocation detected without explicit CUDA_DISABLE_CONTROL, auto-setting to true")
-					found = true
+					controlDisabled = true
 					response.Envs["CUDA_DISABLE_CONTROL"] = "true"
 				}
-				if !found {
+				if !controlDisabled {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
 						HostPath: hostHookPath + "/vgpu/ld.so.preload",
 						ReadOnly: true},
