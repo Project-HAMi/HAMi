@@ -36,7 +36,7 @@ HAMi provides a Kubernetes-native layer for:
 - **Device sharing**: allocate a fraction of a physical accelerator by memory, core, or device count.
 - **Resource isolation**: enforce per-workload accelerator memory and compute limits where the device backend supports it.
 - **Device-aware scheduling**: place pods with topology-aware, binpack, spread, and device-specific scheduling policies.
-- **Heterogeneous AI clusters**: manage NVIDIA GPUs, NPUs, DCUs, MLUs, and other accelerator types through one scheduling and allocation workflow.
+- **Heterogeneous AI clusters**: manage NVIDIA GPUs, NPUs, DCUs, MLUs, XPUs, and other accelerator types through one scheduling and allocation workflow.
 - **Zero application changes**: keep using standard Kubernetes resource requests and limits.
 - **Production operations**: expose metrics, dashboards, WebUI, Helm installation, and community-supported deployment guidance.
 
@@ -45,7 +45,7 @@ HAMi provides a Kubernetes-native layer for:
 - Increase GPU utilization in shared Kubernetes AI clusters.
 - Run multi-tenant notebook, training, and inference workloads on the same accelerator pool.
 - Build private cloud AI platforms with fair device allocation and quota control.
-- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, Kunlunxin, MetaX, Moore Threads, and other vendors.
+- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, MetaX, Moore Threads, Kunlunxin, and other vendors.
 - Combine HAMi with Kubernetes schedulers such as kube-scheduler and Volcano for batch AI workloads.
 
 ## How It Works
