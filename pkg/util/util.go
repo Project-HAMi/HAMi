@@ -160,7 +160,14 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	return err
 }
 func AllInitContainersSucceeded(pod *corev1.Pod) bool {
-	if len(pod.Status.InitContainerStatuses) == 0 {
+	if pod == nil {
+		return false
+	}
+	initContainers := len(pod.Spec.InitContainers)
+	if initContainers == 0 {
+		return false
+	}
+	if len(pod.Status.InitContainerStatuses) != initContainers {
 		return false
 	}
 	for _, s := range pod.Status.InitContainerStatuses {
