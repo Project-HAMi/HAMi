@@ -514,7 +514,7 @@ func Test_ScoreNode(t *testing.T) {
 	}
 }
 
-// baidu.com/use-gpuuuid and nouse-gpuuuid were defined but never consulted, so
+// hami.io/use-kunlun-uuid and nouse-kunlun-uuid were defined but never consulted, so
 // a pod asking for a specific XPU was scheduled onto any of them.
 func TestKunlunDevices_Fit_UseUUID(t *testing.T) {
 	dev := &KunlunDevices{}
@@ -535,6 +535,7 @@ func TestKunlunDevices_Fit_UseUUID(t *testing.T) {
 		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}
 	}
 
+	// Test legacy annotation
 	fit, res, _ := dev.Fit(devices, req, podWith(map[string]string{
 		KunlunUseUUID: "xpu-5",
 	}), &device.NodeInfo{}, &device.PodDevices{})
@@ -542,9 +543,26 @@ func TestKunlunDevices_Fit_UseUUID(t *testing.T) {
 	assert.Equal(t, len(res[KunlunGPUDevice]), 1)
 	assert.Equal(t, res[KunlunGPUDevice][0].UUID, "xpu-5")
 
+	// Test new standard annotation
+	fit, res, _ = dev.Fit(devices, req, podWith(map[string]string{
+		UseUUIDAnno: "xpu-3",
+	}), &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(res[KunlunGPUDevice]), 1)
+	assert.Equal(t, res[KunlunGPUDevice][0].UUID, "xpu-3")
+
+	// the literal key, so a rename of the constant cannot silently stop the
+	// physical path from reading what vdevice.go documents.
+	fit, res, _ = dev.Fit(devices, req, podWith(map[string]string{
+		"hami.io/use-xpu-uuid": "xpu-6",
+	}), &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, len(res[KunlunGPUDevice]), 1)
+	assert.Equal(t, res[KunlunGPUDevice][0].UUID, "xpu-6")
+
 	// asking for a card that is not on the node must not fall back to another
 	fit, _, reason := dev.Fit(devices, req, podWith(map[string]string{
-		KunlunUseUUID: "xpu-99",
+		UseUUIDAnno: "xpu-99",
 	}), &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
@@ -565,7 +583,7 @@ func TestKunlunDevices_Fit_NoUseUUID(t *testing.T) {
 	}
 	req := device.ContainerDeviceRequest{Nums: 1, Type: KunlunGPUDevice}
 
-	// exclude every card and nothing should be allocatable
+	// exclude every card and nothing should be allocatable (using legacy annotation)
 	all := make([]string, 0, 8)
 	for i := range devices {
 		all = append(all, fmt.Sprintf("xpu-%d", i))
@@ -573,6 +591,15 @@ func TestKunlunDevices_Fit_NoUseUUID(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
 			KunlunNoUseUUID: strings.Join(all, ","),
+		}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
+
+	// exclude every card and nothing should be allocatable (using new standard annotation)
+	fit, _, reason = dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			NoUseUUIDAnno: strings.Join(all, ","),
 		}},
 	}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
@@ -594,13 +621,29 @@ func TestKunlunVDevices_Fit_UUIDAnnotations(t *testing.T) {
 	}
 	req := device.ContainerDeviceRequest{Nums: 1, Type: XPUDevice, Memreq: KunlunMaxMemory}
 
+	// Test standard hami annotation
 	fit, res, _ := dev.Fit(devices, req, &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{KunlunUseUUID: "xpu-3"}},
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{UseUUIDAnno: "xpu-3"}},
 	}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, true)
 	assert.Equal(t, res[XPUDevice][0].UUID, "xpu-3")
 
+	// Test legacy baidu annotation (backward compatibility)
+	fit, res, _ = dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{KunlunUseUUID: "xpu-2"}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, res[XPUDevice][0].UUID, "xpu-2")
+
+	// Test standard hami nouse annotation
 	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{NoUseUUIDAnno: "xpu-0,xpu-1,xpu-2,xpu-3,xpu-4,xpu-5,xpu-6,xpu-7"}},
+	}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardUUIDMismatch))
+
+	// Test legacy baidu nouse annotation
+	fit, _, reason = dev.Fit(devices, req, &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{KunlunNoUseUUID: "xpu-0,xpu-1,xpu-2,xpu-3,xpu-4,xpu-5,xpu-6,xpu-7"}},
 	}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)

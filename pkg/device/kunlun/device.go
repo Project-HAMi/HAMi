@@ -187,10 +187,11 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	// graghSelect decides topology from the position of a device in the slice,
 	// so the uuid constraint has to be applied through fitFn rather than by
 	// filtering the slice first.
-	uuidMismatch := 0
+	uuidMismatches := make(map[string]bool)
 	fitFn := func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
-		if !device.CheckUUID(pod.GetAnnotations(), d.ID, KunlunUseUUID, KunlunNoUseUUID, kl.CommonWord()) {
-			uuidMismatch++
+		if !device.CheckUUID(pod.GetAnnotations(), d.ID, UseUUIDAnno, NoUseUUIDAnno, kl.CommonWord()) ||
+			!device.CheckUUID(pod.GetAnnotations(), d.ID, KunlunUseUUID, KunlunNoUseUUID, kl.CommonWord()) {
+			uuidMismatches[d.ID] = true
 			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", d.ID)
 			return false
 		}
@@ -199,6 +200,7 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 
 	alloc := graghSelect(devices, request, fitFn)
 	if len(alloc) == 0 {
+		uuidMismatch := len(uuidMismatches)
 		if uuidMismatch > 0 {
 			reason[common.CardUUIDMismatch] += uuidMismatch
 		} else {
