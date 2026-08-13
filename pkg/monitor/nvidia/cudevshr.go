@@ -181,6 +181,8 @@ func (l *ContainerLister) Update() error {
 		podUIDs[string(pod.UID)] = true
 	}
 
+	validEntries := make(map[string]bool)
+
 	for _, entry := range entries {
 		if !entry.IsDir() {
 			continue
@@ -195,6 +197,7 @@ func (l *ContainerLister) Update() error {
 		if !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
 			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
+				validEntries[entry.Name()] = true
 				continue
 			}
 			klog.Infof("Removing dirname %s in monitorpath", dirName)
@@ -205,6 +208,7 @@ func (l *ContainerLister) Update() error {
 			_ = os.RemoveAll(dirName)
 			continue
 		}
+		validEntries[entry.Name()] = true
 		if _, ok := l.containers[entry.Name()]; ok {
 			continue
 		}
@@ -221,6 +225,15 @@ func (l *ContainerLister) Update() error {
 		l.containers[entry.Name()] = usage
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
 	}
+
+	for name, c := range l.containers {
+		if !validEntries[name] {
+			klog.Infof("Removing orphaned container dirname %s from monitorpath", name)
+			syscall.Munmap(c.data)
+			delete(l.containers, name)
+		}
+	}
+
 	return nil
 }
 

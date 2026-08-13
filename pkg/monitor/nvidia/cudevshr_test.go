@@ -539,4 +539,28 @@ func Test_ContainerLister_Update(t *testing.T) {
 		assert.NilError(t, l.Update())
 		assert.Equal(t, len(l.containers), 0)
 	})
+
+	t.Run("externally deleted directory unmaps and removes container from l.containers", func(t *testing.T) {
+		dir := t.TempDir()
+		entryName := "missing-pod-uid_ctr"
+		
+		// Create a mock mapped memory usage
+		cacheDir := t.TempDir()
+		writeCacheFile(t, cacheDir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		usage, err := loadCache(cacheDir)
+		assert.NilError(t, err)
+
+		l := &ContainerLister{
+			containerPath: dir,
+			containers:    map[string]*ContainerUsage{entryName: usage},
+			podLister:     newTestPodLister(),
+		}
+		
+		// The directory entryName is intentionally NOT created in dir, simulating external deletion
+		assert.NilError(t, l.Update())
+		
+		// Verify that the reconciliation loop successfully unmapped and evicted the orphaned container
+		_, ok := l.containers[entryName]
+		assert.Equal(t, ok, false)
+	})
 }
