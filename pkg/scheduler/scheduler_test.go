@@ -1617,7 +1617,19 @@ func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
 	cachedDevs, ok = nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, true, ok, "mock-vendor devices should be present after recovery")
 	require.Equal(t, 1, len(cachedDevs))
-	assert.Equal(t, "MOCK-RECOVERED", cachedDevs[0].ID, "device state should correctly recover to MOCK-RECOVERED")
+	// Cycle 3: Vendor subsequently reports zero devices successfully.
+	// Verify zero-device cleanup removes stale cached vendor entry (scheduler.go:509-516).
+	mockDev.getNodeErr = nil
+	mockDev.nodeDevices = []*device.DeviceInfo{}
+
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 3 zero-device semantics:
+	// - NodeCleanUp is NOT called because device is healthy.
+	// - Stale vendor cache entry is removed via rmNodeDevices.
+	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp must NOT be invoked when vendor reports zero devices with no error")
+	_, getErr := s.GetNode("node-recovery")
+	assert.ErrorContains(t, getErr, "not found", "stale vendor entry should be removed when vendor reports zero devices")
 }
 
 func Test_ResourceQuota(t *testing.T) {
