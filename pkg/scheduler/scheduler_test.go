@@ -37,11 +37,11 @@ import (
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/tools/record"
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
-	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
@@ -2301,7 +2301,8 @@ func TestBind_TimeoutStateRecovery(t *testing.T) {
 	defer cleanup()
 
 	// Intercept bindings to simulate a network timeout returning from the Bind API call
-	fakeClient := s.kubeClient.(*fake.Clientset)
+	fakeClient, ok := s.kubeClient.(*fake.Clientset)
+	require.True(t, ok, "kubeClient should be of type *fake.Clientset")
 	fakeClient.PrependReactor("create", "pods", func(action k8stesting.Action) (handled bool, ret runtime.Object, err error) {
 		if action.GetSubresource() == "binding" {
 			return true, nil, fmt.Errorf("simulated network timeout")
