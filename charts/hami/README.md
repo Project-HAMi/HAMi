@@ -18,8 +18,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `fullnameOverride` | Full name override | `""` |
 | `namespaceOverride` | Namespace override | `""` |
 | `platform.openshift` | Enable OpenShift-specific resources and handling | `false` |
-| `openshift.securityContextConstraints.create` | Create the validated HAMi device-plugin SecurityContextConstraints resource | `false` |
-| `openshift.securityContextConstraints.name` | SCC created or granted to enabled device-plugin service accounts | `""` |
+| `openshift.securityContextConstraints.create` | Create the validated HAMi device-plugin SecurityContextConstraints resource when OpenShift support is enabled | `true` |
+| `openshift.securityContextConstraints.name` | SCC created or granted to enabled device-plugin service accounts | `"hami-device-plugin"` |
 | `selinux.enabled` | Relabel shared vGPU host directories on SELinux-enabled Kubernetes nodes | `false` |
 | `selinux.type` | SELinux type applied to shared vGPU host directories | `"container_file_t"` |
 | `selinux.level` | SELinux level applied to shared vGPU host directories | `"s0"` |

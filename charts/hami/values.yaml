@@ -26,11 +26,10 @@ platform:
 
 openshift:
   securityContextConstraints:
-    # Leave disabled and empty to manage SCC grants outside this chart.
-    # Set create=true with a custom name to create the HAMi device-plugin SCC,
-    # or keep create=false and set name=privileged to use OpenShift's built-in SCC.
-    create: false
-    name: ""
+    # Used only when platform.openshift=true. By default, the chart creates and
+    # grants its dedicated device-plugin SCC.
+    create: true
+    name: "hami-device-plugin"
 
 # SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
 selinux:
