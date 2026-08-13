@@ -786,9 +786,6 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 					}
 					if !matched {
 						klog.ErrorS(nil, "pod allocated unknown or stale device resources", "pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID, "gpuUUID", udevice.UUID)
-						for _, d := range node.Devices.DeviceLists {
-							d.Device.Health = false
-						}
 					}
 				}
 			}
