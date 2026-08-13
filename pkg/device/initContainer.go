@@ -61,6 +61,8 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 					cur.mem += dev.Usedmem
 					cur.cores += dev.Usedcores
 					// App containers run concurrently: each occurrence is an additional slot.
+					// TODO: If PR #2584 changes sidecars to app-sum accounting, update this
+					// slot calculation to follow the same classification.
 					cur.slots++
 					appSum[key] = cur
 				}

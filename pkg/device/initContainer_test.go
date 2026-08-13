@@ -231,8 +231,8 @@ func TestCollapseInitContainerUsage_EmptyContainerDeviceList(t *testing.T) {
 	assert.DeepEqual(t, expected, result)
 }
 
-// TestCollapseInitContainerUsage_MultiAppSameGPUSlots guards the regression: two
-// app containers sharing one GPU must collapse to two slots, not one.
+// TestCollapseInitContainerUsage_MultiAppSameGPUSlots guards the regression: three
+// app containers sharing one GPU must collapse to three slots, not one.
 func TestCollapseInitContainerUsage_MultiAppSameGPUSlots(t *testing.T) {
 	pod := makePod("test", 0, 3)
 	raw := PodDevices{
