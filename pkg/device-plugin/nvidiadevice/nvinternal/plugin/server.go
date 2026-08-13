@@ -838,10 +838,55 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				cacheFileHostDirectory := fmt.Sprintf("%s/vgpu/containers/%s_%s", hostHookPath, current.UID, currentCtr.Name)
 				os.RemoveAll(cacheFileHostDirectory)
 
-				os.MkdirAll(cacheFileHostDirectory, 0777)
-				os.Chmod(cacheFileHostDirectory, 0777)
-				os.MkdirAll("/tmp/vgpulock", 0777)
-				os.Chmod("/tmp/vgpulock", 0777)
+				// WHY: We must check the error from MkdirAll. If the directory
+				// cannot be created (e.g., permissions on the parent, full disk),
+				// the volume mount that follows will silently fail inside the
+				// container. By returning the error here we surface the problem
+				// immediately and abort the allocation cleanly.
+				if err := os.MkdirAll(cacheFileHostDirectory, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("create vgpu cache directory %s: %w", cacheFileHostDirectory, err)
+				}
+				// WHY: Before calling Chmod we verify the path is a real
+				// directory (not a symlink). The plugin runs as root and /tmp is
+				// world-writable, so a malicious local user could race to replace
+				// this path with a symlink pointing at a sensitive file (e.g.
+				// /etc/shadow). os.Chmod follows symlinks, so without this check
+				// we would silently chmod the symlink target to 0777, giving
+				// every user on the node read/write access — a textbook Local
+				// Privilege Escalation. os.Lstat does NOT follow symlinks, so it
+				// lets us inspect what actually sits at the path.
+				if fi, err := os.Lstat(cacheFileHostDirectory); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("stat vgpu cache directory %s: %w", cacheFileHostDirectory, err)
+				} else if fi.Mode()&os.ModeSymlink != 0 {
+					// The path is a symlink — something is wrong. Refuse to
+					// proceed; changing permissions through a symlink is unsafe.
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("vgpu cache path %s is a symlink; refusing to chmod", cacheFileHostDirectory)
+				} else if err := os.Chmod(cacheFileHostDirectory, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("chmod vgpu cache directory %s: %w", cacheFileHostDirectory, err)
+				}
+
+				// WHY: Same pattern for the vgpulock directory. /tmp is
+				// world-writable, so the symlink attack surface here is even
+				// larger. We apply the identical Lstat guard before Chmod.
+				const vgpuLockDir = "/tmp/vgpulock"
+				if err := os.MkdirAll(vgpuLockDir, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("create vgpulock directory: %w", err)
+				}
+				if fi, err := os.Lstat(vgpuLockDir); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("stat vgpulock directory: %w", err)
+				} else if fi.Mode()&os.ModeSymlink != 0 {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("vgpulock path %s is a symlink; refusing to chmod", vgpuLockDir)
+				} else if err := os.Chmod(vgpuLockDir, 0777); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("chmod vgpulock directory: %w", err)
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
