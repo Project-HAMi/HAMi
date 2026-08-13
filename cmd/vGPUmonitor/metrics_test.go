@@ -126,3 +126,47 @@ func TestHostGPUMetricsMissingNodeName(t *testing.T) {
 		t.Errorf("expected missing node name error from collectGPUMemoryMetrics, got: %v", err)
 	}
 }
+
+func TestHostGPUMetricsCollectionSuccess(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	mockDev := &nvmlmock.Device{
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{Used: 1024}, nvml.SUCCESS
+		},
+		GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) {
+			return nvml.Utilization{Gpu: 50, Memory: 20}, nvml.SUCCESS
+		},
+		GetUUIDFunc: func() (string, nvml.Return) {
+			return "GPU-12345678-1234-1234-1234-123456789012", nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) {
+			return "Tesla T4", nvml.SUCCESS
+		},
+	}
+
+	initLegacyDescriptors()
+	cc := ClusterManagerCollector{
+		ClusterManager: &ClusterManager{LegacyMetrics: true},
+	}
+
+	ch := make(chan prometheus.Metric, 10)
+
+	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUMemoryMetrics failed: %v", err)
+	}
+
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUUtilizationMetrics failed: %v", err)
+	}
+
+	close(ch)
+
+	count := 0
+	for range ch {
+		count++
+	}
+	if count < 4 {
+		t.Errorf("expected at least 4 metrics, got %d", count)
+	}
+}
