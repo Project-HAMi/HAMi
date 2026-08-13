@@ -92,31 +92,6 @@ func (dev *CambriconDevices) CommonWord() string {
 	return CambriconMLUCommonWord
 }
 
-func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
-	ctx := context.Background()
-	patchedAnnotation, err := json.Marshal(
-		map[string]any{
-			"metadata": map[string]map[string]string{"annotations": {
-				DsmluLockTime: time.Now().Format(time.RFC3339),
-			}}})
-	if err != nil {
-		klog.ErrorS(err, "Failed to marshal node annotation", "node", node.Name)
-		return fmt.Errorf("marshal node annotation: %w", err)
-	}
-
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
-	for i := 0; i < retry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to patch node annotation", "node", node.Name, "retry", i)
-		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
-	}
-	if err != nil {
-		return fmt.Errorf("setNodeLock exceeds retry count %d", retry)
-	}
-	klog.InfoS("Node lock set", "node", node.Name)
-	return nil
-}
-
 func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	found := false
 	for _, val := range p.Spec.Containers {
@@ -132,49 +107,17 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	ctx := context.Background()
-	nodeName := n.Name
-
-	current, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-	if err != nil {
-		return fmt.Errorf("failed to get node for lock release: %w", err)
+	found := false
+	for _, val := range p.Spec.Containers {
+		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+			found = true
+			break
+		}
 	}
-	if current.Annotations == nil {
+	if !found {
 		return nil
 	}
-	if _, ok := current.Annotations[DsmluLockTime]; !ok {
-		klog.InfoS("Node lock not set", "node", nodeName)
-		return nil
-	}
-
-	patchData, err := json.Marshal(
-		map[string]any{
-			"metadata": map[string]map[string]any{"annotations": {
-				DsmluLockTime: nil,
-			}}})
-	if err != nil {
-		return fmt.Errorf("marshal patch for lock release: %w", err)
-	}
-
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
-	for i := 0; i < retry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to release node lock", "node", nodeName, "retry", i)
-		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-
-		current, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
-		if err != nil {
-			return fmt.Errorf("failed to re-get node during release retry: %w", err)
-		}
-		if current.Annotations == nil || current.Annotations[DsmluLockTime] == "" {
-			return nil
-		}
-		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
-	}
-	if err != nil {
-		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
-	}
-	klog.InfoS("Node lock released", "node", nodeName)
-	return nil
+	return nodelock.ReleaseNodeLock(n.Name, NodeLockCambricon, p, false)
 }
 
 func (dev *CambriconDevices) NodeCleanUp(nn string) error {
