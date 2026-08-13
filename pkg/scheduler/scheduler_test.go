@@ -1503,6 +1503,123 @@ func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testi
 	assert.Equal(t, true, hasHealthyErr, "healthy-err vendor should be preserved")
 }
 
+func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	mockDev := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("transient discovery error"),
+		health:      true,
+		needUpdate:  false,
+	}
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": mockDev,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-recovery",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Pre-populate scheduler cache with initial mock-vendor device (MOCK-0)
+	s.addNode("node-recovery", &device.NodeInfo{
+		ID:   "node-recovery",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"mock-vendor": {{
+				ID:           "MOCK-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "mock-vendor",
+				Health:       true,
+				DeviceVendor: "mock-vendor",
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+
+	// Cycle 1: Transient discovery error occurs when fetching node devices.
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 1 semantics:
+	// - NodeCleanUp was NOT called because device is healthy.
+	// - Transient error did NOT trigger zero-device cleanup.
+	// - Cached MOCK-0 device is preserved in scheduler cache.
+	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be called during transient discovery error")
+	nodeInfo, err := s.GetNode("node-recovery")
+	require.NoError(t, err)
+	cachedDevs, ok := nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, true, ok, "cached mock-vendor devices should be preserved despite transient discovery error")
+	require.Equal(t, 1, len(cachedDevs))
+	assert.Equal(t, "MOCK-0", cachedDevs[0].ID, "cached device ID MOCK-0 should remain unchanged")
+
+	// Cycle 2: Vendor recovers — GetNodeDevices succeeds and returns updated device (MOCK-RECOVERED).
+	mockDev.getNodeErr = nil
+	mockDev.nodeDevices = []*device.DeviceInfo{{
+		ID:           "MOCK-RECOVERED",
+		Index:        0,
+		Count:        1,
+		Devmem:       2048,
+		Devcore:      100,
+		Type:         "mock-vendor",
+		Health:       true,
+		DeviceVendor: "mock-vendor",
+	}}
+	mockDev.health = true
+	mockDev.needUpdate = true
+
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 2 recovery semantics:
+	// - Device state correctly recovers and updates in scheduler cache.
+	// - Old MOCK-0 state is updated to MOCK-RECOVERED.
+	nodeInfo, err = s.GetNode("node-recovery")
+	require.NoError(t, err)
+	cachedDevs, ok = nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, true, ok, "mock-vendor devices should be present after recovery")
+	require.Equal(t, 1, len(cachedDevs))
+	assert.Equal(t, "MOCK-RECOVERED", cachedDevs[0].ID, "device state should correctly recover to MOCK-RECOVERED")
+}
+
 func Test_ResourceQuota(t *testing.T) {
 	s := NewScheduler()
 	t.Cleanup(func() { close(s.stopCh) })

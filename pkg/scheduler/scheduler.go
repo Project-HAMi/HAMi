@@ -506,6 +506,15 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			if err != nil {
 				continue
 			}
+			if len(nodedevices) == 0 {
+				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
+					if _, ok := existingNode.Devices[devhandsk]; ok {
+						klog.InfoS("Vendor reports zero devices, removing stale cache entry", "nodeName", val.Name, "deviceVendor", devhandsk)
+						s.rmNodeDevices(val.Name, devhandsk)
+					}
+				}
+				continue
+			}
 			if !needUpdate {
 				klog.V(5).InfoS("No update needed for device", "nodeName", val.Name, "deviceVendor", devhandsk)
 				continue
