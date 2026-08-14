@@ -1,4 +1,4 @@
-//go:build !windows
+//go:build unix
 
 /*
  * SPDX-License-Identifier: Apache-2.0
