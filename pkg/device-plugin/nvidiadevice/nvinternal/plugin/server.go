@@ -664,16 +664,14 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 	}
 
 	requiredSet := make(map[string]bool, len(required))
-	requiredByPhysical := make(map[string]int, len(required))
-	availableByPhysical := make(map[string][]string)
-	selected := make([]string, 0, allocationSize)
-
+	requiredByPhysical := make(map[string][]string, len(required))
 	for _, id := range required {
 		requiredSet[id] = true
-		requiredByPhysical[physicalDeviceID(id)]++
-		selected = append(selected, id)
+		physicalID := physicalDeviceID(id)
+		requiredByPhysical[physicalID] = append(requiredByPhysical[physicalID], id)
 	}
 
+	availableByPhysical := make(map[string][]string)
 	for _, id := range available {
 		if requiredSet[id] {
 			continue
@@ -681,10 +679,16 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 		availableByPhysical[physicalDeviceID(id)] = append(availableByPhysical[physicalDeviceID(id)], id)
 	}
 
+	// Build the result in desired's order. Allocate() later zips this
+	// response positionally against the scheduler's per-device memory/core
+	// plan (see alignContainerDevicesWithAllocatedIDs); putting required IDs
+	// first here would desync position i's UUID from position i's limits.
+	selected := make([]string, 0, allocationSize)
 	for _, dev := range desired[:allocationSize] {
 		physicalID := physicalDeviceID(dev.UUID)
-		if requiredByPhysical[physicalID] > 0 {
-			requiredByPhysical[physicalID]--
+		if queue := requiredByPhysical[physicalID]; len(queue) > 0 {
+			selected = append(selected, queue[0])
+			requiredByPhysical[physicalID] = queue[1:]
 			continue
 		}
 		candidates := availableByPhysical[physicalID]

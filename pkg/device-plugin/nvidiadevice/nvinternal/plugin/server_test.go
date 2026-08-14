@@ -232,9 +232,10 @@ func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
 
 	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, required, desired, len(desired))
 	require.NoError(t, err)
-	require.Len(t, got, len(desired))
-	require.Contains(t, got, "GPU-03f69c50-207a-2038-9b45-23cac89cb67d-1")
-	require.ElementsMatch(t, []string{
+	// Order must match desired's order position-for-position — required's
+	// device (67d) sits at desired[3], not desired[0] — so a correct
+	// implementation must not float it to the front of the result.
+	require.Equal(t, []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
@@ -260,6 +261,59 @@ func TestSelectPreferredDeviceIDsFromAnnotatedDevicesErrorsWhenAnnotatedUUIDMiss
 	_, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, nil, desired, len(desired))
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "GPU-03f69c50-207a-2038-9b45-23cac89cb67c")
+}
+
+func TestSelectPreferredDeviceIDsFromAnnotatedDevicesRequiredNotAtFrontOfDesired(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	available := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+	}
+	// Kubelet requires the LAST GPU in the scheduler's plan to stay put —
+	// the case that would previously float to selected[0].
+	required := []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0"}
+	desired := device.ContainerDevices{
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c"},
+	}
+
+	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, required, desired, len(desired))
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+	}, got)
+}
+
+func TestSelectPreferredDeviceIDsFromAnnotatedDevicesMultipleRequiredSlicesSamePhysicalGPU(t *testing.T) {
+	plugin := &NvidiaDevicePlugin{}
+	available := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0", "GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+	}
+	// Two required slices come from the same physical GPU (67a); each must
+	// land at the desired position matching that physical GPU, in required's
+	// own relative order, without being confused for one another.
+	required := []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+	}
+	desired := device.ContainerDevices{
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a"},
+		{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b"},
+	}
+
+	got, err := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(available, required, desired, len(desired))
+	require.NoError(t, err)
+	require.Equal(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-1",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+	}, got)
 }
 
 func TestGetDevicePluginOptionsEnablesPreferredAllocation(t *testing.T) {
@@ -332,7 +386,9 @@ func TestGetPreferredAllocationAlignsWithAnnotatedDevices(t *testing.T) {
 	response, err := plugin.GetPreferredAllocation(context.Background(), request)
 	require.NoError(t, err)
 	require.Len(t, response.ContainerResponses, 1)
-	require.ElementsMatch(t, []string{
+	// Order must match the annotated devreq order, since Allocate() later
+	// reads per-position memory/core limits from that same order.
+	require.Equal(t, []string{
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
 		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
@@ -847,6 +903,127 @@ func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) 
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", response.ContainerResponses[1].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "4000m", response.ContainerResponses[1].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+}
+
+// TestAllocateAppliesCorrectMemoryLimitAfterPreferredAllocationReorder drives
+// GetPreferredAllocation followed by Allocate end to end, the way kubelet
+// actually calls the plugin: kubelet asks for a preferred device order, then
+// echoes that exact order back as DevicesIds on the following Allocate call.
+// It guards against selectPreferredDeviceIDsFromAnnotatedDevices reordering
+// its response relative to the scheduler's per-device memory/core plan,
+// which would attach one GPU's memory/core limit to a different physical
+// GPU's env vars.
+func TestAllocateAppliesCorrectMemoryLimitAfterPreferredAllocationReorder(t *testing.T) {
+	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
+	deviceIDStrategy := v1.DeviceIDStrategyUUID
+	memScale := 1.0
+	logLevel := nvidia.Error
+
+	plugin := &NvidiaDevicePlugin{
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							DeviceIDStrategy: &deviceIDStrategy,
+						},
+					},
+				},
+			},
+		},
+		deviceListStrategies: deviceListStrategies,
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceMemoryScaling: &memScale,
+				LogLevel:            &logLevel,
+			},
+		},
+		operatingMode: "default",
+	}
+
+	previousEnable := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() { enableGetPreferredAllocation = previousEnable }()
+
+	previousInRequestDevice := device.InRequestDevices[nvidia.NvidiaGPUDevice]
+	device.InRequestDevices[nvidia.NvidiaGPUDevice] = "hami.io/vgpu-devices-to-allocate"
+	defer func() { device.InRequestDevices[nvidia.NvidiaGPUDevice] = previousInRequestDevice }()
+
+	// The scheduler's plan for this container, in this exact order:
+	// position 0 -> GPU a (1000MiB), position 1 -> GPU b (2000MiB),
+	// position 2 -> GPU c (3000MiB).
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": device.EncodePodSingleDevice(device.PodSingleDevice{
+					{
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000, Usedcores: 10},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67b", Type: nvidia.NvidiaGPUDevice, Usedmem: 2000, Usedcores: 20},
+						{UUID: "GPU-03f69c50-207a-2038-9b45-23cac89cb67c", Type: nvidia.NvidiaGPUDevice, Usedmem: 3000, Usedcores: 30},
+					},
+				}),
+			},
+		},
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
+
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	previousGetPendingPod := getPendingPod
+	getPendingPod = func(context.Context, string) (*corev1.Pod, error) { return pod, nil }
+	defer func() { getPendingPod = previousGetPendingPod }()
+
+	previousPodAllocationFailed := podAllocationFailed
+	podAllocationFailed = func(string, *corev1.Pod, string) {}
+	defer func() { podAllocationFailed = previousPodAllocationFailed }()
+
+	previousPodAllocationTrySuccess := podAllocationTrySuccess
+	podAllocationTrySuccess = func(string, string, string, *corev1.Pod) {}
+	defer func() { podAllocationTrySuccess = previousPodAllocationTrySuccess }()
+
+	previousKubeClient := client.KubeClient
+	client.KubeClient = fake.NewSimpleClientset(pod.DeepCopy())
+	defer func() { client.KubeClient = previousKubeClient }()
+
+	// Kubelet asks for a preferred order first, pinning a slice of GPU c —
+	// the last entry in the scheduler's plan, not the first.
+	prefRequest := &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{
+			{
+				AvailableDeviceIDs: []string{
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+					"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+				},
+				MustIncludeDeviceIDs: []string{"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0"},
+				AllocationSize:       3,
+			},
+		},
+	}
+	prefResponse, err := plugin.GetPreferredAllocation(context.Background(), prefRequest)
+	require.NoError(t, err)
+	require.Len(t, prefResponse.ContainerResponses, 1)
+	require.Equal(t, []string{
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67a-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67b-0",
+		"GPU-03f69c50-207a-2038-9b45-23cac89cb67c-0",
+	}, prefResponse.ContainerResponses[0].DeviceIDs)
+
+	// Kubelet echoes GetPreferredAllocation's response back as DevicesIds.
+	allocRequest := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: prefResponse.ContainerResponses[0].DeviceIDs},
+		},
+	}
+	allocResponse, err := plugin.Allocate(context.Background(), allocRequest)
+	require.NoError(t, err)
+	// Each position's memory/core limit must match the GPU actually visible
+	// at that position, not the position it originally occupied pre-reorder.
+	require.Equal(t, "1000m", allocResponse.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
+	require.Equal(t, "2000m", allocResponse.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_1"])
+	require.Equal(t, "3000m", allocResponse.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_2"])
 }
 
 type mockListAndWatchServer struct {
