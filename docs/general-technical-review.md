@@ -163,7 +163,7 @@ Semantic versioning, tagged releases, release branches, automated image/chart/re
 kubectl label nodes <gpu-node-name> gpu=on
 
 # 2) Add HAMi Helm repository
-helm repo add hami-charts https://project-hami.github.io/HAMi/
+helm repo add hami-charts https://project-hami.github.io/HAMi
 helm repo update
 
 # 3) Install HAMi into kube-system

@@ -113,7 +113,7 @@ kubectl label nodes <node-name> gpu=on
 添加 HAMi Helm 仓库：
 
 ```bash
-helm repo add hami-charts https://project-hami.github.io/HAMi/
+helm repo add hami-charts https://project-hami.github.io/HAMi
 helm repo update
 ```
 
