@@ -73,10 +73,10 @@ hami.io/vgpu-time: 1705054796
 
 ## Node Lock Mechanism
 
-To prevent race conditions during concurrent pod scheduling, HAMi employs an annotation-based node locking mechanism (`hami.io/node-lock`).
+To prevent race conditions during concurrent pod scheduling, HAMi employs an annotation-based node locking mechanism (`hami.io/mutex.lock`).
 
 During the `Bind` phase, the scheduler acquires this lock on the target node before proceeding with device allocation. It is critical to understand the separation of concerns:
-- **Annotation Lock:** The `hami.io/node-lock` annotation acts strictly as a concurrency mutex.
+- **Annotation Lock:** The `hami.io/mutex.lock` annotation acts strictly as a concurrency mutex.
 - **Device Accounting:** The actual accounting of GPU resources (memory, cores) is tracked independently.
 
 If a binding fails, releasing the lock (e.g., via a `fail()` fallback mechanism) **only removes the annotation lock**. It does not automatically revert or touch the underlying device accounting. Therefore, a prematurely released lock during an API error does not inherently cause hardware oversubscription, as the accounting state remains untouched. The device plugin is responsible for consuming this lock during pod creation to safely instantiate the required environment variables and mounts.
