@@ -592,6 +592,18 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(1),
 			},
 		},
+		{
+			name: "oversized dcu memory request exceeds int32 range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+						"hygon.com/dcumem": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -602,6 +614,71 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+}
+
+func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "oversized dcu count exceeds int32 range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative dcu cores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum":   resource.MustParse("1"),
+						"hygon.com/dcucores": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := DCUDevices{}
+			fs := flag.FlagSet{}
+			ParseConfig(&fs)
+			result := dev.GenerateResourceRequests(test.args)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers the case where the
+// raw memory request fits in int32 but overflows once MemoryFactor is applied.
+func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
+	origFactor := MemoryFactor
+	MemoryFactor = 1024
+	defer func() { MemoryFactor = origFactor }()
+
+	dev := DCUDevices{}
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+
+	// 3000000 fits in int32, but 3000000 * 1024 exceeds math.MaxInt32.
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+				"hygon.com/dcumem": resource.MustParse("3000000"),
+			},
+		},
+	}
+	result := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
 func TestDevices_LockNode(t *testing.T) {
