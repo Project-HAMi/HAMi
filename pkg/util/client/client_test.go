@@ -29,18 +29,10 @@ import (
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-)
-
-// Mock functions for testing.
-var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
 )
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
-	InitGlobalClient()
 	tests := []struct {
 		name           string
 		kubeConfig     string
@@ -72,14 +64,17 @@ func TestGetClient(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Mock the clientcmd.BuildConfigFromFlags function.
+			once = sync.Once{}
+			KubeClient = nil
+
+			// Mock the buildConfigFromFlags function.
 			oldBuildConfigFromFlags := buildConfigFromFlags
 			buildConfigFromFlags = func(masterUrl, kubeconfigPath string) (*rest.Config, error) {
 				return tt.buildConfig, tt.buildConfigErr
 			}
 			defer func() { buildConfigFromFlags = oldBuildConfigFromFlags }()
 
-			// Mock the rest.InClusterConfig function.
+			// Mock the inClusterConfig function.
 			oldInClusterConfig := inClusterConfig
 			inClusterConfig = func() (*rest.Config, error) {
 				return tt.inCluster, tt.inClusterErr
@@ -87,9 +82,10 @@ func TestGetClient(t *testing.T) {
 			defer func() { inClusterConfig = oldInClusterConfig }()
 
 			// Set the KUBECONFIG environment variable.
-			oldKubeConfig := os.Getenv("KUBECONFIG")
-			os.Setenv("KUBECONFIG", tt.kubeConfig)
-			defer os.Setenv("KUBECONFIG", oldKubeConfig)
+			t.Setenv("KUBECONFIG", tt.kubeConfig)
+
+			// Initialize global client with mock.
+			InitGlobalClient()
 
 			// Call GetClient and check the result.
 			client := GetClient()
@@ -108,6 +104,7 @@ func TestGetClient(t *testing.T) {
 
 // TestClientWithOptions tests client initialization with options.
 func TestClientWithOptions(t *testing.T) {
+	t.Setenv("KUBECONFIG", filepath.Join("testdata", "kubeconfig.yaml"))
 	KubeClient = nil
 	once = sync.Once{}
 
