@@ -127,6 +127,13 @@ func WriteConfig(directory string, cfg ContainerConfig) error {
 		return fmt.Errorf("write container config temp file: %w", err)
 	}
 
+	// Explicitly chmod 0644 so the file mode is not restricted by a process umask (e.g. 0077),
+	// guaranteeing that non-root container users (like SSH sessions) can always read the config.
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		_ = os.Remove(tmpPath)
+		return fmt.Errorf("chmod container config temp file: %w", err)
+	}
+
 	finalPath := filepath.Join(directory, Filename)
 	if err := os.Rename(tmpPath, finalPath); err != nil {
 		_ = os.Remove(tmpPath) // best-effort cleanup of the orphaned temp file
