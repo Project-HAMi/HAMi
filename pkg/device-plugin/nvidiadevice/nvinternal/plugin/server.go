@@ -62,6 +62,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin/containerconfig"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
@@ -820,14 +821,33 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 
 			if plugin.operatingMode != "mig" {
+				// --- Build per-device limit records ----------------------------------
+				// WHY collect into a slice first: we need both the env-var loop (below,
+				// for backward compatibility) and the config-file writer to see the same
+				// data without duplicating the loop body.
+				deviceLimits := make([]containerconfig.DeviceLimitConfig, len(devreq))
 				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
+					deviceLimits[i] = containerconfig.DeviceLimitConfig{
+						Index:         i,
+						UUID:          dev.UUID,
+						MemoryLimitMB: dev.Usedmem,
+						SMLimit:       devreq[0].Usedcores,
+					}
 				}
+
+				// Capture the shared-cache path in a variable so we can include it in
+				// both the env-var response AND the config file without generating two
+				// different UUIDs (which would break the shared-memory tracker).
+				sharedCachePath := fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
 				response.Envs["CUDA_DEVICE_SM_LIMIT"] = fmt.Sprint(devreq[0].Usedcores)
-				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = fmt.Sprintf("%s/vgpu/%v.cache", hostHookPath, uuid.New().String())
+				response.Envs["CUDA_DEVICE_MEMORY_SHARED_CACHE"] = sharedCachePath
+
+				oversubscribe := false
 				if *plugin.schedulerConfig.DeviceMemoryScaling > 1 {
 					response.Envs["CUDA_OVERSUBSCRIBE"] = "true"
+					oversubscribe = true
 				}
 				if *plugin.schedulerConfig.LogLevel != "" {
 					response.Envs["LIBCUDA_LOG_LEVEL"] = string(*plugin.schedulerConfig.LogLevel)
@@ -842,6 +862,41 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				os.Chmod(cacheFileHostDirectory, 0777)
 				os.MkdirAll("/tmp/vgpulock", 0777)
 				os.Chmod("/tmp/vgpulock", 0777)
+
+				// --- Write persistent config.json for issue #2125 -------------------
+				// WHY: Environment variables injected above are the primary mechanism
+				// for conveying GPU limits to libvgpu.so. However, when a user SSHes
+				// into the container, or when a process is spawned via su/sudo/login,
+				// the shell runtime scrubs the environment. libvgpu.so is still
+				// preloaded via ld.so.preload in those sessions, but it sees no
+				// CUDA_DEVICE_MEMORY_LIMIT_* variables and falls back to "no limit",
+				// allowing the process to exhaust the full GPU.
+				//
+				// Writing all limits to config.json inside cacheFileHostDirectory gives
+				// libvgpu.so a filesystem-based fallback. Because cacheFileHostDirectory
+				// is already bind-mounted into the container at {hostHookPath}/vgpu/,
+				// the file appears inside the container at {hostHookPath}/vgpu/config.json
+				// and is readable by any UID (mode 0644), including non-root SSH users.
+				//
+				// The env-var injection above is kept fully intact for backward
+				// compatibility with libvgpu.so builds that do not yet read this file.
+				containerCfg := containerconfig.ContainerConfig{
+					Version:          containerconfig.Version,
+					PodUID:           string(current.UID),
+					ContainerName:    currentCtr.Name,
+					Devices:          deviceLimits,
+					SharedCachePath:  sharedCachePath,
+					Oversubscribe:    oversubscribe,
+					DisableCoreLimit: plugin.schedulerConfig.DisableCoreLimit,
+					LogLevel:         string(*plugin.schedulerConfig.LogLevel),
+				}
+				if err := containerconfig.WriteConfig(cacheFileHostDirectory, containerCfg); err != nil {
+					// Non-fatal: the env-var path still enforces limits for normal
+					// (non-SSH, non-su) processes. Log the failure so operators can
+					// investigate, but do not abort the allocation.
+					klog.Warningf("containerconfig.WriteConfig for pod %s/%s container %s: %v",
+						current.Namespace, current.Name, currentCtr.Name, err)
+				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
