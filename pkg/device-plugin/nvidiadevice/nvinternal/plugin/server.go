@@ -864,49 +864,62 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				os.Chmod("/tmp/vgpulock", 0777)
 
 				// --- Write persistent config.json for issue #2125 -------------------
-				// WHY: Environment variables injected above are the primary mechanism
-				// for conveying GPU limits to libvgpu.so. However, when a user SSHes
-				// into the container, or when a process is spawned via su/sudo/login,
-				// the shell runtime scrubs the environment. libvgpu.so is still
-				// preloaded via ld.so.preload in those sessions, but it sees no
-				// CUDA_DEVICE_MEMORY_LIMIT_* variables and falls back to "no limit",
-				// allowing the process to exhaust the full GPU.
+				// WHY a SEPARATE directory: cacheFileHostDirectory is mode 0777 and is
+				// bind-mounted read-write into the container so libvgpu.so can create its
+				// shared-memory cache files. If config.json lived there, a container
+				// process running as root could remove or replace it (e.g. symlink to
+				// /dev/null) and silently defeat its own GPU memory limits.
 				//
-				// Writing all limits to config.json inside cacheFileHostDirectory gives
-				// libvgpu.so a filesystem-based fallback. Because cacheFileHostDirectory
-				// is already bind-mounted into the container at {hostHookPath}/vgpu/,
-				// the file appears inside the container at {hostHookPath}/vgpu/config.json
-				// and is readable by any UID (mode 0644), including non-root SSH users.
+				// Instead, config.json is written to a root-owned 0755 host directory
+				// that is bind-mounted into the container as a READ-ONLY individual file
+				// at {hostHookPath}/vgpu/config.json. The directory is readable by all
+				// UIDs (including SSH non-root users) but cannot be modified from inside
+				// the container because the mount is ReadOnly.
 				//
 				// The env-var injection above is kept fully intact for backward
 				// compatibility with libvgpu.so builds that do not yet read this file.
-				containerCfg := containerconfig.ContainerConfig{
-					Version:          containerconfig.Version,
-					PodUID:           string(current.UID),
-					ContainerName:    currentCtr.Name,
-					Devices:          deviceLimits,
-					SharedCachePath:  sharedCachePath,
-					Oversubscribe:    oversubscribe,
-					DisableCoreLimit: plugin.schedulerConfig.DisableCoreLimit,
-					LogLevel:         string(*plugin.schedulerConfig.LogLevel),
-				}
-				if err := containerconfig.WriteConfig(cacheFileHostDirectory, containerCfg); err != nil {
-					// Non-fatal: the env-var path still enforces limits for normal
-					// (non-SSH, non-su) processes. Log the failure so operators can
-					// investigate, but do not abort the allocation.
-					klog.Warningf("containerconfig.WriteConfig for pod %s/%s container %s: %v",
-						current.Namespace, current.Name, currentCtr.Name, err)
+				configHostDir := fmt.Sprintf("%s/vgpu/configs/%s_%s", hostHookPath, current.UID, currentCtr.Name)
+				os.RemoveAll(configHostDir)
+				if err := os.MkdirAll(configHostDir, 0755); err != nil {
+					// Non-fatal: log and continue — the env-var path still enforces
+					// limits for normal (non-SSH, non-su) processes.
+					klog.Warningf("containerconfig: MkdirAll(%s): %v", configHostDir, err)
+				} else {
+					containerCfg := containerconfig.ContainerConfig{
+						Version:          containerconfig.Version,
+						PodUID:           string(current.UID),
+						ContainerName:    currentCtr.Name,
+						Devices:          deviceLimits,
+						SharedCachePath:  sharedCachePath,
+						Oversubscribe:    oversubscribe,
+						DisableCoreLimit: plugin.schedulerConfig.DisableCoreLimit,
+						LogLevel:         string(*plugin.schedulerConfig.LogLevel),
+					}
+					if err := containerconfig.WriteConfig(configHostDir, containerCfg); err != nil {
+						klog.Warningf("containerconfig.WriteConfig for pod %s/%s container %s: %v",
+							current.Namespace, current.Name, currentCtr.Name, err)
+					}
 				}
 				response.Mounts = append(response.Mounts,
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu/libvgpu.so", hostHookPath),
 						HostPath: GetLibPath(),
 						ReadOnly: true},
+					// Read-write mount for shared-memory cache files. config.json is NOT
+					// placed here; see the separate read-only config mount below.
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: fmt.Sprintf("%s/vgpu", hostHookPath),
-						HostPath: cacheFileHostDirectory,
-						ReadOnly: false},
+						HostPath:  cacheFileHostDirectory,
+						ReadOnly:  false},
 					&kubeletdevicepluginv1beta1.Mount{ContainerPath: "/tmp/vgpulock",
 						HostPath: "/tmp/vgpulock",
 						ReadOnly: false},
+					// Read-only config file mount. Lives outside the 0777 read-write
+					// cacheFileHostDirectory so container processes cannot tamper with
+					// their own GPU limits.
+					&kubeletdevicepluginv1beta1.Mount{
+						ContainerPath: fmt.Sprintf("%s/vgpu/%s", hostHookPath, containerconfig.Filename),
+						HostPath:      fmt.Sprintf("%s/%s", configHostDir, containerconfig.Filename),
+						ReadOnly:      true,
+					},
 				)
 				found := false
 				for _, val := range currentCtr.Env {
