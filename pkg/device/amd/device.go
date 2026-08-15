@@ -77,21 +77,20 @@ func (dev *AMDDevices) CommonWord() string {
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
-	if ok {
-		core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
-		if coreRequested {
-			corePercentage, coreIsInteger := core.AsInt64()
-			if !coreIsInteger || corePercentage < 1 || corePercentage > 100 {
-				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
-			}
+	if !ok {
+		// A container that does not request the AMD device count is not a HAMi
+		// GPU request. GenerateResourceRequests and LockNode both key off the
+		// count resource, so admitting a memory- or core-only container here
+		// would rewrite the pod's scheduler name to the HAMi extender while
+		// every later stage treats it as a non-GPU pod: quota is skipped, the
+		// filter passes on all nodes, and the pod binds with no device reserved.
+		return false, nil
+	}
+	if core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]; coreRequested {
+		corePercentage, coreIsInteger := core.AsInt64()
+		if !coreIsInteger || corePercentage < 1 || corePercentage > 100 {
+			return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
 		}
-
-	}
-	if !ok && dev.resourceMemoryName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
-	}
-	if !ok && dev.resourceCoreName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
 	}
 	klog.Infoln("MutateAdmission result", ok)
 	return ok, nil

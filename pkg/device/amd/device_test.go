@@ -49,7 +49,7 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "gpu memory in limits",
+			name: "gpu memory only (no count) -> false",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -57,10 +57,10 @@ func Test_MutateAdmission(t *testing.T) {
 					},
 				},
 			},
-			want: true,
+			want: false,
 		},
 		{
-			name: "core percentage in limits",
+			name: "core percentage only (no count) -> false",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -68,7 +68,7 @@ func Test_MutateAdmission(t *testing.T) {
 					},
 				},
 			},
-			want: true,
+			want: false,
 		},
 		{
 			name: "requests only (limits empty) -> false",
