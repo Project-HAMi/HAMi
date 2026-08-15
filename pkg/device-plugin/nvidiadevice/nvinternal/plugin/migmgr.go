@@ -59,6 +59,9 @@ type migInstance struct {
 
 // MigInstanceManager is the single authority over live MIG GI+CI state on a
 // node. Keys are the scheduler-reserved profile and physical placement.
+//
+// Callers must invoke Init once before using other methods, and Shutdown
+// once when done; NVML is not re-initialized per call.
 type MigInstanceManager struct {
 	mu                  sync.Mutex
 	gpuLocks            map[int]*sync.Mutex
@@ -71,6 +74,24 @@ func NewMigInstanceManager() *MigInstanceManager {
 		gpuLocks:            make(map[int]*sync.Mutex),
 		byAllocation:        make(map[migAllocationKey]*migInstance),
 		byAllocationMigUUID: make(map[string]migAllocationKey),
+	}
+}
+
+// Init initializes NVML for this manager. It must be called exactly once,
+// before any other MigInstanceManager method, and paired with a single
+// later call to Shutdown.
+func (m *MigInstanceManager) Init() error {
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	return nil
+}
+
+// Shutdown releases the NVML session acquired by Init. Safe to call once,
+// when the manager is no longer needed.
+func (m *MigInstanceManager) Shutdown() {
+	if nvret := nvml.Shutdown(); nvret != nvml.SUCCESS {
+		klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(nvret)), "nvml Shutdown failed")
 	}
 }
 
@@ -95,12 +116,10 @@ func profileSliceKey(profile string) string {
 // ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand instance creation
 // through NVML. Busy GPUs are left untouched; idle GPUs
 // have MIG mode enabled and all existing GI/CI instances destroyed.
+//
+// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
 	reset := []int{}
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return reset, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
 		if _, busy := inUse[gpuIndex]; busy {
 			continue
@@ -277,6 +296,8 @@ func destroyAllMigInstances(dev nvml.Device) error {
 }
 
 // Release destroys the GI+CI bound to the given MIG UUID.
+//
+// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) Release(migUUID string) error {
 	m.mu.Lock()
 	key, ok := m.byAllocationMigUUID[migUUID]
@@ -288,10 +309,6 @@ func (m *MigInstanceManager) Release(migUUID string) error {
 	lk := m.gpuLock(key.GPUIndex)
 	lk.Lock()
 	defer lk.Unlock()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
 	m.mu.Lock()
 	inst := m.byAllocation[key]
 	m.mu.Unlock()
@@ -316,6 +333,8 @@ func allocationKey(gpuIndex int, profile string, placement nvml.GpuInstancePlace
 // placement. It returns whether this call created the instance, allowing the
 // caller to roll back only its own partial allocation. It never retries
 // another placement.
+//
+// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (string, bool, error) {
 	key := allocationKey(gpuIndex, profile, placement)
 	lk := m.gpuLock(gpuIndex)
@@ -329,11 +348,6 @@ func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, plac
 		return uuid, false, nil
 	}
 	m.mu.Unlock()
-
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return "", false, fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
 
 	if err := ensureMigModeEnabled(gpuIndex); err != nil {
 		return "", false, err
@@ -426,14 +440,11 @@ func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string,
 	}, true
 }
 
+// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID string, placement nvml.GpuInstancePlacement, gpuInstanceID, computeInstanceID uint32) error {
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
 	defer lk.Unlock()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
 	dev, err := deviceHandleByIndex(gpuIndex)
 	if err != nil {
 		return err
@@ -486,6 +497,7 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	return fmt.Errorf("annotated MIG allocation %s profile=%s placement=%+v is not live", migUUID, profile, placement)
 }
 
+// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocationKey]struct{}) error {
 	m.mu.Lock()
 	keys := make([]migAllocationKey, 0, len(m.byAllocation))
@@ -496,10 +508,6 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 	if len(keys) == 0 {
 		return nil
 	}
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
-	}
-	defer nvml.Shutdown()
 	for _, key := range keys {
 		if _, ok := active[key]; ok {
 			continue

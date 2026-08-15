@@ -193,6 +193,9 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	var migMgr *MigInstanceManager
 	if mode == "mig" {
 		migMgr = NewMigInstanceManager()
+		if err := migMgr.Init(); err != nil {
+			return nil, fmt.Errorf("init MIG instance manager: %w", err)
+		}
 	}
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
@@ -340,6 +343,13 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 		// reconcile the manager with live Pods so completed or deleted Pods
 		// release their exact profile+placement allocation.
 		go plugin.runMigAnnotationReconciler(5 * time.Second)
+		// The manager's NVML session is owned by the plugin's lifetime, not
+		// by individual Start/Stop cycles (Stop only restarts the gRPC
+		// server); release it once when the plugin is finally torn down.
+		go func() {
+			<-plugin.ctx.Done()
+			plugin.migMgr.Shutdown()
+		}()
 	}
 
 	return nil
