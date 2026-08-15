@@ -29,18 +29,10 @@ import (
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-)
-
-// Mock functions for testing.
-var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
 )
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
-	InitGlobalClient()
 	tests := []struct {
 		name           string
 		kubeConfig     string
@@ -91,6 +83,10 @@ func TestGetClient(t *testing.T) {
 			os.Setenv("KUBECONFIG", tt.kubeConfig)
 			defer os.Setenv("KUBECONFIG", oldKubeConfig)
 
+			// Reset sync.Once and initialize the global client using the injected mocks
+			once = sync.Once{}
+			InitGlobalClient()
+
 			// Call GetClient and check the result.
 			client := GetClient()
 			if tt.expectError {
@@ -110,6 +106,13 @@ func TestGetClient(t *testing.T) {
 func TestClientWithOptions(t *testing.T) {
 	KubeClient = nil
 	once = sync.Once{}
+
+	// Mock the config loader to prevent failure on environments without kubeconfig
+	oldBuildConfigFromFlags := buildConfigFromFlags
+	buildConfigFromFlags = func(masterUrl, kubeconfigPath string) (*rest.Config, error) {
+		return &rest.Config{Host: "https://example.com"}, nil
+	}
+	defer func() { buildConfigFromFlags = oldBuildConfigFromFlags }()
 
 	timeout := 1
 	client, _ := NewClient(WithTimeout(timeout))
