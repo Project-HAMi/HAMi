@@ -1846,3 +1846,14 @@ func TestDecodeNodeDevicesLegacyFormat(t *testing.T) {
 		},
 	}, decoded)
 }
+
+func TestResourcereqs_NilPod(t *testing.T) {
+	counts := Resourcereqs(nil)
+	assert.Equal(t, 0, len(counts))
+}
+
+func TestCheckHealth_NilNode(t *testing.T) {
+	got1, got2 := CheckHealth("NVIDIA", "nvidia.com/gpu", nil)
+	assert.Equal(t, false, got1)
+	assert.Equal(t, false, got2)
+}

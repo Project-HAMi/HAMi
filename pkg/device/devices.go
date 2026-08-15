@@ -571,6 +571,10 @@ func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 }
 
 func CheckHealth(devType string, resourceCountName string, node *corev1.Node) (bool, bool) {
+	if node == nil {
+		return false, false
+	}
+
 	handshake := node.Annotations[util.HandshakeAnnos[devType]]
 	if strings.Contains(handshake, "Requesting") {
 		_, timestampStr, found := strings.Cut(handshake, "_")
@@ -634,6 +638,11 @@ func ExtractMigTemplatesFromUUID(uuid string) (int, int, error) {
 }
 
 func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
+	if pod == nil {
+		klog.V(4).InfoS("Nil pod passed to Resourcereqs")
+		return nil
+	}
+
 	// Total containers = init containers + regular containers
 	totalContainers := len(pod.Spec.InitContainers) + len(pod.Spec.Containers)
 	counts = make(PodDeviceRequests, totalContainers)
@@ -654,6 +663,9 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 			"containerIndex", i,
 			"containerName", pod.Spec.InitContainers[i].Name)
 		for idx, val := range devices {
+			if val == nil {
+				continue
+			}
 			request := val.GenerateResourceRequests(&pod.Spec.InitContainers[i])
 			if request.Nums > 0 {
 				cnt += request.Nums
@@ -672,6 +684,9 @@ func Resourcereqs(pod *corev1.Pod) (counts PodDeviceRequests) {
 			"containerIndex", initContainerOffset+i,
 			"containerName", pod.Spec.Containers[i].Name)
 		for idx, val := range devices {
+			if val == nil {
+				continue
+			}
 			request := val.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if request.Nums > 0 {
 				cnt += request.Nums
