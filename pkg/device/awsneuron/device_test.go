@@ -60,6 +60,41 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "set request-only neuron number",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"aws.amazon.com/neuron": *resource.NewQuantity(2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: true,
+		},
+		{
+			name: "reject request-only neuron number that overflows device count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"aws.amazon.com/neuron": *resource.NewQuantity(int64(math.MaxInt32)+1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuron must not exceed 2147483647"),
+		},
+		{
 			name: "set neuron cores",
 			args: struct {
 				ctr *corev1.Container
@@ -168,7 +203,7 @@ func Test_MutateAdmission(t *testing.T) {
 				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
 			},
 			want: false,
-			err:  fmt.Errorf("aws.amazon.com/neuroncore exceeds the maximum supported core count"),
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must not exceed 4294967294"),
 		},
 		{
 			name: "no neuron devices",
@@ -515,6 +550,17 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(2),
 			},
+		},
+		{
+			name: "reject request-only neuron number that overflows device count when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"aws.amazon.com/neuron": *resource.NewQuantity(int64(math.MaxInt32)+1, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "allocate neuron core",
