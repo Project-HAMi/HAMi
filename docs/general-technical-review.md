@@ -157,9 +157,9 @@ Semantic versioning, tagged releases, release branches, automated image/chart/re
 
 Before installing HAMi, ensure the following requirements are met:
 
-- **Kubernetes:** version 1.16 or later
+- **Kubernetes:** version 1.23 or later
 - **Helm:** version 3.0 or later
-- **Operating system:** Linux kernel >= 3.10, glibc >= 2.17
+- **Operating system:** Linux kernel >= 3.10, glibc >= 2.17 && < 2.30
 
 #### Hardware requirements
 
@@ -169,7 +169,7 @@ Before installing HAMi, ensure the following requirements are met:
 
 #### Driver requirements
 
-- **NVIDIA:** Driver version >= 440, `nvidia-container-toolkit` >= 2.0, and `nvidia-container-runtime` configured as the default runtime for containerd, Docker, or CRI-O
+- **NVIDIA:** Driver version >= 440, `nvidia-container-toolkit` >= 1.0, and `nvidia-container-runtime` configured as the default runtime for containerd, Docker, or CRI-O
 - **Ascend NPU:** Ascend driver and firmware version compatible with the target hardware; `npu-container-toolkit` installed and configured as the default runtime
 - For other accelerators, install the vendor-provided device plugin and container runtime components before deploying HAMi
 
