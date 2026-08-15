@@ -82,6 +82,17 @@ func Test_MutateAdmission(t *testing.T) {
 			wantErr: "must be a positive integer",
 		},
 		{
+			name: "accepts count at int32 max",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(math.MaxInt32, resource.DecimalSI),
+					},
+				},
+			},
+			want: true,
+		},
+		{
 			name: "rejects count above int32 max",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -182,6 +193,7 @@ func Test_MutateAdmission(t *testing.T) {
 			got, err := dev.MutateAdmission(tt.ctr, &corev1.Pod{})
 			if tt.wantErr != "" {
 				assert.ErrorContains(t, err, tt.wantErr)
+				assert.Equal(t, tt.want, got)
 				return
 			}
 			assert.NilError(t, err)
