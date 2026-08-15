@@ -64,6 +64,29 @@ type DeviceLimitConfig struct {
 // Backward compatibility: all env-var injection in Allocate is kept unchanged.
 // This file is additive — it provides a second, env-independent path to the
 // same information.
+//
+// # Consumer authority contract (for libvgpu.so implementers)
+//
+// The intended lookup order when libvgpu.so resolves a limit value is:
+//
+//  1. Environment variable present and non-empty → use the env value.
+//     (Highest priority; preserves backward compatibility with all existing
+//     deployments that do not use config.json.)
+//
+//  2. Environment variable absent or empty → read the corresponding field
+//     from config.json mounted at {hostHookPath}/vgpu/config.json.
+//     (Fallback for SSH/su/sudo sessions where the env has been scrubbed.)
+//
+//  3. Both absent → apply no limit.
+//     (Identical to current behaviour before this mechanism was introduced.)
+//
+// If config.json is missing, unreadable, or unparseable, the consumer MUST
+// fall back silently to case (3) and MUST NOT fail the process. The file is
+// written on a best-effort basis; its absence is not an error condition.
+//
+// If an env variable and config.json disagree on the same limit, the env
+// variable wins (case 1 above). config.json is never authoritative over a
+// present, non-empty environment variable.
 type ContainerConfig struct {
 	// Version is the schema version (currently 1).
 	// libvgpu.so should reject or warn on versions it does not understand.
