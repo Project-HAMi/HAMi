@@ -17,6 +17,7 @@ limitations under the License.
 package awsneuron
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -77,6 +78,26 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "reject odd neuron core count greater than one",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(3, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{},
+				},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must be 1 or a multiple of 2"),
+		},
+		{
 			name: "no neuron devices",
 			args: struct {
 				ctr *corev1.Container
@@ -101,8 +122,13 @@ func Test_MutateAdmission(t *testing.T) {
 				ResourceCoreName:  "aws.amazon.com/neuroncore",
 			}
 			dev := InitAWSNeuronDevice(config)
-			result, _ := dev.MutateAdmission(test.args.ctr, test.args.p)
+			result, err := dev.MutateAdmission(test.args.ctr, test.args.p)
 			assert.Equal(t, result, test.want)
+			if test.err == nil {
+				assert.NilError(t, err)
+			} else {
+				assert.Error(t, err, test.err.Error())
+			}
 		})
 	}
 }
@@ -435,6 +461,26 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Memreq:           int32(0),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(1),
+			},
+		},
+		{
+			name: "round up odd neuron core request when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": resource.MustParse("3"),
+					},
+					Requests: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": resource.MustParse("3"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(2),
+				Type:             AWSNeuronDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(2),
 			},
 		},
 	}

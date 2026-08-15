@@ -79,7 +79,18 @@ func (dev *AWSNeuronDevices) CommonWord() string {
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
 	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 	if !ok {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+		core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+		if !coreRequested {
+			return false, nil
+		}
+		coreCount, isInteger := core.AsInt64()
+		if !isInteger {
+			return false, fmt.Errorf("%s must be an integer", dev.resourceCoreName)
+		}
+		if coreCount > 1 && coreCount%2 != 0 {
+			return false, fmt.Errorf("%s must be 1 or a multiple of 2", dev.resourceCoreName)
+		}
+		ok = true
 	}
 	return ok, nil
 }
@@ -246,10 +257,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				klog.InfoS("Detected awsNeuron device request",
 					"container", ctr.Name,
 					"deviceCores", n)
-				num := 1
-				if n >= 2 {
-					num = int(n / 2)
-				}
+				num := n/2 + n%2
 				corenum := 1
 				if n >= 2 {
 					corenum = 2
