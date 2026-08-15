@@ -16,6 +16,7 @@ labels: kind/bug
 
 **Anything else we need to know?**:
 
+<!-- Remove credentials, tokens, registry secrets, and other private information before sharing logs or configuration files. -->
 - Accelerator diagnostic command output on host (e.g., `nvidia-smi -a`, `npu-smi info`, `cnmon`, `rocm-smi`, or vendor equivalent)
 - Your docker or containerd configuration file (e.g: `/etc/docker/daemon.json` or `/etc/containerd/config.toml`)
 - The hami-device-plugin container logs
@@ -28,5 +29,8 @@ labels: kind/bug
 - Accelerator vendor & architecture (e.g., NVIDIA, Huawei Ascend, Cambricon, Hygon, AMD, MetaX, Moore Threads, Iluvatar, AWS Neuron, etc.):
 - Driver and runtime toolkit version (e.g., NVIDIA Driver/CUDA, Ascend CANN, Cambricon Neuware, ROCm, etc.):
 - Container runtime & version (`docker version` or `crictl version`)
+- Kubernetes version:
+- Pod YAML, resource request configuration, or pod events:
+- Workload image and tag (redact private image names and state when redacted):
 - Kernel version from `uname -a`
 - Others:
