@@ -18,6 +18,7 @@ package awsneuron
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -77,22 +78,45 @@ func (dev *AWSNeuronDevices) CommonWord() string {
 }
 
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
-	if !ok {
-		core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
-		if !coreRequested {
-			return false, nil
-		}
-		coreCount, isInteger := core.AsInt64()
-		if !isInteger {
-			return false, fmt.Errorf("%s must be an integer", dev.resourceCoreName)
-		}
-		if coreCount > 1 && coreCount%2 != 0 {
-			return false, fmt.Errorf("%s must be 1 or a multiple of 2", dev.resourceCoreName)
-		}
-		ok = true
+	_, countRequested := resourceQuantity(ctr, corev1.ResourceName(dev.resourceCountName))
+	if countRequested {
+		return true, nil
 	}
-	return ok, nil
+
+	core, coreRequested := resourceQuantity(ctr, corev1.ResourceName(dev.resourceCoreName))
+	if !coreRequested {
+		return false, nil
+	}
+	coreCount, err := dev.validateCoreRequest(core)
+	if err != nil {
+		return false, err
+	}
+	if coreCount > 1 && coreCount%2 != 0 {
+		return false, fmt.Errorf("%s must be 1 or a multiple of 2", dev.resourceCoreName)
+	}
+	return true, nil
+}
+
+func resourceQuantity(ctr *corev1.Container, name corev1.ResourceName) (resource.Quantity, bool) {
+	quantity, ok := ctr.Resources.Limits[name]
+	if !ok {
+		quantity, ok = ctr.Resources.Requests[name]
+	}
+	return quantity, ok
+}
+
+func (dev *AWSNeuronDevices) validateCoreRequest(core resource.Quantity) (int64, error) {
+	coreCount, isInteger := core.AsInt64()
+	if !isInteger {
+		return 0, fmt.Errorf("%s must be an integer", dev.resourceCoreName)
+	}
+	if coreCount <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", dev.resourceCoreName)
+	}
+	if coreCount > int64(math.MaxInt32)*2 {
+		return 0, fmt.Errorf("%s exceeds the maximum supported core count", dev.resourceCoreName)
+	}
+	return coreCount, nil
 }
 
 func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -230,10 +254,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	klog.Info("Start to count awsNeuron devices for container ", ctr.Name)
 	awsResourceCount := corev1.ResourceName(dev.resourceCountName)
 	awsResourceCores := corev1.ResourceName(dev.resourceCoreName)
-	v, ok := ctr.Resources.Limits[awsResourceCount]
-	if !ok {
-		v, ok = ctr.Resources.Requests[awsResourceCount]
-	}
+	v, ok := resourceQuantity(ctr, awsResourceCount)
 	if ok {
 		if n, ok := v.AsInt64(); ok {
 			klog.InfoS("Detected awsNeuron device request",
@@ -248,12 +269,9 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 		}
 	} else {
-		core, ok := ctr.Resources.Limits[awsResourceCores]
-		if !ok {
-			core, ok = ctr.Resources.Requests[awsResourceCores]
-		}
+		core, ok := resourceQuantity(ctr, awsResourceCores)
 		if ok {
-			if n, ok := core.AsInt64(); ok {
+			if n, err := dev.validateCoreRequest(core); err == nil {
 				klog.InfoS("Detected awsNeuron device request",
 					"container", ctr.Name,
 					"deviceCores", n)
@@ -269,6 +287,8 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 					MemPercentagereq: 0,
 					Coresreq:         int32(corenum),
 				}
+			} else {
+				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
 			}
 		}
 	}

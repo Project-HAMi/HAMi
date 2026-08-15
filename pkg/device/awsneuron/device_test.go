@@ -18,6 +18,7 @@ package awsneuron
 
 import (
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -96,6 +97,78 @@ func Test_MutateAdmission(t *testing.T) {
 			},
 			want: false,
 			err:  fmt.Errorf("aws.amazon.com/neuroncore must be 1 or a multiple of 2"),
+		},
+		{
+			name: "reject request-only odd neuron core count greater than one",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(3, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must be 1 or a multiple of 2"),
+		},
+		{
+			name: "reject zero neuron core count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(0, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must be greater than 0"),
+		},
+		{
+			name: "reject negative neuron core count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(-2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuroncore must be greater than 0"),
+		},
+		{
+			name: "reject neuron core count that overflows device count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*2+2, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{}},
+			},
+			want: false,
+			err:  fmt.Errorf("aws.amazon.com/neuroncore exceeds the maximum supported core count"),
 		},
 		{
 			name: "no neuron devices",
@@ -482,6 +555,56 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(2),
 			},
+		},
+		{
+			name: "round up request-only odd neuron core request when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Requests: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": resource.MustParse("3"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(2),
+				Type:             AWSNeuronDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(0),
+				Coresreq:         int32(2),
+			},
+		},
+		{
+			name: "reject zero neuron core request when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "reject negative neuron core request when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": resource.MustParse("-2"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "reject neuron core request that overflows device count when admission is bypassed",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"aws.amazon.com/neuroncore": *resource.NewQuantity(int64(math.MaxInt32)*2+2, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
 		},
 	}
 	for _, test := range tests {
