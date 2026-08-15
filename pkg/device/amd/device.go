@@ -76,7 +76,7 @@ func (dev *AMDDevices) CommonWord() string {
 }
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 	if !ok {
 		// A container that does not request the AMD device count is not a HAMi
 		// GPU request. GenerateResourceRequests and LockNode both key off the
@@ -85,6 +85,14 @@ func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bo
 		// every later stage treats it as a non-GPU pod: quota is skipped, the
 		// filter passes on all nodes, and the pod binds with no device reserved.
 		return false, nil
+	}
+	// Validate the count value, not just its presence: GenerateResourceRequests
+	// rejects a non-integer, non-positive, or out-of-range count and yields an
+	// empty request, so admitting such a value here would reintroduce the same
+	// "admitted but never scheduled/locked" divergence this guard closes.
+	countValue, countIsInteger := count.AsInt64()
+	if !countIsInteger || countValue <= 0 || countValue > math.MaxInt32 {
+		return false, fmt.Errorf("%s must be a positive integer no greater than %d", dev.resourceCountName, math.MaxInt32)
 	}
 	if core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]; coreRequested {
 		corePercentage, coreIsInteger := core.AsInt64()

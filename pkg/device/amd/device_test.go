@@ -49,6 +49,50 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "rejects zero count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects negative count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects non-integer count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("500m"),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects count above int32 max",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
 			name: "gpu memory only (no count) -> false",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
