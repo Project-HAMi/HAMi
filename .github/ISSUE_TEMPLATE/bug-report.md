@@ -16,18 +16,26 @@ labels: kind/bug
 
 **Anything else we need to know?**:
 
-- The output of `nvidia-smi -a` on your host
-- Your docker or containerd configuration file (e.g: `/etc/docker/daemon.json`)
-- The hami-device-plugin container logs
-- The hami-scheduler container logs
-- The kubelet logs on the node (e.g: `sudo journalctl -r -u kubelet`)
-- Any relevant kernel output lines from `dmesg`
+Please include the following information when it is relevant:
+
+- The Pod manifest, or at least its accelerator resource requests and limits
+- Pod events and relevant accelerator-related node annotations
+- Output from the vendor's diagnostic tool (for example, `nvidia-smi -a` for NVIDIA devices)
+- Your container runtime configuration (for example, `/etc/docker/daemon.json` or the relevant containerd configuration)
+- Logs from the device plugin for the affected accelerator
+- The hami-scheduler logs
+- The kubelet logs from the affected node (for example, `sudo journalctl -r -u kubelet`)
+- Relevant kernel output from `dmesg`
+
+> **Security note:** Remove credentials, tokens, registry secrets, private image names, and other sensitive information before posting manifests, configuration files, or logs.
 
 **Environment**:
 - HAMi version:
-- nvidia driver or other AI device driver version:
-- Docker version from `docker version`
-- Docker command, image and tag used
-- Kernel version from `uname -a`
+- Kubernetes version:
+- Accelerator vendor and model:
+- HAMi device backend and requested resource names (for example, `nvidia.com/gpu`):
+- Accelerator driver and runtime version:
+- Container runtime and version:
+- Workload image and tag:
+- Operating system and kernel version (for example, the output of `uname -a`):
 - Others:
-
