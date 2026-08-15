@@ -1021,6 +1021,9 @@ func TestAllInitContainersSucceeded(t *testing.T) {
 }
 
 func TestGetNode(t *testing.T) {
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
 	t.Run("empty node name", func(t *testing.T) {
 		client.KubeClient = fake.NewClientset()
 		node, err := GetNode("")
@@ -1029,9 +1032,7 @@ func TestGetNode(t *testing.T) {
 	})
 
 	t.Run("uninitialized client", func(t *testing.T) {
-		oldClient := client.KubeClient
 		client.KubeClient = nil
-		defer func() { client.KubeClient = oldClient }()
 
 		node, err := GetNode("some-node")
 		assert.Assert(t, err != nil)
@@ -1059,6 +1060,9 @@ func TestGetNode(t *testing.T) {
 }
 
 func TestPatchNodeAnnotations(t *testing.T) {
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+
 	t.Run("successful patch", func(t *testing.T) {
 		node := &corev1.Node{
 			ObjectMeta: metav1.ObjectMeta{
@@ -1087,10 +1091,11 @@ func TestPatchNodeAnnotations(t *testing.T) {
 		client.KubeClient = fake.NewClientset()
 
 		annotations := map[string]string{
-			"test-key": "test-value",
+			"hami.io/test-key": "test-value",
 		}
 		err := PatchNodeAnnotations(node, annotations)
 		assert.Assert(t, err != nil)
 	})
 }
+
 
