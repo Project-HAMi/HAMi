@@ -932,12 +932,13 @@ func TestAllInitContainersSucceeded_NilPod(t *testing.T) {
 }
 
 func TestPatchNodeAnnotations_NilNode(t *testing.T) {
-	err := PatchNodeAnnotations(nil, map[string]string{"foo": "bar"})
+	err := PatchNodeAnnotations(nil, map[string]string{"hami.io/test": "bar"})
 	assert.ErrorContains(t, err, "node is nil")
 }
 
 func TestRemoveNodeAnnotation_NilNode(t *testing.T) {
-	err := RemoveNodeAnnotation(nil, "foo")
+	err := RemoveNodeAnnotation(nil, "hami.io/test")
 	assert.ErrorContains(t, err, "node is nil")
 }
+
 

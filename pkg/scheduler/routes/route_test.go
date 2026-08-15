@@ -267,19 +267,20 @@ func TestPredicateRoute_NilPodInArgs(t *testing.T) {
 		t.Fatalf("failed to marshal args: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body)).WithContext(ctx)
+	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
-	s := &scheduler.Scheduler{}
+	s := scheduler.NewScheduler()
 	handler := PredicateRoute(s)
-	// Must not panic when logging nil pod
+	// Must not panic when handling nil pod during filter processing
 	handler(w, req, nil)
 
 	if w.Code != 200 {
 		t.Errorf("expected 200, got %d", w.Code)
+	}
+	var result extenderv1.ExtenderFilterResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
 	}
 }
 
@@ -288,7 +289,10 @@ func TestWebHookRoute_HandlerExecution(t *testing.T) {
 	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
 	w := httptest.NewRecorder()
 
-	// Should not panic regardless of webhook state
 	handler(w, req, nil)
+	if w.Code == 0 {
+		t.Error("expected non-zero response status code")
+	}
 }
+
 
