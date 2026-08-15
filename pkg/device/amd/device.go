@@ -76,8 +76,13 @@ func (dev *AMDDevices) CommonWord() string {
 }
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
+	count, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 	if ok {
+		countValue, countIsInteger := count.AsInt64()
+		if !countIsInteger || countValue < 1 {
+			return false, fmt.Errorf("%s must be a positive integer", dev.resourceCountName)
+		}
+
 		core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
 		if coreRequested {
 			corePercentage, coreIsInteger := core.AsInt64()

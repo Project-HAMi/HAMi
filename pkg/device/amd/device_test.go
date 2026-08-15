@@ -82,6 +82,28 @@ func Test_MutateAdmission(t *testing.T) {
 			want: false,
 		},
 		{
+			name: "rejects zero gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects negative gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
 			name: "rejects zero core percentage",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
