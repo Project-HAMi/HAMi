@@ -920,3 +920,177 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		assert.Equal(t, 2, len(events.Items))
 	})
 }
+
+func TestAllInitContainersSucceeded(t *testing.T) {
+	tests := []struct {
+		name string
+		pod  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "no init container statuses",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "init container state terminated is nil",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name:  "init-1",
+							State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "init container exit code non-zero",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-1",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 1},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "all init containers succeeded with exit code 0",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-1",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+						{
+							Name: "init-2",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "one init container succeeded and one failed",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-1",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+						{
+							Name: "init-2",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 137},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := AllInitContainersSucceeded(tt.pod)
+			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestGetNode(t *testing.T) {
+	t.Run("empty node name", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		node, err := GetNode("")
+		assert.Assert(t, err != nil)
+		assert.Assert(t, node == nil)
+	})
+
+	t.Run("uninitialized client", func(t *testing.T) {
+		oldClient := client.KubeClient
+		client.KubeClient = nil
+		defer func() { client.KubeClient = oldClient }()
+
+		node, err := GetNode("some-node")
+		assert.Assert(t, err != nil)
+		assert.Assert(t, node == nil)
+	})
+
+	t.Run("node not found", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		node, err := GetNode("non-existent-node")
+		assert.Assert(t, err != nil)
+		assert.Assert(t, node == nil)
+	})
+
+	t.Run("successful fetch", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset(&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "valid-node",
+			},
+		})
+		node, err := GetNode("valid-node")
+		assert.NilError(t, err)
+		assert.Assert(t, node != nil)
+		assert.Equal(t, "valid-node", node.Name)
+	})
+}
+
+func TestPatchNodeAnnotations(t *testing.T) {
+	t.Run("successful patch", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "node-to-patch",
+			},
+		}
+		client.KubeClient = fake.NewClientset(node)
+
+		annotations := map[string]string{
+			"hami.io/test-annotation": "patched-value",
+		}
+		err := PatchNodeAnnotations(node, annotations)
+		assert.NilError(t, err)
+
+		patchedNode, getErr := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "node-to-patch", metav1.GetOptions{})
+		assert.NilError(t, getErr)
+		assert.Equal(t, "patched-value", patchedNode.Annotations["hami.io/test-annotation"])
+	})
+
+	t.Run("non-existent node patch fails", func(t *testing.T) {
+		node := &corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: "non-existent-node",
+			},
+		}
+		client.KubeClient = fake.NewClientset()
+
+		annotations := map[string]string{
+			"test-key": "test-value",
+		}
+		err := PatchNodeAnnotations(node, annotations)
+		assert.Assert(t, err != nil)
+	})
+}
+
