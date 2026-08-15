@@ -73,7 +73,11 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			} else {
 				extenderFilterResult, err = s.Filter(extenderArgs)
 				if err != nil {
-					klog.ErrorS(err, "Filter error for pod", "pod", extenderArgs.Pod.Name)
+					podName := ""
+					if extenderArgs.Pod != nil {
+						podName = extenderArgs.Pod.Name
+					}
+					klog.ErrorS(err, "Filter error for pod", "pod", podName)
 					extenderFilterResult = &extenderv1.ExtenderFilterResult{
 						Error: err.Error(),
 					}
@@ -151,6 +155,10 @@ func WebHookRoute() httprouter.Handle {
 	}
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
 		klog.V(5).Infof("Handling webhook request on %s", r.URL.Path)
+		if h == nil {
+			http.Error(w, "Webhook handler not initialized", http.StatusInternalServerError)
+			return
+		}
 		h.ServeHTTP(w, r)
 	}
 }

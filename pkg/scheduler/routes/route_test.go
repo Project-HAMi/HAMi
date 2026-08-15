@@ -258,3 +258,37 @@ func TestBind_DecodeError(t *testing.T) {
 		t.Error("expected a decode error to be reported in the bind result")
 	}
 }
+
+func TestPredicateRoute_NilPodInArgs(t *testing.T) {
+	// ExtenderArgs with nil Pod
+	args := extenderv1.ExtenderArgs{Pod: nil}
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body)).WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	s := &scheduler.Scheduler{}
+	handler := PredicateRoute(s)
+	// Must not panic when logging nil pod
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+}
+
+func TestWebHookRoute_HandlerExecution(t *testing.T) {
+	handler := WebHookRoute()
+	req := httptest.NewRequest("POST", "/webhook", strings.NewReader("{}"))
+	w := httptest.NewRecorder()
+
+	// Should not panic regardless of webhook state
+	handler(w, req, nil)
+}
+

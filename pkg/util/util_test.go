@@ -919,4 +919,25 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		// Old event still present plus one new event.
 		assert.Equal(t, 2, len(events.Items))
 	})
+
+	t.Run("nil node does not panic", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		// Must not panic when node is nil
+		EmitNodeWarningEvent(nil, reason, msg1, dedupWindow)
+	})
 }
+
+func TestAllInitContainersSucceeded_NilPod(t *testing.T) {
+	assert.Equal(t, false, AllInitContainersSucceeded(nil))
+}
+
+func TestPatchNodeAnnotations_NilNode(t *testing.T) {
+	err := PatchNodeAnnotations(nil, map[string]string{"foo": "bar"})
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestRemoveNodeAnnotation_NilNode(t *testing.T) {
+	err := RemoveNodeAnnotation(nil, "foo")
+	assert.ErrorContains(t, err, "node is nil")
+}
+
