@@ -1,11 +1,13 @@
 ---
 name: Bug Report
-about: Report a bug encountered while using HAMi.
+about: Report a bug encountered while using HAMi across supported accelerator backends.
 labels: kind/bug
-
 ---
 
-<!-- Please use this template while reporting a bug and provide as much info as possible. Not doing so may result in your bug not being addressed in a timely manner. Thanks!
+<!-- Please use this template when reporting a bug and provide as much detail as possible.
+     SECURITY REMINDER: Please ensure you redact any sensitive information
+     (such as credentials, tokens, private registry secrets, passwords, or API keys)
+     before posting logs, YAMLs, or configuration files.
 -->
 
 **What happened**:
@@ -14,20 +16,23 @@ labels: kind/bug
 
 **How to reproduce it (as minimally and precisely as possible)**:
 
-**Anything else we need to know?**:
-
-- The output of `nvidia-smi -a` on your host
-- Your docker or containerd configuration file (e.g: `/etc/docker/daemon.json`)
-- The hami-device-plugin container logs
-- The hami-scheduler container logs
-- The kubelet logs on the node (e.g: `sudo journalctl -r -u kubelet`)
-- Any relevant kernel output lines from `dmesg`
+**Diagnostic Logs & Configuration**:
+<!-- Please provide relevant logs, configurations, and outputs where applicable: -->
+- Relevant Pod YAML or resource requests/limits configuration
+- Pod events and status (e.g. `kubectl describe pod <pod-name>`)
+- Relevant node annotations and status (e.g. `kubectl get node <node-name> -o yaml` or `kubectl describe node <node-name>`)
+- `hami-scheduler` container logs
+- `hami-device-plugin` container logs for the relevant backend
+- Host container runtime configuration (e.g. `/etc/containerd/config.toml` or `/etc/docker/daemon.json`)
+- Accelerator vendor diagnostic output, if available (e.g. `nvidia-smi`, `npu-smi`, `rocm-smi`, `cnmon`, `hy-smi`, `mx-smi`, `efsmi`, `xpu-smi`, `ixsmi`, `mthreads-gpus`, `br-smi`, `neuron-ls`, `vast-smi`)
+- Host kubelet logs or kernel messages if relevant (e.g. `sudo journalctl -u kubelet`, `dmesg`)
 
 **Environment**:
-- HAMi version:
-- nvidia driver or other AI device driver version:
-- Docker version from `docker version`
-- Docker command, image and tag used
-- Kernel version from `uname -a`
-- Others:
-
+- HAMi version / Helm chart version / image tag:
+- Accelerator vendor and hardware model (e.g. NVIDIA H100/A100, Ascend 910B, Cambricon MLU370, AMD MI300/MI210, Hygon DCU, MetaX, Enflame, Kunlun, Iluvatar, Moore Threads, Biren, AWS Neuron, Vastai):
+- HAMi device backend in use (e.g. `nvidia`, `ascend`, `cambricon`, `amd`, `hygon`, `metax`, `enflame`, `kunlun`, `iluvatar`, `mthreads`, `biren`, `awsneuron`, `vastai`):
+- Accelerator driver, firmware, and toolkit/runtime version (e.g. NVIDIA Driver / CUDA, Huawei CANN, AMD ROCm, Cambricon Neuware, etc.):
+- Kubernetes version (`kubectl version`):
+- Container runtime and version (e.g. containerd, Docker, CRI-O):
+- Operating system and kernel version (`uname -a`):
+- Others / Additional context:
