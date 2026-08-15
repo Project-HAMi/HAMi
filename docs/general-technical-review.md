@@ -153,6 +153,33 @@ HAMi has no mandatory external database. Storage use is mainly image layers, log
 Semantic versioning, tagged releases, release branches, automated image/chart/release-note workflows, with documented manual verification steps.  
 - Release process doc: https://github.com/Project-HAMi/HAMi/blob/master/.github/release-process.md
 
+### Prerequisites
+
+Before installing HAMi, ensure the following requirements are met:
+
+- **Kubernetes:** version 1.16 or later
+- **Helm:** version 3.0 or later
+- **Operating system:** Linux kernel >= 3.10, glibc >= 2.17
+
+#### Hardware requirements
+
+- **NVIDIA GPU:** Any NVIDIA GPU supported by the driver version listed below
+- **Ascend NPU:** Huawei Ascend 910A/B or later, with the corresponding Ascend driver and firmware installed
+- Other supported accelerators (Cambricon MLU, Hygon DCU, MetaX, Iluvatar, Kunlunxin, Enflame) follow vendor-specific hardware and driver requirements
+
+#### Driver requirements
+
+- **NVIDIA:** Driver version >= 440, `nvidia-container-toolkit` >= 2.0, and `nvidia-container-runtime` configured as the default runtime for containerd, Docker, or CRI-O
+- **Ascend NPU:** Ascend driver and firmware version compatible with the target hardware; `npu-container-toolkit` installed and configured as the default runtime
+- For other accelerators, install the vendor-provided device plugin and container runtime components before deploying HAMi
+
+#### Network requirements
+
+- Cluster-internal connectivity between the Kubernetes API server, kube-scheduler, kubelet, and HAMi components on all nodes
+- The HAMi scheduler extender listens on port 31998 (configurable); ensure this port is reachable from the API server
+- The monitoring endpoint listens on port 31993 (configurable); ensure it is reachable if Prometheus scraping is enabled
+- No external network access is required for core HAMi functionality; image pulls and optional telemetry depend on your cluster's network policy
+
 ### Installation
 
 - **Installation and validation:** Helm-based install with node labeling and chart value customization.  
