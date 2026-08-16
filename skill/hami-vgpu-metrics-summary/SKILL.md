@@ -1,5 +1,5 @@
 ---
-name: hami_vgpu_metrics_summarizer
+name: hami-vgpu-metrics-summary
 
 description: A comprehensive analysis skill for summarizing HAMi vGPU metrics from Prometheus-style `/metrics` output. It organizes GPU allocation by node, device, pod, and namespace, and produces clear reports covering vGPU core allocation, memory allocation, allocation-based utilization, sharing density, and namespace-level usage patterns.
 ---
@@ -190,6 +190,13 @@ These come from `cmd/vGPUmonitor/metrics.go` and should be treated separately:
 - `hami_host_gpu_utilization_ratio`
 - `hami_vgpu_memory_used_bytes`
 - `hami_vgpu_memory_limit_bytes`
+- `hami_container_device_memory_bytes`
+- `hami_container_device_utilization_ratio`
+- `hami_container_last_kernel_elapsed_seconds`
+- `hami_mig_device_info`
+- `hami_vgpu_memory_context_bytes`
+- `hami_vgpu_memory_module_bytes`
+- `hami_vgpu_memory_buffer_bytes`
 
 Use them only as **runtime complements**. They do not replace scheduler allocation metrics for namespace/device allocation summaries.
 
@@ -737,6 +744,12 @@ If the user asks in English, answer in English.
 | `hami_host_gpu_utilization_ratio` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
 | `hami_vgpu_memory_used_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
 | `hami_build_info` | HAMi version/build metadata | cluster |
+| `hami_container_device_memory_bytes` | Per-container device memory usage | pod/container |
+| `hami_container_last_kernel_elapsed_seconds` | Seconds since the container's last CUDA kernel execution | pod/container |
+| `hami_mig_device_info` | MIG runtime identity (mig_uuid, profile, gpu_instance_id, compute_instance_id) for a container's allocation | pod/container |
+| `hami_vgpu_memory_context_bytes` | Per-container GPU memory used by CUDA context | pod/container |
+| `hami_vgpu_memory_module_bytes` | Per-container GPU memory used by loaded CUDA modules | pod/container |
+| `hami_vgpu_memory_buffer_bytes` | Per-container GPU memory used by allocated buffers | pod/container |
 
 ---
 
