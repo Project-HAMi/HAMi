@@ -920,3 +920,101 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		assert.Equal(t, 2, len(events.Items))
 	})
 }
+
+func TestAllInitContainersSucceeded(t *testing.T) {
+	tests := []struct {
+		name     string
+		pod      *corev1.Pod
+		expected bool
+	}{
+		{
+			name: "empty init container statuses returns false",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "init container state terminated is nil",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							State: corev1.ContainerState{},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "init container failed with non-zero exit code",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									ExitCode: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+		{
+			name: "all init containers succeeded with exit code 0",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									ExitCode: 0,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: true,
+		},
+		{
+			name: "mixed init containers: one succeeded and one failed",
+			pod: &corev1.Pod{
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									ExitCode: 0,
+								},
+							},
+						},
+						{
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{
+									ExitCode: 1,
+								},
+							},
+						},
+					},
+				},
+			},
+			expected: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := AllInitContainersSucceeded(tt.pod)
+			if result != tt.expected {
+				t.Errorf("AllInitContainersSucceeded() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
+}
