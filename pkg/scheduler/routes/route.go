@@ -61,6 +61,12 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
 			}
+		} else if extenderArgs.Pod == nil {
+			err := fmt.Errorf("extender args missing pod")
+			klog.ErrorS(err, "Rejecting filter request with no pod")
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: err.Error(),
+			}
 		} else {
 			synced := s.WaitForCacheSync(r.Context())
 			if !synced {
