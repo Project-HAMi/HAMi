@@ -2285,3 +2285,56 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
 }
+
+// TestFilterWithoutCandidateNodes covers extender args that carry a
+// device-requesting pod but neither Nodes nor NodeNames. The live filter path
+// used to dereference the nil *[]string while building the failure message and
+// took the extender process down with it.
+func TestFilterWithoutCandidateNodes(t *testing.T) {
+	s := NewScheduler()
+
+	sConfig := &config.Config{
+		NvidiaConfig: nvidia.NvidiaConfig{
+			ResourceCountName:            "hami.io/gpu",
+			ResourceMemoryName:           "hami.io/gpumem",
+			ResourceMemoryPercentageName: "hami.io/gpumem-percentage",
+			ResourceCoreName:             "hami.io/gpucores",
+			DefaultGPUNum:                1,
+		},
+	}
+	require.NoError(t, config.InitDevicesWithConfig(sConfig))
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "no-candidate-nodes",
+			Namespace: "default",
+			UID:       types.UID("no-candidate-nodes-uid"),
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{
+				Name: "worker",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hami.io/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"hami.io/gpucores": *resource.NewQuantity(20, resource.BinarySI),
+						"hami.io/gpumem":   *resource.NewQuantity(1024, resource.BinarySI),
+					},
+				},
+			}},
+		},
+	}
+	require.True(t, s.podManager.AddPod(pod, "node-a", device.PodDevices{}))
+
+	res, err := s.Filter(extenderv1.ExtenderArgs{Pod: pod})
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.Equal(t, "extender args contain neither Nodes nor NodeNames", res.Error)
+	require.Nil(t, res.NodeNames)
+	require.Nil(t, res.Nodes)
+
+	// The request is rejected before the live path evicts the pod from the
+	// scheduling caches, so an already-scheduled pod keeps its accounting.
+	cached, ok := s.podManager.GetPod(pod)
+	require.True(t, ok)
+	require.Equal(t, "node-a", cached.NodeID)
+}
