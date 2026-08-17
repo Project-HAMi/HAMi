@@ -22,5 +22,5 @@ spec:
           resources:
             limits:
               cambricon.com/vmlu: "1"
-              cambricon.com/mlu370.smlu.vmemory: "20"
-              cambricon.com/mlu370.smlu.vcore: "10"
+              cambricon.com/mlu.smlu.vmemory: "20"
+              cambricon.com/mlu.smlu.vcore: "10"
