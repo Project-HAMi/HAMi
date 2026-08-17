@@ -408,3 +408,72 @@ hami_node_gpu_mig_instance_info{compute_instance_id="0",device_index="0",device_
 		t.Fatalf("unexpected collecting result:\n%s", err)
 	}
 }
+
+func TestClusterManagerCollectorQuotaMetrics(t *testing.T) {
+	// Regression coverage for collectQuotaMetrics: verify per-namespace quota
+	// usage is exported as hami_resource_quota_used, and as legacy QuotaUsed
+	// when LegacyMetrics is enabled.
+	const (
+		ns       = "team-a"
+		memName  = "nvidia.com/gpumem"
+		coreName = "nvidia.com/gpucore"
+	)
+
+	qm := device.NewQuotaManager()
+	qm.Quotas[ns] = &device.DeviceQuota{
+		memName:  &device.Quota{Used: 4096, Limit: 8192, LimitSet: true},
+		coreName: &device.Quota{Used: 50, Limit: 100, LimitSet: true},
+	}
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	provider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: qm,
+		podManager:   device.NewPodManager(),
+	}
+
+	t.Run("non-legacy", func(t *testing.T) {
+		collector := ClusterManagerCollector{
+			ClusterManager:  &ClusterManager{LegacyMetrics: false},
+			metricsProvider: provider,
+		}
+		want := `
+# HELP hami_resource_quota_used resourcequota usage for a certain device
+# TYPE hami_resource_quota_used gauge
+hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
+hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
+`
+		if err := promtestutil.CollectAndCompare(
+			collector,
+			strings.NewReader(want),
+			"hami_resource_quota_used",
+		); err != nil {
+			t.Fatalf("unexpected non-legacy collecting result:\n%s", err)
+		}
+	})
+
+	t.Run("legacy", func(t *testing.T) {
+		collector := ClusterManagerCollector{
+			ClusterManager:  &ClusterManager{LegacyMetrics: true},
+			metricsProvider: provider,
+		}
+		want := `
+# HELP QuotaUsed resourcequota usage for a certain device
+# TYPE QuotaUsed gauge
+QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
+QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096
+# HELP hami_resource_quota_used resourcequota usage for a certain device
+# TYPE hami_resource_quota_used gauge
+hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
+hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/gpumem"} 4096
+`
+		if err := promtestutil.CollectAndCompare(
+			collector,
+			strings.NewReader(want),
+			"hami_resource_quota_used",
+			"QuotaUsed",
+		); err != nil {
+			t.Fatalf("unexpected legacy collecting result:\n%s", err)
+		}
+	})
+}

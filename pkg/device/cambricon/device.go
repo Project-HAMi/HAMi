@@ -98,25 +98,21 @@ func (dev *CambriconDevices) CommonWord() string {
 
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	ctx := context.Background()
-	if _, ok := node.Annotations[DsmluLockTime]; ok {
-		return fmt.Errorf("node %s is locked", node.Name)
-	}
-
 	patchedAnnotation, err := json.Marshal(
 		map[string]any{
 			"metadata": map[string]map[string]string{"annotations": {
 				DsmluLockTime: time.Now().Format(time.RFC3339),
 			}}})
 	if err != nil {
-		klog.ErrorS(err, "Failed to patch node annotation", "node", node.Name)
-		return fmt.Errorf("patch node annotation %v", err)
+		klog.ErrorS(err, "Failed to marshal node annotation", "node", node.Name)
+		return fmt.Errorf("marshal node annotation: %w", err)
 	}
 
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.StrategicMergePatchType, patchedAnnotation, metav1.PatchOptions{})
+	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
 		klog.ErrorS(err, "Failed to patch node annotation", "node", node.Name, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.StrategicMergePatchType, patchedAnnotation, metav1.PatchOptions{})
+		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("setNodeLock exceeds retry count %d", retry)
@@ -156,27 +152,48 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	if n.Annotations == nil {
+	ctx := context.Background()
+	nodeName := n.Name
+
+	current, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get node for lock release: %w", err)
+	}
+	if current.Annotations == nil {
 		return nil
 	}
-	if _, ok := n.Annotations[DsmluLockTime]; !ok {
-		klog.InfoS("Node lock not set", "node", n.Name)
+	if _, ok := current.Annotations[DsmluLockTime]; !ok {
+		klog.InfoS("Node lock not set", "node", nodeName)
 		return nil
 	}
 
-	newNode := n.DeepCopy()
-	delete(newNode.Annotations, DsmluLockTime)
-	_, err := client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+	patchData, err := json.Marshal(
+		map[string]any{
+			"metadata": map[string]map[string]any{"annotations": {
+				DsmluLockTime: nil,
+			}}})
+	if err != nil {
+		return fmt.Errorf("marshal patch for lock release: %w", err)
+	}
+
+	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to patch node annotation", "node", n.Name, "retry", i)
+		klog.ErrorS(err, "Failed to release node lock", "node", nodeName, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Update(context.Background(), newNode, metav1.UpdateOptions{})
+
+		current, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to re-get node during release retry: %w", err)
+		}
+		if current.Annotations == nil || current.Annotations[DsmluLockTime] == "" {
+			return nil
+		}
+		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, patchData, metav1.PatchOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("releaseNodeLock exceeds retry count %d", retry)
 	}
-	delete(n.Annotations, DsmluLockTime)
-	klog.InfoS("Node lock released", "node", n.Name)
+	klog.InfoS("Node lock released", "node", nodeName)
 	return nil
 }
 
@@ -362,7 +379,7 @@ func (cam *CambriconDevices) Fit(devices []*device.DeviceUsage, request device.C
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)

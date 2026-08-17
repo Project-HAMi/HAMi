@@ -208,7 +208,19 @@ func FilterDeviceToRegister(uuid, indexStr string) bool {
 	return false
 }
 
+// NodeDeleted removes the per-node health bookkeeping entries for nn from
+// ReportedGPUNum and ReportedRegisterAnnos. It must be called whenever a
+// node is permanently removed (deletion or unrecoverable health failure) so
+// that the maps do not retain stale entries and node-name reuse starts clean.
+func (dev *NvidiaGPUDevices) NodeDeleted(nn string) {
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+	delete(dev.ReportedGPUNum, nn)
+	delete(dev.ReportedRegisterAnnos, nn)
+}
+
 func (dev *NvidiaGPUDevices) NodeCleanUp(nn string) error {
+	dev.NodeDeleted(nn)
 	return util.MarkAnnotationsToDelete(HandshakeAnnos, nn)
 }
 
@@ -676,8 +688,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
-	needTopology := gpuPolicy == util.GPUSchedulerPolicyTopology.String()
-	isMutex := gpuPolicy == util.GPUSchedulerPolicyMutex.String()
+	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
+	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)

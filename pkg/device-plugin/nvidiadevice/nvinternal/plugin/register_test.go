@@ -97,7 +97,7 @@ func TestGetNumaNode(t *testing.T) {
 
 	t.Run("numa node file is absent", func(t *testing.T) {
 		dev := &nvmlmock.Device{GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
-			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', '0', '0', '0', '0', ':', '0', '2', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', 'D', 'E', 'A', 'D', ':', 'B', 'E', ':', 'E', 'F', '.', '0'}}, nvml.SUCCESS
 		}}
 		hasNode, node, err := GetNumaNode(dev)
 		if err == nil || hasNode || node != 0 {

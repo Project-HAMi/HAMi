@@ -819,3 +819,10 @@ func TestSpec_ConcurrentAtomicAccess(t *testing.T) {
 
 	wg.Wait()
 }
+
+func TestV0SharedRegionTLayoutSize(t *testing.T) {
+	const want = 1197896
+	if got := MinSize(); got != want {
+		t.Errorf("MinSize() = %d, want %d; a field was added or removed from v0.sharedRegionT — update the size discriminator in cudevshr.go accordingly", got, want)
+	}
+}

@@ -194,6 +194,10 @@ func CastSpec(data []byte) Spec {
 	}
 }
 
+func MinSize() int {
+	return int(unsafe.Sizeof(sharedRegionT{}))
+}
+
 //	func (s *SharedRegionT) UsedMemory(idx int) (uint64, error) {
 //		return 0, nil
 //	}

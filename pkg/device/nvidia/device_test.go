@@ -2751,3 +2751,82 @@ func TestFit_TopologyNegativeScores(t *testing.T) {
 		assert.Assert(t, uuids["dev-2"])
 	})
 }
+
+// TestNodeDeleted_ClearsBookkeepingForDeletedNode verifies that NodeDeleted
+// removes both ReportedGPUNum and ReportedRegisterAnnos entries for the
+// named node while leaving other nodes' entries intact.
+func TestNodeDeleted_ClearsBookkeepingForDeletedNode(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{ResourceCountName: "nvidia.com/gpu"})
+
+	// Populate bookkeeping for two nodes.
+	dev.mu.Lock()
+	dev.ReportedGPUNum["node-a"] = 4
+	dev.ReportedGPUNum["node-b"] = 2
+	dev.ReportedRegisterAnnos["node-a"] = "anno-a"
+	dev.ReportedRegisterAnnos["node-b"] = "anno-b"
+	dev.mu.Unlock()
+
+	// Delete node-a.
+	dev.NodeDeleted("node-a")
+
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+
+	// node-a entries must be gone.
+	_, gpuPresent := dev.ReportedGPUNum["node-a"]
+	assert.Assert(t, !gpuPresent, "expected ReportedGPUNum entry for node-a to be removed")
+	_, annoPresent := dev.ReportedRegisterAnnos["node-a"]
+	assert.Assert(t, !annoPresent, "expected ReportedRegisterAnnos entry for node-a to be removed")
+
+	// node-b must be untouched.
+	assert.Equal(t, dev.ReportedGPUNum["node-b"], int64(2), "ReportedGPUNum for node-b must be unchanged")
+	assert.Equal(t, dev.ReportedRegisterAnnos["node-b"], "anno-b", "ReportedRegisterAnnos for node-b must be unchanged")
+}
+
+// TestNodeDeleted_IdempotentOnUnknownNode verifies that calling NodeDeleted
+// for a node that was never registered does not panic or error.
+func TestNodeDeleted_IdempotentOnUnknownNode(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{ResourceCountName: "nvidia.com/gpu"})
+	// Should not panic.
+	dev.NodeDeleted("node-never-registered")
+	dev.mu.Lock()
+	defer dev.mu.Unlock()
+	assert.Equal(t, len(dev.ReportedGPUNum), 0)
+	assert.Equal(t, len(dev.ReportedRegisterAnnos), 0)
+}
+
+// TestNodeDeleted_ReuseAfterDeletion verifies that after a node is deleted its
+// bookkeeping is cleared so that a subsequent CheckHealth call for a node with
+// the same name (i.e. re-created node) is not hampered by stale state.
+func TestNodeDeleted_ReuseAfterDeletion(t *testing.T) {
+	config := NvidiaConfig{ResourceCountName: "nvidia.com/gpu"}
+	dev := InitNvidiaDevice(config)
+
+	allocatable := corev1.ResourceList{
+		corev1.ResourceName(config.ResourceCountName): *resource.NewQuantity(4, resource.DecimalSI),
+	}
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "reused-node",
+			Annotations: map[string]string{
+				util.HandshakeAnnos[NvidiaGPUDevice]: "Heartbeat_2099-01-01T00:00:00Z",
+			},
+		},
+		Status: corev1.NodeStatus{Allocatable: allocatable},
+	}
+
+	// Simulate a prior registration cycle: CheckHealth establishes bookkeeping.
+	dev.mu.Lock()
+	dev.ReportedGPUNum["reused-node"] = 4
+	dev.ReportedRegisterAnnos["reused-node"] = "old-anno"
+	dev.mu.Unlock()
+
+	// Node deleted — bookkeeping must be wiped.
+	dev.NodeDeleted("reused-node")
+
+	// After re-creation the new CheckHealth must detect a change (needUpdate=true)
+	// because reported=0 (after deletion) != current=4.
+	healthy, needUpdate := dev.CheckHealth("NVIDIA", node)
+	assert.Equal(t, healthy, true, "re-created node should be healthy")
+	assert.Equal(t, needUpdate, true, "re-created node must trigger an update (stale bookkeeping was cleared)")
+}

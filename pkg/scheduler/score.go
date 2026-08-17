@@ -60,10 +60,10 @@ func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
 	return types
 }
 
-func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices) (bool, string) {
+func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod *corev1.Pod, nodeInfo *device.NodeInfo, devinput *device.PodDevices, weights util.DeviceScoringWeights) (bool, string) {
 	// Compute scores for all devices based on the request.
 	for index := range node.Devices.DeviceLists {
-		node.Devices.DeviceLists[index].ComputeScore(requests)
+		node.Devices.DeviceLists[index].ComputeScore(requests, weights)
 	}
 
 	// Process each device type in the request.
@@ -205,7 +205,7 @@ func applyPeakUsage(node *NodeUsage, appNodeCopy *NodeUsage, peakUsage map[strin
 	}
 }
 
-func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot) (device.PodDevices, bool, string) {
+func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
 	initAllocs := make(device.PodDevices)
 
 	for i, req := range resourceReqs {
@@ -219,7 +219,7 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 			continue
 		}
 		nodeCopy := node.DeepCopy()
-		fit, reason := fitInDevices(nodeCopy, req, task, nodeInfo, &initAllocs)
+		fit, reason := fitInDevices(nodeCopy, req, task, nodeInfo, &initAllocs, weights)
 		if !fit {
 			klog.V(4).InfoS("Init container does not fit",
 				"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
@@ -235,7 +235,7 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 	return initAllocs, true, ""
 }
 
-func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, nodeID string) (string, bool) {
+func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
 	appIndex := 0
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
@@ -252,7 +252,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			appIndex++
 			continue
 		}
-		fit, reason := fitInDevices(appNodeCopy, n, task, nodeInfo, &score.Devices)
+		fit, reason := fitInDevices(appNodeCopy, n, task, nodeInfo, &score.Devices, weights)
 		if !fit {
 			klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 			return reason, false
@@ -273,7 +273,7 @@ type nodeScoreResult struct {
 	err    error
 }
 
-func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string) nodeScoreResult {
+func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, userNodePolicy string, weights util.DeviceScoringWeights) nodeScoreResult {
 	viewStatus(*node)
 
 	nodeInfo := node.NodeInfo
@@ -292,7 +292,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 
 	var initAllocs device.PodDevices
 	if numInitContainers > 0 {
-		allocs, fit, reason := allocateInitContainers(node, nodeID, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, peakUsage)
+		allocs, fit, reason := allocateInitContainers(node, nodeID, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
@@ -309,7 +309,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, nodeID); !fit {
+	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
 
@@ -340,6 +340,11 @@ func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.
 }
 
 func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string, recordEvents bool, detailedFailureReason bool) (*policy.NodeScoreList, error) {
+	deviceScoringWeights, err := util.GetDeviceScoringWeightsByPod(task)
+	if err != nil {
+		return nil, err
+	}
+
 	userNodePolicy := resolveNodeSchedulerPolicy(task)
 	res := policy.NodeScoreList{
 		Policy:   userNodePolicy,
@@ -357,7 +362,7 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		go func(nodeID string, node *NodeUsage) {
 			defer wg.Done()
 
-			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy)
+			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, deviceScoringWeights)
 
 			switch {
 			case result.err != nil:
