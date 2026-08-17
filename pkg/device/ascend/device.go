@@ -325,22 +325,7 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 						memnums = memnums * int64(dev.config.MemoryFactor)
 						klog.V(4).Infof("Update Ascend memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
-					// If "core" is requested, it explicitly indicates the use of soft-partitioning.
-					isCoreRequested := false
-					if ascendResourceCore != "" {
-						_, isCoreRequested = ctr.Resources.Limits[ascendResourceCore]
-						if !isCoreRequested {
-							_, isCoreRequested = ctr.Resources.Requests[ascendResourceCore]
-						}
-					}
-
-					if isCoreRequested {
-						// Soft-partitioning: Use the raw value directly.
-						memnum = int(memnums)
-					} else {
-						m, _ := dev.trimMemory(memnums)
-						memnum = int(m)
-					}
+					memnum = int(memnums)
 				}
 			}
 

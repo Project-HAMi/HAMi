@@ -1284,13 +1284,17 @@ func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 					ResourceName:       "huawei.com/Ascend910B3",
 					ResourceCoreName:   "huawei.com/Ascend910B3-core",
 					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					MemoryAllocatable:  32768,
+					MemoryCapacity:     32768,
+					Templates: []Template{
+						{Name: "vir08", Memory: 8738, AICore: 8},
+						{Name: "vir16", Memory: 17476, AICore: 16},
+					},
 				},
 			}
 			result := dev.GenerateResourceRequests(&test.args)
 
-			assert.Equal(t, result.Memreq, test.want.Memreq)
-			assert.Equal(t, result.Coresreq, test.want.Coresreq)
-			assert.Equal(t, result.Type, test.want.Type)
+			assert.Equal(t, result, test.want)
 		})
 	}
 }
@@ -1347,7 +1351,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(2184),
+				Memreq:           int32(1280),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -1386,7 +1390,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(17476),
+				Memreq:           int32(12800),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -1425,7 +1429,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(2184),
+				Memreq:           int32(128),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
