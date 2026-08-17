@@ -207,7 +207,7 @@ This document provides detailed descriptions of all configurable values paramete
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu"]` |
+| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |
