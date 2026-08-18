@@ -209,6 +209,11 @@ This document provides detailed descriptions of all configurable values paramete
 | `devices.kunlun.enabled` | Whether to enable | `true` |
 | `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
 
+### Enflame
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
+
 ### Mthreads
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
