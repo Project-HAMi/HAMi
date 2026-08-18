@@ -116,8 +116,6 @@ func profileSliceKey(profile string) string {
 // ResetIdleGPUs prepares idle MIG-capable GPUs for on-demand instance creation
 // through NVML. Busy GPUs are left untouched; idle GPUs
 // have MIG mode enabled and all existing GI/CI instances destroyed.
-//
-// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) ResetIdleGPUs(deviceCount int, inUse map[int]struct{}) ([]int, error) {
 	reset := []int{}
 	for gpuIndex := 0; gpuIndex < deviceCount; gpuIndex++ {
@@ -296,8 +294,6 @@ func destroyAllMigInstances(dev nvml.Device) error {
 }
 
 // Release destroys the GI+CI bound to the given MIG UUID.
-//
-// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) Release(migUUID string) error {
 	m.mu.Lock()
 	key, ok := m.byAllocationMigUUID[migUUID]
@@ -333,8 +329,6 @@ func allocationKey(gpuIndex int, profile string, placement nvml.GpuInstancePlace
 // placement. It returns whether this call created the instance, allowing the
 // caller to roll back only its own partial allocation. It never retries
 // another placement.
-//
-// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) EnsureAllocation(gpuIndex int, profile string, placement nvml.GpuInstancePlacement) (string, bool, error) {
 	key := allocationKey(gpuIndex, profile, placement)
 	lk := m.gpuLock(gpuIndex)
@@ -440,7 +434,6 @@ func (m *MigInstanceManager) AllocationRuntimeInfo(gpuIndex int, profile string,
 	}, true
 }
 
-// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID string, placement nvml.GpuInstancePlacement, gpuInstanceID, computeInstanceID uint32) error {
 	lk := m.gpuLock(gpuIndex)
 	lk.Lock()
@@ -497,7 +490,6 @@ func (m *MigInstanceManager) AdoptAllocation(gpuIndex int, profile, migUUID stri
 	return fmt.Errorf("annotated MIG allocation %s profile=%s placement=%+v is not live", migUUID, profile, placement)
 }
 
-// Requires NVML already initialized via Init.
 func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocationKey]struct{}) error {
 	m.mu.Lock()
 	keys := make([]migAllocationKey, 0, len(m.byAllocation))
@@ -505,9 +497,6 @@ func (m *MigInstanceManager) ReconcileActiveAllocations(active map[migAllocation
 		keys = append(keys, key)
 	}
 	m.mu.Unlock()
-	if len(keys) == 0 {
-		return nil
-	}
 	for _, key := range keys {
 		if _, ok := active[key]; ok {
 			continue
