@@ -40,7 +40,6 @@ func TestGetClient(t *testing.T) {
 		buildConfigErr error
 		inCluster      *rest.Config
 		inClusterErr   error
-		expectError    bool
 	}{
 		{
 			name:           "Success from kubeconfig",
@@ -49,7 +48,6 @@ func TestGetClient(t *testing.T) {
 			buildConfigErr: nil,
 			inCluster:      nil,
 			inClusterErr:   nil,
-			expectError:    false,
 		},
 		{
 			name:           "Fallback to in-cluster config",
@@ -58,7 +56,6 @@ func TestGetClient(t *testing.T) {
 			buildConfigErr: errors.New("kubeconfig error"),
 			inCluster:      &rest.Config{Host: "https://in-cluster.example.com"},
 			inClusterErr:   nil,
-			expectError:    false,
 		},
 	}
 
@@ -84,19 +81,14 @@ func TestGetClient(t *testing.T) {
 			defer os.Setenv("KUBECONFIG", oldKubeConfig)
 
 			// Reset sync.Once and initialize the global client using the injected mocks
+			KubeClient = nil
 			once = sync.Once{}
 			InitGlobalClient()
 
 			// Call GetClient and check the result.
 			client := GetClient()
-			if tt.expectError {
-				if client != nil {
-					t.Errorf("Expected error, but got a valid client")
-				}
-			} else {
-				if client == nil {
-					t.Errorf("Expected a valid client, but got nil")
-				}
+			if client == nil {
+				t.Errorf("Expected a valid client, but got nil")
 			}
 		})
 	}
