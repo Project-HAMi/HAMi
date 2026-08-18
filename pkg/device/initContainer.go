@@ -20,16 +20,26 @@ import (
 	"sort"
 
 	corev1 "k8s.io/api/core/v1"
+
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 type deviceKey struct {
 	devType string
 	uuid    string
 }
+
 type usage struct {
 	mem   int32
 	cores int32
 	slots int32
+}
+
+func isSidecarAt(pod *corev1.Pod, cidx int) bool {
+	if cidx < 0 || cidx >= len(pod.Spec.InitContainers) {
+		return false
+	}
+	return util.IsSidecarContainer(&pod.Spec.InitContainers[cidx])
 }
 
 // CollapseInitContainerUsage returns the effective device usage for a pod.
@@ -40,12 +50,21 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	numInit := len(pod.Spec.InitContainers)
 	initPeak := make(map[deviceKey]usage)
 	appSum := make(map[deviceKey]usage)
+	sidecarSum := make(map[deviceKey]usage)
 
 	for devType, podSingle := range raw {
 		for cidx, ctrDevs := range podSingle {
 			for _, dev := range ctrDevs {
 				key := deviceKey{devType: devType, uuid: dev.UUID}
-				if cidx < numInit {
+				switch {
+				case cidx < numInit && isSidecarAt(pod, cidx):
+					cur := sidecarSum[key]
+					cur.mem += dev.Usedmem
+					cur.cores += dev.Usedcores
+					// Sidecars run concurrently with app containers: each occurrence is an additional slot.
+					cur.slots++
+					sidecarSum[key] = cur
+				case cidx < numInit:
 					cur := initPeak[key]
 					if dev.Usedmem > cur.mem {
 						cur.mem = dev.Usedmem
@@ -56,13 +75,11 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 					// Init containers run sequentially: peak concurrency is one slot per device.
 					cur.slots = 1
 					initPeak[key] = cur
-				} else {
+				default:
 					cur := appSum[key]
 					cur.mem += dev.Usedmem
 					cur.cores += dev.Usedcores
 					// App containers run concurrently: each occurrence is an additional slot.
-					// TODO: If PR #2584 changes sidecars to app-sum accounting, update this
-					// slot calculation to follow the same classification.
 					cur.slots++
 					appSum[key] = cur
 				}
@@ -73,14 +90,11 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	collapsed := make(PodDevices)
 	for devType := range raw {
 		uuidSet := make(map[string]struct{})
-		for k := range initPeak {
-			if k.devType == devType {
-				uuidSet[k.uuid] = struct{}{}
-			}
-		}
-		for k := range appSum {
-			if k.devType == devType {
-				uuidSet[k.uuid] = struct{}{}
+		for _, m := range []map[deviceKey]usage{initPeak, appSum, sidecarSum} {
+			for k := range m {
+				if k.devType == devType {
+					uuidSet[k.uuid] = struct{}{}
+				}
 			}
 		}
 
@@ -90,11 +104,11 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 		for uuid := range uuidSet {
 			initU := initPeak[deviceKey{devType, uuid}]
 			appU := appSum[deviceKey{devType, uuid}]
+			scU := sidecarSum[deviceKey{devType, uuid}]
 
-			effMem := max(initU.mem, appU.mem)
-			effCores := max(initU.cores, appU.cores)
-			// Raw entries carry no slot count; clamp to at least one.
-			effSlots := max(initU.slots, appU.slots, 1)
+			effMem := scU.mem + max(initU.mem, appU.mem)
+			effCores := scU.cores + max(initU.cores, appU.cores)
+			effSlots := max(scU.slots+max(initU.slots, appU.slots), 1)
 
 			containerDevs = append(containerDevs, ContainerDevice{
 				UUID:      uuid,
@@ -113,9 +127,7 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	return collapsed
 }
 
-// AppContainersOnlyDeviceUsage returns the device usage considering only app containers.
-// Used when init containers have finished and we want to shrink to app-only footprint.
-func AppContainersOnlyDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
+func SteadyStateDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	if raw == nil {
 		return nil
 	}
@@ -125,8 +137,8 @@ func AppContainersOnlyDeviceUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 	for devType, podSingle := range raw {
 		sums := make(map[string]usage)
 		for cidx, ctrDevs := range podSingle {
-			if cidx < numInit {
-				continue // skip init containers
+			if cidx < numInit && !isSidecarAt(pod, cidx) {
+				continue
 			}
 			for _, dev := range ctrDevs {
 				s := sums[dev.UUID]

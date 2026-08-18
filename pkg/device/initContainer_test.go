@@ -17,6 +17,7 @@ limitations under the License.
 package device
 
 import (
+	"fmt"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -246,16 +247,16 @@ func TestCollapseInitContainerUsage_MultiAppSameGPUSlots(t *testing.T) {
 	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(3))
 }
 
-func TestAppContainersOnlyDeviceUsage_NilInput(t *testing.T) {
-	result := AppContainersOnlyDeviceUsage(nil, nil)
+func TestSteadyStateDeviceUsage_NilInput(t *testing.T) {
+	result := SteadyStateDeviceUsage(nil, nil)
 	assert.Assert(t, result == nil)
 
 	pod := makePod("test", 1, 1)
-	result = AppContainersOnlyDeviceUsage(pod, nil)
+	result = SteadyStateDeviceUsage(pod, nil)
 	assert.Assert(t, result == nil)
 }
 
-func TestAppContainersOnlyDeviceUsage_OnlyAppContainers(t *testing.T) {
+func TestSteadyStateDeviceUsage_OnlyAppContainers(t *testing.T) {
 	pod := makePod("test", 0, 2)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
@@ -268,11 +269,11 @@ func TestAppContainersOnlyDeviceUsage_OnlyAppContainers(t *testing.T) {
 			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 2}},
 		},
 	}
-	result := AppContainersOnlyDeviceUsage(pod, raw)
+	result := SteadyStateDeviceUsage(pod, raw)
 	assert.DeepEqual(t, expected, result)
 }
 
-func TestAppContainersOnlyDeviceUsage_IgnoresInitContainers(t *testing.T) {
+func TestSteadyStateDeviceUsage_IgnoresInitContainers(t *testing.T) {
 	pod := makePod("test", 1, 2)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
@@ -286,11 +287,11 @@ func TestAppContainersOnlyDeviceUsage_IgnoresInitContainers(t *testing.T) {
 			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 2}},
 		},
 	}
-	result := AppContainersOnlyDeviceUsage(pod, raw)
+	result := SteadyStateDeviceUsage(pod, raw)
 	assert.DeepEqual(t, expected, result)
 }
 
-func TestAppContainersOnlyDeviceUsage_MultipleDeviceTypes(t *testing.T) {
+func TestSteadyStateDeviceUsage_MultipleDeviceTypes(t *testing.T) {
 	pod := makePod("test", 1, 1)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
@@ -310,11 +311,11 @@ func TestAppContainersOnlyDeviceUsage_MultipleDeviceTypes(t *testing.T) {
 			{ContainerDevice{UUID: "xpu0", Type: "kunlun", Usedmem: 400, Usedcores: 40, Slots: 1}},
 		},
 	}
-	result := AppContainersOnlyDeviceUsage(pod, raw)
+	result := SteadyStateDeviceUsage(pod, raw)
 	assert.DeepEqual(t, expected, result)
 }
 
-func TestAppContainersOnlyDeviceUsage_MultipleDevicesPerContainer(t *testing.T) {
+func TestSteadyStateDeviceUsage_MultipleDevicesPerContainer(t *testing.T) {
 	pod := makePod("test", 1, 1)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
@@ -336,13 +337,13 @@ func TestAppContainersOnlyDeviceUsage_MultipleDevicesPerContainer(t *testing.T) 
 			},
 		},
 	}
-	result := AppContainersOnlyDeviceUsage(pod, raw)
+	result := SteadyStateDeviceUsage(pod, raw)
 	assert.DeepEqual(t, expected, result)
 }
 
-// TestAppContainersOnlyDeviceUsage_MultiAppSameGPUSlots guards that the app-only
+// TestSteadyStateDeviceUsage_MultiAppSameGPUSlots guards that the steady-state
 // shrink path also preserves the per-container slot count.
-func TestAppContainersOnlyDeviceUsage_MultiAppSameGPUSlots(t *testing.T) {
+func TestSteadyStateDeviceUsage_MultiAppSameGPUSlots(t *testing.T) {
 	pod := makePod("test", 1, 2)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
@@ -351,6 +352,136 @@ func TestAppContainersOnlyDeviceUsage_MultiAppSameGPUSlots(t *testing.T) {
 			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}}, // app1
 		},
 	}
-	result := AppContainersOnlyDeviceUsage(pod, raw)
+	result := SteadyStateDeviceUsage(pod, raw)
 	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(2))
+}
+
+// --- Sidecar container accounting (sidecarsContainer-design.md) ---
+
+func makePodWithSidecars(name string, initPolicies []*corev1.ContainerRestartPolicy, numApp int) *corev1.Pod {
+	initContainers := make([]corev1.Container, len(initPolicies))
+	for i, p := range initPolicies {
+		initContainers[i] = corev1.Container{Name: fmt.Sprintf("init-%d", i), RestartPolicy: p}
+	}
+	appContainers := make([]corev1.Container, numApp)
+	for i := range appContainers {
+		appContainers[i] = corev1.Container{Name: fmt.Sprintf("app-%d", i)}
+	}
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: name, Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: initContainers,
+			Containers:     appContainers,
+		},
+	}
+}
+
+// Design case "oversubscription prevented": a 4000 sidecar plus a 4000 app
+// container on one card must account as 8000, not max(4000,4000)=4000.
+func TestCollapseInitContainerUsage_SidecarAddsToAppSum(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{&always}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}}, // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}}, // app
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// Design case "shrink restored": init 20000 + sidecar 2000 + app 10000 →
+// collapse = 2000 + max(20000, 10000) = 22000; steady state = 12000, and the
+// steady state must still contain the sidecar's share (the pin that a fixed
+// gate plus an unfixed target would violate).
+func TestCollapseAndSteadyState_SidecarWithInitAndApp(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil, &always}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 20000, Usedcores: 60}}, // init (regular)
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 2000, Usedcores: 10}},  // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 10000, Usedcores: 30}}, // app
+		},
+	}
+	expectedCollapsed := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 22000, Usedcores: 70}},
+		},
+	}
+	assert.DeepEqual(t, expectedCollapsed, CollapseInitContainerUsage(pod, raw))
+
+	expectedSteady := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 12000, Usedcores: 40}},
+		},
+	}
+	assert.DeepEqual(t, expectedSteady, SteadyStateDeviceUsage(pod, raw))
+}
+
+// A nil restartPolicy is a regular init container: results must be identical
+// to the pre-sidecar behavior (the "safe everywhere" property).
+func TestCollapseInitContainerUsage_NilRestartPolicyUnchanged(t *testing.T) {
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}}, // init
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}}, // app
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// All init containers are sidecars: init_peak = 0, so
+// effective = sidecar_sum + max(0, app_sum), and the steady state equals it.
+func TestCollapseInitContainerUsage_AllSidecars(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{&always, &always}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 3000, Usedcores: 10}}, // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 20}}, // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 1000, Usedcores: 5}},  // app
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 9000, Usedcores: 35}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+	assert.DeepEqual(t, expected, SteadyStateDeviceUsage(pod, raw))
+}
+
+// Per-UUID independence: sidecar on gpu0, regular init on gpu1, app on gpu0.
+// Missing per-UUID entries count as 0 before the max() and the addition.
+func TestCollapseInitContainerUsage_SidecarMultiUUID(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{&always, nil}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 2000, Usedcores: 10}}, // sidecar on gpu0
+			{ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 7000, Usedcores: 70}}, // init on gpu1
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 3000, Usedcores: 30}}, // app on gpu0
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 40},
+				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 7000, Usedcores: 70},
+			},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
 }
