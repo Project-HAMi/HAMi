@@ -16,11 +16,11 @@ labels: kind/bug
 
 **Anything else we need to know?**:
 
-Please include the following information when it is relevant:
+Please include the following information:
 
 - The Pod manifest, or at least its accelerator resource requests and limits
 - Pod events and relevant accelerator-related node annotations
-- Output from the vendor's diagnostic tool (for example, `nvidia-smi -a` for NVIDIA devices)
+- Output from the vendor's diagnostic tool, when available (for example, `nvidia-smi -a` for NVIDIA devices)
 - Your container runtime configuration (for example, `/etc/docker/daemon.json` or the relevant containerd configuration)
 - Logs from the device plugin for the affected accelerator
 - The hami-scheduler logs
@@ -36,6 +36,6 @@ Please include the following information when it is relevant:
 - HAMi device backend and requested resource names (for example, `nvidia.com/gpu`):
 - Accelerator driver and runtime version:
 - Container runtime and version:
-- Workload image and tag:
+- Workload image and tag (redact private image names and state when redacted):
 - Operating system and kernel version (for example, the output of `uname -a`):
 - Others:
