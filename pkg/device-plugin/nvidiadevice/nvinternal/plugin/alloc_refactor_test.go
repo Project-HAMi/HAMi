@@ -470,6 +470,7 @@ func TestAllocate_MultiContainer_CUDA_DISABLE_CONTROL_FirstContainer(t *testing.
 		"container 1 should have ld.so.preload mounted")
 }
 
+
 func TestAllocate_WholeGPU_AutoSets_CUDA_DISABLE_CONTROL(t *testing.T) {
 	setupInRequestDevices(t)
 	plugin := newTestPlugin(t)
@@ -480,7 +481,7 @@ func TestAllocate_WholeGPU_AutoSets_CUDA_DISABLE_CONTROL(t *testing.T) {
 			Namespace: "default",
 			UID:       "pod-uid",
 			Annotations: map[string]string{
-				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,0:;",
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,100:;",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -518,7 +519,7 @@ func TestAllocate_WholeGPU_Explicit_False_Preserves_Mount(t *testing.T) {
 			Namespace: "default",
 			UID:       "pod-uid",
 			Annotations: map[string]string{
-				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,0:;",
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,100:;",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -558,7 +559,7 @@ func TestAllocate_WholeGPU_MultiDevice_NonZeroSMOnSecondDevice(t *testing.T) {
 			Namespace: "default",
 			UID:       "pod-uid",
 			Annotations: map[string]string{
-				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,0:GPU-bbb,NVIDIA,0,50:;",
+				"hami.io/vgpu-devices-to-allocate": "GPU-aaa,NVIDIA,0,100:GPU-bbb,NVIDIA,0,50:;",
 			},
 		},
 		Spec: corev1.PodSpec{

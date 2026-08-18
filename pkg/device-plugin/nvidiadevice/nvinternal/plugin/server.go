@@ -824,7 +824,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				for i, dev := range devreq {
 					limitKey := fmt.Sprintf("CUDA_DEVICE_MEMORY_LIMIT_%v", i)
 					response.Envs[limitKey] = fmt.Sprintf("%vm", dev.Usedmem)
-					if dev.Usedmem != 0 || dev.Usedcores != 0 {
+					if dev.Usedcores != 100 {
 						isWholeGPU = false
 					}
 				}
