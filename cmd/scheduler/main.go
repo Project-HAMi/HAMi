@@ -110,8 +110,11 @@ func injectProfilingRoute(router *httprouter.Router) {
 }
 
 func start() error {
-	// Initialize node lock timeout from config
-	nodelock.NodeLockTimeout = config.NodeLockTimeout
+	// Only override the environment-derived value when the flag was explicitly
+	// set, so HAMI_NODELOCK_EXPIRE isn't clobbered by the flag's default.
+	if rootCmd.Flags().Changed("node-lock-timeout") {
+		nodelock.NodeLockTimeout = config.NodeLockTimeout
+	}
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
 	client.InitGlobalClient(
 		client.WithBurst(config.Burst),
