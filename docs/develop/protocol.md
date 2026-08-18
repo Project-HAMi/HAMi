@@ -75,8 +75,10 @@ hami.io/vgpu-time: 1705054796
 
 To prevent race conditions during concurrent pod scheduling, HAMi employs an annotation-based node locking mechanism (`hami.io/mutex.lock`).
 
-During the `Bind` phase, the scheduler acquires this lock on the target node before proceeding with device allocation. It is critical to understand the separation of concerns:
-- **Annotation Lock:** The `hami.io/mutex.lock` annotation acts strictly as a concurrency mutex.
+Note that device allocation is actually decided in the `Filter` phase, not `Bind`. The lock is used to cover the critical window between the `Bind` phase and the device plugin's allocate phase. 
+
+It is critical to understand the separation of concerns:
+- **Annotation Lock:** The `hami.io/mutex.lock` annotation acts strictly as a concurrency mutex. The lock value is formatted as `<time.RFC3339>,<podNamespace>,<podName>` (e.g., `2024-01-23T04:30:00Z,default,my-pod`). By default, it expires after 5 minutes, though this can be overridden via the `HAMI_NODELOCK_EXPIRE` environment variable. The lock is released by the device plugin upon successful allocation, or by the scheduler if binding fails.
 - **Device Accounting:** The actual accounting of GPU resources (memory, cores) is tracked independently.
 
-If a binding fails, releasing the lock (e.g., via a `fail()` fallback mechanism) **only removes the annotation lock**. It does not automatically revert or touch the underlying device accounting. Therefore, a prematurely released lock during an API error does not inherently cause hardware oversubscription, as the accounting state remains untouched. The device plugin is responsible for consuming this lock during pod creation to safely instantiate the required environment variables and mounts.
+If a binding fails, releasing the lock **only removes the annotation lock**. It does not automatically revert or touch the underlying device accounting state. The device plugin is responsible for consuming this lock during pod creation to safely instantiate the required environment variables and mounts.
