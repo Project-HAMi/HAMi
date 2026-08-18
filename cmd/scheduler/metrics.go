@@ -306,8 +306,10 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
 				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
-				klog.V(4).Infof("Failed to send quotaLimitDesc metric: %v", err)
+			if q.LimitSet {
+				if err := sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
+					klog.V(4).Infof("Failed to send quotaLimitDesc metric: %v", err)
+				}
 			}
 			if legacy {
 				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))

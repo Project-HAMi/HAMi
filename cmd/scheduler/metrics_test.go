@@ -487,3 +487,39 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 		}
 	})
 }
+
+func TestClusterManagerCollectorQuotaUnconfiguredLimit(t *testing.T) {
+	const (
+		ns      = "team-b"
+		memName = "nvidia.com/gpumem"
+	)
+
+	unconfQm := device.NewQuotaManager()
+	unconfQm.Quotas[ns] = &device.DeviceQuota{
+		memName: &device.Quota{Used: 1024, Limit: 0, LimitSet: false},
+	}
+	t.Cleanup(func() { delete(unconfQm.Quotas, ns) })
+
+	unconfProvider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: unconfQm,
+		podManager:   device.NewPodManager(),
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  &ClusterManager{LegacyMetrics: false},
+		metricsProvider: unconfProvider,
+	}
+	want := `
+# HELP hami_resource_quota_used resourcequota usage for a certain device
+# TYPE hami_resource_quota_used gauge
+hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpumem"} 1024
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_resource_quota_used",
+		"hami_resource_quota_limit",
+	); err != nil {
+		t.Fatalf("unexpected unconfigured limit collecting result:\n%s", err)
+	}
+}
