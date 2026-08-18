@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -521,17 +522,38 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "nvidia device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[resourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[resourceMem]
 			}
 			if ok {
+				// Negative quantities such as -1m return ok=false from AsInt64, so reject by sign first.
+				if mem.Sign() < 0 {
+					klog.ErrorS(nil, "nvidia device memory request is negative", "container", ctr.Name, "request", mem.String())
+					return device.ContainerDeviceRequest{}
+				}
 				memnums, ok := mem.AsInt64()
 				if ok {
+					// nvidia memory is in MB, so an over-int32 value such as a byte quantity 16Gi is a wrong-unit mistake.
+					if memnums > math.MaxInt32 {
+						klog.ErrorS(nil, "nvidia device memory request is out of range; memory unit is treated as MB not Byte, so a quantity such as 16Gi is invalid, request 16384 for 16GB instead",
+							"container", ctr.Name, "request", mem.String())
+						return device.ContainerDeviceRequest{}
+					}
 					if dev.config.MemoryFactor > 1 {
 						rawMemnums := memnums
+						// memnums is bounded by math.MaxInt32 and MemoryFactor is int32, so this product cannot overflow int64.
 						memnums = memnums * int64(dev.config.MemoryFactor)
+						if memnums > math.MaxInt32 {
+							klog.ErrorS(nil, "nvidia device memory request overflows int32 after applying memory factor",
+								"container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", dev.config.MemoryFactor)
+							return device.ContainerDeviceRequest{}
+						}
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
 					}
 					memnum = int(memnums)
@@ -573,6 +595,10 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			if ok {
 				corenums, ok := core.AsInt64()
 				if ok {
+					if corenums < 0 || corenums > math.MaxInt32 {
+						klog.ErrorS(nil, "nvidia device core request is out of range", "container", ctr.Name, "request", core.String())
+						return device.ContainerDeviceRequest{}
+					}
 					corenum = int32(corenums)
 				}
 			}

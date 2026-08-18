@@ -1915,6 +1915,128 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 	assert.Equal(t, result.Memreq, int32(2048))
 }
 
+// Test_GenerateResourceRequests_OutOfRangeValues checks that out-of-range values are rejected, not silently wrapped.
+func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 1,
+	}
+	dev := InitNvidiaDevice(config)
+
+	tests := []struct {
+		name string
+		ctr  *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			// 16Gi in bytes wraps to 0 when narrowed to int32; nvidia memory is counted in MB.
+			name: "memory requested in bytes exceeds int32 range",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// -1m makes AsInt64 return ok=false, so it must be rejected by sign, not defaulted.
+			name: "negative fractional memory request",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": resource.MustParse("-1m"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// A plain whole -100 passes AsInt64 (ok=true), so it must be rejected by sign before the int32 narrowing.
+			name: "negative whole memory request",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpumem": *resource.NewQuantity(-100, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized device count exceeds int32 range",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(2200000000, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative core request",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized core request exceeds int32 range",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(2200000000, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := dev.GenerateResourceRequests(tt.ctr)
+			assert.DeepEqual(t, result, tt.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a value that fits int32 but overflows after MemoryFactor.
+func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+		MemoryFactor:                 10,
+	}
+	dev := InitNvidiaDevice(config)
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				// 300000000 fits int32 but 300000000*10 overflows it.
+				"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/gpumem": *resource.NewQuantity(300000000, resource.DecimalSI),
+			},
+		},
+	}
+	result := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
+}
+
 func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
