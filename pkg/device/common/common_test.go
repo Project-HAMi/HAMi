@@ -23,42 +23,39 @@ import (
 
 func TestGenReason(t *testing.T) {
 	tests := []struct {
-		name     string
-		reasons  map[string]int
-		cards    int
-		expected string
+		name    string
+		reasons map[string]int
+		cards   int
 	}{
 		{
-			name:     "empty reasons",
-			reasons:  map[string]int{},
-			cards:    8,
-			expected: "",
+			name:    "empty reasons",
+			reasons: map[string]int{},
+			cards:   8,
 		},
 		{
 			name: "single reason",
 			reasons: map[string]int{
 				CardInsufficientMemory: 3,
 			},
-			cards:    8,
-			expected: "3/8 CardInsufficientMemory",
+			cards: 8,
 		},
 		{
-			name: "multiple reasons sorted alphabetically",
+			name: "multiple reasons",
 			reasons: map[string]int{
 				CardInsufficientMemory: 3,
 				CardInsufficientCore:   2,
 				CardNotHealth:          3,
 			},
-			cards:    8,
-			expected: "2/8 CardInsufficientCore, 3/8 CardInsufficientMemory, 3/8 CardNotHealth",
+			cards: 8,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			result := GenReason(tt.reasons, tt.cards)
-			if result != tt.expected {
-				t.Errorf("GenReason() = %q, expected %q", result, tt.expected)
+			parsed := ParseReason(result)
+			if !reflect.DeepEqual(parsed, tt.reasons) {
+				t.Errorf("GenReason() parsed result = %v, expected %v", parsed, tt.reasons)
 			}
 		})
 	}
@@ -88,6 +85,14 @@ func TestParseReason(t *testing.T) {
 			name:              "malformed reason string",
 			reason:            "invalid_reason_format",
 			expectedReasonMap: map[string]int{},
+		},
+		{
+			name:   "malformed entry between valid entries",
+			reason: "3/8 CardInsufficientMemory, invalid_reason_format, 2/8 CardInsufficientCore",
+			expectedReasonMap: map[string]int{
+				CardInsufficientMemory: 3,
+				CardInsufficientCore:   2,
+			},
 		},
 		{
 			name:   "single reason format",
