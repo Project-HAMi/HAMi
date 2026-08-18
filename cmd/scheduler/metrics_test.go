@@ -438,6 +438,10 @@ func TestClusterManagerCollectorQuotaMetrics(t *testing.T) {
 			metricsProvider: provider,
 		}
 		want := `
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
 # HELP hami_resource_quota_used resourcequota usage for a certain device
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
@@ -447,6 +451,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			collector,
 			strings.NewReader(want),
 			"hami_resource_quota_used",
+			"hami_resource_quota_limit",
 		); err != nil {
 			t.Fatalf("unexpected non-legacy collecting result:\n%s", err)
 		}
@@ -462,6 +467,10 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 # TYPE QuotaUsed gauge
 QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
 QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
 # HELP hami_resource_quota_used resourcequota usage for a certain device
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
@@ -471,6 +480,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			collector,
 			strings.NewReader(want),
 			"hami_resource_quota_used",
+			"hami_resource_quota_limit",
 			"QuotaUsed",
 		); err != nil {
 			t.Fatalf("unexpected legacy collecting result:\n%s", err)
