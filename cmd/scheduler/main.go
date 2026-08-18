@@ -54,7 +54,7 @@ var (
 		Short: "kubernetes vgpu scheduler",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			return start()
+			return start(cmd.Flags().Changed("node-lock-timeout"))
 		},
 	}
 )
@@ -109,9 +109,18 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
-func start() error {
-	// Initialize node lock timeout from config
-	nodelock.NodeLockTimeout = config.NodeLockTimeout
+// applyNodeLockTimeout applies the flag only when it was set explicitly, so it
+// does not overwrite the value nodelock's init took from HAMI_NODELOCK_EXPIRE.
+func applyNodeLockTimeout(flagSet bool) {
+	if flagSet {
+		nodelock.NodeLockTimeout = config.NodeLockTimeout
+		return
+	}
+	config.NodeLockTimeout = nodelock.NodeLockTimeout
+}
+
+func start(nodeLockTimeoutFlagSet bool) error {
+	applyNodeLockTimeout(nodeLockTimeoutFlagSet)
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
 	client.InitGlobalClient(
 		client.WithBurst(config.Burst),
