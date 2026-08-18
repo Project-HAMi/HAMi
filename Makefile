@@ -94,9 +94,10 @@ lint_chart:
       echo "chart trivy check: pass"
 
 .PHONY: verify_chart
-verify_chart: lint_chart
+verify_chart:
 	$(MAKE) -C charts validate
 	bash ./hack/verify-chart-version.sh
+	$(MAKE) lint_chart
 
 .PHONY: e2e-env-setup
 e2e-env-setup:

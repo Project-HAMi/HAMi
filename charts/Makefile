@@ -6,14 +6,13 @@ VERSION_REGEX := '[vV]*[0-9]\+\.[0-9]\+\.[0-9]\+.*'
 CHART_FILE := "./hami/Chart.yaml"
 VALUES_FILE := "./hami/values.yaml"
 
-.PHONY: all lint update-versions deps validate
+.PHONY: all lint update-versions deps validate clean
 all: update-versions deps lint package
 
 # Validate the committed chart without updating release versions.
 validate:
-	helm dependency build ./hami
-	helm lint --with-subcharts --values ./hami/values.yaml ./hami --debug
-	helm template hami ./hami --values ./hami/values.yaml > /dev/null
+	helm lint --with-subcharts ./hami --debug
+	helm template hami ./hami > /dev/null
 
 #update version in chart
 update-versions:
