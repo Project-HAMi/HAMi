@@ -1,7 +1,10 @@
 cyphar.com/go-pathrs v0.2.4 h1:iD/mge36swa1UFKdINkr1Frkpp6wZsy3YYEildj9cLY=
 cyphar.com/go-pathrs v0.2.4/go.mod h1:y8f1EMG7r+hCuFf/rXsKqMJrJAUoADZGNh5/vZPKcGc=
+cyphar.com/go-pathrs v0.2.5 h1:SnX9FBvnoyn3lUs1dkMgZ52bAETpirNu3FTRh5HlRik=
 github.com/Masterminds/semver/v3 v3.4.0 h1:Zog+i5UMtVoCU8oKka5P7i9q9HgrJeGzI9SA1Xbatp0=
 github.com/Masterminds/semver/v3 v3.4.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
+github.com/Masterminds/semver/v3 v3.5.0 h1:kQceYJfbupGfZOKZQg0kou0DgAKhzDg2NZPAwZ/2OOE=
+github.com/Masterminds/semver/v3 v3.5.0/go.mod h1:4V+yj/TJE1HU9XfppCwVMZq3I84lprf4nC11bSS5beM=
 github.com/NVIDIA/go-gpuallocator v0.6.0 h1:2PA2swx59gJYREPkZNTGtyCP6Pnz3WEgnYsXlRkyvkk=
 github.com/NVIDIA/go-gpuallocator v0.6.0/go.mod h1:c+Yspg+/QxWOmoSQeuI48Z/7nS+mMPtxyj1NYUTwewY=
 github.com/NVIDIA/go-nvlib v0.12.0 h1:LICVlUGlDnpbwQv64rOZQn11xQae1J+c+dvH9CCi7jc=
@@ -12,6 +15,8 @@ github.com/NVIDIA/k8s-device-plugin v0.19.3 h1:NE1ecj9oG/4MQfySHlPVW9EHtq7FqtL06
 github.com/NVIDIA/k8s-device-plugin v0.19.3/go.mod h1:4yIt26x7Jg3N/ISKDVAb21IUI/FdELpuNSVJccqrS3U=
 github.com/NVIDIA/nvidia-container-toolkit v1.19.1 h1:1sV4ddFrBccqL9Lbzcdu50w2j5FhyNJpN5hXTfCsjps=
 github.com/NVIDIA/nvidia-container-toolkit v1.19.1/go.mod h1:yGsZ4s2lMjfE4r8/DMUPVpaFhRGkWvo2H++/Dy84nVc=
+github.com/NVIDIA/nvidia-container-toolkit v1.20.0 h1:RMOgXeDM7CdPOOLc18NCTitArQFqT2NUgUBB34JijDg=
+github.com/NVIDIA/nvidia-container-toolkit v1.20.0/go.mod h1:6otYPfCJdFX96mpi3WV58tyhjvwitYwVytHIifKbdcA=
 github.com/beorn7/perks v1.0.1 h1:VlbKKnNfV8bJzeqoa4cOKqO6bYr3WgKZxO8Z16+hsOM=
 github.com/beorn7/perks v1.0.1/go.mod h1:G2ZrVWU2WbWT9wwq4/hrbKbnv/1ERSJQ0ibhJ6rlkpw=
 github.com/blang/semver/v4 v4.0.0 h1:1PFHFE6yCCTv8C1TeyNNarDzntLi7wMI5i/pzqYIsAM=
@@ -25,6 +30,7 @@ github.com/cpuguy83/go-md2man/v2 v2.0.7 h1:zbFlGlXEAKlwXpmvle3d8Oe3YnkKIK4xSRTd3
 github.com/cpuguy83/go-md2man/v2 v2.0.7/go.mod h1:oOW0eioCTA6cOiMLiUPZOpcVxMig6NIQQ7OS05n1F4g=
 github.com/cyphar/filepath-securejoin v0.6.1 h1:5CeZ1jPXEiYt3+Z6zqprSAgSWiggmpVyciv8syjIpVE=
 github.com/cyphar/filepath-securejoin v0.6.1/go.mod h1:A8hd4EnAeyujCJRrICiOWqjS1AX0a9kM5XL+NwKoYSc=
+github.com/cyphar/filepath-securejoin v0.7.0 h1:s0Y3ITPy6sQn5xt54DuYvTF8hu134ooYLUb58DX/HjE=
 github.com/davecgh/go-spew v1.1.0/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSsI+c5H38=
 github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc h1:U9qPSI2PIWSS1VwoXQT9A3Wy9MM3WgvqSxFWenqJduM=
@@ -118,6 +124,8 @@ github.com/onsi/gomega v1.42.1 h1:iN1rCUX+44NZ1Dc97MPoeFYbFR0vh8zxoxMFwKdyZ6I=
 github.com/onsi/gomega v1.42.1/go.mod h1:REff/hsDsodHoKlWsP2mAPhu1+5/6hVYNf9rIEBpeSg=
 github.com/opencontainers/cgroups v0.0.6 h1:tfZFWTIIGaUUFImTyuTg+Mr5x8XRiSdZESgEBW7UxuI=
 github.com/opencontainers/cgroups v0.0.6/go.mod h1:oWVzJsKK0gG9SCRBfTpnn16WcGEqDI8PAcpMGbqWxcs=
+github.com/opencontainers/cgroups v0.0.7 h1:FqhggFhigAMgKKwy39jweWX3h7Ha6VBF/qNR6Sso3oc=
+github.com/opencontainers/cgroups v0.0.7/go.mod h1:hPBRvnBhLZueEN0eJyozMeM3HeFGYlZW9KnO//px6G4=
 github.com/opencontainers/runc v1.4.3 h1:/bq84roxG30xEICkFodXzMEVQFs7kzo4lCiZME1uKxI=
 github.com/opencontainers/runc v1.4.3/go.mod h1:ufk5PTTsy5pnGBAvTh50e+eqGk01pYH2YcVxh557Qlk=
 github.com/opencontainers/runtime-spec v1.3.0 h1:YZupQUdctfhpZy3TM39nN9Ika5CBWT5diQ8ibYCRkxg=

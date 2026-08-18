@@ -7,7 +7,7 @@ require (
 	github.com/NVIDIA/go-nvlib v0.12.0
 	github.com/NVIDIA/go-nvml v0.13.3-1
 	github.com/NVIDIA/k8s-device-plugin v0.19.3
-	github.com/NVIDIA/nvidia-container-toolkit v1.19.1
+	github.com/NVIDIA/nvidia-container-toolkit v1.20.0
 	github.com/ccoveille/go-safecast/v2 v2.0.1
 	github.com/fsnotify/fsnotify v1.10.1
 	github.com/google/uuid v1.6.0
@@ -39,7 +39,7 @@ require (
 )
 
 require (
-	github.com/Masterminds/semver/v3 v3.4.0 // indirect
+	github.com/Masterminds/semver/v3 v3.5.0 // indirect
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/cpuguy83/go-md2man/v2 v2.0.7 // indirect
@@ -64,7 +64,7 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.3-0.20250322232337-35a7c28c31ee // indirect
 	github.com/munnerz/goautoneg v0.0.0-20191010083416-a7dc8b61c822 // indirect
-	github.com/opencontainers/cgroups v0.0.6 // indirect
+	github.com/opencontainers/cgroups v0.0.7 // indirect
 	github.com/opencontainers/runc v1.4.3 // indirect
 	github.com/opencontainers/runtime-spec v1.3.0 // indirect
 	github.com/opencontainers/runtime-tools v0.9.1-0.20251114084447-edf4cb3d2116 // indirect
