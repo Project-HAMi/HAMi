@@ -622,10 +622,12 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
 
 	var annotatedRequests device.PodSingleDevice
+	var pendingPod *corev1.Pod
 	nodename := os.Getenv(util.NodeNameEnvName)
 	if nodename != "" {
 		current, err := getPendingPod(ctx, nodename)
 		if err == nil && current != nil {
+			pendingPod = current
 			if podRequests, decodeErr := device.DecodePodDevices(device.InRequestDevices, current.Annotations); decodeErr == nil {
 				annotatedRequests = podRequests[nvidia.NvidiaGPUDevice]
 			}
@@ -652,10 +654,39 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 				})
 			} else {
 				klog.Warningf("err: %v", err)
+				plugin.reportAnnotatedDeviceMismatch(pendingPod, idx, err)
 			}
 		}
 	}
 	return response, nil
+}
+
+// errAnnotatedDeviceUnavailable indicates kubelet's available device set
+// contains no replica of a scheduler-annotated GPU, typically because the
+// Topology Manager restricted the allocation to a different NUMA node.
+var errAnnotatedDeviceUnavailable = errors.New("no available slice device found for annotated GPU")
+
+// reportAnnotatedDeviceMismatch surfaces an annotated-GPU mismatch for Pods
+// that opt into NUMA alignment via the hami.io/numa-alignment annotation.
+// Detection only: the preferred allocation response is left unchanged, so
+// kubelet still falls back to its own device selection. The NUMA refit that
+// acts on this condition is tracked in issue #2080.
+func (plugin *NvidiaDevicePlugin) reportAnnotatedDeviceMismatch(pod *corev1.Pod, containerRequest int, err error) {
+	if pod == nil || plugin.operatingMode == nvidia.MigMode || !errors.Is(err, errAnnotatedDeviceUnavailable) {
+		return
+	}
+
+	mode, parseErr := util.GetNumaAlignmentModeByPod(pod)
+	if parseErr != nil {
+		klog.Warningf("ignoring invalid numa-alignment annotation on pod %s/%s: %v", pod.Namespace, pod.Name, parseErr)
+		return
+	}
+	if mode == util.NumaAlignmentNone {
+		return
+	}
+
+	klog.InfoS("scheduler-annotated GPU has no replica in kubelet's available devices; NUMA refit is not implemented yet, so kubelet will select a device on its own",
+		"err", err, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
 }
 
 func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(available, required []string, desired device.ContainerDevices, allocationSize int) ([]string, error) {
@@ -689,13 +720,17 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 		}
 		candidates := availableByPhysical[physicalID]
 		if len(candidates) == 0 {
-			return nil, fmt.Errorf("no available slice device found for annotated GPU %s", physicalID)
+			return nil, fmt.Errorf("%w %s", errAnnotatedDeviceUnavailable, physicalID)
 		}
 		selected = append(selected, candidates[0])
 		availableByPhysical[physicalID] = candidates[1:]
 	}
 
 	if len(selected) != allocationSize {
+		// This can also indicate kubelet-vs-scheduler divergence, for
+		// example MustIncludeDeviceIDs carrying replicas of a GPU the
+		// scheduler never annotated. Classifying that case is deferred to
+		// the NUMA refit (issue #2080).
 		return nil, fmt.Errorf("preferred allocation selected %d devices, want %d", len(selected), allocationSize)
 	}
 
