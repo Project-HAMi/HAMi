@@ -1211,7 +1211,14 @@ func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 	)
 	client.KubeClient = clientSet
 
-	podBStarted := make(chan struct{})
+	podBAtMutex := make(chan struct{})
+	beforeLockNodeMutexHook = func(n string, p *corev1.Pod) {
+		if p != nil && p.Name == podB.Name {
+			close(podBAtMutex)
+		}
+	}
+	t.Cleanup(func() { beforeLockNodeMutexHook = nil })
+
 	podBResult := make(chan error, 1)
 
 	// Intercept the first patch (ReleaseNodeLock during Pod A's recovery)
@@ -1220,14 +1227,14 @@ func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 	clientSet.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
 		patchCount++
 		if patchCount == 1 {
-			// Pod A is releasing the expired lock. Launch Pod B's LockNode concurrently.
+			// Pod A is releasing the expired lock while holding the per-node mutex.
+			// Launch Pod B's LockNode concurrently.
 			go func() {
-				close(podBStarted)
 				podBResult <- LockNode(nodeName, "", podB)
 			}()
-			// Wait for Pod B goroutine to have launched
-			<-podBStarted
-			// Ensure Pod B is waiting on the per-node mutex and has not returned
+			// Wait until Pod B has actually reached the per-node mutex boundary.
+			<-podBAtMutex
+			// Ensure Pod B is waiting on the per-node mutex and has not returned.
 			select {
 			case res := <-podBResult:
 				t.Errorf("Pod B should not complete while Pod A holds the per-node lock, got: %v", res)
@@ -1260,5 +1267,65 @@ func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 	ownerA := NodeLockSep + GeneratePodNamespaceName(podA, NodeLockSep)
 	if !strings.HasSuffix(lockStr, ownerA) {
 		t.Fatalf("expected node lock to belong to Pod A (%s), got: %s", ownerA, lockStr)
+	}
+}
+
+// TestLockNodeNilPodWithExpiredLock verifies that LockNode fails immediately
+// when called with a nil pod, without releasing or mutating existing node locks.
+func TestLockNodeNilPodWithExpiredLock(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "nil-pod-expired-node"
+
+	expiredLockTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
+	expiredLockValue := expiredLockTime + NodeLockSep + "old-ns" + NodeLockSep + "old-pod"
+
+	clientSet := fake.NewClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: expiredLockValue,
+			},
+		},
+	})
+	client.KubeClient = clientSet
+
+	err := LockNode(nodeName, "", nil)
+	if err == nil {
+		t.Fatal("expected LockNode(..., nil) to fail, got nil")
+	}
+	expectedErrMsg := "cannot lock node: pod is nil"
+	if err.Error() != expectedErrMsg {
+		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
+	}
+
+	// Verify the existing node lock was NOT removed or mutated
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != expiredLockValue {
+		t.Fatalf("expected node lock annotation to remain %q, got %q", expiredLockValue, got)
+	}
+}
+
+// TestSetNodeLockNilPod verifies that SetNodeLock fails immediately when called with a nil pod.
+func TestSetNodeLockNilPod(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "nil-pod-set-node"
+
+	clientSet := fake.NewClientset(&corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+		},
+	})
+	client.KubeClient = clientSet
+
+	err := SetNodeLock(nodeName, "", nil)
+	if err == nil {
+		t.Fatal("expected SetNodeLock(..., nil) to fail, got nil")
+	}
+	expectedErrMsg := "cannot set node lock: pod is nil"
+	if err.Error() != expectedErrMsg {
+		t.Fatalf("expected error %q, got %q", expectedErrMsg, err.Error())
 	}
 }

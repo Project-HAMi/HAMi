@@ -61,6 +61,9 @@ var (
 		Factor:   2.0,
 		Jitter:   0.5,
 	}
+
+	// beforeLockNodeMutexHook is an optional test hook called right before acquiring the per-node mutex in LockNode.
+	beforeLockNodeMutexHook func(nodeName string, pods *corev1.Pod)
 )
 
 // nodeLockManager manages locks on a per-node basis to allow concurrent
@@ -127,6 +130,9 @@ func setupNodeLockTimeout() {
 }
 
 func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
+	if pods == nil {
+		return fmt.Errorf("cannot set node lock: pod is nil")
+	}
 	// Acquire per-node lock instead of global lock
 	nodeLock := nodeLocks.getLock(nodeName)
 	nodeLock.Lock()
@@ -247,6 +253,12 @@ func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, sk
 }
 
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
+	if pods == nil {
+		return fmt.Errorf("cannot lock node: pod is nil")
+	}
+	if beforeLockNodeMutexHook != nil {
+		beforeLockNodeMutexHook(nodeName, pods)
+	}
 	// Acquire per-node lock instead of global lock
 	nodeLock := nodeLocks.getLock(nodeName)
 	nodeLock.Lock()
@@ -269,7 +281,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
 		skipOwnerCheck = true
-	} else if pods != nil && ns == pods.Namespace && previousPodName == pods.Name {
+	} else if ns == pods.Namespace && previousPodName == pods.Name {
 		// The lock is already held by this exact pod. lockAllDevices calls
 		// LockNode once per device vendor a pod requests resources from, so
 		// a pod requesting resources from two or more vendors (e.g. both
