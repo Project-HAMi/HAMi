@@ -95,6 +95,7 @@ resolve_target_gpu "$multi_inventory" GPU-0004 4
 assert_eq GPU-0004 "$RESOLVED_TARGET_GPU_UUID" "matching dual selector"
 expect_failure resolve_target_gpu "$multi_inventory" GPU-0004 5
 expect_failure resolve_target_gpu "$multi_inventory" GPU-dead ""
+expect_failure resolve_target_gpu "$multi_inventory" GPU-nothex ""
 expect_failure resolve_target_gpu "$multi_inventory" "" 04
 
 full_listing=$(cat <<'EOF'
@@ -116,7 +117,7 @@ selected_listing=$(extract_target_gpu_listing "$full_listing" GPU-0004)
 assert_eq "$expected_listing" "$selected_listing" "target nvidia-smi listing"
 expect_failure extract_target_gpu_listing "$full_listing" GPU-dead
 
-preset_output=$(bash "$SCRIPT" --print-preset)
+preset_output=$(env -u MIG_E2E_PRESET bash "$SCRIPT" --print-preset)
 assert_output_line "$preset_output" 'preset=a100-40gb'
 assert_output_line "$preset_output" 'small_profile=1g.5gb'
 assert_output_line "$preset_output" 'small_memory_mib=4500'
@@ -155,5 +156,20 @@ expect_failure assert_runtime_annotation dry-run-pod 2g.48gb
 TARGET_GPU_UUID=GPU-0005
 expect_failure assert_runtime_annotation dry-run-pod 1g.24gb
 unset -f kubectl
+
+device_plugin_pod() {
+  printf '%s\n' device-plugin-pod
+}
+kubectl() {
+  printf '%s\n' "$MOCK_RESTART_LOG"
+}
+TARGET_GPU_INDEX=4
+MOCK_RESTART_LOG='mig init: resolved startup layout inUseGPUs=[4] resetGPUs=[0 1]'
+assert_restart_log_target
+MOCK_RESTART_LOG='"mig init: resolved startup layout" inUseGPUs="[4]" resetGPUs="[0 1]"'
+assert_restart_log_target
+MOCK_RESTART_LOG='mig init: resolved startup layout inUseGPUs=[3] resetGPUs=[0 1]'
+expect_failure assert_restart_log_target
+unset -f kubectl device_plugin_pod
 
 echo "PASS: hami-mig-e2e preset, target-selection, and manifest helpers"

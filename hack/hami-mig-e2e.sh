@@ -65,7 +65,6 @@ load_preset() {
       LARGE_PROFILE=3g.20gb
       LARGE_MEMORY=19000
       SMALL_CAPACITY=7
-      CASE_SET=a100-40gb
       ;;
     rtx-pro-6000)
       PRESET_NAME=rtx-pro-6000
@@ -77,7 +76,6 @@ load_preset() {
       LARGE_PROFILE=4g.96gb
       LARGE_MEMORY=60000
       SMALL_CAPACITY=4
-      CASE_SET=rtx-pro-6000
       ;;
     *)
       fail "unknown MIG_E2E_PRESET ${preset}; expected a100-40gb or rtx-pro-6000"
@@ -505,9 +503,12 @@ assert_pending_unbound() {
 }
 
 assert_restart_log_target() {
-  kubectl logs -n "$HAMI_NS" "$(device_plugin_pod)" -c "$DEVICE_PLUGIN_CONTAINER" --since=3m |
-    grep -F "inUseGPUs=[${TARGET_GPU_INDEX}]" >/dev/null ||
+  local logs
+  logs=$(kubectl logs -n "$HAMI_NS" "$(device_plugin_pod)" -c "$DEVICE_PLUGIN_CONTAINER" --since=3m)
+  if ! grep -Fq "inUseGPUs=[${TARGET_GPU_INDEX}]" <<<"$logs" &&
+    ! grep -Fq "inUseGPUs=\"[${TARGET_GPU_INDEX}]\"" <<<"$logs"; then
     fail "device-plugin startup did not preserve target GPU index ${TARGET_GPU_INDEX} as the sole busy GPU"
+  fi
 }
 
 delete_pods_and_wait() {
@@ -519,10 +520,12 @@ delete_pods_and_wait() {
 }
 
 run_a100_40gb_cases() {
-  local p1 p2 p3 p4
+  local p1 p2 p3 p4 i pod refill_index reclaim_count survivor_count
   local uuid_one_a uuid_one_b uuid_two_a uuid_two_b uuid_two_c uuid_overflow
-  local uuid_three_a uuid_two_d uuid_one_d uuid_b2 uuid_b4 uuid_b6 uuid_b7
+  local uuid_three_a uuid_two_d uuid_one_d
   local progress_before_restart progress_before_reclaim progress_before_mixed_reclaim progress_before_burst_reclaim
+  local -a burst_pods=() reclaimed_pods=() survivor_pods=() survivor_uuids=()
+  local -a refill_pods=() active_pods=()
 
   log "CASE 1: two concurrent 1g plus a mixed 2g"
   create_pod one-a "$SMALL_MEMORY"
@@ -600,8 +603,7 @@ run_a100_40gb_cases() {
   echo "PASS CASE 4 replacement=${uuid_overflow}"
 
   log "reset before 3g topology"
-  kubectl delete pod -n "$NS" one-a two-a two-c overflow-one --wait=false
-  for pod in one-a two-a two-c overflow-one; do kubectl wait -n "$NS" --for=delete "pod/$pod" --timeout=120s || true; done
+  delete_pods_and_wait one-a two-a two-c overflow-one
   wait_count 0
 
   log "CASE 5: scheduler rejects topology-infeasible 1g beside 2x3g"
@@ -620,8 +622,7 @@ run_a100_40gb_cases() {
   echo "PASS CASE 5 topology rejected before Bind"
 
   log "reset before balanced topology"
-  kubectl delete pod -n "$NS" three-a three-b blocked-one --wait=false
-  for pod in three-a three-b blocked-one; do kubectl wait -n "$NS" --for=delete "pod/$pod" --timeout=120s || true; done
+  delete_pods_and_wait three-a three-b blocked-one
   wait_count 0
 
   log "CASE 6: 1x3g + 1x2g + 2x1g exact capacity, overflow, and immediate replacement"
@@ -657,31 +658,53 @@ run_a100_40gb_cases() {
   assert_uuid one-d "$uuid_one_d"
   echo "PASS CASE 6"
 
-  log "reset before seven-way burst"
-  kubectl delete pod -n "$NS" three-a two-d one-d overflow-two --wait=false
-  for pod in three-a two-d one-d overflow-two; do kubectl wait -n "$NS" --for=delete "pod/$pod" --timeout=120s || true; done
+  log "reset before full-capacity burst"
+  delete_pods_and_wait three-a two-d one-d overflow-two
   wait_count 0
 
-  log "CASE 7: seven concurrent 1g instances, partial reclaim and refill"
-  for i in $(seq 1 "$SMALL_CAPACITY"); do create_pod "burst-${i}" "$SMALL_MEMORY"; done
-  for i in $(seq 1 "$SMALL_CAPACITY"); do wait_ready "burst-${i}" & done
-  wait
+  log "CASE 7: ${SMALL_CAPACITY} concurrent 1g instances, partial reclaim and refill"
+  for i in $(seq 1 "$SMALL_CAPACITY"); do
+    pod="burst-${i}"
+    burst_pods+=("$pod")
+    create_pod "$pod" "$SMALL_MEMORY"
+  done
+  wait_ready_many "${burst_pods[@]}"
   wait_count "$SMALL_CAPACITY" 180
   [[ "$(profile_count "$SMALL_PROFILE")" == "$SMALL_CAPACITY" ]] || fail "expected ${SMALL_CAPACITY} ${SMALL_PROFILE} instances"
-  for i in $(seq 1 "$SMALL_CAPACITY"); do assert_gpu_progress "burst-${i}"; done
-  uuid_b2=$(pod_uuid burst-2); uuid_b4=$(pod_uuid burst-4); uuid_b6=$(pod_uuid burst-6); uuid_b7=$(pod_uuid burst-7)
-  progress_before_burst_reclaim=$(snapshot_gpu_progress burst-2 burst-4 burst-6 burst-7)
-  kubectl delete pod -n "$NS" burst-1 burst-3 burst-5 --wait=false
-  for i in 1 3 5; do kubectl wait -n "$NS" --for=delete "pod/burst-${i}" --timeout=120s || true; done
-  wait_count 4
-  assert_gpu_progress_since "$progress_before_burst_reclaim" burst-2 burst-4 burst-6 burst-7
-  assert_uuid burst-2 "$uuid_b2"; assert_uuid burst-4 "$uuid_b4"; assert_uuid burst-6 "$uuid_b6"; assert_uuid burst-7 "$uuid_b7"
-  for i in 8 9 10; do create_pod "burst-${i}" "$SMALL_MEMORY"; done
-  for i in 8 9 10; do wait_ready "burst-${i}" & done
-  wait
+  for pod in "${burst_pods[@]}"; do assert_gpu_progress "$pod"; done
+
+  reclaim_count=$((SMALL_CAPACITY / 2))
+  survivor_count=$((SMALL_CAPACITY - reclaim_count))
+  ((reclaim_count > 0)) || fail "SMALL_CAPACITY must allow at least one reclaim"
+  for i in $(seq 1 "$SMALL_CAPACITY"); do
+    pod="burst-${i}"
+    if ((i % 2 == 1 && ${#reclaimed_pods[@]} < reclaim_count)); then
+      reclaimed_pods+=("$pod")
+    else
+      survivor_pods+=("$pod")
+      survivor_uuids+=("$(pod_uuid "$pod")")
+    fi
+  done
+
+  progress_before_burst_reclaim=$(snapshot_gpu_progress "${survivor_pods[@]}")
+  delete_pods_and_wait "${reclaimed_pods[@]}"
+  wait_count "$survivor_count"
+  assert_gpu_progress_since "$progress_before_burst_reclaim" "${survivor_pods[@]}"
+  for i in "${!survivor_pods[@]}"; do
+    assert_uuid "${survivor_pods[$i]}" "${survivor_uuids[$i]}"
+  done
+
+  for i in $(seq 1 "$reclaim_count"); do
+    refill_index=$((SMALL_CAPACITY + i))
+    pod="burst-${refill_index}"
+    refill_pods+=("$pod")
+    create_pod "$pod" "$SMALL_MEMORY"
+  done
+  wait_ready_many "${refill_pods[@]}"
   wait_count "$SMALL_CAPACITY" 180
   [[ "$(profile_count "$SMALL_PROFILE")" == "$SMALL_CAPACITY" ]] || fail "refill did not restore ${SMALL_CAPACITY} ${SMALL_PROFILE} instances"
-  for i in 2 4 6 7 8 9 10; do assert_gpu_progress "burst-${i}"; done
+  active_pods=("${survivor_pods[@]}" "${refill_pods[@]}")
+  for pod in "${active_pods[@]}"; do assert_gpu_progress "$pod"; done
   echo "PASS CASE 7"
 }
 
@@ -818,7 +841,7 @@ run_hardware_e2e() {
   assert_multi_gpu_empty_baseline
   kubectl create namespace "$NS"
 
-  case "$CASE_SET" in
+  case "$PRESET_NAME" in
     a100-40gb) run_a100_40gb_cases ;;
     rtx-pro-6000) run_rtx_pro_6000_cases ;;
     *) fail "no scenario set for preset ${PRESET_NAME}" ;;
