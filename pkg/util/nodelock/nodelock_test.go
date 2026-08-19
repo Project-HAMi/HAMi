@@ -771,6 +771,12 @@ func TestSetNodeLockRaceIsRetryable(t *testing.T) {
 	}
 	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
 	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+	if _, err := client.KubeClient.CoreV1().Pods(podA.Namespace).Create(context.TODO(), podA, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to create podA: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Pods(podB.Namespace).Create(context.TODO(), podB, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to create podB: %v", err)
+	}
 	raceLock := nodeLocks.getLock(nodeName)
 	raceLock.Lock()
 	results := make(chan error, 2)
@@ -955,5 +961,304 @@ func TestSetupNodeLockTimeout(t *testing.T) {
 				t.Errorf("got %v, want %v", NodeLockTimeout, tt.want)
 			}
 		})
+	}
+}
+
+// TestLockNodeExpiredRecoveryRace verifies that when multiple callers concurrently
+// attempt to LockNode on an expired lock, recovery is serialized per node: exactly
+// one caller acquires the lock, the other observes contention, and the winning
+// lock is never cleared or overwritten.
+func TestLockNodeExpiredRecoveryRace(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "expired-recovery-node"
+
+	// Create node with an expired lock (10 minutes ago)
+	expiredLockTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
+	expiredLockValue := expiredLockTime + NodeLockSep + "old-ns" + NodeLockSep + "old-pod"
+
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: expiredLockValue,
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+
+	if _, err := client.KubeClient.CoreV1().Pods(podA.Namespace).Create(context.TODO(), podA, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create pod-a fixture: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Pods(podB.Namespace).Create(context.TODO(), podB, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create pod-b fixture: %v", err)
+	}
+
+	// Pre-lock to align both goroutines at LockNode entry
+	alignLock := nodeLocks.getLock(nodeName)
+	alignLock.Lock()
+
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, pod := range []*corev1.Pod{podA, podB} {
+		wg.Add(1)
+		go func(p *corev1.Pod) {
+			defer wg.Done()
+			results <- LockNode(nodeName, "", p)
+		}(pod)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	alignLock.Unlock()
+	wg.Wait()
+	close(results)
+
+	var successes, contentions int
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case IsNodeLockContention(err):
+			contentions++
+		default:
+			t.Fatalf("unexpected error from LockNode: %v", err)
+		}
+	}
+
+	if successes != 1 || contentions != 1 {
+		t.Fatalf("expected exactly 1 winner and 1 contention out of 2 concurrent expired recovery calls, got successes=%d contentions=%d", successes, contentions)
+	}
+
+	// Verify the node annotation belongs to one of the two pods and was not erased
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	lockStr, ok := node.Annotations[NodeLockKey]
+	if !ok {
+		t.Fatal("expected node lock annotation to exist, but was absent")
+	}
+
+	ownerA := NodeLockSep + GeneratePodNamespaceName(podA, NodeLockSep)
+	ownerB := NodeLockSep + GeneratePodNamespaceName(podB, NodeLockSep)
+	if !strings.HasSuffix(lockStr, ownerA) && !strings.HasSuffix(lockStr, ownerB) {
+		t.Fatalf("expected node lock to belong to pod-a or pod-b, got: %s", lockStr)
+	}
+}
+
+// TestLockNodeDanglingRecoveryRace verifies that when multiple callers concurrently
+// attempt LockNode on a dangling lock (pod deleted), recovery is serialized per node:
+// exactly one caller acquires the lock and the winning lock is preserved.
+func TestLockNodeDanglingRecoveryRace(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "dangling-recovery-node"
+
+	// Create node with a fresh lock owned by a non-existent pod
+	freshLockTime := time.Now().Format(time.RFC3339)
+	danglingLockValue := freshLockTime + NodeLockSep + "dead-ns" + NodeLockSep + "dead-pod"
+
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: danglingLockValue,
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+
+	if _, err := client.KubeClient.CoreV1().Pods(podA.Namespace).Create(context.TODO(), podA, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create pod-a fixture: %v", err)
+	}
+	if _, err := client.KubeClient.CoreV1().Pods(podB.Namespace).Create(context.TODO(), podB, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create pod-b fixture: %v", err)
+	}
+
+	alignLock := nodeLocks.getLock(nodeName)
+	alignLock.Lock()
+
+	results := make(chan error, 2)
+	var wg sync.WaitGroup
+	for _, pod := range []*corev1.Pod{podA, podB} {
+		wg.Add(1)
+		go func(p *corev1.Pod) {
+			defer wg.Done()
+			results <- LockNode(nodeName, "", p)
+		}(pod)
+	}
+
+	time.Sleep(50 * time.Millisecond)
+	alignLock.Unlock()
+	wg.Wait()
+	close(results)
+
+	var successes, contentions int
+	for err := range results {
+		switch {
+		case err == nil:
+			successes++
+		case IsNodeLockContention(err):
+			contentions++
+		default:
+			t.Fatalf("unexpected error from LockNode: %v", err)
+		}
+	}
+
+	if successes != 1 || contentions != 1 {
+		t.Fatalf("expected exactly 1 winner and 1 contention out of 2 concurrent dangling recovery calls, got successes=%d contentions=%d", successes, contentions)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	lockStr, ok := node.Annotations[NodeLockKey]
+	if !ok {
+		t.Fatal("expected node lock annotation to exist, but was absent")
+	}
+
+	ownerA := NodeLockSep + GeneratePodNamespaceName(podA, NodeLockSep)
+	ownerB := NodeLockSep + GeneratePodNamespaceName(podB, NodeLockSep)
+	if !strings.HasSuffix(lockStr, ownerA) && !strings.HasSuffix(lockStr, ownerB) {
+		t.Fatalf("expected node lock to belong to pod-a or pod-b, got: %s", lockStr)
+	}
+}
+
+// TestLockNodePreservesValidUnexpiredLock verifies that a valid unexpired lock held
+// by a live pod cannot be stolen by another caller.
+func TestLockNodePreservesValidUnexpiredLock(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "valid-lock-node"
+
+	livePod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "live-pod", Namespace: "live-ns"}}
+	if _, err := client.KubeClient.CoreV1().Pods(livePod.Namespace).Create(context.TODO(), livePod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create live pod: %v", err)
+	}
+
+	freshLockTime := time.Now().Format(time.RFC3339)
+	lockValue := freshLockTime + NodeLockSep + livePod.Namespace + NodeLockSep + livePod.Name
+
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				NodeLockKey: lockValue,
+			},
+		},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create node: %v", err)
+	}
+
+	callerPod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "caller-pod", Namespace: "other-ns"}}
+	if _, err := client.KubeClient.CoreV1().Pods(callerPod.Namespace).Create(context.TODO(), callerPod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("failed to create caller-pod fixture: %v", err)
+	}
+
+	err = LockNode(nodeName, "", callerPod)
+	if err == nil {
+		t.Fatal("expected LockNode to fail on valid unexpired lock, but succeeded")
+	}
+	if !IsNodeLockContention(err) {
+		t.Fatalf("expected ErrNodeLockContention, got: %v", err)
+	}
+
+	node, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != lockValue {
+		t.Fatalf("expected node lock to remain %q, got %q", lockValue, got)
+	}
+}
+
+// TestLockNodeDeterministicExpiredRecoverySerialization uses controlled synchronization
+// to prove that a second LockNode caller cannot interleave during another caller's
+// expired-lock recovery.
+func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "deterministic-recovery-node"
+
+	expiredLockTime := time.Now().Add(-10 * time.Minute).Format(time.RFC3339)
+	expiredLockValue := expiredLockTime + NodeLockSep + "old-ns" + NodeLockSep + "old-pod"
+
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "test-ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "test-ns"}}
+
+	clientSet := fake.NewClientset(
+		&corev1.Node{
+			ObjectMeta: metav1.ObjectMeta{
+				Name: nodeName,
+				Annotations: map[string]string{
+					NodeLockKey: expiredLockValue,
+				},
+			},
+		},
+		podA,
+		podB,
+	)
+	client.KubeClient = clientSet
+
+	podBStarted := make(chan struct{})
+	podBResult := make(chan error, 1)
+
+	// Intercept the first patch (ReleaseNodeLock during Pod A's recovery)
+	// and verify that Pod B's LockNode cannot proceed while Pod A is in recovery.
+	patchCount := 0
+	clientSet.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCount++
+		if patchCount == 1 {
+			// Pod A is releasing the expired lock. Launch Pod B's LockNode concurrently.
+			go func() {
+				close(podBStarted)
+				podBResult <- LockNode(nodeName, "", podB)
+			}()
+			// Wait for Pod B goroutine to have launched
+			<-podBStarted
+			// Ensure Pod B is waiting on the per-node mutex and has not returned
+			select {
+			case res := <-podBResult:
+				t.Errorf("Pod B should not complete while Pod A holds the per-node lock, got: %v", res)
+			default:
+				// Expected: Pod B is blocked waiting for Pod A to finish recovery
+			}
+		}
+		return false, nil, nil
+	})
+
+	if err := LockNode(nodeName, "", podA); err != nil {
+		t.Fatalf("Pod A LockNode failed: %v", err)
+	}
+
+	// Now Pod A is done and released the per-node mutex. Pod B should finish with contention.
+	err := <-podBResult
+	if err == nil {
+		t.Fatal("Pod B should have failed with contention, but succeeded")
+	}
+	if !IsNodeLockContention(err) {
+		t.Fatalf("Pod B expected ErrNodeLockContention, got: %v", err)
+	}
+
+	// Final verification: node lock is intact for Pod A
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get node: %v", err)
+	}
+	lockStr := node.Annotations[NodeLockKey]
+	ownerA := NodeLockSep + GeneratePodNamespaceName(podA, NodeLockSep)
+	if !strings.HasSuffix(lockStr, ownerA) {
+		t.Fatalf("expected node lock to belong to Pod A (%s), got: %s", ownerA, lockStr)
 	}
 }

@@ -132,6 +132,10 @@ func SetNodeLock(nodeName string, lockname string, pods *corev1.Pod) error {
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
 
+	return setNodeLockLocked(nodeName, lockname, pods)
+}
+
+func setNodeLockLocked(nodeName string, lockname string, pods *corev1.Pod) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -181,6 +185,10 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 	nodeLock.Lock()
 	defer nodeLock.Unlock()
 
+	return releaseNodeLockLocked(nodeName, lockname, pod, skipNodeLockOwnerCheck)
+}
+
+func releaseNodeLockLocked(nodeName string, lockname string, pod *corev1.Pod, skipNodeLockOwnerCheck bool) error {
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
@@ -239,13 +247,18 @@ func ReleaseNodeLock(nodeName string, lockname string, pod *corev1.Pod, skipNode
 }
 
 func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
+	// Acquire per-node lock instead of global lock
+	nodeLock := nodeLocks.getLock(nodeName)
+	nodeLock.Lock()
+	defer nodeLock.Unlock()
+
 	ctx := context.Background()
 	node, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
 	if err != nil {
 		return err
 	}
 	if _, ok := node.Annotations[NodeLockKey]; !ok {
-		return SetNodeLock(nodeName, lockname, pods)
+		return setNodeLockLocked(nodeName, lockname, pods)
 	}
 	lockTime, ns, previousPodName, err := ParseNodeLock(node.Annotations[NodeLockKey])
 	if err != nil {
@@ -256,7 +269,7 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	if time.Since(lockTime) > NodeLockTimeout {
 		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime, "timeout", NodeLockTimeout)
 		skipOwnerCheck = true
-	} else if ns == pods.Namespace && previousPodName == pods.Name {
+	} else if pods != nil && ns == pods.Namespace && previousPodName == pods.Name {
 		// The lock is already held by this exact pod. lockAllDevices calls
 		// LockNode once per device vendor a pod requests resources from, so
 		// a pod requesting resources from two or more vendors (e.g. both
@@ -265,9 +278,8 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 		// become schedulable. Treat this as already acquired.
 		klog.V(4).InfoS("Node lock already held by this pod, treating as acquired", "node", nodeName, "podName", pods.Name)
 		return nil
-	} else
-	// Check dangling nodeLock
-	if ns != "" && previousPodName != "" {
+	} else if ns != "" && previousPodName != "" {
+		// Check dangling nodeLock
 		if _, err := client.GetClient().CoreV1().Pods(ns).Get(ctx, previousPodName, metav1.GetOptions{}); err != nil {
 			if !apierrors.IsNotFound(err) {
 				klog.ErrorS(err, "Failed to get pod of NodeLock", "podName", previousPodName, "namespace", ns)
@@ -279,12 +291,12 @@ func LockNode(nodeName string, lockname string, pods *corev1.Pod) error {
 	}
 
 	if skipOwnerCheck {
-		err = ReleaseNodeLock(nodeName, lockname, pods, true)
+		err = releaseNodeLockLocked(nodeName, lockname, pods, true)
 		if err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
 		}
-		return SetNodeLock(nodeName, lockname, pods)
+		return setNodeLockLocked(nodeName, lockname, pods)
 	}
 
 	return fmt.Errorf("node %s has been locked within %v: %w", nodeName, NodeLockTimeout, ErrNodeLockContention)
