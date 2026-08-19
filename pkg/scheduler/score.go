@@ -223,6 +223,7 @@ func applyPeakUsage(node *NodeUsage, appNodeCopy *NodeUsage, peakUsage map[strin
 	}
 }
 
+// fitInDevices keys rows by request type ("NVIDIA") while nodes may register model-specific types ("NVIDIA A100-SXM4-40GB"); union both so padding/merge never drops fitted rows.
 func allocationTypeKeys(resourceReqs device.PodDeviceRequests, baseTypes map[string]struct{}) map[string]struct{} {
 	allocTypes := make(map[string]struct{}, len(baseTypes))
 	for typ := range baseTypes {
