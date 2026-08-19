@@ -506,6 +506,10 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 			if err != nil {
 				continue
 			}
+			// GetNodeDevices succeeded but reported zero devices: the vendor plugin
+			// is healthy but no longer advertising devices on this node. Remove any
+			// stale entry so the scheduler does not keep offering capacity that no
+			// longer exists.
 			if len(nodedevices) == 0 {
 				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
 					if _, ok := existingNode.Devices[devhandsk]; ok {

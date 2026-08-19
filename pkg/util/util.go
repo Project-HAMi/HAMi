@@ -284,6 +284,19 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	return userGPUPolicy
 }
 
+// PolicyContains reports whether policy names name, treating policy as a
+// comma-separated ordered list (e.g. "binpack,numa"). A single value with no
+// comma is compared directly, so existing single-policy callers are unaffected.
+func PolicyContains(policy string, name SchedulerPolicyName) bool {
+	target := name.String()
+	for p := range strings.SplitSeq(policy, ",") {
+		if strings.TrimSpace(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
 	if pod == nil {
 		return false

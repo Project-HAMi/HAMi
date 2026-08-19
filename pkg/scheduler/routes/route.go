@@ -40,6 +40,14 @@ func checkBody(w http.ResponseWriter, r *http.Request) bool {
 	return true
 }
 
+func writeResponse(w http.ResponseWriter, code int, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if _, err := w.Write(body); err != nil {
+		klog.ErrorS(err, "Failed to write response")
+	}
+}
+
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 	klog.Infoln("Initializing Predicate Route")
 	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
@@ -83,17 +91,15 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 		if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
 			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: fmt.Sprintf("Failed to marshal extender filter result: %s", err.Error()),
 			}
 			resultBody, _ = json.Marshal(extenderFilterResult)
-			w.Write(resultBody)
+			// Note: write error in this fallback path is not explicitly tested
+			// as it requires both a marshal failure and a write failure.
+			writeResponse(w, http.StatusInternalServerError, resultBody)
 		} else {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(resultBody)
+			writeResponse(w, http.StatusOK, resultBody)
 		}
 	}
 }
@@ -128,18 +134,16 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 
 		if response, err := json.Marshal(extenderBindingResult); err != nil {
 			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
 			extenderBindingResult = &extenderv1.ExtenderBindingResult{
 				Error: fmt.Sprintf("Failed to marshal binding result: %s", err.Error()),
 			}
 			response, _ := json.Marshal(extenderBindingResult)
-			w.Write(response)
+			// Note: write error in this fallback path is not explicitly tested
+			// as it requires both a marshal failure and a write failure.
+			writeResponse(w, http.StatusInternalServerError, response)
 		} else {
 			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+			writeResponse(w, http.StatusOK, response)
 		}
 	}
 }

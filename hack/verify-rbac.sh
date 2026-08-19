@@ -13,23 +13,21 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+# This script verifies that production Go code does not use Kubernetes API
+# verbs that are not granted by the RBAC roles in the helm chart.
+#
+# It runs the rbaccheck tool which reads the ClusterRole/Role templates from
+# the chart and uses Go AST analysis to check Go source files. Each directory
+# is checked against the role of the binary that runs its code; shared code
+# (pkg/util/) is checked against the union of all roles.
+
 set -o errexit
 set -o nounset
 set -o pipefail
 
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
 
-# Show progress
-set -x
+cd "${REPO_ROOT}"
 
-# Orders are determined by two factors:
-# (1) Less Execution time item should be executed first.
-# (2) More likely to fail item should be executed first.
-
-bash "$REPO_ROOT/hack/verify-staticcheck.sh"
-
-bash "$REPO_ROOT/hack/verify-license.sh"
-
-bash "$REPO_ROOT/hack/verify-import-aliases.sh"
-
-bash "$REPO_ROOT/hack/verify-rbac.sh"
+echo "Running RBAC permission check..."
+go run ./hack/tools/rbaccheck/ ./pkg/ ./cmd/
