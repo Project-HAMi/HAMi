@@ -404,6 +404,28 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(0),
 			},
 		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"vastaitech.com/va": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"vastaitech.com/va": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

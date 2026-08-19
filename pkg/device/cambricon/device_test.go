@@ -298,6 +298,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("1"),
 						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+			name: "zero count must not silently bypass quota",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("0"),
 					},
 				},
 			},
@@ -310,6 +315,11 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("1"),
 						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+			name: "negative count must be rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("-1"),
 					},
 				},
 			},

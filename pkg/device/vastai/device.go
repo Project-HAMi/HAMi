@@ -19,6 +19,7 @@ package vastai
 import (
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 	"sort"
 	"strings"
@@ -149,6 +150,10 @@ func (dev *VastaiDevices) GenerateResourceRequests(ctr *corev1.Container) device
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "vastai device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found vastai devices")
 			memnum := 0
 			corenum := int32(0)

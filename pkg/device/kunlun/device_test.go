@@ -23,11 +23,79 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
+
+func Test_KunlunDevices_GenerateResourceRequests(t *testing.T) {
+	KunlunResourceCount = "kunlunxin.com/xpu"
+
+	tests := []struct {
+		name string
+		args *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "nothing requested",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits:   corev1.ResourceList{},
+					Requests: corev1.ResourceList{},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "valid positive count",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceCount): resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(1),
+				Type:             KunlunGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceCount): resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceCount): resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := KunlunDevices{}
+			result := dev.GenerateResourceRequests(test.args)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
 
 func TestKunlunVDevices_Fit_Mutex(t *testing.T) {
 	dev := &KunlunVDevices{}
