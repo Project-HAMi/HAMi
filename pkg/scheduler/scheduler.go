@@ -694,13 +694,6 @@ func buildTransientNodeInfo(node *corev1.Node) (*device.NodeInfo, error) {
 	return nodeInfo, nil
 }
 
-func nodeNamesLen(nodeNames *[]string) int {
-	if nodeNames == nil {
-		return 0
-	}
-	return len(*nodeNames)
-}
-
 func nodeListLen(nodes *corev1.NodeList) int {
 	if nodes == nil {
 		return 0
