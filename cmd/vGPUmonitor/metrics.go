@@ -73,6 +73,23 @@ var (
 		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
+	hostGPUTemperaturedesc = prometheus.NewDesc(
+		"hami_host_gpu_temperature_celsius",
+		"GPU temperature in degrees Celsius",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUPowerUsagedesc = prometheus.NewDesc(
+		"hami_host_gpu_power_usage_watts",
+		"GPU power draw in watts",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUEccErrorsdesc = prometheus.NewDesc(
+		"hami_host_gpu_ecc_errors_total",
+		"Lifetime aggregate ECC errors",
+		[]string{"device_index", "device_uuid", "device_type", "error_type"}, nil,
+	)
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
 		"vGPU device memory usage in bytes",
@@ -195,6 +212,9 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
 	ch <- hostGPUMemoryUtilizationdesc
+	ch <- hostGPUTemperaturedesc
+	ch <- hostGPUPowerUsagedesc
+	ch <- hostGPUEccErrorsdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceLastKernelDesc
@@ -292,6 +312,18 @@ func (cc ClusterManagerCollector) collectGPUDeviceMetrics(ch chan<- prometheus.M
 		return err
 	}
 
+	if err := cc.collectGPUTemperatureMetrics(ch, hdev, index); err != nil {
+		return err
+	}
+
+	if err := cc.collectGPUPowerMetrics(ch, hdev, index); err != nil {
+		return err
+	}
+
+	if err := cc.collectGPUEccErrorMetrics(ch, hdev, index); err != nil {
+		return err
+	}
+
 	return nil
 }
 
@@ -369,6 +401,112 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 		fmt.Sprint(index), uuid, deviceName,
 	); err != nil {
 		return fmt.Errorf("nvml send memory controller utilization: %w", err)
+	}
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUTemperatureMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	temp, nvret := hdev.GetTemperature(nvml.TEMPERATURE_GPU)
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Temperature metrics not supported for device %d, skipping", index)
+		return nil
+	}
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetTemperature err: %s", nvml.ErrorString(nvret))
+	}
+
+	uuid, nvret := hdev.GetUUID()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName = "NVIDIA-" + deviceName
+
+	ch <- prometheus.MustNewConstMetric(
+		hostGPUTemperaturedesc,
+		prometheus.GaugeValue,
+		float64(temp),
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUPowerMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	// GetPowerUsage returns milliwatts; convert to watts.
+	powerMilliwatts, nvret := hdev.GetPowerUsage()
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("Power usage metrics not supported for device %d, skipping", index)
+		return nil
+	}
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetPowerUsage err: %s", nvml.ErrorString(nvret))
+	}
+
+	uuid, nvret := hdev.GetUUID()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName = "NVIDIA-" + deviceName
+
+	ch <- prometheus.MustNewConstMetric(
+		hostGPUPowerUsagedesc,
+		prometheus.GaugeValue,
+		float64(powerMilliwatts)/1000.0,
+		fmt.Sprint(index), uuid, deviceName,
+	)
+
+	return nil
+}
+
+func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
+	uuid, nvret := hdev.GetUUID()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetUUID err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName, nvret := hdev.GetName()
+	if nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml GetName err: %s", nvml.ErrorString(nvret))
+	}
+
+	deviceName = "NVIDIA-" + deviceName
+
+	for _, entry := range []struct {
+		errorType nvml.MemoryErrorType
+		label     string
+	}{
+		{nvml.MEMORY_ERROR_TYPE_CORRECTED, "corrected"},
+		{nvml.MEMORY_ERROR_TYPE_UNCORRECTED, "uncorrected"},
+	} {
+		count, nvret := hdev.GetTotalEccErrors(entry.errorType, nvml.AGGREGATE_ECC)
+		if nvret == nvml.ERROR_NOT_SUPPORTED {
+			klog.V(3).Infof("ECC %s error metrics not supported for device %d, skipping", entry.label, index)
+			continue
+		}
+		if nvret != nvml.SUCCESS {
+			klog.Errorf("nvml GetTotalEccErrors (%s) err for device %d: %s", entry.label, index, nvml.ErrorString(nvret))
+			continue
+		}
+
+		ch <- prometheus.MustNewConstMetric(
+			hostGPUEccErrorsdesc,
+			prometheus.GaugeValue,
+			float64(count),
+			fmt.Sprint(index), uuid, deviceName, entry.label,
+		)
 	}
 
 	return nil
