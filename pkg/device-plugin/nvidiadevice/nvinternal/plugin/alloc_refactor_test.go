@@ -19,7 +19,6 @@ package plugin
 import (
 	"context"
 	"errors"
-	"os"
 	"testing"
 
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
@@ -81,16 +80,10 @@ func mustStrategies(t *testing.T, strategies ...string) v1.DeviceListStrategies 
 
 func newTestPlugin(t *testing.T) *NvidiaDevicePlugin {
 	t.Helper()
-	prevHookPath := os.Getenv("HOOK_PATH")
+	t.Setenv("HOOK_PATH", "/tmp/hami-test-hookpath")
 	prevHostHookPath := hostHookPath
-	os.Setenv("HOOK_PATH", "/tmp/hami-test-hookpath")
 	hostHookPath = "/tmp/hami-test-hookpath"
 	t.Cleanup(func() {
-		if prevHookPath != "" {
-			os.Setenv("HOOK_PATH", prevHookPath)
-		} else {
-			os.Unsetenv("HOOK_PATH")
-		}
 		hostHookPath = prevHostHookPath
 	})
 	logLevel := nvidia.Error

@@ -87,9 +87,7 @@ func TestGetClient(t *testing.T) {
 			defer func() { inClusterConfig = oldInClusterConfig }()
 
 			// Set the KUBECONFIG environment variable.
-			oldKubeConfig := os.Getenv("KUBECONFIG")
-			os.Setenv("KUBECONFIG", tt.kubeConfig)
-			defer os.Setenv("KUBECONFIG", oldKubeConfig)
+			t.Setenv("KUBECONFIG", tt.kubeConfig)
 
 			// Call GetClient and check the result.
 			client := GetClient()
