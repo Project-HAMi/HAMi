@@ -426,6 +426,45 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             int32(2147483647),
+				Type:             BirenDevice,
+				Memreq:           int32(0),
+				MemPercentagereq: int32(100),
+				Coresreq:         int32(0),
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"birentech.com/gpu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
