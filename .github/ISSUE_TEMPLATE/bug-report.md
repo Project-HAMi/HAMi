@@ -14,20 +14,28 @@ labels: kind/bug
 
 **How to reproduce it (as minimally and precisely as possible)**:
 
-**Anything else we need to know?**:
-
-- The output of `nvidia-smi -a` on your host
-- Your docker or containerd configuration file (e.g: `/etc/docker/daemon.json`)
-- The hami-device-plugin container logs
-- The hami-scheduler container logs
-- The kubelet logs on the node (e.g: `sudo journalctl -r -u kubelet`)
-- Any relevant kernel output lines from `dmesg`
-
 **Environment**:
-- HAMi version:
-- nvidia driver or other AI device driver version:
-- Docker version from `docker version`
-- Docker command, image and tag used
-- Kernel version from `uname -a`
-- Others:
 
+- HAMi version:
+- Accelerator vendor and model (e.g., NVIDIA A100, Ascend 910B, AMD MI250X, Hygon, MetaX, Enflame, Kunlun, Iluvatar, MThreads, Biren, AWS Neuron):
+- HAMi device backend (e.g., nvidia-device-plugin, ascend-device-plugin, cambricon-device-plugin, etc.):
+- Vendor driver version:
+- Vendor runtime version (e.g., CUDA, CANN, ROCm, etc.):
+- Container runtime and version (e.g., containerd 1.7, Docker 24.0):
+- Kubernetes version:
+- Kernel version (`uname -a`):
+
+**Logs and diagnostics**:
+
+> Remove all credentials, tokens, registry secrets, and other private information before posting.
+
+- Pod YAML or the relevant resource section:
+- Pod events (`kubectl describe pod <pod-name>`):
+- Node annotations (`kubectl get node <node-name> -o yaml`):
+- HAMi scheduler logs:
+- HAMi device-plugin logs:
+- Kubelet logs (`sudo journalctl -r -u kubelet`):
+- Relevant `dmesg` output:
+- Vendor-specific diagnostic output (e.g., `nvidia-smi -a` for NVIDIA, `npu-smi info` for Ascend, `rocm-smi` for AMD — include if available):
+
+**Additional context**:
