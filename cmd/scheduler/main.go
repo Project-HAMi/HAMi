@@ -54,7 +54,7 @@ var (
 		Short: "kubernetes vgpu scheduler",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			return start(cmd.Flags().Changed("node-lock-timeout"))
+			return start()
 		},
 	}
 )
@@ -76,7 +76,10 @@ func init() {
 	rootCmd.Flags().IntVar(&config.Burst, "kube-burst", client.DefaultBurst, "Burst to use while talking with kube-apiserver.")
 	rootCmd.Flags().IntVar(&config.Timeout, "kube-timeout", client.DefaultTimeout, "Timeout to use while talking with kube-apiserver.")
 	rootCmd.Flags().BoolVar(&enableProfiling, "profiling", false, "Enable pprof profiling via HTTP server")
-	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
+	// nodelock's package init runs before this one and has already applied
+	// HAMI_NODELOCK_EXPIRE, so taking its value as the flag default leaves
+	// precedence as flag, then environment, then default.
+	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", nodelock.NodeLockTimeout, "timeout for node locks")
 	rootCmd.Flags().DurationVar(&config.NodeLockRetryTimeout, "node-lock-retry-timeout", 28*time.Second, "timeout for retrying LockNode when contended by another PodGroup member (0 disables retry). Align the Extender's httpTimeout in KubeSchedulerConfiguration with this value.")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
 
@@ -109,18 +112,8 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
-// applyNodeLockTimeout applies the flag only when it was set explicitly, so it
-// does not overwrite the value nodelock's init took from HAMI_NODELOCK_EXPIRE.
-func applyNodeLockTimeout(flagSet bool) {
-	if flagSet {
-		nodelock.NodeLockTimeout = config.NodeLockTimeout
-		return
-	}
-	config.NodeLockTimeout = nodelock.NodeLockTimeout
-}
-
-func start(nodeLockTimeoutFlagSet bool) error {
-	applyNodeLockTimeout(nodeLockTimeoutFlagSet)
+func start() error {
+	nodelock.NodeLockTimeout = config.NodeLockTimeout
 	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
 	client.InitGlobalClient(
 		client.WithBurst(config.Burst),
