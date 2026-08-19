@@ -54,7 +54,10 @@ const (
 	AWSUsageInfo             = "awsusageinfo"
 	AWSNodeType              = "AWSNodeType"
 	maxAWSNeuronDeviceCount  = int64(math.MaxInt32)
-	maxAWSNeuronCoreCount    = maxAWSNeuronDeviceCount * 2
+	// maxCoresPerNeuronDevice caps per-device cores: addCoreUsage builds a
+	// two-bit mask and PatchAnnotations only emits the first two core indexes.
+	maxCoresPerNeuronDevice = int64(2)
+	maxAWSNeuronCoreCount   = maxAWSNeuronDeviceCount * maxCoresPerNeuronDevice
 )
 
 type AWSNeuronConfig struct {
@@ -94,8 +97,9 @@ func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if err != nil {
 		return false, err
 	}
-	if coreCount > 1 && coreCount%2 != 0 {
-		return false, fmt.Errorf("%s must be 1 or a multiple of 2", dev.resourceCoreName)
+	// Defer to the conversion path so the two cannot disagree.
+	if _, _, err := dev.splitCoreRequest(coreCount); err != nil {
+		return false, err
 	}
 	return true, nil
 }
@@ -120,6 +124,33 @@ func validateResourceRequest(quantity resource.Quantity, resourceName string, ma
 		return 0, fmt.Errorf("%s must not exceed %d", resourceName, maxValue)
 	}
 	return value, nil
+}
+
+// coresPerDevice reports NeuronCores per device. It is zero until a node is
+// registered, so callers without one fall back to the cap.
+func (dev *AWSNeuronDevices) coresPerDevice() int64 {
+	observed := int64(dev.coresPerAWSNeuron)
+	if observed <= 0 {
+		return maxCoresPerNeuronDevice
+	}
+	return min(observed, maxCoresPerNeuronDevice)
+}
+
+// splitCoreRequest maps a NeuronCore count onto devices. One core count applies
+// to every device, so counts that neither fit nor fill devices are rejected.
+func (dev *AWSNeuronDevices) splitCoreRequest(cores int64) (int32, int32, error) {
+	coresPerDevice := dev.coresPerDevice()
+	if cores <= coresPerDevice {
+		return 1, int32(cores), nil
+	}
+	if cores%coresPerDevice != 0 {
+		return 0, 0, fmt.Errorf("%s must be 1 or a multiple of %d, got %d", dev.resourceCoreName, coresPerDevice, cores)
+	}
+	nums := cores / coresPerDevice
+	if nums > maxAWSNeuronDeviceCount {
+		return 0, 0, fmt.Errorf("%s needs %d devices, which exceeds the maximum of %d", dev.resourceCoreName, nums, maxAWSNeuronDeviceCount)
+	}
+	return int32(nums), int32(coresPerDevice), nil
 }
 
 func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -277,24 +308,25 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	} else {
 		core, ok := resourceQuantity(ctr, awsResourceCores)
 		if ok {
-			if n, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount); err == nil {
-				klog.InfoS("Detected awsNeuron device request",
-					"container", ctr.Name,
-					"deviceCores", n)
-				num := n/2 + n%2
-				corenum := 1
-				if n >= 2 {
-					corenum = 2
-				}
-				return device.ContainerDeviceRequest{
-					Nums:             int32(num),
-					Type:             AWSNeuronDevice,
-					Memreq:           0,
-					MemPercentagereq: 0,
-					Coresreq:         int32(corenum),
-				}
-			} else {
+			n, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
+			if err != nil {
 				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}
+			}
+			nums, coresreq, err := dev.splitCoreRequest(n)
+			if err != nil {
+				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}
+			}
+			klog.InfoS("Detected awsNeuron device request",
+				"container", ctr.Name,
+				"deviceCores", n)
+			return device.ContainerDeviceRequest{
+				Nums:             nums,
+				Type:             AWSNeuronDevice,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         coresreq,
 			}
 		}
 	}
