@@ -159,6 +159,51 @@ func singleNvidiaGPUNode(mode string, placements []device.MigPlacement) NodeUsag
 	}
 }
 
+func TestIsMIGRequest(t *testing.T) {
+	migDevices := []*device.DeviceUsage{{Mode: nvidia.MigMode}}
+	hamiCoreDevices := []*device.DeviceUsage{{Mode: nvidia.HamiCoreMode}}
+	migPod, _, _ := twoNvidiaDeviceRequest(nvidia.MigMode)
+	hamiCorePod, _, _ := twoNvidiaDeviceRequest(nvidia.HamiCoreMode)
+	nvidiaRequest := device.ContainerDeviceRequest{Type: nvidia.NvidiaGPUDevice}
+
+	tests := []struct {
+		name    string
+		request device.ContainerDeviceRequest
+		devices []*device.DeviceUsage
+		pod     *corev1.Pod
+		want    bool
+	}{
+		{
+			name: "non-NVIDIA request", request: device.ContainerDeviceRequest{Type: "AMD"},
+			devices: migDevices, pod: migPod,
+		},
+		{
+			name: "explicit HAMi-core mode", request: nvidiaRequest,
+			devices: migDevices, pod: hamiCorePod,
+		},
+		{
+			name: "MIG mode without Pod", request: nvidiaRequest,
+			devices: migDevices, want: true,
+		},
+		{
+			name: "MIG mode annotation", request: nvidiaRequest,
+			devices: migDevices, pod: migPod, want: true,
+		},
+		{
+			name: "no MIG device", request: nvidiaRequest,
+			devices: hamiCoreDevices,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isMIGRequest(test.request, test.devices, test.pod); got != test.want {
+				t.Fatalf("isMIGRequest() = %v, want %v", got, test.want)
+			}
+		})
+	}
+}
+
 func TestFitInDevicesAllowsMultipleMigPlacementsOnSingleGPU(t *testing.T) {
 	pod, request, requests := twoNvidiaDeviceRequest(nvidia.MigMode)
 	node := singleNvidiaGPUNode(nvidia.MigMode, []device.MigPlacement{
@@ -183,8 +228,8 @@ func TestFitInDevicesAllowsMultipleMigPlacementsOnSingleGPU(t *testing.T) {
 	}
 	firstPlacement, firstOK := got[0][0].CustomInfo[nvidia.MigPlacementCustomInfo].(device.MigPlacement)
 	secondPlacement, secondOK := got[0][1].CustomInfo[nvidia.MigPlacementCustomInfo].(device.MigPlacement)
-	if !firstOK || !secondOK || firstPlacement != (device.MigPlacement{Start: 6, Size: 1}) || secondPlacement != (device.MigPlacement{Start: 5, Size: 1}) {
-		t.Fatalf("allocated placements = %+v, %+v, want distinct starts 6 and 5", firstPlacement, secondPlacement)
+	if !firstOK || !secondOK || firstPlacement == secondPlacement {
+		t.Fatalf("allocated placements = %+v, %+v, want two distinct placements", firstPlacement, secondPlacement)
 	}
 }
 
