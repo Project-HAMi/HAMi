@@ -188,6 +188,9 @@ func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *cor
 // podContainerNameAt returns the pod's container name at the PodDevices
 // position, counting init containers first, for the scheduler's cross-check.
 func podContainerNameAt(pod *corev1.Pod, index int) string {
+	if index < 0 {
+		return ""
+	}
 	if index < len(pod.Spec.InitContainers) {
 		return pod.Spec.InitContainers[index].Name
 	}
