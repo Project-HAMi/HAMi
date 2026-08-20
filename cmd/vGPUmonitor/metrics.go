@@ -67,6 +67,12 @@ var (
 		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
+	hostGPUMemoryUtilizationdesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_controller_utilization_ratio",
+		"GPU memory controller utilization ratio (0-100)",
+		[]string{"device_index", "device_uuid", "device_type"}, nil,
+	)
+
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
 		"vGPU device memory usage in bytes",
@@ -188,6 +194,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
+	ch <- hostGPUMemoryUtilizationdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceLastKernelDesc
@@ -362,6 +369,13 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu),
 		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
+
+	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
+		float64(utilRates.Memory),
+		fmt.Sprint(index), uuid, deviceName,
+	); err != nil {
+		return fmt.Errorf("nvml send memory controller utilization: %w", err)
+	}
 
 	return nil
 }
