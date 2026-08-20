@@ -538,6 +538,72 @@ func Test_AllContainersCreated(t *testing.T) {
 	}
 }
 
+func Test_AllInitContainersSucceeded(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Pod
+		want bool
+	}{
+		{
+			name: "missing init container statuses",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{Name: "init-a"},
+						{Name: "init-b"},
+					},
+				},
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-a",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+					},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "all init containers terminated successfully",
+			args: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{
+						{Name: "init-a"},
+						{Name: "init-b"},
+					},
+				},
+				Status: corev1.PodStatus{
+					InitContainerStatuses: []corev1.ContainerStatus{
+						{
+							Name: "init-a",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+						{
+							Name: "init-b",
+							State: corev1.ContainerState{
+								Terminated: &corev1.ContainerStateTerminated{ExitCode: 0},
+							},
+						},
+					},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := AllInitContainersSucceeded(test.args)
+			assert.Equal(t, test.want, got)
+		})
+	}
+}
+
 func TestIsPodGroupMember(t *testing.T) {
 	podGroupName := "my-training-job"
 	emptyPodGroupName := ""
