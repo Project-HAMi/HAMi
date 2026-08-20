@@ -184,14 +184,6 @@ func AllInitContainersSucceeded(pod *corev1.Pod) bool {
 		delete(remaining, s.Name)
 	}
 	return len(remaining) == 0
-		return false
-	}
-	for _, s := range pod.Status.InitContainerStatuses {
-		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
