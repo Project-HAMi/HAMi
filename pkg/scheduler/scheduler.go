@@ -612,6 +612,16 @@ func (s *Scheduler) updateSchedulerLabel() {
 	}
 }
 
+// IsSynced returns true when the scheduler's internal node/device cache has
+// completed at least one successful sync cycle and is ready to serve requests.
+// Unlike WaitForCacheSync it is non-blocking and safe to call from a Prometheus
+// Collect callback.
+func (s *Scheduler) IsSynced() bool {
+	s.lock.RLock()
+	defer s.lock.RUnlock()
+	return s.synced
+}
+
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
 		s.lock.RLock()
