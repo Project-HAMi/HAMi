@@ -69,15 +69,173 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 			err:  nil,
 		},
+		{
+			name: "dcu memory in limits -> synthesizes count in limits and requests",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcumem": resource.MustParse("1024"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "requests only (limits empty) -> true and syncs limits",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "rejects zero dcu count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("0"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  fmt.Errorf("hygon.com/dcunum must be a positive integer between 1 and 2147483647"),
+		},
+		{
+			name: "rejects negative dcu count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("-1"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  fmt.Errorf("hygon.com/dcunum must be a positive integer between 1 and 2147483647"),
+		},
+		{
+			name: "rejects fractional dcu count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("1.5"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  fmt.Errorf("hygon.com/dcunum must be a positive integer between 1 and 2147483647"),
+		},
+		{
+			name: "rejects overflow dcu count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": *resource.NewQuantity(math.MaxInt32+1, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  fmt.Errorf("hygon.com/dcunum must be a positive integer between 1 and 2147483647"),
+		},
+		{
+			name: "accepts max int32 dcu count",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": *resource.NewQuantity(math.MaxInt32, resource.DecimalSI),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: true,
+			err:  nil,
+		},
+		{
+			name: "conflicting count in limits and requests",
+			args: struct {
+				ctr *corev1.Container
+				p   *corev1.Pod
+			}{
+				ctr: &corev1.Container{
+					Resources: corev1.ResourceRequirements{
+						Limits: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("1"),
+						},
+						Requests: corev1.ResourceList{
+							"hygon.com/dcunum": resource.MustParse("5"),
+						},
+					},
+				},
+				p: &corev1.Pod{},
+			},
+			want: false,
+			err:  fmt.Errorf("conflicting hygon.com/dcunum request"),
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			dev := DCUDevices{}
 			result, err := dev.MutateAdmission(test.args.ctr, test.args.p)
-			if err != test.err {
-				klog.InfoS("set to resource limits failed")
+			if test.err != nil {
+				assert.ErrorContains(t, err, test.err.Error())
+				return
 			}
+			assert.NilError(t, err)
 			assert.Equal(t, result, test.want)
+			if result && test.name == "dcu memory in limits -> synthesizes count in limits and requests" {
+				limitQty, ok := test.args.ctr.Resources.Limits["hygon.com/dcunum"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, limitQty.Value(), int64(1))
+
+				reqQty, ok := test.args.ctr.Resources.Requests["hygon.com/dcunum"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, reqQty.Value(), int64(1))
+			}
 		})
 	}
 }

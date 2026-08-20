@@ -92,8 +92,67 @@ func ParseConfig(fs *flag.FlagSet) {
 }
 
 func (dev *DCUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
-	return ok, nil
+	count, countRequested := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)]
+	reqCount, reqRequested := ctr.Resources.Requests[corev1.ResourceName(HygonResourceCount)]
+
+	if countRequested || reqRequested {
+		if countRequested {
+			n, isInt := count.AsInt64()
+			if !isInt || n <= 0 || n > math.MaxInt32 {
+				return false, fmt.Errorf("%s must be a positive integer between 1 and %d", HygonResourceCount, math.MaxInt32)
+			}
+		}
+		if reqRequested {
+			n, isInt := reqCount.AsInt64()
+			if !isInt || n <= 0 || n > math.MaxInt32 {
+				return false, fmt.Errorf("%s must be a positive integer between 1 and %d", HygonResourceCount, math.MaxInt32)
+			}
+		}
+		if countRequested && reqRequested {
+			limitN, _ := count.AsInt64()
+			reqN, _ := reqCount.AsInt64()
+			if limitN != reqN {
+				return false, fmt.Errorf("conflicting %s request (%d) and limit (%d)", HygonResourceCount, reqN, limitN)
+			}
+		}
+		if !countRequested && reqRequested {
+			if ctr.Resources.Limits == nil {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
+			ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)] = reqCount
+		} else if countRequested && !reqRequested {
+			if ctr.Resources.Requests == nil {
+				ctr.Resources.Requests = corev1.ResourceList{}
+			}
+			ctr.Resources.Requests[corev1.ResourceName(HygonResourceCount)] = count
+		}
+		return true, nil
+	}
+
+	_, memRequested := ctr.Resources.Limits[corev1.ResourceName(HygonResourceMemory)]
+	if !memRequested {
+		_, memRequested = ctr.Resources.Requests[corev1.ResourceName(HygonResourceMemory)]
+	}
+	_, coreRequested := ctr.Resources.Limits[corev1.ResourceName(HygonResourceCores)]
+	if !coreRequested {
+		_, coreRequested = ctr.Resources.Requests[corev1.ResourceName(HygonResourceCores)]
+	}
+
+	if memRequested || coreRequested {
+		gpuQty := *resource.NewQuantity(1, resource.DecimalSI)
+		if ctr.Resources.Limits == nil {
+			ctr.Resources.Limits = corev1.ResourceList{}
+		}
+		ctr.Resources.Limits[corev1.ResourceName(HygonResourceCount)] = gpuQty
+
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
+		ctr.Resources.Requests[corev1.ResourceName(HygonResourceCount)] = gpuQty
+		return true, nil
+	}
+
+	return false, nil
 }
 
 func checkDCUtype(annos map[string]string, cardtype string) bool {
