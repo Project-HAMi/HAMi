@@ -1186,7 +1186,8 @@ func TestLockNodePreservesValidUnexpiredLock(t *testing.T) {
 
 // TestLockNodeDeterministicExpiredRecoverySerialization uses controlled synchronization
 // to prove that a second LockNode caller cannot interleave during another caller's
-// expired-lock recovery.
+// expired-lock recovery window (after the stale lock is released and before the
+// replacement lock is acquired).
 func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 	nodeLocks = newNodeLockManager()
 	nodeName := "deterministic-recovery-node"
@@ -1221,23 +1222,35 @@ func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 
 	podBResult := make(chan error, 1)
 
-	// Intercept the first patch (ReleaseNodeLock during Pod A's recovery)
-	// and verify that Pod B's LockNode cannot proceed while Pod A is in recovery.
-	patchCount := 0
+	var (
+		patchCount int
+		pausedOnce bool
+	)
+
+	// Intercept patch operations to count when the stale lock has been released (Patch #1).
 	clientSet.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
 		patchCount++
-		if patchCount == 1 {
-			// Pod A is releasing the expired lock while holding the per-node mutex.
-			// Launch Pod B's LockNode concurrently.
+		return false, nil, nil
+	})
+
+	// Intercept the first node get after stale lock release (which occurs at the start
+	// of setNodeLockLocked) to pause Pod A in the release -> reacquire window and give
+	// Pod B an opportunity to attempt LockNode.
+	clientSet.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getAction, ok := action.(k8stesting.GetAction)
+		if ok && getAction.GetName() == nodeName && patchCount == 1 && !pausedOnce {
+			pausedOnce = true
+			// Pod A is paused after releasing the stale lock and before acquiring the replacement lock.
+			// Launch Pod B's LockNode concurrently during this critical recovery gap.
 			go func() {
 				podBResult <- LockNode(nodeName, "", podB)
 			}()
 			// Wait until Pod B has actually reached the per-node mutex boundary.
 			<-podBAtMutex
-			// Ensure Pod B is waiting on the per-node mutex and has not returned.
+			// Ensure Pod B is blocked waiting for Pod A to finish recovery and has not returned.
 			select {
 			case res := <-podBResult:
-				t.Errorf("Pod B should not complete while Pod A holds the per-node lock, got: %v", res)
+				t.Errorf("Pod B should not complete while Pod A is in the recovery window, got: %v", res)
 			default:
 				// Expected: Pod B is blocked waiting for Pod A to finish recovery
 			}
