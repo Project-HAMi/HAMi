@@ -195,10 +195,8 @@ func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
 			return
 		}
 
-		var buf bytes.Buffer
 		// Limit the body size to prevent deep nesting/resource exhaustion attacks
-		limitedReader := io.LimitReader(r.Body, maxRequestSize)
-		body := io.TeeReader(limitedReader, &buf)
+		body := io.LimitReader(r.Body, maxRequestSize)
 
 		var response device.NumaRefitResponse
 		var request device.NumaRefitRequest
