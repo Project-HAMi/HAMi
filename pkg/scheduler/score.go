@@ -27,6 +27,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/policy"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -48,6 +49,23 @@ func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 		}
 	}
 	return l
+}
+
+func isMIGRequest(request device.ContainerDeviceRequest, devices []*device.DeviceUsage, pod *corev1.Pod) bool {
+	if request.Type != nvidia.NvidiaGPUDevice {
+		return false
+	}
+	if pod != nil {
+		if mode, ok := pod.GetAnnotations()[nvidia.AllocateMode]; ok && !strings.Contains(mode, nvidia.MigMode) {
+			return false
+		}
+	}
+	for _, dev := range devices {
+		if dev.Mode == nvidia.MigMode {
+			return true
+		}
+	}
+	return false
 }
 
 func nodeDeviceBaseTypes(list policy.DeviceUsageList) map[string]struct{} {
@@ -78,7 +96,7 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 		}
 
 		typeDevices := getNodeResources(*node, k.Type)
-		if int(k.Nums) > len(typeDevices) {
+		if int(k.Nums) > len(typeDevices) && !isMIGRequest(k, typeDevices, pod) {
 			klog.V(5).InfoS(common.NodeInsufficientDevice, "pod", klog.KObj(pod),
 				"request devices nums", k.Nums, "node device nums (type)", len(typeDevices), "type", k.Type)
 			return false, common.NodeInsufficientDevice
