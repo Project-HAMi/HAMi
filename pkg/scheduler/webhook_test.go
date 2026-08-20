@@ -19,6 +19,7 @@ package scheduler
 import (
 	"context"
 	"flag"
+	"strings"
 	"testing"
 
 	admissionv1 "k8s.io/api/admission/v1"
@@ -36,6 +37,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/hygon"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 func TestHandle(t *testing.T) {
@@ -1080,5 +1082,68 @@ func TestFitResourceQuota_InitContainerPeakSequence(t *testing.T) {
 	// Now pod2 should be allowed
 	if !fitResourceQuota(pod2) {
 		t.Fatal("Step 3 failed: pod2 should be allowed after pod1 init finished (total 10000+20000=30000)")
+	}
+}
+
+func TestHandleNumaAlignmentAnnotation(t *testing.T) {
+	tests := []struct {
+		name       string
+		value      string
+		wantDenied bool
+	}{
+		{name: "best-effort is admitted", value: "best-effort", wantDenied: false},
+		{name: "invalid value is denied", value: "bogus", wantDenied: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "numa-pod",
+					Namespace:   "default",
+					Annotations: map[string]string{util.NumaAlignmentAnnotationKey: test.value},
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "container1",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+						},
+					}},
+				},
+			}
+
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+			podBytes, err := runtime.Encode(codec, pod)
+			if err != nil {
+				t.Fatalf("Error encoding pod: %v", err)
+			}
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID: "test-uid", Namespace: "default", Name: "numa-pod",
+					Object: runtime.RawExtension{Raw: podBytes},
+				},
+			}
+
+			wh, err := NewWebHook()
+			if err != nil {
+				t.Fatalf("Error creating webhook: %v", err)
+			}
+			resp := wh.Handle(context.Background(), req)
+
+			if test.wantDenied {
+				if resp.Allowed {
+					t.Fatalf("expected denial, got allowed: %+v", resp.Result)
+				}
+				if !strings.Contains(resp.Result.Message, "invalid") {
+					t.Fatalf("expected invalid-annotation message, got %q", resp.Result.Message)
+				}
+			} else if !resp.Allowed {
+				t.Fatalf("expected admission, got denied: %+v", resp.Result)
+			}
+		})
 	}
 }
