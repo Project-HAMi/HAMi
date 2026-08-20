@@ -76,19 +76,19 @@ var (
 	hostGPUTemperaturedesc = prometheus.NewDesc(
 		"hami_host_gpu_temperature_celsius",
 		"GPU temperature in degrees Celsius",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUPowerUsagedesc = prometheus.NewDesc(
 		"hami_host_gpu_power_usage_watts",
 		"GPU power draw in watts",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUEccErrorsdesc = prometheus.NewDesc(
 		"hami_host_gpu_ecc_errors_total",
 		"Lifetime aggregate ECC errors",
-		[]string{"device_index", "device_uuid", "device_type", "error_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type", "error_type"}, nil,
 	)
 	ctrvGPUdesc = prometheus.NewDesc(
 		"hami_vgpu_memory_used_bytes",
@@ -434,11 +434,16 @@ func (cc ClusterManagerCollector) collectGPUTemperatureMetrics(ch chan<- prometh
 
 	deviceName = "NVIDIA-" + deviceName
 
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUTemperaturedesc,
 		prometheus.GaugeValue,
 		float64(temp),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
@@ -467,11 +472,16 @@ func (cc ClusterManagerCollector) collectGPUPowerMetrics(ch chan<- prometheus.Me
 
 	deviceName = "NVIDIA-" + deviceName
 
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUPowerUsagedesc,
 		prometheus.GaugeValue,
 		float64(powerMilliwatts)/1000.0,
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
@@ -489,6 +499,11 @@ func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus
 	}
 
 	deviceName = "NVIDIA-" + deviceName
+
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
 
 	for _, entry := range []struct {
 		errorType nvml.MemoryErrorType
@@ -511,7 +526,7 @@ func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus
 			hostGPUEccErrorsdesc,
 			prometheus.GaugeValue,
 			float64(count),
-			fmt.Sprint(index), uuid, deviceName, entry.label,
+			nodeName, fmt.Sprint(index), uuid, deviceName, entry.label,
 		)
 	}
 
