@@ -259,3 +259,75 @@ func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
 		t.Fatalf("expected memory controller utilization metric with value %v", wantMemory)
 	}
 }
+
+func TestHostGPUMetricsUnsupported(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "Tesla T4", nvml.SUCCESS },
+		GetTemperatureFunc: func(nvml.TemperatureSensors) (uint32, nvml.Return) {
+			return 0, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetPowerUsageFunc: func() (uint32, nvml.Return) {
+			return 0, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetTotalEccErrorsFunc: func(nvml.MemoryErrorType, nvml.EccCounterType) (uint64, nvml.Return) {
+			return 0, nvml.ERROR_NOT_SUPPORTED
+		},
+	}
+
+	cc := ClusterManagerCollector{}
+	ch := make(chan prometheus.Metric, 10)
+
+	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("expected nil error for unsupported temperature, got: %v", err)
+	}
+	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("expected nil error for unsupported power, got: %v", err)
+	}
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("expected nil error for unsupported ECC, got: %v", err)
+	}
+
+	close(ch)
+	for range ch {
+		t.Fatalf("expected no metrics emitted for unsupported hardware")
+	}
+}
+
+func TestHostGPUMetricsError(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "Tesla T4", nvml.SUCCESS },
+		GetTemperatureFunc: func(nvml.TemperatureSensors) (uint32, nvml.Return) {
+			return 0, nvml.ERROR_UNKNOWN
+		},
+		GetPowerUsageFunc: func() (uint32, nvml.Return) {
+			return 0, nvml.ERROR_UNKNOWN
+		},
+		GetTotalEccErrorsFunc: func(nvml.MemoryErrorType, nvml.EccCounterType) (uint64, nvml.Return) {
+			return 0, nvml.ERROR_UNKNOWN
+		},
+	}
+
+	cc := ClusterManagerCollector{}
+
+	if err := cc.collectGPUTemperatureMetrics(nil, mockDev, 0); err == nil {
+		t.Fatalf("expected error for temperature, got nil")
+	}
+	if err := cc.collectGPUPowerMetrics(nil, mockDev, 0); err == nil {
+		t.Fatalf("expected error for power, got nil")
+	}
+	
+	ch := make(chan prometheus.Metric, 10)
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("expected nil error for ECC even when unknown error occurs (it continues), got: %v", err)
+	}
+	close(ch)
+	for range ch {
+		t.Fatalf("expected no metrics emitted for errored hardware")
+	}
+}
