@@ -30,6 +30,7 @@ func TestNumaRefitRequestJSONRoundTrip(t *testing.T) {
 		PodName:            "numa-pod",
 		NodeName:           "node-1",
 		ContainerIndex:     1,
+		ContainerName:      "main",
 		DeviceType:         "NVIDIA",
 		AllowedDeviceUUIDs: []string{"GPU-aaaa", "GPU-bbbb"},
 	}
@@ -43,15 +44,16 @@ func TestNumaRefitRequestJSONRoundTrip(t *testing.T) {
 }
 
 func TestNumaRefitRequestJSONFieldNames(t *testing.T) {
-	raw, err := json.Marshal(NumaRefitRequest{})
+	raw, err := json.Marshal(NumaRefitRequest{ContainerName: "main"})
 	assert.NilError(t, err)
 
 	var fields map[string]any
 	assert.NilError(t, json.Unmarshal(raw, &fields))
-	for _, key := range []string{"podUID", "podNamespace", "podName", "nodeName", "containerIndex", "deviceType", "allowedDeviceUUIDs"} {
+	for _, key := range []string{"podUID", "podNamespace", "podName", "nodeName", "containerIndex", "containerName", "deviceType", "allowedDeviceUUIDs"} {
 		_, ok := fields[key]
 		assert.Assert(t, ok, "missing wire field %q", key)
 	}
+	assert.Equal(t, fields["containerName"], "main")
 }
 
 func TestNumaRefitResponseCarriesEncodedContainerDevices(t *testing.T) {
