@@ -814,14 +814,20 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			return true, tmpDevs, ""
 		}
 		if len(tmpDevs[k.Type]) > int(originReq) {
+			// A MIG card appears once per free slot; duplicates only inflate the
+			// combination space and win zero-score ties. Collapse when cards suffice.
+			candidates := tmpDevs
+			if distinct := distinctCardCandidates(tmpDevs[k.Type]); len(distinct) >= int(originReq) {
+				candidates = map[string]device.ContainerDevices{k.Type: distinct}
+			}
 			if originReq == 1 {
 				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSingleCard(nodeInfo, request, tmpDevs)
+				lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
 				tmpDevs[k.Type] = lowestDevices
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
 			} else {
 				// If requesting multiple devices, select the best combination of cards.
-				combinations := generateCombinations(request, tmpDevs)
+				combinations := generateCombinations(request, candidates)
 				combination := computeBestCombination(nodeInfo, combinations)
 				tmpDevs[k.Type] = combination
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
@@ -873,6 +879,21 @@ func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[str
 
 	helper(devices, 0, num, device.ContainerDevices{})
 	return result
+}
+
+// distinctCardCandidates keeps the first candidate of each physical card,
+// preserving the order the Fit loop produced them in.
+func distinctCardCandidates(candidates device.ContainerDevices) device.ContainerDevices {
+	seen := make(map[string]struct{}, len(candidates))
+	distinct := make(device.ContainerDevices, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := seen[candidate.UUID]; ok {
+			continue
+		}
+		seen[candidate.UUID] = struct{}{}
+		distinct = append(distinct, candidate)
+	}
+	return distinct
 }
 
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
