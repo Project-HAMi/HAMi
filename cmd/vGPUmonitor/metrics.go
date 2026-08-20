@@ -322,16 +322,11 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUdesc,
-		prometheus.GaugeValue,
-		float64(memory.Used),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUdesc, prometheus.GaugeValue, float64(memory.Used), nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUdesc metric: %v", err)
+	}
 
-	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used), nodeName, fmt.Sprint(index), uuid, deviceName)
 
 	return nil
 }
@@ -359,16 +354,11 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 
 	deviceName = "NVIDIA-" + deviceName
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUUtilizationdesc,
-		prometheus.GaugeValue,
-		float64(utilRates.Gpu),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUUtilizationdesc metric: %v", err)
+	}
 
-	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), nodeName, fmt.Sprint(index), uuid, deviceName)
 
 	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
 		float64(utilRates.Memory),
@@ -421,8 +411,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 		klog.V(5).Infof("Processing Pod %s/%s", pod.Namespace, pod.Name)
 
-		// Iterate through each container in the Pod
-		for _, ctr := range pod.Spec.Containers {
+		// Iterate through each container in the Pod (both regular and init containers)
+		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+		allContainers = append(allContainers, pod.Spec.InitContainers...)
+		allContainers = append(allContainers, pod.Spec.Containers...)
+		for _, ctr := range allContainers {
 			// Find the matching container
 			for _, c := range podContainers {
 				if c.ContainerName == ctr.Name {
