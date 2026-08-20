@@ -87,7 +87,7 @@ func TestGetPreferredAllocationMismatchResponseUnchanged(t *testing.T) {
 			availableIDs: []string{numaTestGPUB + "-0", numaTestGPUB + "-1"},
 		},
 		{
-			name:         "strict is not accepted yet",
+			name:         "strict without the refit endpoint",
 			annotations:  map[string]string{util.NumaAlignmentAnnotationKey: "strict"},
 			availableIDs: []string{numaTestGPUB + "-0", numaTestGPUB + "-1"},
 		},
@@ -216,12 +216,13 @@ func TestReportAnnotatedDeviceMismatch(t *testing.T) {
 			wantFields: []string{`numaAlignment="best-effort"`, "default/numa-pod", "containerRequest=0"},
 		},
 		{
-			name:       "strict warns as invalid until the refit lands",
+			name:       "strict mismatch is reported at error severity",
 			plugin:     &NvidiaDevicePlugin{},
 			pod:        podWithMode("strict"),
 			err:        mismatch,
-			wantLogged: "ignoring invalid numa-alignment annotation",
-			wantPrefix: "W",
+			wantLogged: mismatchMessage,
+			wantPrefix: "E",
+			wantFields: []string{`numaAlignment="strict"`, "default/numa-pod"},
 		},
 	}
 

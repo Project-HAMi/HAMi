@@ -647,10 +647,14 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	// Filter out empty annotations to match kubelet's ContainerRequests order.
 	// Kubelet only sends requests for containers that need GPUs, but annotations
 	// include all containers (init + regular), some of which may be empty.
+	// annotationIndices keeps each entry's original PodDevices container
+	// position, which the NUMA refit protocol requires.
 	var nonEmptyAnnotations []device.ContainerDevices
-	for _, ann := range annotatedRequests {
+	var annotationIndices []int
+	for i, ann := range annotatedRequests {
 		if len(ann) > 0 {
 			nonEmptyAnnotations = append(nonEmptyAnnotations, ann)
+			annotationIndices = append(annotationIndices, i)
 		}
 	}
 
@@ -664,7 +668,24 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 				})
 			} else {
 				klog.Warningf("err: %v", err)
-				plugin.reportAnnotatedDeviceMismatch(pendingPod, idx, err)
+				refitDevices, refitErr := plugin.tryNumaRefit(ctx, pendingPod, annotationIndices[idx], req, err)
+				switch {
+				case refitErr != nil:
+					// Strict mode: failing the call terminally fails the
+					// pod's admission rather than running misaligned. Mark
+					// the bind failed so the node lock is released instead
+					// of blocking the node until the lock timeout.
+					if nodename != "" && pendingPod != nil {
+						PodAllocationFailed(nodename, pendingPod, NodeLockNvidia)
+					}
+					return nil, refitErr
+				case len(refitDevices) > 0:
+					response.ContainerResponses = append(response.ContainerResponses, &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
+						DeviceIDs: refitDevices,
+					})
+				default:
+					plugin.reportAnnotatedDeviceMismatch(pendingPod, idx, err)
+				}
 			}
 		}
 	}
@@ -695,8 +716,12 @@ func (plugin *NvidiaDevicePlugin) reportAnnotatedDeviceMismatch(pod *corev1.Pod,
 		return
 	}
 
-	klog.InfoS("scheduler-annotated GPU has no replica in kubelet's available devices; NUMA refit is not implemented yet, so kubelet will select a device on its own",
-		"err", err, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
+	const message = "scheduler-annotated GPU has no replica in kubelet's available devices and the NUMA refit did not handle it, so kubelet will select a device on its own"
+	if mode == util.NumaAlignmentStrict {
+		klog.ErrorS(err, message, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
+		return
+	}
+	klog.InfoS(message, "err", err, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
 }
 
 func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(available, required []string, desired device.ContainerDevices, allocationSize int) ([]string, error) {
