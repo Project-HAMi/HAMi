@@ -518,7 +518,7 @@ func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus
 
 		ch <- prometheus.MustNewConstMetric(
 			hostGPUEccErrorsdesc,
-			prometheus.GaugeValue,
+			prometheus.CounterValue,
 			float64(count),
 			nodeName, fmt.Sprint(index), uuid, deviceName, entry.label,
 		)
