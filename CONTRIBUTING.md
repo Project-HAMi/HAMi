@@ -156,6 +156,10 @@ Before submitting a pull request, run these local verifications to predict wheth
 
 * Run and pass `make verify`
 
+For Helm chart or chart-validation changes, use Helm v3.21.4 and also run `make verify_chart`.
+This target lints and renders the chart with its default values, runs the existing Trivy scan,
+and verifies that the chart and application versions match.
+
 ## Issue and PR Lifecycle
 
 To keep the project manageable, we apply the following policy to all open issues and pull requests:
