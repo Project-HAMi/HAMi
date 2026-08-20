@@ -3440,3 +3440,12 @@ func Test_lockAllDevices_Transactional(t *testing.T) {
 		})
 	})
 }
+
+func TestSchedulerIsSynced(t *testing.T) {
+	s := &Scheduler{}
+	assert.Equal(t, false, s.IsSynced())
+
+	s.synced.Store(true)
+
+	assert.Equal(t, true, s.IsSynced())
+}
