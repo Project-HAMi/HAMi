@@ -44,14 +44,14 @@ var _ = ginkgo.Describe("[Node] Node E2E Tests", ginkgo.Ordered, func() {
 		gomega.Expect(err).NotTo(gomega.HaveOccurred())
 		gomega.Expect(len(nodes.Items)).To(gomega.BeNumerically(">", 0), "No nodes available for testing")
 
-		// Select a node with GPU resources
+		// Select a node with GPU resources - fail fast if no GPU node found
 		for _, node := range nodes.Items {
 			if _, exists := node.Status.Capacity["nvidia.com/gpu"]; exists {
 				nodeName = node.Name
 				break
 			}
 		}
-		gomega.Expect(nodeName).NotTo(gomega.BeEmpty(), "No GPU node found")
+		gomega.Expect(nodeName).NotTo(gomega.BeEmpty(), "No GPU node found: E2E tests require at least one node with nvidia.com/gpu capacity")
 	})
 
 	ginkgo.It("verify node with labeling", func() {
