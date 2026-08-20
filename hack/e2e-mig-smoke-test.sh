@@ -129,10 +129,15 @@ uuid_smoke_one=$(pod_uuid smoke-one)
 assert_runtime_annotation smoke-one
 assert_gpu_progress smoke-one
 
-log "SMOKE CASE: overflow rejection"
+log "SMOKE CASE: overflow rejection after filling 1g capacity"
+for i in $(seq 2 7); do create_pod "smoke-fill-${i}" 4500; done
+for i in $(seq 2 7); do wait_ready "smoke-fill-${i}" & done
+wait
+wait_count 7 180
+[[ "$(profile_count 1g.5gb)" == 7 ]] || fail "expected seven 1g.5gb instances before overflow"
 create_pod smoke-overflow 4500
 assert_pending_unbound smoke-overflow
-wait_count 1
+wait_count 7
 echo "PASS SMOKE CASE: overflow rejected"
 
 log "final cleanup and health"

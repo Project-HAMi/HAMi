@@ -34,6 +34,7 @@ jobs:
       E2E_TYPE: ${{ inputs.deploy-type }}
       HAMI_VERSION: ${{ inputs.ref }}
       TARGET_NODE: ${{ vars.MIG_TARGET_NODE }}
+      MIG_TEST_TYPE: ${{ inputs.type }}
     steps:
       - name: checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -79,7 +80,7 @@ jobs:
 
       - name: e2e mig test
         run: |
-          if [ "${{ inputs.type }}" == "smoke" ]; then
+          if [ "${MIG_TEST_TYPE}" == "smoke" ]; then
             make e2e-mig-smoke-test
           else
             make e2e-mig-test
