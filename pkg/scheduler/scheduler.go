@@ -78,6 +78,13 @@ type Scheduler struct {
 
 	lock   sync.RWMutex
 	synced bool
+
+	// allocLock serializes reservation mutations between Filter and the
+	// NUMA refit (RefitNumaAllocation). kube-scheduler already serializes
+	// Filter calls per scheduling cycle, so in the common path this adds no
+	// contention; it exists so a refit cannot interleave with Filter's
+	// take-fit-readd span and observe or produce half-applied accounting.
+	allocLock sync.Mutex
 }
 
 func NewScheduler() *Scheduler {
@@ -1051,6 +1058,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
 	}
+
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)
