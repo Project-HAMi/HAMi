@@ -71,7 +71,7 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
-			name: "requests only (limits empty) -> false",
+			name: "requests only (limits empty) -> true and syncs limits",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Requests: corev1.ResourceList{
@@ -79,7 +79,7 @@ func Test_MutateAdmission(t *testing.T) {
 					},
 				},
 			},
-			want: false,
+			want: true,
 		},
 		{
 			name: "rejects zero core percentage",
@@ -118,6 +118,101 @@ func Test_MutateAdmission(t *testing.T) {
 			want: true,
 		},
 		{
+			name: "rejects zero gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects negative gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects fractional gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("1.5"),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "rejects overflow gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(math.MaxInt32+1, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be a positive integer",
+		},
+		{
+			name: "accepts max int32 gpu count",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(math.MaxInt32, resource.DecimalSI),
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "rejects invalid core percentage in memory-only container",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu-mem":      *resource.NewQuantity(1024, resource.DecimalSI),
+						"amd.com/gpu-core-pct": *resource.NewQuantity(105, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "must be an integer percentage between 1 and 100",
+		},
+		{
+			name: "gpu memory in limits with existing request -> preserves request and syncs limits",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu-mem": *resource.NewQuantity(1024, resource.DecimalSI),
+					},
+					Requests: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(5, resource.DecimalSI),
+					},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "conflicting count in limits and requests",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+					Requests: corev1.ResourceList{
+						"amd.com/gpu": *resource.NewQuantity(5, resource.DecimalSI),
+					},
+				},
+			},
+			wantErr: "conflicting amd.com/gpu request",
+		},
+		{
 			name: "no resources",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -142,6 +237,30 @@ func Test_MutateAdmission(t *testing.T) {
 			}
 			assert.NilError(t, err)
 			assert.Equal(t, tt.want, got)
+			if got && (tt.name == "gpu memory in limits" || tt.name == "core percentage in limits") {
+				limitQty, ok := tt.ctr.Resources.Limits["amd.com/gpu"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, limitQty.Value(), int64(1))
+
+				reqQty, ok := tt.ctr.Resources.Requests["amd.com/gpu"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, reqQty.Value(), int64(1))
+
+				req := dev.GenerateResourceRequests(tt.ctr)
+				assert.Equal(t, req.Nums, int32(1))
+			}
+			if got && tt.name == "gpu memory in limits with existing request -> preserves request and syncs limits" {
+				limitQty, ok := tt.ctr.Resources.Limits["amd.com/gpu"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, limitQty.Value(), int64(5))
+
+				reqQty, ok := tt.ctr.Resources.Requests["amd.com/gpu"]
+				assert.Equal(t, ok, true)
+				assert.Equal(t, reqQty.Value(), int64(5))
+
+				req := dev.GenerateResourceRequests(tt.ctr)
+				assert.Equal(t, req.Nums, int32(5))
+			}
 		})
 	}
 }

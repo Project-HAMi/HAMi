@@ -76,25 +76,88 @@ func (dev *AMDDevices) CommonWord() string {
 }
 
 func (dev *AMDDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
-	if ok {
+	count, countRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
+	reqCount, reqRequested := ctr.Resources.Requests[corev1.ResourceName(dev.resourceCountName)]
+
+	if countRequested || reqRequested {
+		if countRequested {
+			n, isInt := count.AsInt64()
+			if !isInt || n <= 0 || n > math.MaxInt32 {
+				return false, fmt.Errorf("%s must be a positive integer between 1 and %d", dev.resourceCountName, math.MaxInt32)
+			}
+		}
+		if reqRequested {
+			n, isInt := reqCount.AsInt64()
+			if !isInt || n <= 0 || n > math.MaxInt32 {
+				return false, fmt.Errorf("%s must be a positive integer between 1 and %d", dev.resourceCountName, math.MaxInt32)
+			}
+		}
+		if countRequested && reqRequested {
+			limitN, _ := count.AsInt64()
+			reqN, _ := reqCount.AsInt64()
+			if limitN != reqN {
+				return false, fmt.Errorf("conflicting %s request (%d) and limit (%d)", dev.resourceCountName, reqN, limitN)
+			}
+		}
+		if !countRequested && reqRequested {
+			if ctr.Resources.Limits == nil {
+				ctr.Resources.Limits = corev1.ResourceList{}
+			}
+			ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = reqCount
+		} else if countRequested && !reqRequested {
+			if ctr.Resources.Requests == nil {
+				ctr.Resources.Requests = corev1.ResourceList{}
+			}
+			ctr.Resources.Requests[corev1.ResourceName(dev.resourceCountName)] = count
+		}
+
 		core, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+		if !coreRequested {
+			core, coreRequested = ctr.Resources.Requests[corev1.ResourceName(dev.resourceCoreName)]
+		}
 		if coreRequested {
 			corePercentage, coreIsInteger := core.AsInt64()
 			if !coreIsInteger || corePercentage < 1 || corePercentage > 100 {
 				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
 			}
 		}
+		return true, nil
+	}
 
+	_, memRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
+	if !memRequested {
+		_, memRequested = ctr.Resources.Requests[corev1.ResourceName(dev.resourceMemoryName)]
 	}
-	if !ok && dev.resourceMemoryName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceMemoryName)]
+	_, coreRequested := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+	if !coreRequested {
+		_, coreRequested = ctr.Resources.Requests[corev1.ResourceName(dev.resourceCoreName)]
 	}
-	if !ok && dev.resourceCoreName != "" {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+
+	if (memRequested && dev.resourceMemoryName != "") || (coreRequested && dev.resourceCoreName != "") {
+		if coreRequested {
+			core, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+			if !ok {
+				core = ctr.Resources.Requests[corev1.ResourceName(dev.resourceCoreName)]
+			}
+			corePercentage, coreIsInteger := core.AsInt64()
+			if !coreIsInteger || corePercentage < 1 || corePercentage > 100 {
+				return false, fmt.Errorf("%s must be an integer percentage between 1 and 100", dev.resourceCoreName)
+			}
+		}
+		gpuQty := *resource.NewQuantity(1, resource.DecimalSI)
+		if ctr.Resources.Limits == nil {
+			ctr.Resources.Limits = corev1.ResourceList{}
+		}
+		ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)] = gpuQty
+
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
+		ctr.Resources.Requests[corev1.ResourceName(dev.resourceCountName)] = gpuQty
+		return true, nil
 	}
-	klog.Infoln("MutateAdmission result", ok)
-	return ok, nil
+
+	return false, nil
 }
 
 func (dev *AMDDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
