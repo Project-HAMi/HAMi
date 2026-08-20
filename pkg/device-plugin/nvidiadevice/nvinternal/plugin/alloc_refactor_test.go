@@ -27,9 +27,9 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
-	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	"k8s.io/client-go/kubernetes/fake"
 	clienttesting "k8s.io/client-go/testing"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
@@ -148,12 +148,12 @@ func mockAllocateGlobals(t *testing.T, pod *corev1.Pod) {
 
 func TestPopNextContainerDevices(t *testing.T) {
 	tests := []struct {
-		name         string
-		containers   []corev1.Container
-		podSingleDev device.PodSingleDevice
-		wantName     string
-		wantUUID     string
-		wantErr      string
+		name          string
+		containers    []corev1.Container
+		podSingleDev  device.PodSingleDevice
+		wantName      string
+		wantUUID      string
+		wantErr       string
 		wantRemaining int
 	}{
 		{
@@ -808,4 +808,65 @@ func TestAllocate_PatchErasedAnnotationError(t *testing.T) {
 	_, err := plugin.Allocate(context.Background(), request)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "patch not allowed")
+}
+
+func exclusiveControlPod(env []corev1.EnvVar, annotation string) *corev1.Pod {
+	return &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+			UID:       "pod-uid",
+			Annotations: map[string]string{
+				"hami.io/vgpu-devices-to-allocate": annotation,
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "c0", Env: env}},
+		},
+	}
+}
+
+func allocateSingle(t *testing.T, pod *corev1.Pod) *kubeletdevicepluginv1beta1.ContainerAllocateResponse {
+	t.Helper()
+	setupInRequestDevices(t)
+	plugin := newTestPlugin(t)
+	setupFakeClient(t, pod)
+	mockAllocateGlobals(t, pod)
+	request := &kubeletdevicepluginv1beta1.AllocateRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerAllocateRequest{
+			{DevicesIds: []string{"GPU-aaa-0"}},
+		},
+	}
+	response, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Len(t, response.ContainerResponses, 1)
+	return response.ContainerResponses[0]
+}
+
+func TestAllocate_ExclusiveGPU_AutoDisablesControl(t *testing.T) {
+	ctr := allocateSingle(t, exclusiveControlPod(nil, "GPU-aaa,NVIDIA,0,100:;"))
+	require.Equal(t, "true", ctr.Envs["CUDA_DISABLE_CONTROL"])
+	require.False(t, hasLdSoPreloadMount(ctr.Mounts))
+}
+
+func TestAllocate_ExclusiveGPU_ExplicitFalseKeepsControl(t *testing.T) {
+	env := []corev1.EnvVar{{Name: "CUDA_DISABLE_CONTROL", Value: "false"}}
+	ctr := allocateSingle(t, exclusiveControlPod(env, "GPU-aaa,NVIDIA,0,100:;"))
+	_, set := ctr.Envs["CUDA_DISABLE_CONTROL"]
+	require.False(t, set)
+	require.True(t, hasLdSoPreloadMount(ctr.Mounts))
+}
+
+func TestAllocate_LimitlessSharedGPU_KeepsControl(t *testing.T) {
+	ctr := allocateSingle(t, exclusiveControlPod(nil, "GPU-aaa,NVIDIA,0,0:;"))
+	_, set := ctr.Envs["CUDA_DISABLE_CONTROL"]
+	require.False(t, set)
+	require.True(t, hasLdSoPreloadMount(ctr.Mounts))
+}
+
+func TestAllocate_ExclusiveCoresWithMemoryCap_KeepsControl(t *testing.T) {
+	ctr := allocateSingle(t, exclusiveControlPod(nil, "GPU-aaa,NVIDIA,3000,100:;"))
+	_, set := ctr.Envs["CUDA_DISABLE_CONTROL"]
+	require.False(t, set)
+	require.True(t, hasLdSoPreloadMount(ctr.Mounts))
 }

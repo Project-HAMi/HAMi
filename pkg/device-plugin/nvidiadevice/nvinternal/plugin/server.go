@@ -853,10 +853,23 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						HostPath: "/tmp/vgpulock",
 						ReadOnly: false},
 				)
+				// An exclusive allocation (full cores, no memory cap) shares its card
+				// with no other pod, so the interception library adds no isolation and
+				// can deadlock NCCL init (#2641). Skipping it drops the pod from
+				// vGPUmonitor's per-pod metrics, since nothing writes the cache file.
+				exclusive := len(devreq) > 0
+				for _, dev := range devreq {
+					if dev.Usedcores != 100 || dev.Usedmem != 0 {
+						exclusive = false
+						break
+					}
+				}
 				found := false
+				userSet := false
 				for _, val := range currentCtr.Env {
 					if strings.Compare(val.Name, "CUDA_DISABLE_CONTROL") == 0 {
 						// if env existed but is set to false or can not be parsed, ignore
+						userSet = true
 						t, _ := strconv.ParseBool(val.Value)
 						if !t {
 							continue
@@ -865,6 +878,11 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 						found = true
 						break
 					}
+				}
+				if exclusive && !userSet {
+					found = true
+					response.Envs["CUDA_DISABLE_CONTROL"] = "true"
+					klog.InfoS("exclusive GPU allocation, disabling in-container control", "pod", klog.KObj(current), "container", currentCtr.Name)
 				}
 				if !found {
 					response.Mounts = append(response.Mounts, &kubeletdevicepluginv1beta1.Mount{ContainerPath: "/etc/ld.so.preload",
