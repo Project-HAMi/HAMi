@@ -274,7 +274,7 @@ jobs:
   # execute MIG smoke test when hami code merge
   e2e_mig_test:
     uses: ./.github/workflows/call-e2e-mig.yaml
-    needs: [ package_chart, get_info, build ]
+    needs: [ package_chart, get_info, build, e2e_test ]
     if: needs.get_info.outputs.e2e_run == 'true'
     with:
       ref: ${{ needs.get_info.outputs.version }}
