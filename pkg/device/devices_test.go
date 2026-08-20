@@ -1869,3 +1869,106 @@ func TestDecodeNodeDevicesLegacyFormat(t *testing.T) {
 		},
 	}, decoded)
 }
+
+func TestPodRequiresDevice(t *testing.T) {
+	mockDev := &mockDevices{
+		resourceRequest: ContainerDeviceRequest{
+			Nums:     1,
+			Type:     "NVIDIA",
+			Memreq:   1000,
+			Coresreq: 10,
+		},
+	}
+
+	gpuCtr := corev1.Container{
+		Name: "gpu-ctr",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu": resource.MustParse("1"),
+			},
+		},
+	}
+	noGpuCtr := corev1.Container{
+		Name: "no-gpu-ctr",
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"cpu": resource.MustParse("1"),
+			},
+		},
+	}
+
+	tests := []struct {
+		name string
+		dev  Devices
+		pod  *corev1.Pod
+		want bool
+	}{
+		{
+			name: "nil pod returns false",
+			dev:  mockDev,
+			pod:  nil,
+			want: false,
+		},
+		{
+			name: "nil dev returns false",
+			dev:  nil,
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{gpuCtr},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "no device request in init or regular containers",
+			dev:  mockDev,
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{noGpuCtr},
+					Containers:     []corev1.Container{noGpuCtr},
+				},
+			},
+			want: false,
+		},
+		{
+			name: "regular-container-only request",
+			dev:  mockDev,
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{noGpuCtr},
+					Containers:     []corev1.Container{gpuCtr},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "init-container-only request",
+			dev:  mockDev,
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{gpuCtr},
+					Containers:     []corev1.Container{noGpuCtr},
+				},
+			},
+			want: true,
+		},
+		{
+			name: "init and regular container requests",
+			dev:  mockDev,
+			pod: &corev1.Pod{
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{gpuCtr},
+					Containers:     []corev1.Container{gpuCtr},
+				},
+			},
+			want: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := PodRequiresDevice(tt.dev, tt.pod)
+			assert.Equal(t, got, tt.want)
+		})
+	}
+}
