@@ -847,7 +847,13 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			failedNodes[nodeID] = "node unregistered"
 			continue
 		}
-		cachenodeMap[node.ID] = overallnodeMap[node.ID]
+		usage, ok := overallnodeMap[node.ID]
+		if !ok {
+			klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
+			failedNodes[nodeID] = "node usage unavailable"
+			continue
+		}
+		cachenodeMap[node.ID] = usage
 	}
 	return &cachenodeMap, &overallnodeMap, failedNodes, nil
 }
