@@ -170,6 +170,22 @@ func AllInitContainersSucceeded(pod *corev1.Pod) bool {
 	if len(pod.Status.InitContainerStatuses) != initContainers {
 		return false
 	}
+	remaining := make(map[string]struct{}, initContainers)
+	for _, container := range pod.Spec.InitContainers {
+		remaining[container.Name] = struct{}{}
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if _, ok := remaining[s.Name]; !ok {
+			return false
+		}
+		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+			return false
+		}
+		delete(remaining, s.Name)
+	}
+	return len(remaining) == 0
+		return false
+	}
 	for _, s := range pod.Status.InitContainerStatuses {
 		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
 			return false
