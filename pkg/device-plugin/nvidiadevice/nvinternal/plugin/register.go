@@ -89,6 +89,9 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 // nvmlInit is overridable in tests to simulate NVML init failures without a real driver.
 var nvmlInit = nvml.Init
 
+// calculateGPUScore is overridable in tests to simulate topology-score calculation failures.
+var calculateGPUScore = nvidia.CalculateGPUScore
+
 func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
@@ -276,7 +279,7 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 
 	var data []byte
 	if os.Getenv("ENABLE_TOPOLOGY_SCORE") == "true" {
-		gpuScore, hasAsymmetry, err := nvidia.CalculateGPUScore(device.GetDevicesUUIDList(*devices))
+		gpuScore, hasAsymmetry, err := calculateGPUScore(device.GetDevicesUUIDList(*devices))
 		if err != nil {
 			klog.ErrorS(err, "calculate gpu topo score error")
 			return false, err

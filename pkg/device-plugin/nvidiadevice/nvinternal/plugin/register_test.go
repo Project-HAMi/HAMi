@@ -30,6 +30,7 @@ import (
 	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
+	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
@@ -230,6 +231,54 @@ func TestRegisterInAnnotationRetriesAfterPatchFailure(t *testing.T) {
 	}
 	if !changed {
 		t.Fatal("second RegisterInAnnotation() changed = false, want true (patch should be retried, not skipped)")
+	}
+}
+
+// TestRegisterInAnnotationDoesNotPoisonCacheOnScoreError verifies that a
+// failure computing the topology score (ENABLE_TOPOLOGY_SCORE=true) does not
+// poison deviceCache either: the cache is only written after every step,
+// including score calculation, completes successfully - matching the
+// patch-failure behavior verified above.
+func TestRegisterInAnnotationDoesNotPoisonCacheOnScoreError(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	originalCalculateGPUScore := calculateGPUScore
+	calculateGPUScore = func([]string) (nvidia.ListDeviceScore, bool, error) {
+		return nil, false, fmt.Errorf("simulated topology score failure")
+	}
+	defer func() { calculateGPUScore = originalCalculateGPUScore }()
+
+	t.Setenv("ENABLE_TOPOLOGY_SCORE", "true")
+
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	util.NodeName = "test-node"
+	defer func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	}()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	client.KubeClient = fake.NewSimpleClientset(node)
+
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if err == nil {
+		t.Fatal("RegisterInAnnotation() error = nil, want error from failed score calculation")
+	}
+	if changed {
+		t.Fatal("RegisterInAnnotation() changed = true, want false (no patch was attempted)")
+	}
+	if plugin.deviceCache != "" {
+		t.Fatalf("deviceCache = %q after a failed score calculation, want unchanged (empty)", plugin.deviceCache)
 	}
 }
 
