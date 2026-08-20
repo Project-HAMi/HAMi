@@ -1247,6 +1247,11 @@ func TestLockNodeDeterministicExpiredRecoverySerialization(t *testing.T) {
 			}()
 			// Wait until Pod B has actually reached the per-node mutex boundary.
 			<-podBAtMutex
+			// Yield the processor to allow Pod B's goroutine to execute its lock attempt.
+			// If the implementation were non-atomic (the bug), Pod B would acquire the lock,
+			// mutate the node, and finish immediately. Under the fixed atomic implementation,
+			// Pod B is blocked on nodeLock.Lock() because Pod A holds the per-node mutex.
+			runtime.Gosched()
 			// Ensure Pod B is blocked waiting for Pod A to finish recovery and has not returned.
 			select {
 			case res := <-podBResult:
