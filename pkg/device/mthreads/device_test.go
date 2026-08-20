@@ -568,6 +568,32 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("1"),
+						"mthreads.com/sgpu-memory": resource.MustParse("16Gi"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"mthreads.com/vgpu":        resource.MustParse("1"),
+						"mthreads.com/sgpu-memory": resource.MustParse("16.0Gi"),
+						"mthreads.com/sgpu-core":   resource.MustParse("1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
