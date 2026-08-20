@@ -212,6 +212,41 @@ func TestPredicateRoute_DecodeError(t *testing.T) {
 	}
 }
 
+func TestPredicateRoute_NilPod(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "pod field omitted", body: `{"NodeNames":["node1"]}`},
+		{name: "pod field explicitly null", body: `{"Pod":null,"NodeNames":["node1"]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/predicate", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			s := &scheduler.Scheduler{}
+			handler := PredicateRoute(s)
+
+			// Must not panic when Pod is missing/null.
+			handler(w, req, nil)
+
+			if w.Code != 200 {
+				t.Errorf("expected 200 (error reported in body, not status), got %d", w.Code)
+			}
+
+			var result extenderv1.ExtenderFilterResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("failed to unmarshal response: %v", err)
+			}
+			if result.Error == "" {
+				t.Error("expected a missing-pod error to be reported in the filter result")
+			}
+		})
+	}
+}
+
 func TestPredicateRoute_CacheNotSynced(t *testing.T) {
 	args := extenderv1.ExtenderArgs{Pod: &corev1.Pod{}}
 	body, err := json.Marshal(args)
