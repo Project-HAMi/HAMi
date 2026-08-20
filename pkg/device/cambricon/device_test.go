@@ -298,6 +298,12 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("1"),
 						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
 			name: "zero count must not silently bypass quota",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
@@ -315,6 +321,86 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"cambricon.com/mlu":              resource.MustParse("1"),
 						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2147483647,
+				Type:             CambriconMLUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
 			name: "negative count must be rejected",
 			args: corev1.Container{
 				Resources: corev1.ResourceRequirements{
