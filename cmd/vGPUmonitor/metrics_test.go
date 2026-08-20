@@ -350,7 +350,7 @@ func TestHostGPUMetricsError(t *testing.T) {
 	if err := cc.collectGPUPowerMetrics(nil, mockDev, 0); err == nil {
 		t.Fatalf("expected error for power, got nil")
 	}
-	
+
 	ch := make(chan prometheus.Metric, 10)
 	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
 		t.Fatalf("expected nil error for ECC even when unknown error occurs (it continues), got: %v", err)
