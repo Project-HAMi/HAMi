@@ -111,10 +111,34 @@ func TestHostGPUMetricsMissingNodeName(t *testing.T) {
 		GetNameFunc: func() (string, nvml.Return) {
 			return "Tesla T4", nvml.SUCCESS
 		},
+		GetTemperatureFunc: func(nvml.TemperatureSensors) (uint32, nvml.Return) {
+			return 45, nvml.SUCCESS
+		},
+		GetPowerUsageFunc: func() (uint32, nvml.Return) {
+			return 150000, nvml.SUCCESS
+		},
+		GetTotalEccErrorsFunc: func(nvml.MemoryErrorType, nvml.EccCounterType) (uint64, nvml.Return) {
+			return 5, nvml.SUCCESS
+		},
 	}
 	err = cc.collectGPUMemoryMetrics(nil, mockDev, 0)
 	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
 		t.Errorf("expected missing node name error from collectGPUMemoryMetrics, got: %v", err)
+	}
+
+	err = cc.collectGPUTemperatureMetrics(nil, mockDev, 0)
+	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from collectGPUTemperatureMetrics, got: %v", err)
+	}
+
+	err = cc.collectGPUPowerMetrics(nil, mockDev, 0)
+	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from collectGPUPowerMetrics, got: %v", err)
+	}
+
+	err = cc.collectGPUEccErrorMetrics(nil, mockDev, 0)
+	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from collectGPUEccErrorMetrics, got: %v", err)
 	}
 }
 
@@ -134,6 +158,15 @@ func TestHostGPUMetricsCollectionSuccess(t *testing.T) {
 		GetNameFunc: func() (string, nvml.Return) {
 			return "Tesla T4", nvml.SUCCESS
 		},
+		GetTemperatureFunc: func(nvml.TemperatureSensors) (uint32, nvml.Return) {
+			return 45, nvml.SUCCESS
+		},
+		GetPowerUsageFunc: func() (uint32, nvml.Return) {
+			return 150000, nvml.SUCCESS
+		},
+		GetTotalEccErrorsFunc: func(nvml.MemoryErrorType, nvml.EccCounterType) (uint64, nvml.Return) {
+			return 5, nvml.SUCCESS
+		},
 	}
 
 	initLegacyDescriptors()
@@ -151,14 +184,26 @@ func TestHostGPUMetricsCollectionSuccess(t *testing.T) {
 		t.Fatalf("collectGPUUtilizationMetrics failed: %v", err)
 	}
 
+	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUTemperatureMetrics failed: %v", err)
+	}
+
+	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUPowerMetrics failed: %v", err)
+	}
+
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+		t.Fatalf("collectGPUEccErrorMetrics failed: %v", err)
+	}
+
 	close(ch)
 
 	count := 0
 	for range ch {
 		count++
 	}
-	if count < 4 {
-		t.Errorf("expected at least 4 metrics, got %d", count)
+	if count < 8 {
+		t.Errorf("expected at least 8 metrics, got %d", count)
 	}
 }
 
