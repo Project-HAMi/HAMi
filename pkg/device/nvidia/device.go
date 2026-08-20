@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 	"strings"
@@ -527,15 +528,19 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				mem, ok = ctr.Resources.Requests[resourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					if dev.config.MemoryFactor > 1 {
-						rawMemnums := memnums
-						memnums = memnums * int64(dev.config.MemoryFactor)
-						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, dev.config.MemoryFactor)
-					}
-					memnum = int(memnums)
+				memnums, parsed := mem.AsInt64()
+				factor := max(int64(dev.config.MemoryFactor), 1)
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/factor {
+					klog.ErrorS(nil, "nvidia memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name)
+					return device.ContainerDeviceRequest{}
 				}
+				if factor > 1 {
+					rawMemnums := memnums
+					memnums = memnums * factor
+					klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, factor)
+				}
+				memnum = int(memnums)
 			}
 			mempnum := int32(101)
 			mem, ok = ctr.Resources.Limits[resourceMemPercentage]
@@ -688,8 +693,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
-	needTopology := gpuPolicy == util.GPUSchedulerPolicyTopology.String()
-	isMutex := gpuPolicy == util.GPUSchedulerPolicyMutex.String()
+	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
+	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)

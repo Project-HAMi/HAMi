@@ -231,7 +231,7 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	dieMode := isDieMode(devices)
 	// Under mutex a physical card (AIC) is exclusive: in die mode a card is made
 	// of several dies, so if any die on a card is in use none of its sibling dies

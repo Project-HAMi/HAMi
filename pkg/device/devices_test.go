@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -1719,6 +1720,28 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 	f.Fuzz(func(t *testing.T, str string) {
 		// Must never panic on arbitrary pod-annotation input.
 		_, _ = DecodeContainerDevices(str)
+	})
+}
+
+func FuzzEncodeDecodeContainerDevices(f *testing.F) {
+	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10))
+	f.Add("", "", int32(0), int32(0))
+	f.Add("GPU-boundary", "NVIDIA", int32(-2147483648), int32(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores int32) {
+		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
+			t.Skip()
+		}
+
+		want := ContainerDevices{{
+			UUID:      uuid,
+			Type:      deviceType,
+			Usedmem:   usedmem,
+			Usedcores: usedcores,
+		}}
+		encoded := EncodeContainerDevices(want)
+		got, err := DecodeContainerDevices(encoded)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, want, got)
 	})
 }
 

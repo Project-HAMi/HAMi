@@ -18,6 +18,7 @@ package awsneuron
 
 import (
 	"fmt"
+	"math"
 	"slices"
 	"strconv"
 	"strings"
@@ -52,6 +53,11 @@ const (
 	AWSNeuronAllocated       = "NEURON_ALLOCATED"
 	AWSUsageInfo             = "awsusageinfo"
 	AWSNodeType              = "AWSNodeType"
+	maxAWSNeuronDeviceCount  = int64(math.MaxInt32)
+	// maxCoresPerNeuronDevice caps per-device cores: addCoreUsage builds a
+	// two-bit mask and PatchAnnotations only emits the first two core indexes.
+	maxCoresPerNeuronDevice = int64(2)
+	maxAWSNeuronCoreCount   = maxAWSNeuronDeviceCount * maxCoresPerNeuronDevice
 )
 
 type AWSNeuronConfig struct {
@@ -77,11 +83,74 @@ func (dev *AWSNeuronDevices) CommonWord() string {
 }
 
 func (dev *AWSNeuronDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool, error) {
-	_, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
-	if !ok {
-		_, ok = ctr.Resources.Limits[corev1.ResourceName(dev.resourceCoreName)]
+	count, countRequested := resourceQuantity(ctr, corev1.ResourceName(dev.resourceCountName))
+	if countRequested {
+		_, err := validateResourceRequest(count, dev.resourceCountName, maxAWSNeuronDeviceCount)
+		return err == nil, err
 	}
-	return ok, nil
+
+	core, coreRequested := resourceQuantity(ctr, corev1.ResourceName(dev.resourceCoreName))
+	if !coreRequested {
+		return false, nil
+	}
+	coreCount, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
+	if err != nil {
+		return false, err
+	}
+	// Defer to the conversion path so the two cannot disagree.
+	if _, _, err := dev.splitCoreRequest(coreCount); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func resourceQuantity(ctr *corev1.Container, name corev1.ResourceName) (resource.Quantity, bool) {
+	quantity, ok := ctr.Resources.Limits[name]
+	if !ok {
+		quantity, ok = ctr.Resources.Requests[name]
+	}
+	return quantity, ok
+}
+
+func validateResourceRequest(quantity resource.Quantity, resourceName string, maxValue int64) (int64, error) {
+	value, isInteger := quantity.AsInt64()
+	if !isInteger {
+		return 0, fmt.Errorf("%s must be an integer", resourceName)
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("%s must be greater than 0", resourceName)
+	}
+	if value > maxValue {
+		return 0, fmt.Errorf("%s must not exceed %d", resourceName, maxValue)
+	}
+	return value, nil
+}
+
+// coresPerDevice reports NeuronCores per device. It is zero until a node is
+// registered, so callers without one fall back to the cap.
+func (dev *AWSNeuronDevices) coresPerDevice() int64 {
+	observed := int64(dev.coresPerAWSNeuron)
+	if observed <= 0 {
+		return maxCoresPerNeuronDevice
+	}
+	return min(observed, maxCoresPerNeuronDevice)
+}
+
+// splitCoreRequest maps a NeuronCore count onto devices. One core count applies
+// to every device, so counts that neither fit nor fill devices are rejected.
+func (dev *AWSNeuronDevices) splitCoreRequest(cores int64) (int32, int32, error) {
+	coresPerDevice := dev.coresPerDevice()
+	if cores <= coresPerDevice {
+		return 1, int32(cores), nil
+	}
+	if cores%coresPerDevice != 0 {
+		return 0, 0, fmt.Errorf("%s must be 1 or a multiple of %d, got %d", dev.resourceCoreName, coresPerDevice, cores)
+	}
+	nums := cores / coresPerDevice
+	if nums > maxAWSNeuronDeviceCount {
+		return 0, 0, fmt.Errorf("%s needs %d devices, which exceeds the maximum of %d", dev.resourceCoreName, nums, maxAWSNeuronDeviceCount)
+	}
+	return int32(nums), int32(coresPerDevice), nil
 }
 
 func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo, error) {
@@ -135,8 +204,12 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 		value := ""
 		for ctridx, dp := range devlist {
 			if len(dp) > 0 {
+				ctr := getContainerByIndex(pod, ctridx)
+				if ctr == nil {
+					continue
+				}
 				for _, val := range dp {
-					devValue, ok := pod.Spec.Containers[ctridx].Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
+					devValue, ok := ctr.Resources.Limits[corev1.ResourceName(dev.resourceCountName)]
 					if ok {
 						c, _ := devValue.AsInt64()
 						if c > 0 {
@@ -167,6 +240,17 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	}
 	klog.V(4).InfoS("annos", "input", (*annoinput))
 	return *annoinput
+}
+
+func getContainerByIndex(pod *corev1.Pod, ctridx int) *corev1.Container {
+	if ctridx < len(pod.Spec.InitContainers) {
+		return &pod.Spec.InitContainers[ctridx]
+	}
+	ctridx -= len(pod.Spec.InitContainers)
+	if ctridx < len(pod.Spec.Containers) {
+		return &pod.Spec.Containers[ctridx]
+	}
+	return nil
 }
 
 func (dev *AWSNeuronDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
@@ -204,48 +288,45 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	klog.Info("Start to count awsNeuron devices for container ", ctr.Name)
 	awsResourceCount := corev1.ResourceName(dev.resourceCountName)
 	awsResourceCores := corev1.ResourceName(dev.resourceCoreName)
-	v, ok := ctr.Resources.Limits[awsResourceCount]
-	if !ok {
-		v, ok = ctr.Resources.Requests[awsResourceCount]
-	}
+	v, ok := resourceQuantity(ctr, awsResourceCount)
 	if ok {
-		if n, ok := v.AsInt64(); ok {
+		n, err := validateResourceRequest(v, dev.resourceCountName, maxAWSNeuronDeviceCount)
+		if err != nil {
+			klog.ErrorS(err, "Invalid awsNeuron device request", "container", ctr.Name)
+			return device.ContainerDeviceRequest{}
+		}
+		klog.InfoS("Detected awsNeuron device request",
+			"container", ctr.Name,
+			"deviceCount", n)
+		return device.ContainerDeviceRequest{
+			Nums:             int32(n),
+			Type:             AWSNeuronDevice,
+			Memreq:           0,
+			MemPercentagereq: 0,
+			Coresreq:         int32(dev.coresPerAWSNeuron),
+		}
+	} else {
+		core, ok := resourceQuantity(ctr, awsResourceCores)
+		if ok {
+			n, err := validateResourceRequest(core, dev.resourceCoreName, maxAWSNeuronCoreCount)
+			if err != nil {
+				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}
+			}
+			nums, coresreq, err := dev.splitCoreRequest(n)
+			if err != nil {
+				klog.ErrorS(err, "Invalid awsNeuron core request", "container", ctr.Name)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.InfoS("Detected awsNeuron device request",
 				"container", ctr.Name,
-				"deviceCount", n)
+				"deviceCores", n)
 			return device.ContainerDeviceRequest{
-				Nums:             int32(n),
+				Nums:             nums,
 				Type:             AWSNeuronDevice,
 				Memreq:           0,
 				MemPercentagereq: 0,
-				Coresreq:         int32(dev.coresPerAWSNeuron),
-			}
-		}
-	} else {
-		core, ok := ctr.Resources.Limits[awsResourceCores]
-		if !ok {
-			core, ok = ctr.Resources.Requests[awsResourceCores]
-		}
-		if ok {
-			if n, ok := core.AsInt64(); ok {
-				klog.InfoS("Detected awsNeuron device request",
-					"container", ctr.Name,
-					"deviceCores", n)
-				num := 1
-				if n >= 2 {
-					num = int(n / 2)
-				}
-				corenum := 1
-				if n >= 2 {
-					corenum = 2
-				}
-				return device.ContainerDeviceRequest{
-					Nums:             int32(num),
-					Type:             AWSNeuronDevice,
-					Memreq:           0,
-					MemPercentagereq: 0,
-					Coresreq:         int32(corenum),
-				}
+				Coresreq:         coresreq,
 			}
 		}
 	}
@@ -365,7 +446,7 @@ func (neuron *AWSNeuronDevices) Fit(devices []*device.DeviceUsage, request devic
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	if k.Nums > 1 {
 		alloc := graphSelect(devices, int(request.Nums))
 		if len(alloc) == 0 {

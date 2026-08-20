@@ -787,6 +787,29 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 	}
 }
 
+func TestPolicyContains(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		target SchedulerPolicyName
+		want   bool
+	}{
+		{"single value match", "mutex", GPUSchedulerPolicyMutex, true},
+		{"single value no match", "spread", GPUSchedulerPolicyMutex, false},
+		{"empty policy", "", GPUSchedulerPolicyMutex, false},
+		{"comma list match first", "mutex,spread", GPUSchedulerPolicyMutex, true},
+		{"comma list match last", "spread,numa,mutex", GPUSchedulerPolicyMutex, true},
+		{"comma list no match", "binpack,spread", GPUSchedulerPolicyMutex, false},
+		{"comma list with spaces", "mutex, spread, numa", GPUSchedulerPolicyNuma, true},
+		{"chain of sort keys, no filter", "binpack,spread,numa", GPUSchedulerPolicyTopology, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, PolicyContains(tt.policy, tt.target))
+		})
+	}
+}
+
 func TestSchedulerPolicyName_String(t *testing.T) {
 	tests := []struct {
 		policy SchedulerPolicyName
