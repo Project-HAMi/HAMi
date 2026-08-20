@@ -19,6 +19,7 @@ package hygon
 import (
 	"errors"
 	"flag"
+	"math"
 	"slices"
 	"strings"
 
@@ -175,6 +176,10 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "dcu device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found dcu devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[dcuResourceMem]
@@ -184,9 +189,17 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				memnums, ok := mem.AsInt64()
 				if ok {
+					if memnums < 0 || memnums > math.MaxInt32 {
+						klog.ErrorS(nil, "dcu device memory request is out of range", "container", ctr.Name, "request", mem.String())
+						return device.ContainerDeviceRequest{}
+					}
 					if MemoryFactor > 1 {
 						rawMemnums := memnums
 						memnums = memnums * int64(MemoryFactor)
+						if memnums > math.MaxInt32 {
+							klog.ErrorS(nil, "dcu device memory request overflows int32 after applying memory factor", "container", ctr.Name, "raw", rawMemnums, "scaled", memnums, "factor", MemoryFactor)
+							return device.ContainerDeviceRequest{}
+						}
 						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, MemoryFactor)
 					}
 					memnum = int(memnums)
@@ -200,6 +213,10 @@ func (dev *DCUDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			if ok {
 				corenums, ok := core.AsInt64()
 				if ok {
+					if corenums < 0 || corenums > math.MaxInt32 {
+						klog.ErrorS(nil, "dcu device core request is out of range", "container", ctr.Name, "request", core.String())
+						return device.ContainerDeviceRequest{}
+					}
 					corenum = int32(corenums)
 				}
 			}
@@ -252,11 +269,15 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, numa := dcu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -265,7 +286,7 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -340,9 +361,9 @@ func (dcu *DCUDevices) Fit(devices []*device.DeviceUsage, request device.Contain
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
@@ -352,5 +373,6 @@ func (dev *DCUDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  HygonResourceCount,
 		ResourceMemoryName: HygonResourceMemory,
 		ResourceCoreName:   HygonResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

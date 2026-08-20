@@ -93,6 +93,12 @@ lint_chart:
       (($$?==0)) || { echo "error, failed to check chart trivy" && exit 1 ; } ; \
       echo "chart trivy check: pass"
 
+.PHONY: verify_chart
+verify_chart:
+	$(MAKE) -C charts validate
+	bash ./hack/verify-chart-version.sh
+	$(MAKE) lint_chart
+
 .PHONY: e2e-env-setup
 e2e-env-setup:
 	./hack/e2e-test-setup.sh

@@ -17,7 +17,8 @@ limitations under the License.
 package nodelock
 
 import (
-	"context" // Added for the new test
+	"context"
+	"errors"
 	"runtime"
 	"strings"
 	"sync"
@@ -25,16 +26,231 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1" // Added for the new test
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/runtime/schema"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
+func TestSetNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-set-conflict"
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "ns"}}
+	holderB := GenerateNodeLockKeyByPod(podB)
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: holderB},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent lock"))
+	})
+
+	err := SetNodeLock(nodeName, "", podA)
+	if !IsNodeLockContention(err) {
+		t.Fatalf("SetNodeLock() error = %v, want node lock contention", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != holderB {
+		t.Fatalf("node lock = %q, want concurrent holder %q", got, holderB)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestSetNodeLockSucceedsAfterLostPatchResponse(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-set-lost-response"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	lockStr := "2026-08-01T06:00:00Z,ns,pod-a"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: nodeName}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: lockStr},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, errors.New("simulated lost patch response")
+	})
+
+	if err := SetNodeLock(nodeName, "", pod); err != nil {
+		t.Fatalf("SetNodeLock() error = %v, want nil", err)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestReleaseNodeLockPreservesConcurrentLockAfterConflict(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-conflict"
+	podA := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	podB := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-b", Namespace: "ns"}}
+	holderA := GenerateNodeLockKeyByPod(podA)
+	holderB := GenerateNodeLockKeyByPod(podB)
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: holderA},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: holderB},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent lock"))
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", podA, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != holderB {
+		t.Fatalf("node lock = %q, want concurrent holder %q", got, holderB)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestReleaseNodeLockPreservesReplacedLegacyLockAfterConflict(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-legacy-conflict"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	initialLock := "2026-08-01T06:00:00Z"
+	replacedLock := "2026-08-01T06:00:01Z"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: initialLock},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls < 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: replacedLock},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated concurrent legacy lock"))
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if got := node.Annotations[NodeLockKey]; got != replacedLock {
+		t.Fatalf("node lock = %q, want concurrent legacy lock %q", got, replacedLock)
+	}
+	if patchCalls != 1 {
+		t.Fatalf("patch calls = %d, want 1", patchCalls)
+	}
+}
+
+func TestReleaseNodeLockReleasesRestampedLockForSamePod(t *testing.T) {
+	nodeLocks = newNodeLockManager()
+	nodeName := "node-release-restamped"
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod-a", Namespace: "ns"}}
+	initialLock := "2026-07-29T13:00:00Z,ns,pod-a"
+	restampedLock := "2026-07-29T13:00:01Z,ns,pod-a"
+	clientSet := fake.NewClientset(&corev1.Node{ObjectMeta: metav1.ObjectMeta{
+		Name:        nodeName,
+		Annotations: map[string]string{NodeLockKey: initialLock},
+	}})
+	client.KubeClient = clientSet
+
+	getCalls := 0
+	clientSet.PrependReactor("get", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		getCalls++
+		if getCalls != 3 {
+			return false, nil, nil
+		}
+		return true, &corev1.Node{ObjectMeta: metav1.ObjectMeta{
+			Name:        nodeName,
+			Annotations: map[string]string{NodeLockKey: restampedLock},
+		}}, nil
+	})
+	patchCalls := 0
+	clientSet.PrependReactor("patch", "nodes", func(k8stesting.Action) (bool, k8sruntime.Object, error) {
+		patchCalls++
+		if patchCalls == 1 {
+			return true, nil, apierrors.NewConflict(schema.GroupResource{Resource: "nodes"}, nodeName, errors.New("simulated restamp"))
+		}
+		return false, nil, nil
+	})
+
+	if err := ReleaseNodeLock(nodeName, "", pod, false); err != nil {
+		t.Fatalf("ReleaseNodeLock() error = %v, want nil", err)
+	}
+	node, err := clientSet.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("get node: %v", err)
+	}
+	if _, ok := node.Annotations[NodeLockKey]; ok {
+		t.Fatalf("node lock = %q, want removed", node.Annotations[NodeLockKey])
+	}
+	if patchCalls != 2 {
+		t.Fatalf("patch calls = %d, want 2", patchCalls)
+	}
+}
+
 func Test_LockNode(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	type args struct {
-		nodeName func() string
+		nodeName func(t *testing.T) string
 		lockname string
 		pods     *corev1.Pod
 	}
@@ -46,7 +262,7 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node not found",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					return "node"
 				},
 				pods: &corev1.Pod{
@@ -59,20 +275,67 @@ func Test_LockNode(t *testing.T) {
 			wantErr: true,
 		},
 		{
-			name: "node has been locked",
+			name: "node has been locked by another pod",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-1"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
 							Annotations: map[string]string{
 								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
-									ObjectMeta: metav1.ObjectMeta{Name: "hami", Namespace: "hami-ns"},
+									ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
 								}),
 							},
 						},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
+					// The lock holder ("other-pod"/"other-ns") must exist and not be
+					// dangling, otherwise LockNode treats it as stale and takes over.
+					if _, err := client.KubeClient.CoreV1().Pods("other-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "other-pod", Namespace: "other-ns"},
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create lock-holder pod fixture: %v", err)
+					}
+					return name
+				},
+				pods: &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "hami",
+						Namespace: "hami-ns",
+					},
+				},
+			},
+			wantErr: true,
+		},
+		{
+			name: "node has been locked by another pod in the same namespace",
+			args: args{
+				nodeName: func(t *testing.T) string {
+					name := "worker-1b"
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+						ObjectMeta: metav1.ObjectMeta{
+							Name: name,
+							Annotations: map[string]string{
+								NodeLockKey: GenerateNodeLockKeyByPod(&corev1.Pod{
+									ObjectMeta: metav1.ObjectMeta{Name: "other-pod-same-ns", Namespace: "hami-ns"},
+								}),
+							},
+						},
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
+					// Same namespace as the requester below, but a different pod
+					// name: exercises ns == pods.Namespace (true) with
+					// previousPodName == pods.Name (false), distinct from both the
+					// "another pod" case above (both false) and the reentrant
+					// same-pod case (both true).
+					if _, err := client.KubeClient.CoreV1().Pods("hami-ns").Create(context.TODO(), &corev1.Pod{
+						ObjectMeta: metav1.ObjectMeta{Name: "other-pod-same-ns", Namespace: "hami-ns"},
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create lock-holder pod fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -87,16 +350,18 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "node lock is invalid",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-2"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{
 							Name: name,
 							Annotations: map[string]string{
 								NodeLockKey: "lock",
 							},
 						},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -111,11 +376,13 @@ func Test_LockNode(t *testing.T) {
 		{
 			name: "successfully set node lock",
 			args: args{
-				nodeName: func() string {
+				nodeName: func(t *testing.T) string {
 					name := "worker-3"
-					client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					if _, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
 						ObjectMeta: metav1.ObjectMeta{Name: name, Annotations: map[string]string{}},
-					}, metav1.CreateOptions{})
+					}, metav1.CreateOptions{}); err != nil {
+						t.Fatalf("failed to create node fixture: %v", err)
+					}
 					return name
 				},
 				pods: &corev1.Pod{
@@ -130,7 +397,7 @@ func Test_LockNode(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if err := LockNode(tt.args.nodeName(), tt.args.lockname, tt.args.pods); (err != nil) != tt.wantErr {
+			if err := LockNode(tt.args.nodeName(t), tt.args.lockname, tt.args.pods); (err != nil) != tt.wantErr {
 				t.Errorf("LockNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
 		})
@@ -230,6 +497,40 @@ func TestLockNodeWithDangling(t *testing.T) {
 	// Try to lock the node again - this should pass and release the old dangling lock
 	if err := LockNode(nodeName, "", pod); err != nil {
 		t.Fatal("Expected nil but got error")
+	}
+}
+
+// TestLockNodeReentrantSamePod covers lockAllDevices' actual call pattern:
+// it calls LockNode once per device vendor a pod requests resources from, so
+// a pod requesting e.g. both nvidia.com/gpu and cambricon.com/vmlu locks the
+// same node twice for itself in a row. The second call must succeed instead
+// of contending with the pod's own still-valid lock, or such a pod could
+// never become schedulable.
+func TestLockNodeReentrantSamePod(t *testing.T) {
+	client.KubeClient = fake.NewClientset()
+	nodeLocks = newNodeLockManager()
+	nodeName := "multi-vendor-node"
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName, Annotations: map[string]string{}},
+	}, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("Failed to create node: %v", err)
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "multi-vendor-pod", Namespace: "test-ns"}}
+	// The requesting pod must actually exist for this test to exercise the
+	// intended live-ownership scenario. Without it, the first LockNode call
+	// still succeeds, but only because it's setting a fresh lock, not
+	// because the reentrancy branch has verified anything about a real,
+	// live pod - so a real dangling-lock path could be masked instead.
+	if _, err := client.KubeClient.CoreV1().Pods("test-ns").Create(context.TODO(), pod, metav1.CreateOptions{}); err != nil {
+		t.Fatalf("Failed to create pod: %v", err)
+	}
+
+	if err := LockNode(nodeName, "nvidia", pod); err != nil {
+		t.Fatalf("first LockNode call (simulating the nvidia backend) failed: %v", err)
+	}
+	if err := LockNode(nodeName, "cambricon", pod); err != nil {
+		t.Fatalf("second LockNode call for the same pod (simulating the cambricon backend) should succeed, got: %v", err)
 	}
 }
 

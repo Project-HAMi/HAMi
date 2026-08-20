@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -158,8 +159,22 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	}
 	return err
 }
+func AllInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return false
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
+	if pod == nil {
+		return fmt.Errorf("pod is nil")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 		Labels      map[string]string `json:"labels,omitempty"`
@@ -269,16 +284,109 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	return userGPUPolicy
 }
 
+// PolicyContains reports whether policy names name, treating policy as a
+// comma-separated ordered list (e.g. "binpack,numa"). A single value with no
+// comma is compared directly, so existing single-policy callers are unaffected.
+func PolicyContains(policy string, name SchedulerPolicyName) bool {
+	target := name.String()
+	for p := range strings.SplitSeq(policy, ",") {
+		if strings.TrimSpace(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 
 func IsPodTerminating(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return pod.DeletionTimestamp != nil
 }
 
 func AllContainersCreated(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
+}
+
+// EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.
+func EmitNodeWarningEvent(node *corev1.Node, reason, message string, dedupWindow time.Duration) {
+	c := client.GetClient()
+	if c == nil {
+		klog.Warningf("cannot emit node event for %s: Kubernetes client not initialized", node.Name)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	fieldSel := fmt.Sprintf(
+		"involvedObject.kind=Node,involvedObject.name=%s,involvedObject.uid=%s,reason=%s",
+		node.Name, string(node.UID), reason,
+	)
+	existing, err := c.CoreV1().Events(corev1.NamespaceDefault).List(ctx, metav1.ListOptions{
+		FieldSelector: fieldSel,
+	})
+	if err != nil {
+		klog.Warningf("failed to list events for node %s: %v; will attempt create", node.Name, err)
+	}
+
+	now := metav1.Now()
+
+	if err == nil && len(existing.Items) > 0 {
+		// Client-side filter: the field selector is a server-side optimization; re-check
+		// here so the function is correct even against fake clients or non-compliant servers.
+		var latest *corev1.Event
+		for i := range existing.Items {
+			ev := &existing.Items[i]
+			if ev.InvolvedObject.UID != node.UID || ev.Reason != reason {
+				continue
+			}
+			if latest == nil || ev.LastTimestamp.After(latest.LastTimestamp.Time) {
+				latest = ev
+			}
+		}
+		if latest != nil && now.Sub(latest.LastTimestamp.Time) <= dedupWindow {
+			latest.Count++
+			latest.LastTimestamp = now
+			latest.Message = message
+			if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Update(ctx, latest, metav1.UpdateOptions{}); err != nil {
+				klog.Warningf("failed to update node event for %s: %v", node.Name, err)
+			}
+			return
+		}
+	}
+
+	event := &corev1.Event{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: node.Name + "-",
+			Namespace:    corev1.NamespaceDefault,
+		},
+		InvolvedObject: corev1.ObjectReference{
+			APIVersion: "v1",
+			Kind:       "Node",
+			Name:       node.Name,
+			UID:        node.UID,
+		},
+		Reason:         reason,
+		Message:        message,
+		Type:           corev1.EventTypeWarning,
+		Count:          1,
+		FirstTimestamp: now,
+		LastTimestamp:  now,
+		Source:         corev1.EventSource{Component: "hami-device-plugin"},
+	}
+	if _, err := c.CoreV1().Events(corev1.NamespaceDefault).Create(ctx, event, metav1.CreateOptions{}); err != nil {
+		klog.Warningf("failed to create node event for %s: %v", node.Name, err)
+	}
 }
 
 func IsPodGroupMember(pod *corev1.Pod) bool {

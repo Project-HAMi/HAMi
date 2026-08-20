@@ -185,8 +185,13 @@ func (l *ContainerLister) Update() error {
 		if !entry.IsDir() {
 			continue
 		}
+		parts := strings.SplitN(entry.Name(), "_", 2)
+		if len(parts) != 2 || parts[0] == "" || parts[1] == "" {
+			klog.Warningf("Skipping dir with unexpected name format: %s", entry.Name())
+			continue
+		}
 		dirName := filepath.Join(l.containerPath, entry.Name())
-		podUID := strings.Split(entry.Name(), "_")[0]
+		podUID := parts[0]
 		if !podUIDs[podUID] {
 			dirInfo, err := os.Stat(dirName)
 			if err == nil && dirInfo.ModTime().Add(resyncInterval).After(time.Now()) {
@@ -209,11 +214,10 @@ func (l *ContainerLister) Update() error {
 			continue
 		}
 		if usage == nil {
-			// no cuInit in container
 			continue
 		}
 		usage.PodUID = podUID
-		usage.ContainerName = strings.Split(entry.Name(), "_")[1]
+		usage.ContainerName = parts[1]
 		l.containers[entry.Name()] = usage
 		klog.Infof("Adding ctr dirname %s in monitorpath", dirName)
 	}
@@ -226,7 +230,14 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(files) > 2 {
+	matchedFiles := 0
+	for _, val := range files {
+		if strings.Contains(val.Name(), "libvgpu.so") ||
+			strings.HasSuffix(val.Name(), ".cache") {
+			matchedFiles++
+		}
+	}
+	if matchedFiles > 2 {
 		return nil, errors.New("cache num not matched")
 	}
 	if len(files) == 0 {
@@ -237,7 +248,7 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		if strings.Contains(val.Name(), "libvgpu.so") {
 			continue
 		}
-		if !strings.Contains(val.Name(), ".cache") {
+		if !strings.HasSuffix(val.Name(), ".cache") {
 			continue
 		}
 		cacheFile = filepath.Join(fpath, val.Name())
@@ -274,15 +285,16 @@ func loadCache(fpath string) (*ContainerUsage, error) {
 		_ = syscall.Munmap(usage.data)
 		return nil, fmt.Errorf("cache file magic flag not matched")
 	}
-	if info.Size() == 1197897 {
+	if info.Size() >= int64(v0.MinSize()) && info.Size() < int64(v1.MinSize()) {
 		klog.Infoln("casting......v0")
 		usage.Info = v0.CastSpec(usage.data)
-	} else if head.majorVersion == 1 {
+	} else if head.majorVersion == 1 && info.Size() >= int64(v1.MinSize()) {
 		klog.Infoln("casting......v1")
 		usage.Info = v1.CastSpec(usage.data)
 	} else {
+		majorVersion, minorVersion := head.majorVersion, head.minorVersion
 		_ = syscall.Munmap(usage.data)
-		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), head.majorVersion, head.minorVersion)
+		return nil, fmt.Errorf("unknown cache file size %d version %d.%d", info.Size(), majorVersion, minorVersion)
 	}
 	return usage, nil
 }

@@ -28,6 +28,12 @@ import (
 	"k8s.io/klog/v2"
 )
 
+// Variables for testing.
+var (
+	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
+	inClusterConfig      = rest.InClusterConfig
+)
+
 type Client struct {
 	// Embedded kubernetes.Interface to avoid name conflicts.
 	kubernetes.Interface
@@ -92,10 +98,10 @@ func loadKubeConfig() (*rest.Config, error) {
 		kubeConfigPath = filepath.Join(os.Getenv("HOME"), ".kube", "config")
 	}
 
-	config, err := clientcmd.BuildConfigFromFlags("", kubeConfigPath)
+	config, err := buildConfigFromFlags("", kubeConfigPath)
 	if err != nil {
 		klog.Infof("BuildConfigFromFlags failed for file %s: %v. Using in-cluster config.", kubeConfigPath, err)
-		return rest.InClusterConfig()
+		return inClusterConfig()
 	}
 	return config, nil
 }
