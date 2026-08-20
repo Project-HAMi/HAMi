@@ -122,6 +122,20 @@ spec:
             - name: ENABLE_TOPOLOGY_SCORE
               value: "true"
             {{- end }}
+            {{- with .Values.devicePlugin.numaRefit }}
+            {{- if .enabled }}
+            - name: HAMI_SCHEDULER_ENDPOINT
+              value: {{ .schedulerEndpoint | default (printf "https://%s.%s.svc:%v" (include "hami-vgpu.scheduler" $) (include "hami-vgpu.namespace" $) ($.Values.scheduler.service.httpPort | default 443)) | quote }}
+            {{- if or (not (hasKey . "tlsInsecure")) .tlsInsecure }}
+            - name: HAMI_SCHEDULER_TLS_INSECURE
+              value: "true"
+            {{- end }}
+            {{- if .caFile }}
+            - name: HAMI_SCHEDULER_CA_FILE
+              value: {{ .caFile | quote }}
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
