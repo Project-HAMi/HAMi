@@ -132,6 +132,9 @@ func (dev *AWSNeuronDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[st
 	devlist, ok := pd[AWSNeuronDevice]
 	if ok && len(devlist) > 0 {
 		(*annoinput)[device.SupportDevices[AWSNeuronDevice]] = device.EncodePodSingleDevice(devlist)
+		// value is intentionally declared outside the loop and accumulates across
+		// containers (never reset per-container), so AWSNeuronAssignedIndex ends up
+		// holding every container's assigned indices, not just the last container's.
 		value := ""
 		for ctridx, dp := range devlist {
 			if len(dp) > 0 {
