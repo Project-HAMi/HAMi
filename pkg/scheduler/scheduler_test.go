@@ -22,6 +22,7 @@ import (
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -2673,4 +2674,296 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 	require.Contains(t, res.Error, "apiserver 500")
 	require.Equal(t, int32(1), mock.lockCalls.Load(),
 		"non-contention error must not trigger retry")
+}
+
+type transactionMockDevice struct {
+	registerMockDevice
+	name         string
+	lockErr      error
+	lockErrFunc  func(attempt int32) error // optional dynamic lock error generator
+	releaseErr   error                     // returned by ReleaseNodeLock; exercises rollback error branch
+	lockCalls    atomic.Int32
+	releaseCalls atomic.Int32
+
+	// events records the sequence of "lock:<name>" and "release:<name>" calls.
+	// The pointer is shared across all devices in a test so ordering is global.
+	events *[]string
+	mu     sync.Mutex
+}
+
+func (m *transactionMockDevice) CommonWord() string { return m.name }
+func (m *transactionMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	attempt := m.lockCalls.Add(1)
+	if m.events != nil {
+		m.mu.Lock()
+		*m.events = append(*m.events, "lock:"+m.name)
+		m.mu.Unlock()
+	}
+	if m.lockErrFunc != nil {
+		return m.lockErrFunc(attempt)
+	}
+	return m.lockErr
+}
+func (m *transactionMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	m.releaseCalls.Add(1)
+	if m.events != nil {
+		m.mu.Lock()
+		*m.events = append(*m.events, "release:"+m.name)
+		m.mu.Unlock()
+	}
+	return m.releaseErr
+}
+
+func Test_lockAllDevices_Transactional(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "default"}}
+	errMockFailed := fmt.Errorf("mock lock failed")
+
+	t.Run("AllLocksSucceed", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1"}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3"}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	t.Run("FirstBackendFails", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1", lockErr: errMockFailed}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3"}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(0))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(0))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	// LastBackendFails: backend1 and backend2 both acquire locks, backend3 fails.
+	// This verifies:
+	//   - backend1 and backend2 are each released exactly once.
+	//   - backend3 is NOT released.
+	//   - rollback is in reverse acquisition order: release:backend2 before release:backend1.
+	t.Run("LastBackendFails", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{name: "backend2", events: events}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed, events: events}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+
+		// Call counts
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Verify event order: lock1, lock2, lock3(fail), release2, release1
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"lock:backend3",
+			"release:backend2",
+			"release:backend1",
+		})
+	})
+
+	// SubsequentAttemptSucceedsAfterRollback: confirms that after a failed+rollback attempt,
+	// a subsequent lockAllDevices() call with the failure cleared succeeds cleanly.
+	t.Run("SubsequentAttemptSucceedsAfterRollback", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1"}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+
+		// First attempt: backend3 fails → rollback
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Clear the failure for backend3
+		dev3.lockErr = nil
+
+		// Second attempt: all succeed
+		err = s.lockAllDevices(node, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(2))
+		// No additional releases
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	// RollbackReleaseError: backend1 and backend2 acquire locks, backend3's LockNode fails.
+	// During rollback, backend2's ReleaseNodeLock returns an error, but rollback continues
+	// and backend1's ReleaseNodeLock is still executed.
+	// Verifies:
+	//   - backend1: LockNode succeeds (1), ReleaseNodeLock succeeds (1).
+	//   - backend2: LockNode succeeds (1), ReleaseNodeLock returns a release error (1).
+	//   - backend3: LockNode fails with errMockFailed (1), ReleaseNodeLock is NOT called (0).
+	//   - Rollback continues despite backend2's release error.
+	//   - The original LockNode error from backend3 is returned (not overwritten by backend2's release error).
+	t.Run("RollbackReleaseError", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		errRelease := fmt.Errorf("mock release failed")
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{name: "backend2", releaseErr: errRelease, events: events}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed, events: events}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+
+		// Original LockNode error from backend3 must be returned, not backend2's release error.
+		assert.ErrorIs(t, err, errMockFailed)
+
+		// Call count assertions:
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Verify event sequence: lock1, lock2, lock3(fail), release2(err), release1
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"lock:backend3",
+			"release:backend2",
+			"release:backend1",
+		})
+	})
+
+	// AcquireNodeLocks_RetryLoop_ReleaseCount: exercises the REAL acquireNodeLocks() retry loop
+	// when a podgroup member encounters node-lock contention on attempt 1 and succeeds on attempt 2.
+	// Verifies:
+	//   - backend1 is locked on attempt 1, then backend2 returns nodelockutil.ErrNodeLockContention.
+	//   - rollback in lockAllDevices() releases backend1 exactly once for attempt 1 (release:backend1).
+	//   - acquireNodeLocks() catches contention error and enters retry loop.
+	//   - on attempt 2, backend1 and backend2 both lock successfully.
+	//   - acquireNodeLocks() returns nil.
+	//   - total release count for backend1 is 1 (no duplicate releases from acquireNodeLocks).
+	//   - total release count for backend2 is 0.
+	t.Run("AcquireNodeLocks_RetryLoop_ReleaseCount", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		oldTimeout := config.NodeLockRetryTimeout
+		config.NodeLockRetryTimeout = 5 * time.Second
+		defer func() { config.NodeLockRetryTimeout = oldTimeout }()
+
+		pgPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Labels:    map[string]string{util.PodGroupLabel: "pg1"},
+			},
+		}
+
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{
+			name:   "backend2",
+			events: events,
+			lockErrFunc: func(attempt int32) error {
+				if attempt == 1 {
+					return nodelockutil.ErrNodeLockContention
+				}
+				return nil
+			},
+		}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+		}
+
+		s := Scheduler{}
+		err := s.acquireNodeLocks(node, pgPod)
+
+		// Verification:
+		// 1. acquireNodeLocks() returns nil (second attempt succeeded)
+		assert.NilError(t, err)
+
+		// 2. Call counts: both backends locked twice (attempt 1 & attempt 2)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(2))
+
+		// 3. Release counts: backend1 released EXACTLY ONCE (during attempt 1 rollback).
+		//    backend2 NEVER released (failed attempt 1 before lock was acquired, succeeded attempt 2).
+		//    NO duplicate release was issued by acquireNodeLocks().
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+
+		// 4. Exact sequence of events across the real retry loop:
+		//    Attempt 1: lock1, lock2(fail -> contention) -> release1 (rollback)
+		//    Attempt 2: lock1, lock2(succeed)
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"release:backend1",
+			"lock:backend1",
+			"lock:backend2",
+		})
+	})
 }

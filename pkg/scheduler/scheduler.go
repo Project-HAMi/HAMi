@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -920,16 +921,38 @@ func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
 }
 
 func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
-	for _, val := range device.GetDevices() {
+	devs := device.GetDevices()
+	keys := make([]string, 0, len(devs))
+	for k := range devs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	acquired := make([]device.Devices, 0, len(keys))
+	for _, k := range keys {
+		val := devs[k]
 		if err := val.LockNode(node, pod); err != nil {
+			for _, locked := range slices.Backward(acquired) {
+				if relErr := locked.ReleaseNodeLock(node, pod); relErr != nil {
+					klog.ErrorS(relErr, "Failed to release node lock during rollback", "node", node.Name, "pod", klog.KObj(pod))
+				}
+			}
 			return err
 		}
+		acquired = append(acquired, val)
 	}
 	return nil
 }
 
 func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
-	for _, val := range device.GetDevices() {
+	devs := device.GetDevices()
+	keys := make([]string, 0, len(devs))
+	for k := range devs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		val := devs[k]
 		if err := val.ReleaseNodeLock(node, pod); err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
 		}
@@ -947,7 +970,6 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 		if err == nil {
 			return nil
 		}
-		s.releaseAllDevices(node, pod)
 		if !nodelockutil.IsNodeLockContention(err) {
 			return err
 		}
