@@ -137,7 +137,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
 		"GPU Memory Allocated Percentage on a certain GPU",
-		[]string{"node", "device_uuid", "device_index"}, nil,
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
 		"hami_node_gpu_mig_instance_info",
@@ -261,7 +261,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 			}
 
 			if devs.Device.Totalmem > 0 {
-				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index)); err != nil {
+				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 					klog.V(4).Infof("Failed to send nodeGPUMemoryPercentage metric: %v", err)
 				}
 			}
@@ -281,12 +281,17 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	}
 }
 
-// collectQuotaMetrics emits per-namespace resource quota usage.
+// collectQuotaMetrics emits per-namespace resource quota usage and limits.
 func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metric, legacy bool) {
 	quotaUsedDesc := prometheus.NewDesc(
 		"hami_resource_quota_used",
 		"resourcequota usage for a certain device",
 		[]string{"namespace", "quota_name", "limit"}, nil,
+	)
+	quotaLimitDesc := prometheus.NewDesc(
+		"hami_resource_quota_limit",
+		"resourcequota limit for a certain device",
+		[]string{"namespace", "quota_name"}, nil,
 	)
 	var legacyQuotaUsed *prometheus.Desc
 	if legacy {
@@ -300,6 +305,11 @@ func (cc ClusterManagerCollector) collectQuotaMetrics(ch chan<- prometheus.Metri
 		for quotaname, q := range *val {
 			if err := sendMetric(ch, quotaUsedDesc, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit)); err != nil {
 				klog.V(4).Infof("Failed to send quotaUsedDesc metric: %v", err)
+			}
+			if q.LimitSet {
+				if err := sendMetric(ch, quotaLimitDesc, prometheus.GaugeValue, float64(q.Limit), ns, quotaname); err != nil {
+					klog.V(4).Infof("Failed to send quotaLimitDesc metric: %v", err)
+				}
 			}
 			if legacy {
 				sendLegacyMetric(ch, legacyQuotaUsed, prometheus.GaugeValue, float64(q.Used), ns, quotaname, fmt.Sprint(q.Limit))

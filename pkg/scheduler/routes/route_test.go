@@ -20,11 +20,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
@@ -208,6 +212,41 @@ func TestPredicateRoute_DecodeError(t *testing.T) {
 	}
 }
 
+func TestPredicateRoute_NilPod(t *testing.T) {
+	tests := []struct {
+		name string
+		body string
+	}{
+		{name: "pod field omitted", body: `{"NodeNames":["node1"]}`},
+		{name: "pod field explicitly null", body: `{"Pod":null,"NodeNames":["node1"]}`},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/predicate", strings.NewReader(tt.body))
+			w := httptest.NewRecorder()
+
+			s := &scheduler.Scheduler{}
+			handler := PredicateRoute(s)
+
+			// Must not panic when Pod is missing/null.
+			handler(w, req, nil)
+
+			if w.Code != 200 {
+				t.Errorf("expected 200 (error reported in body, not status), got %d", w.Code)
+			}
+
+			var result extenderv1.ExtenderFilterResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("failed to unmarshal response: %v", err)
+			}
+			if result.Error == "" {
+				t.Error("expected a missing-pod error to be reported in the filter result")
+			}
+		})
+	}
+}
+
 func TestPredicateRoute_CacheNotSynced(t *testing.T) {
 	args := extenderv1.ExtenderArgs{Pod: &corev1.Pod{}}
 	body, err := json.Marshal(args)
@@ -256,5 +295,51 @@ func TestBind_DecodeError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected a decode error to be reported in the bind result")
+	}
+}
+
+type errorResponseWriter struct {
+	http.ResponseWriter
+}
+
+func (w *errorResponseWriter) Write(b []byte) (int, error) {
+	return 0, errors.New("mock write error")
+}
+func TestPredicateRoute_WriteError(t *testing.T) {
+	var buf bytes.Buffer
+	klog.SetOutput(&buf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+	req := httptest.NewRequest("POST", "/predicate", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+	ew := &errorResponseWriter{ResponseWriter: w}
+	s := &scheduler.Scheduler{}
+	handler := PredicateRoute(s)
+	handler(ew, req, nil)
+	klog.Flush()
+	if !strings.Contains(buf.String(), "Failed to write response") {
+		t.Errorf("Expected 'Failed to write response' in log output, but got: %s", buf.String())
+	}
+}
+func TestBind_WriteError(t *testing.T) {
+	var buf bytes.Buffer
+	klog.SetOutput(&buf)
+	klog.LogToStderr(false)
+	defer func() {
+		klog.SetOutput(os.Stderr)
+		klog.LogToStderr(true)
+	}()
+	req := httptest.NewRequest("POST", "/bind", strings.NewReader("{not-json"))
+	w := httptest.NewRecorder()
+	ew := &errorResponseWriter{ResponseWriter: w}
+	s := &scheduler.Scheduler{}
+	handler := Bind(s)
+	handler(ew, req, nil)
+	klog.Flush()
+	if !strings.Contains(buf.String(), "Failed to write response") {
+		t.Errorf("Expected 'Failed to write response' in log output, but got: %s", buf.String())
 	}
 }

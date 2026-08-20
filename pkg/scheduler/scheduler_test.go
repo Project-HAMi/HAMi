@@ -18,10 +18,12 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -127,6 +129,269 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Used, int32(2))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedmem, int32(200))
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
+}
+
+// Regression: ListNodes() silently skips nodes whose Node field is nil, while GetNode()
+// does not apply that same filter and returns success. Before the fix, getNodesUsage()
+// blindly assigned cachenodeMap[id] = overallnodeMap[id] for every node GetNode() accepted,
+// so a node present in nodeManager but absent from the ListNodes() snapshot produced a nil
+// *NodeUsage entry with no corresponding failedNodes record. That nil is later dereferenced
+// unconditionally by calcScoreWithOptions (viewStatus(*node)), panicking the scheduler.
+func Test_getNodesUsage_NodeMissingFromSnapshotIsNotCachedAsNil(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: nil,
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID:      "GPU0",
+				Index:   0,
+				Count:   10,
+				Devmem:  1024,
+				Devcore: 100,
+				Numa:    1,
+				Mode:    "hami",
+				Health:  true,
+			}},
+		},
+	})
+	podMap := device.NewPodManager()
+	s := Scheduler{
+		nodeManager: nodeMage,
+		podManager:  podMap,
+	}
+	nodes := []string{"node1"}
+	cachenodeMap, _, failedNodes, err := s.getNodesUsage(&nodes, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assert.Equal(t, 0, len(*cachenodeMap))
+	v, present := (*cachenodeMap)["node1"]
+	assert.Assert(t, !present, "node1 must not be cached at all, got %v", v)
+	_, failed := failedNodes["node1"]
+	assert.Assert(t, failed, "node1 should be recorded as a failed node")
+}
+
+func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
+	t.Run("StaleOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(0), dev.Used)
+		// A stale UUID must not poison unrelated healthy devices.
+		// Health is per-device (checked individually in every vendor Fit loop).
+		// Existing HAMi precedent: unknown-node pods are silently skipped with no
+		// health change. The stale-UUID case follows the same minimal blast radius.
+		assert.Assert(t, dev.Health, "stale UUID must not mark unrelated devices unhealthy")
+	})
+
+	t.Run("ValidOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.Assert(t, dev.Health, "device health should be true for valid allocation")
+	})
+
+	t.Run("MixedStaleAndValid", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		// GPU-B matched a valid allocation and must stay healthy.
+		// The stale GPU-A reference from another pod must not contaminate GPU-B.
+		assert.Assert(t, dev.Health, "stale UUID from another pod must not mark the valid device unhealthy")
+	})
+
+	// MultipleDevices explicitly documents and prevents regression to node-wide
+	// health poisoning: two healthy GPUs on the node, one pod with a stale UUID.
+	// Neither GPU should become unhealthy.
+	t.Run("MultipleDevices", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-A",
+						Index:   0,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Health:  true,
+					},
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		// The pod references GPU-GHOST which does not exist in the node inventory.
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-GHOST", Usedmem: 512, Usedcores: 50},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "3333", Name: "ghost-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		assert.Equal(t, 2, len(v.Devices.DeviceLists))
+		for _, dl := range v.Devices.DeviceLists {
+			d := dl.Device
+			// Neither GPU-A nor GPU-B should have had their health changed.
+			// Regressing to the old for-loop would set both to false here.
+			assert.Assert(t, d.Health,
+				"device %s must remain healthy: a stale UUID must not trigger node-wide health poisoning", d.ID)
+			// The stale UUID was not matched, so no usage should be counted.
+			assert.Equal(t, int32(0), d.Used)
+		}
+	})
 }
 
 func Test_getPodUsage(t *testing.T) {
@@ -1077,11 +1342,12 @@ func Test_RegisterFromNodeAnnotations_NIL(t *testing.T) {
 }
 
 type registerMockDevice struct {
-	nodeDevices   []*device.DeviceInfo
-	getNodeErr    error
-	health        bool
-	needUpdate    bool
-	nodeCleanedUp int
+	nodeDevices        []*device.DeviceInfo
+	getNodeErr         error
+	getNodeDevicesFunc func(node corev1.Node) ([]*device.DeviceInfo, error)
+	health             bool
+	needUpdate         bool
+	nodeCleanedUp      int
 }
 
 func (m *registerMockDevice) CommonWord() string { return "mock-vendor" }
@@ -1096,7 +1362,10 @@ func (m *registerMockDevice) NodeCleanUp(_ string) error {
 	return nil
 }
 func (m *registerMockDevice) GetResourceNames() device.ResourceNames { return device.ResourceNames{} }
-func (m *registerMockDevice) GetNodeDevices(_ corev1.Node) ([]*device.DeviceInfo, error) {
+func (m *registerMockDevice) GetNodeDevices(node corev1.Node) ([]*device.DeviceInfo, error) {
+	if m.getNodeDevicesFunc != nil {
+		return m.getNodeDevicesFunc(node)
+	}
 	return m.nodeDevices, m.getNodeErr
 }
 func (m *registerMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error        { return nil }
@@ -1198,6 +1467,600 @@ func TestRegisterSkipsCleanupForUntrackedVendor(t *testing.T) {
 	assert.Equal(t, ok, true)
 	_, ok = nodeInfo.Devices["mock-vendor"]
 	assert.Equal(t, ok, false)
+}
+
+func TestRegisterHealthReconciliationOnDiscoveryError_Unhealthy(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	mockDev := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("device discovery error"),
+		health:      false,
+		needUpdate:  false,
+	}
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": mockDev,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-1",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Pre-populate scheduler cache with mock-vendor device
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"mock-vendor": {{
+				ID:           "MOCK-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "mock-vendor",
+				Health:       true,
+				DeviceVendor: "mock-vendor",
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+	s.register(labels.Everything(), map[string]bool{})
+
+	assert.Equal(t, 1, mockDev.nodeCleanedUp, "NodeCleanUp should be invoked when device is unhealthy even on discovery error")
+
+	// mock-vendor was the only vendor on node-1; rmNodeDevices deletes the node
+	// entry entirely when no vendors remain. GetNode must return an error.
+	_, err = s.GetNode("node-1")
+	assert.ErrorContains(t, err, "not found", "node-1 should be removed from scheduler cache after last vendor cleanup")
+}
+
+func TestRegisterHealthReconciliationOnDiscoveryError_Healthy(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	mockDev := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("transient discovery error"),
+		health:      true,
+		needUpdate:  false,
+	}
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": mockDev,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-1",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Pre-populate scheduler cache with mock-vendor device
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"mock-vendor": {{
+				ID:           "MOCK-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "mock-vendor",
+				Health:       true,
+				DeviceVendor: "mock-vendor",
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+	s.register(labels.Everything(), map[string]bool{})
+
+	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be invoked when device is healthy")
+
+	nodeInfo, err := s.GetNode("node-1")
+	require.NoError(t, err)
+	_, ok := nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, true, ok, "healthy mock-vendor device should be preserved in scheduler cache despite discovery error")
+}
+
+func TestRegisterHealthReconciliationOnDiscoveryError_HeterogeneousNode(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	devHealthy := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{{
+			ID:           "HEALTHY-0",
+			Index:        0,
+			Count:        1,
+			Devmem:       1024,
+			Devcore:      100,
+			Type:         "vendor-healthy",
+			Health:       true,
+			DeviceVendor: "vendor-healthy",
+		}},
+		getNodeErr: nil,
+		health:     true,
+		needUpdate: true,
+	}
+	devUnhealthyErr := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("discovery error for vendor-unhealthy"),
+		health:      false,
+		needUpdate:  false,
+	}
+	devHealthyErr := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("transient error for vendor-healthy-err"),
+		health:      true,
+		needUpdate:  false,
+	}
+
+	device.DevicesMap = map[string]device.Devices{
+		"vendor-healthy":       devHealthy,
+		"vendor-unhealthy-err": devUnhealthyErr,
+		"vendor-healthy-err":   devHealthyErr,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-hetero",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Pre-populate scheduler cache with all three vendors
+	s.addNode("node-hetero", &device.NodeInfo{
+		ID:   "node-hetero",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"vendor-healthy": {{
+				ID:           "HEALTHY-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "vendor-healthy",
+				Health:       true,
+				DeviceVendor: "vendor-healthy",
+			}},
+			"vendor-unhealthy-err": {{
+				ID:           "UNHEALTHY-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "vendor-unhealthy-err",
+				Health:       true,
+				DeviceVendor: "vendor-unhealthy-err",
+			}},
+			"vendor-healthy-err": {{
+				ID:           "HEALTHY-ERR-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "vendor-healthy-err",
+				Health:       true,
+				DeviceVendor: "vendor-healthy-err",
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+	s.register(labels.Everything(), map[string]bool{})
+
+	assert.Equal(t, 0, devHealthy.nodeCleanedUp)
+	assert.Equal(t, 1, devUnhealthyErr.nodeCleanedUp)
+	assert.Equal(t, 0, devHealthyErr.nodeCleanedUp)
+
+	nodeInfo, err := s.GetNode("node-hetero")
+	require.NoError(t, err)
+
+	_, hasHealthy := nodeInfo.Devices["vendor-healthy"]
+	assert.Equal(t, true, hasHealthy, "healthy vendor should remain")
+
+	_, hasUnhealthyErr := nodeInfo.Devices["vendor-unhealthy-err"]
+	assert.Equal(t, false, hasUnhealthyErr, "unhealthy vendor should be cleaned up")
+
+	_, hasHealthyErr := nodeInfo.Devices["vendor-healthy-err"]
+	assert.Equal(t, true, hasHealthyErr, "healthy-err vendor should be preserved")
+}
+
+func TestRegisterHealthReconciliationOnDiscoveryError_Recovery(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	defer func() { device.DevicesMap = oldDevicesMap }()
+
+	mockDev := &registerMockDevice{
+		nodeDevices: nil,
+		getNodeErr:  errors.New("transient discovery error"),
+		health:      true,
+		needUpdate:  false,
+	}
+	device.DevicesMap = map[string]device.Devices{
+		"mock-vendor": mockDev,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+	client.KubeClient = fake.NewClientset()
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-recovery",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Pre-populate scheduler cache with initial mock-vendor device (MOCK-0)
+	s.addNode("node-recovery", &device.NodeInfo{
+		ID:   "node-recovery",
+		Node: node.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"mock-vendor": {{
+				ID:           "MOCK-0",
+				Index:        0,
+				Count:        1,
+				Devmem:       1024,
+				Devcore:      100,
+				Type:         "mock-vendor",
+				Health:       true,
+				DeviceVendor: "mock-vendor",
+			}},
+		},
+	})
+
+	atomic.StoreUint32(&s.started, 1)
+
+	// Cycle 1: Transient discovery error occurs when fetching node devices.
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 1 semantics:
+	// - NodeCleanUp was NOT called because device is healthy.
+	// - Transient error did NOT trigger zero-device cleanup.
+	// - Cached MOCK-0 device is preserved in scheduler cache.
+	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp should NOT be called during transient discovery error")
+	nodeInfo, err := s.GetNode("node-recovery")
+	require.NoError(t, err)
+	cachedDevs, ok := nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, true, ok, "cached mock-vendor devices should be preserved despite transient discovery error")
+	require.Equal(t, 1, len(cachedDevs))
+	assert.Equal(t, "MOCK-0", cachedDevs[0].ID, "cached device ID MOCK-0 should remain unchanged")
+
+	// Cycle 2: Vendor recovers — GetNodeDevices succeeds and returns updated device (MOCK-RECOVERED).
+	mockDev.getNodeErr = nil
+	mockDev.nodeDevices = []*device.DeviceInfo{{
+		ID:           "MOCK-RECOVERED",
+		Index:        0,
+		Count:        1,
+		Devmem:       2048,
+		Devcore:      100,
+		Type:         "mock-vendor",
+		Health:       true,
+		DeviceVendor: "mock-vendor",
+	}}
+	mockDev.health = true
+	mockDev.needUpdate = true
+
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 2 recovery semantics:
+	// - Device state correctly recovers and updates in scheduler cache.
+	// - Old MOCK-0 state is updated to MOCK-RECOVERED.
+	nodeInfo, err = s.GetNode("node-recovery")
+	require.NoError(t, err)
+	cachedDevs, ok = nodeInfo.Devices["mock-vendor"]
+	assert.Equal(t, true, ok, "mock-vendor devices should be present after recovery")
+	require.Equal(t, 1, len(cachedDevs))
+	// Cycle 3: Vendor subsequently reports zero devices successfully.
+	// Verify zero-device cleanup removes stale cached vendor entry (scheduler.go:509-516).
+	mockDev.getNodeErr = nil
+	mockDev.nodeDevices = []*device.DeviceInfo{}
+
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Verify Cycle 3 zero-device semantics:
+	// - NodeCleanUp is NOT called because device is healthy.
+	// - Stale vendor cache entry is removed via rmNodeDevices.
+	assert.Equal(t, 0, mockDev.nodeCleanedUp, "NodeCleanUp must NOT be invoked when vendor reports zero devices with no error")
+	_, getErr := s.GetNode("node-recovery")
+	assert.ErrorContains(t, getErr, "not found", "stale vendor entry should be removed when vendor reports zero devices")
+}
+
+func Test_register_StaleDeviceVendorRemoval(t *testing.T) {
+	oldDevicesMap := device.DevicesMap
+	t.Cleanup(func() { device.DevicesMap = oldDevicesMap })
+
+	vendorA := &registerMockDevice{
+		getNodeDevicesFunc: func(node corev1.Node) ([]*device.DeviceInfo, error) {
+			if node.Name == "node-1" {
+				return []*device.DeviceInfo{
+					{
+						ID:           "gpu-1",
+						DeviceVendor: "vendor-A",
+						Health:       true,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		health:     true,
+		needUpdate: true,
+	}
+	vendorB := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{},
+		health:      true,
+		needUpdate:  true,
+	}
+	vendorC := &registerMockDevice{
+		getNodeDevicesFunc: func(node corev1.Node) ([]*device.DeviceInfo, error) {
+			if node.Name == "node-1" {
+				return []*device.DeviceInfo{
+					{
+						ID:           "gpu-3",
+						DeviceVendor: "vendor-C",
+						Health:       true,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+		health:     true,
+		needUpdate: true,
+	}
+	vendorD := &registerMockDevice{
+		nodeDevices: []*device.DeviceInfo{},
+		health:      true,
+		needUpdate:  true,
+	}
+
+	device.DevicesMap = map[string]device.Devices{
+		"vendor-A": vendorA,
+		"vendor-B": vendorB,
+		"vendor-C": vendorC,
+		"vendor-D": vendorD,
+	}
+
+	s := NewScheduler()
+	s.stopCh = make(chan struct{})
+	t.Cleanup(func() { close(s.stopCh) })
+
+	oldKubeClient := client.KubeClient
+	client.KubeClient = fake.NewClientset()
+	t.Cleanup(func() { client.KubeClient = oldKubeClient })
+	s.kubeClient = client.KubeClient
+
+	t.Setenv("POD_NAMESPACE", "default")
+	t.Setenv("POD_NAME", "scheduler-0")
+
+	informerFactory := informers.NewSharedInformerFactoryWithOptions(client.KubeClient, time.Hour)
+	s.podLister = informerFactory.Core().V1().Pods().Lister()
+	s.nodeLister = informerFactory.Core().V1().Nodes().Lister()
+
+	// node-1: present in k8s indexer and pre-populated in scheduler cache
+	node1 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-1",
+		},
+	}
+	_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node1, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(node1)
+	require.NoError(t, err)
+
+	// node-absent: present in k8s indexer but absent from scheduler cache (exercises GetNode() error branch)
+	nodeAbsent := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "node-absent",
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Nodes().Create(context.Background(), nodeAbsent, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Nodes().Informer().GetIndexer().Add(nodeAbsent)
+	require.NoError(t, err)
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "scheduler-0",
+			Namespace: "default",
+			Labels: map[string]string{
+				util.HAMiComponentLabel: util.HAMiComponentScheduler,
+			},
+		},
+	}
+	_, err = client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
+	require.NoError(t, err)
+	err = informerFactory.Core().V1().Pods().Informer().GetIndexer().Add(pod)
+	require.NoError(t, err)
+
+	informerFactory.Start(s.stopCh)
+	informerFactory.WaitForCacheSync(s.stopCh)
+
+	// Initial cache state: node-1 has vendor-A, vendor-B, and vendor-C (vendor-D is untracked)
+	s.addNode("node-1", &device.NodeInfo{
+		ID:   "node-1",
+		Node: node1.DeepCopy(),
+		Devices: map[string][]device.DeviceInfo{
+			"vendor-A": {{
+				ID:           "gpu-1",
+				DeviceVendor: "vendor-A",
+				Health:       true,
+			}},
+			"vendor-B": {{
+				ID:           "gpu-2",
+				DeviceVendor: "vendor-B",
+				Health:       true,
+			}},
+			"vendor-C": {{
+				ID:           "gpu-3",
+				DeviceVendor: "vendor-C",
+				Health:       true,
+			}},
+		},
+	})
+
+	// Verify initial state has vendor-A, vendor-B, and vendor-C, but not vendor-D
+	nodeInfo, err := s.GetNode("node-1")
+	require.NoError(t, err)
+	require.Contains(t, nodeInfo.Devices, "vendor-A")
+	require.Contains(t, nodeInfo.Devices, "vendor-B")
+	require.Contains(t, nodeInfo.Devices, "vendor-C")
+	require.NotContains(t, nodeInfo.Devices, "vendor-D")
+
+	atomic.StoreUint32(&s.started, 1)
+
+	// Execute register cycle:
+	// - For node-1: vendor-B (0 devices) is removed from cache (exercises ok == true branch);
+	//   vendor-D (0 devices) is not in cache (exercises ok == false branch).
+	// - For node-absent: node is absent from scheduler cache (exercises GetNode error branch).
+	s.register(labels.Everything(), map[string]bool{})
+
+	// Expect vendor-B to be removed from node-1 cache, while vendor-A and vendor-C remain
+	nodeInfo, err = s.GetNode("node-1")
+	require.NoError(t, err)
+	_, hasVendorA := nodeInfo.Devices["vendor-A"]
+	_, hasVendorB := nodeInfo.Devices["vendor-B"]
+	_, hasVendorC := nodeInfo.Devices["vendor-C"]
+	assert.Equal(t, hasVendorA, true, "vendor-A should remain in node cache")
+	assert.Equal(t, hasVendorB, false, "stale vendor-B should be removed from node cache")
+	assert.Equal(t, hasVendorC, true, "vendor-C should remain in node cache")
+
+	// Confirm node-absent was never added to scheduler cache
+	_, err = s.GetNode("node-absent")
+	require.Error(t, err)
 }
 
 func Test_ResourceQuota(t *testing.T) {
@@ -2286,6 +3149,7 @@ func Test_Bind_PodGroupPodNonContentionErrorDoesNotRetry(t *testing.T) {
 		"non-contention error must not trigger retry")
 }
 
+ fix/filter-nil-nodenames-panic
 // TestFilterWithoutCandidateNodes covers extender args that carry a
 // device-requesting pod but neither Nodes nor NodeNames. The live filter path
 // used to dereference the nil *[]string while building the failure message and
@@ -2337,4 +3201,296 @@ func TestFilterWithoutCandidateNodes(t *testing.T) {
 	cached, ok := s.podManager.GetPod(pod)
 	require.True(t, ok)
 	require.Equal(t, "node-a", cached.NodeID)
+
+type transactionMockDevice struct {
+	registerMockDevice
+	name         string
+	lockErr      error
+	lockErrFunc  func(attempt int32) error // optional dynamic lock error generator
+	releaseErr   error                     // returned by ReleaseNodeLock; exercises rollback error branch
+	lockCalls    atomic.Int32
+	releaseCalls atomic.Int32
+
+	// events records the sequence of "lock:<name>" and "release:<name>" calls.
+	// The pointer is shared across all devices in a test so ordering is global.
+	events *[]string
+	mu     sync.Mutex
+}
+
+func (m *transactionMockDevice) CommonWord() string { return m.name }
+func (m *transactionMockDevice) LockNode(_ *corev1.Node, _ *corev1.Pod) error {
+	attempt := m.lockCalls.Add(1)
+	if m.events != nil {
+		m.mu.Lock()
+		*m.events = append(*m.events, "lock:"+m.name)
+		m.mu.Unlock()
+	}
+	if m.lockErrFunc != nil {
+		return m.lockErrFunc(attempt)
+	}
+	return m.lockErr
+}
+func (m *transactionMockDevice) ReleaseNodeLock(_ *corev1.Node, _ *corev1.Pod) error {
+	m.releaseCalls.Add(1)
+	if m.events != nil {
+		m.mu.Lock()
+		*m.events = append(*m.events, "release:"+m.name)
+		m.mu.Unlock()
+	}
+	return m.releaseErr
+}
+
+func Test_lockAllDevices_Transactional(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Name: "pod1", Namespace: "default"}}
+	errMockFailed := fmt.Errorf("mock lock failed")
+
+	t.Run("AllLocksSucceed", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1"}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3"}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	t.Run("FirstBackendFails", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1", lockErr: errMockFailed}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3"}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(0))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(0))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	// LastBackendFails: backend1 and backend2 both acquire locks, backend3 fails.
+	// This verifies:
+	//   - backend1 and backend2 are each released exactly once.
+	//   - backend3 is NOT released.
+	//   - rollback is in reverse acquisition order: release:backend2 before release:backend1.
+	t.Run("LastBackendFails", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{name: "backend2", events: events}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed, events: events}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+
+		// Call counts
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Verify event order: lock1, lock2, lock3(fail), release2, release1
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"lock:backend3",
+			"release:backend2",
+			"release:backend1",
+		})
+	})
+
+	// SubsequentAttemptSucceedsAfterRollback: confirms that after a failed+rollback attempt,
+	// a subsequent lockAllDevices() call with the failure cleared succeeds cleanly.
+	t.Run("SubsequentAttemptSucceedsAfterRollback", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		dev1 := &transactionMockDevice{name: "backend1"}
+		dev2 := &transactionMockDevice{name: "backend2"}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+
+		// First attempt: backend3 fails → rollback
+		err := s.lockAllDevices(node, pod)
+		assert.ErrorIs(t, err, errMockFailed)
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Clear the failure for backend3
+		dev3.lockErr = nil
+
+		// Second attempt: all succeed
+		err = s.lockAllDevices(node, pod)
+		assert.NilError(t, err)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(2))
+		// No additional releases
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+	})
+
+	// RollbackReleaseError: backend1 and backend2 acquire locks, backend3's LockNode fails.
+	// During rollback, backend2's ReleaseNodeLock returns an error, but rollback continues
+	// and backend1's ReleaseNodeLock is still executed.
+	// Verifies:
+	//   - backend1: LockNode succeeds (1), ReleaseNodeLock succeeds (1).
+	//   - backend2: LockNode succeeds (1), ReleaseNodeLock returns a release error (1).
+	//   - backend3: LockNode fails with errMockFailed (1), ReleaseNodeLock is NOT called (0).
+	//   - Rollback continues despite backend2's release error.
+	//   - The original LockNode error from backend3 is returned (not overwritten by backend2's release error).
+	t.Run("RollbackReleaseError", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		errRelease := fmt.Errorf("mock release failed")
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{name: "backend2", releaseErr: errRelease, events: events}
+		dev3 := &transactionMockDevice{name: "backend3", lockErr: errMockFailed, events: events}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+			"backend3": dev3,
+		}
+
+		s := Scheduler{}
+		err := s.lockAllDevices(node, pod)
+
+		// Original LockNode error from backend3 must be returned, not backend2's release error.
+		assert.ErrorIs(t, err, errMockFailed)
+
+		// Call count assertions:
+		assert.Equal(t, dev1.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev3.lockCalls.Load(), int32(1))
+		assert.Equal(t, dev3.releaseCalls.Load(), int32(0))
+
+		// Verify event sequence: lock1, lock2, lock3(fail), release2(err), release1
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"lock:backend3",
+			"release:backend2",
+			"release:backend1",
+		})
+	})
+
+	// AcquireNodeLocks_RetryLoop_ReleaseCount: exercises the REAL acquireNodeLocks() retry loop
+	// when a podgroup member encounters node-lock contention on attempt 1 and succeeds on attempt 2.
+	// Verifies:
+	//   - backend1 is locked on attempt 1, then backend2 returns nodelockutil.ErrNodeLockContention.
+	//   - rollback in lockAllDevices() releases backend1 exactly once for attempt 1 (release:backend1).
+	//   - acquireNodeLocks() catches contention error and enters retry loop.
+	//   - on attempt 2, backend1 and backend2 both lock successfully.
+	//   - acquireNodeLocks() returns nil.
+	//   - total release count for backend1 is 1 (no duplicate releases from acquireNodeLocks).
+	//   - total release count for backend2 is 0.
+	t.Run("AcquireNodeLocks_RetryLoop_ReleaseCount", func(t *testing.T) {
+		oldDevicesMap := device.DevicesMap
+		defer func() { device.DevicesMap = oldDevicesMap }()
+
+		oldTimeout := config.NodeLockRetryTimeout
+		config.NodeLockRetryTimeout = 5 * time.Second
+		defer func() { config.NodeLockRetryTimeout = oldTimeout }()
+
+		pgPod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "pod1",
+				Namespace: "default",
+				Labels:    map[string]string{util.PodGroupLabel: "pg1"},
+			},
+		}
+
+		events := &[]string{}
+		dev1 := &transactionMockDevice{name: "backend1", events: events}
+		dev2 := &transactionMockDevice{
+			name:   "backend2",
+			events: events,
+			lockErrFunc: func(attempt int32) error {
+				if attempt == 1 {
+					return nodelockutil.ErrNodeLockContention
+				}
+				return nil
+			},
+		}
+		device.DevicesMap = map[string]device.Devices{
+			"backend1": dev1,
+			"backend2": dev2,
+		}
+
+		s := Scheduler{}
+		err := s.acquireNodeLocks(node, pgPod)
+
+		// Verification:
+		// 1. acquireNodeLocks() returns nil (second attempt succeeded)
+		assert.NilError(t, err)
+
+		// 2. Call counts: both backends locked twice (attempt 1 & attempt 2)
+		assert.Equal(t, dev1.lockCalls.Load(), int32(2))
+		assert.Equal(t, dev2.lockCalls.Load(), int32(2))
+
+		// 3. Release counts: backend1 released EXACTLY ONCE (during attempt 1 rollback).
+		//    backend2 NEVER released (failed attempt 1 before lock was acquired, succeeded attempt 2).
+		//    NO duplicate release was issued by acquireNodeLocks().
+		assert.Equal(t, dev1.releaseCalls.Load(), int32(1))
+		assert.Equal(t, dev2.releaseCalls.Load(), int32(0))
+
+		// 4. Exact sequence of events across the real retry loop:
+		//    Attempt 1: lock1, lock2(fail -> contention) -> release1 (rollback)
+		//    Attempt 2: lock1, lock2(succeed)
+		assert.DeepEqual(t, *events, []string{
+			"lock:backend1",
+			"lock:backend2",
+			"release:backend1",
+			"lock:backend1",
+			"lock:backend2",
+		})
+	})
+ master
 }

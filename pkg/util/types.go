@@ -87,6 +87,8 @@ const (
 	NodeSchedulerPolicyAnnotationKey = "hami.io/node-scheduler-policy"
 	// GPUSchedulerPolicyAnnotationKey is user set Pod annotation to change this default GPU policy.
 	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
+	// DeviceScoringWeightsAnnotationKey configures per-Pod slot, core, and memory scoring weights.
+	DeviceScoringWeightsAnnotationKey = "hami.io/device-scoring-weights"
 )
 
 func (s SchedulerPolicyName) String() string {

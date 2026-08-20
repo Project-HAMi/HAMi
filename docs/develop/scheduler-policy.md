@@ -165,3 +165,39 @@ GPU2 Score: ((20+70)/100 + (1000+6000)/8000)) * 10 = 17.75
 ```
 
 So, in `Spread` policy we can select `GPU1`.
+
+### Per-Pod device scoring weights
+
+By default, HAMi gives equal influence to predicted virtual-device slot,
+device-core, and device-memory allocation when calculating a physical device
+score. A Pod can change its relative influence with the
+`hami.io/device-scoring-weights` annotation:
+
+```yaml
+metadata:
+  annotations:
+    hami.io/device-scoring-weights: "slot=1,core=1,memory=3"
+```
+
+The score is calculated as:
+
+```text
+score = 10 * (
+    slotWeight * predictedSlotUtilization +
+    coreWeight * predictedCoreUtilization +
+    memoryWeight * predictedMemoryUtilization
+)
+```
+
+The annotation changes only the device-utilization score. `binpack` still
+prefers the higher-scoring device, while `spread` prefers the lower-scoring
+device. Capacity, mutex, NUMA, and topology constraints retain their existing
+precedence. The weights affect utilization-score ordering and can resolve ties
+when an existing selection policy consults that order. Device fit and capacity
+checks remain unchanged.
+
+When the annotation is absent, all three weights default to `1`, preserving
+the existing scheduling behavior. When present, the annotation must specify
+all three non-negative integer weights, and at least one weight must be
+positive. Invalid annotations prevent the Pod from being scheduled until the
+annotation is corrected.

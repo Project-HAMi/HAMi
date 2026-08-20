@@ -361,7 +361,7 @@ hami_gpu_core_limit_ratio{device_index="1",device_type="test-device",device_uuid
 hami_gpu_core_limit_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 2
 # HELP hami_node_gpu_memory_allocated_ratio GPU Memory Allocated Percentage on a certain GPU
 # TYPE hami_node_gpu_memory_allocated_ratio gauge
-hami_node_gpu_memory_allocated_ratio{device_index="2",device_uuid="normal-memory",node="node-1"} 0.25
+hami_node_gpu_memory_allocated_ratio{device_index="2",device_type="NVIDIA",device_uuid="normal-memory",node="node-1"} 0.25
 # HELP nodeGPUMemoryPercentage GPU Memory Allocated Percentage on a certain GPU
 # TYPE nodeGPUMemoryPercentage gauge
 nodeGPUMemoryPercentage{deviceidx="2",deviceuuid="normal-memory",nodeid="node-1"} 0.25
@@ -438,6 +438,10 @@ func TestClusterManagerCollectorQuotaMetrics(t *testing.T) {
 			metricsProvider: provider,
 		}
 		want := `
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
 # HELP hami_resource_quota_used resourcequota usage for a certain device
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
@@ -447,6 +451,7 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			collector,
 			strings.NewReader(want),
 			"hami_resource_quota_used",
+			"hami_resource_quota_limit",
 		); err != nil {
 			t.Fatalf("unexpected non-legacy collecting result:\n%s", err)
 		}
@@ -462,6 +467,10 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 # TYPE QuotaUsed gauge
 QuotaUsed{limit="100",quotaName="nvidia.com/gpucore",quotanamespace="team-a"} 50
 QuotaUsed{limit="8192",quotaName="nvidia.com/gpumem",quotanamespace="team-a"} 4096
+# HELP hami_resource_quota_limit resourcequota limit for a certain device
+# TYPE hami_resource_quota_limit gauge
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpucore"} 100
+hami_resource_quota_limit{namespace="team-a",quota_name="nvidia.com/gpumem"} 8192
 # HELP hami_resource_quota_used resourcequota usage for a certain device
 # TYPE hami_resource_quota_used gauge
 hami_resource_quota_used{limit="100",namespace="team-a",quota_name="nvidia.com/gpucore"} 50
@@ -471,9 +480,46 @@ hami_resource_quota_used{limit="8192",namespace="team-a",quota_name="nvidia.com/
 			collector,
 			strings.NewReader(want),
 			"hami_resource_quota_used",
+			"hami_resource_quota_limit",
 			"QuotaUsed",
 		); err != nil {
 			t.Fatalf("unexpected legacy collecting result:\n%s", err)
 		}
 	})
+}
+
+func TestClusterManagerCollectorQuotaUnconfiguredLimit(t *testing.T) {
+	const (
+		ns      = "team-b"
+		memName = "nvidia.com/gpumem"
+	)
+
+	unconfQm := device.NewQuotaManager()
+	unconfQm.Quotas[ns] = &device.DeviceQuota{
+		memName: &device.Quota{Used: 1024, Limit: 0, LimitSet: false},
+	}
+	t.Cleanup(func() { delete(unconfQm.Quotas, ns) })
+
+	unconfProvider := &fakeMetricsProvider{
+		nodeUsage:    map[string]*schedulerpkg.NodeUsage{},
+		quotaManager: unconfQm,
+		podManager:   device.NewPodManager(),
+	}
+	collector := ClusterManagerCollector{
+		ClusterManager:  &ClusterManager{LegacyMetrics: false},
+		metricsProvider: unconfProvider,
+	}
+	want := `
+# HELP hami_resource_quota_used resourcequota usage for a certain device
+# TYPE hami_resource_quota_used gauge
+hami_resource_quota_used{limit="0",namespace="team-b",quota_name="nvidia.com/gpumem"} 1024
+`
+	if err := promtestutil.CollectAndCompare(
+		collector,
+		strings.NewReader(want),
+		"hami_resource_quota_used",
+		"hami_resource_quota_limit",
+	); err != nil {
+		t.Fatalf("unexpected unconfigured limit collecting result:\n%s", err)
+	}
 }

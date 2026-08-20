@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -471,8 +472,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 
 			nodedevices, err := devInstance.GetNodeDevices(*val)
 			if err != nil {
-				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk)
-				continue
+				klog.V(5).InfoS("Failed to get node devices", "nodeName", val.Name, "deviceVendor", devhandsk, "error", err)
 			}
 
 			health, needUpdate := devInstance.CheckHealth(devhandsk, val)
@@ -502,6 +502,22 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 				}
 
 				s.rmNodeDevices(val.Name, devhandsk)
+				continue
+			}
+			if err != nil {
+				continue
+			}
+			// GetNodeDevices succeeded but reported zero devices: the vendor plugin
+			// is healthy but no longer advertising devices on this node. Remove any
+			// stale entry so the scheduler does not keep offering capacity that no
+			// longer exists.
+			if len(nodedevices) == 0 {
+				if existingNode, getNodeErr := s.GetNode(val.Name); getNodeErr == nil {
+					if _, ok := existingNode.Devices[devhandsk]; ok {
+						klog.InfoS("Vendor reports zero devices, removing stale cache entry", "nodeName", val.Name, "deviceVendor", devhandsk)
+						s.rmNodeDevices(val.Name, devhandsk)
+					}
+				}
 				continue
 			}
 			if !needUpdate {
@@ -757,9 +773,11 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 		for _, podsingleds := range p.Devices {
 			for _, ctrdevs := range podsingleds {
 				for _, udevice := range ctrdevs {
+					matched := false
 					for _, d := range node.Devices.DeviceLists {
 						deviceID := udevice.UUID
 						if d.Device.ID == deviceID {
+							matched = true
 							d.Device.Used++
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
@@ -781,6 +799,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 								d.Device.Health = false
 							}
 						}
+					}
+					if !matched {
+						klog.ErrorS(nil, "pod allocated unknown or stale device resources", "pod", klog.KRef(p.Namespace, p.Name), "nodeID", p.NodeID, "gpuUUID", udevice.UUID)
 					}
 				}
 			}
@@ -828,7 +849,13 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 			failedNodes[nodeID] = "node unregistered"
 			continue
 		}
-		cachenodeMap[node.ID] = overallnodeMap[node.ID]
+		usage, ok := overallnodeMap[node.ID]
+		if !ok {
+			klog.V(5).InfoS("node usage not found in snapshot", "node", nodeID)
+			failedNodes[nodeID] = "node usage unavailable"
+			continue
+		}
+		cachenodeMap[node.ID] = usage
 	}
 	return &cachenodeMap, &overallnodeMap, failedNodes, nil
 }
@@ -902,16 +929,38 @@ func (s *Scheduler) cleanupStalePodAllocation(pod *corev1.Pod) {
 }
 
 func (s *Scheduler) lockAllDevices(node *corev1.Node, pod *corev1.Pod) error {
-	for _, val := range device.GetDevices() {
+	devs := device.GetDevices()
+	keys := make([]string, 0, len(devs))
+	for k := range devs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	acquired := make([]device.Devices, 0, len(keys))
+	for _, k := range keys {
+		val := devs[k]
 		if err := val.LockNode(node, pod); err != nil {
+			for _, locked := range slices.Backward(acquired) {
+				if relErr := locked.ReleaseNodeLock(node, pod); relErr != nil {
+					klog.ErrorS(relErr, "Failed to release node lock during rollback", "node", node.Name, "pod", klog.KObj(pod))
+				}
+			}
 			return err
 		}
+		acquired = append(acquired, val)
 	}
 	return nil
 }
 
 func (s *Scheduler) releaseAllDevices(node *corev1.Node, pod *corev1.Pod) {
-	for _, val := range device.GetDevices() {
+	devs := device.GetDevices()
+	keys := make([]string, 0, len(devs))
+	for k := range devs {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		val := devs[k]
 		if err := val.ReleaseNodeLock(node, pod); err != nil {
 			klog.ErrorS(err, "Failed to release node lock", "node", node.Name, "pod", klog.KObj(pod))
 		}
@@ -929,7 +978,6 @@ func (s *Scheduler) acquireNodeLocks(node *corev1.Node, pod *corev1.Pod) error {
 		if err == nil {
 			return nil
 		}
-		s.releaseAllDevices(node, pod)
 		if !nodelockutil.IsNodeLockContention(err) {
 			return err
 		}
