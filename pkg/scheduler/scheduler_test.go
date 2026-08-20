@@ -129,6 +129,228 @@ func Test_getNodesUsage(t *testing.T) {
 	assert.Equal(t, v.Devices.DeviceLists[0].Device.Usedcores, int32(20))
 }
 
+func Test_getNodesUsage_StalePodDeviceAllocation(t *testing.T) {
+	t.Run("StaleOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(0), dev.Used)
+		// A stale UUID must not poison unrelated healthy devices.
+		// Health is per-device (checked individually in every vendor Fit loop).
+		// Existing HAMi precedent: unknown-node pods are silently skipped with no
+		// health change. The stale-UUID case follows the same minimal blast radius.
+		assert.Assert(t, dev.Health, "stale UUID must not mark unrelated devices unhealthy")
+	})
+
+	t.Run("ValidOnly", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		assert.Assert(t, dev.Health, "device health should be true for valid allocation")
+	})
+
+	t.Run("MixedStaleAndValid", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    1,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-A", Usedmem: 100, Usedcores: 10},
+				},
+			},
+		}
+		podDevicesValid := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-B", Usedmem: 200, Usedcores: 20},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "1111", Name: "stale-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "2222", Name: "valid-pod", Namespace: "default"},
+		}, "node1", podDevicesValid)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		dev := v.Devices.DeviceLists[0].Device
+		assert.Equal(t, "GPU-B", dev.ID)
+		assert.Equal(t, int32(1), dev.Used)
+		assert.Equal(t, int32(200), dev.Usedmem)
+		assert.Equal(t, int32(20), dev.Usedcores)
+		// GPU-B matched a valid allocation and must stay healthy.
+		// The stale GPU-A reference from another pod must not contaminate GPU-B.
+		assert.Assert(t, dev.Health, "stale UUID from another pod must not mark the valid device unhealthy")
+	})
+
+	// MultipleDevices explicitly documents and prevents regression to node-wide
+	// health poisoning: two healthy GPUs on the node, one pod with a stale UUID.
+	// Neither GPU should become unhealthy.
+	t.Run("MultipleDevices", func(t *testing.T) {
+		nodeMage := newNodeManager()
+		nodeMage.addNode("node1", &device.NodeInfo{
+			ID: "node1",
+			Node: &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{Name: "node1"},
+			},
+			Devices: map[string][]device.DeviceInfo{
+				nvidia.NvidiaGPUDevice: {
+					{
+						ID:      "GPU-A",
+						Index:   0,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Health:  true,
+					},
+					{
+						ID:      "GPU-B",
+						Index:   1,
+						Count:   10,
+						Devmem:  1024,
+						Devcore: 100,
+						Numa:    0,
+						Mode:    "hami",
+						Health:  true,
+					},
+				},
+			},
+		})
+		// The pod references GPU-GHOST which does not exist in the node inventory.
+		podDevicesStale := device.PodDevices{
+			"NVIDIA": device.PodSingleDevice{
+				[]device.ContainerDevice{
+					{Idx: 0, UUID: "GPU-GHOST", Usedmem: 512, Usedcores: 50},
+				},
+			},
+		}
+		podMap := device.NewPodManager()
+		podMap.AddPod(&corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{UID: "3333", Name: "ghost-pod", Namespace: "default"},
+		}, "node1", podDevicesStale)
+
+		s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+		nodes := []string{"node1"}
+		cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+		assert.NilError(t, err)
+		v := (*cachenodeMap)["node1"]
+		assert.Equal(t, 2, len(v.Devices.DeviceLists))
+		for _, dl := range v.Devices.DeviceLists {
+			d := dl.Device
+			// Neither GPU-A nor GPU-B should have had their health changed.
+			// Regressing to the old for-loop would set both to false here.
+			assert.Assert(t, d.Health,
+				"device %s must remain healthy: a stale UUID must not trigger node-wide health poisoning", d.ID)
+			// The stale UUID was not matched, so no usage should be counted.
+			assert.Equal(t, int32(0), d.Used)
+		}
+	})
+}
+
 func Test_getPodUsage(t *testing.T) {
 	s := NewScheduler()
 	t.Cleanup(func() { close(s.stopCh) })
