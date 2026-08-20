@@ -54,7 +54,7 @@ var (
 		Short: "kubernetes vgpu scheduler",
 		RunE: func(cmd *cobra.Command, args []string) error {
 			flag.PrintPFlags(cmd.Flags())
-			return start()
+			return start(cmd)
 		},
 	}
 )
@@ -109,10 +109,17 @@ func injectProfilingRoute(router *httprouter.Router) {
 	})
 }
 
-func start() error {
-	// Initialize node lock timeout from config
-	nodelock.NodeLockTimeout = config.NodeLockTimeout
-	klog.InfoS("Set node lock timeout", "timeout", nodelock.NodeLockTimeout)
+func resolveNodeLockTimeout(flagChanged bool) {
+	if flagChanged {
+		nodelock.NodeLockTimeout = config.NodeLockTimeout
+		klog.InfoS("Set node lock timeout from flag", "timeout", nodelock.NodeLockTimeout)
+	} else {
+		klog.InfoS("Using node lock timeout from environment or default", "timeout", nodelock.NodeLockTimeout)
+	}
+}
+
+func start(cmd *cobra.Command) error {
+	resolveNodeLockTimeout(cmd.Flags().Changed("node-lock-timeout"))
 	client.InitGlobalClient(
 		client.WithBurst(config.Burst),
 		client.WithQPS(config.QPS),
