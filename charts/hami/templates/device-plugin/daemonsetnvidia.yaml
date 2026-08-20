@@ -126,7 +126,7 @@ spec:
             {{- if .enabled }}
             - name: HAMI_SCHEDULER_ENDPOINT
               value: {{ .schedulerEndpoint | default (printf "https://%s.%s.svc:%v" (include "hami-vgpu.scheduler" $) (include "hami-vgpu.namespace" $) ($.Values.scheduler.service.httpPort | default 443)) | quote }}
-            {{- if or (not (hasKey . "tlsInsecure")) .tlsInsecure }}
+            {{- if .tlsInsecure }}
             - name: HAMI_SCHEDULER_TLS_INSECURE
               value: "true"
             {{- end }}
