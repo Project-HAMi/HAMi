@@ -127,6 +127,15 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	if alreadyAllowed {
 		return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(current)}
 	}
+	// A fit request carries one memory/core amount for all requested
+	// devices, so a reservation with differing per-device amounts (possible
+	// with percentage requests on mixed GPUs) cannot be re-fit faithfully:
+	// replaying current[0] would rewrite the other devices' accounting.
+	for _, d := range current[1:] {
+		if d.Usedmem != current[0].Usedmem || d.Usedcores != current[0].Usedcores {
+			return s.numaRefitFailureEvent(pod, "container %d reserves differing amounts per device; the refit does not support heterogeneous reservations", req.ContainerIndex)
+		}
+	}
 
 	nodeUsageMap, _, failedNodes, err := s.getNodesUsage(&[]string{req.NodeName}, pod)
 	if err != nil {

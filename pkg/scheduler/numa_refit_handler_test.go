@@ -419,3 +419,40 @@ func TestRefitNumaAllocationRejectsMigDevice(t *testing.T) {
 	assert.Equal(t, response.Succeeded, false)
 	assert.Assert(t, strings.Contains(response.FailureReason, "MIG"), "reason: %s", response.FailureReason)
 }
+
+func TestRefitNumaAllocationHeterogeneousReservation(t *testing.T) {
+	// Two devices in one container with differing reserved amounts (possible
+	// with percentage requests on mixed GPUs) cannot be re-fit faithfully.
+	nodes := newNodeManager()
+	nodes.addNode(refitNode, &device.NodeInfo{
+		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "GPU-a", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-b", Count: 10, Devmem: 20000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-c", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-d", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	})
+	reserved := device.PodSingleDevice{{
+		{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 40000, Usedcores: 30},
+		{UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30},
+	}}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		UID: refitPodUID, Name: refitPodName, Namespace: "default",
+		Annotations: map[string]string{
+			device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+			device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+		},
+	}}
+	pods := device.NewPodManager()
+	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
+	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
+	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	_, calls := stubRefitPatch(t, nil)
+
+	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-c", "GPU-d"))
+
+	assert.Equal(t, response.Succeeded, false)
+	assert.Assert(t, strings.Contains(response.FailureReason, "heterogeneous"), "reason: %s", response.FailureReason)
+	assert.Equal(t, *calls, 0)
+}
