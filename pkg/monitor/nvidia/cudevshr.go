@@ -161,6 +161,13 @@ func (l *ContainerLister) Clientset() *kubernetes.Clientset {
 	return l.clientset
 }
 
+// SetContainersForTest replaces the internal container map; use only in tests.
+func (l *ContainerLister) SetContainersForTest(m map[string]*ContainerUsage) {
+	l.mutex.Lock()
+	defer l.mutex.Unlock()
+	l.containers = m
+}
+
 func (l *ContainerLister) Update() error {
 
 	l.mutex.Lock()
