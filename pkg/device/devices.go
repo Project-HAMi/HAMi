@@ -208,11 +208,14 @@ type ResourceNames struct {
 
 type ContainerDevice struct {
 	// TODO current Idx cannot use, because EncodeContainerDevices method not encode this filed.
-	Idx        int
-	UUID       string
-	Type       string
-	Usedmem    int32
-	Usedcores  int32
+	Idx       int
+	UUID      string
+	Type      string
+	Usedmem   int32
+	Usedcores int32
+	// Slots is the number of concurrent tasks this collapsed entry represents on the device.
+	// Usage reconstruction adds it to DeviceUsage.Used; 0 (raw, uncollapsed entries) counts as 1.
+	Slots      int32
 	CustomInfo map[string]any
 }
 

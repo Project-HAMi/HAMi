@@ -512,7 +512,7 @@ func TestPodInfoDeepCopy(t *testing.T) {
 				Devices: PodDevices{
 					"NVIDIA": {
 						{
-							ContainerDevice{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10},
+							ContainerDevice{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10, Slots: 3},
 						},
 					},
 				},
@@ -563,7 +563,7 @@ func TestPodDevicesDeepCopy(t *testing.T) {
 	original := PodDevices{
 		"NVIDIA": {
 			{
-				ContainerDevice{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10},
+				ContainerDevice{UUID: "GPU-0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10, Slots: 3},
 			},
 		},
 	}
