@@ -89,6 +89,10 @@ const (
 	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
 	// DeviceScoringWeightsAnnotationKey configures per-Pod slot, core, and memory scoring weights.
 	DeviceScoringWeightsAnnotationKey = "hami.io/device-scoring-weights"
+	// NumaAlignmentAnnotationKey is a per-Pod annotation selecting how HAMi
+	// reconciles the scheduler-selected GPU with the NUMA-aligned replica
+	// preferred by kubelet's Topology Manager. See NumaAlignmentMode.
+	NumaAlignmentAnnotationKey = "hami.io/numa-alignment"
 )
 
 func (s SchedulerPolicyName) String() string {

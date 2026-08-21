@@ -166,6 +166,23 @@ func (m *PodManager) TakeAndDeletePod(pod *corev1.Pod) (*PodInfo, bool) {
 	return pi, ok
 }
 
+// ReplacePodDevices swaps the tracked devices for pod and returns the
+// previous set. Unlike UpdatePodDevice it leaves
+// InitContainerResourceReleased untouched, so a device swap (for example the
+// NUMA refit from #2080) does not disable the init-container usage shrink.
+func (m *PodManager) ReplacePodDevices(pod *corev1.Pod, newDevices PodDevices) (oldDevices PodDevices, ok bool) {
+	m.mutex.Lock()
+	defer m.mutex.Unlock()
+
+	pi, exists := m.pods[pod.UID]
+	if !exists {
+		return nil, false
+	}
+	oldDevices = pi.Devices
+	pi.Devices = newDevices
+	return oldDevices, true
+}
+
 func (m *PodManager) UpdatePodDevice(pod *corev1.Pod, newDevices PodDevices) (oldDevices PodDevices, ok bool) {
 	m.mutex.Lock()
 	defer m.mutex.Unlock()
