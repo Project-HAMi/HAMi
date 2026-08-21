@@ -180,6 +180,54 @@ func TestWatchAndRegisterDisableSignal(t *testing.T) {
 	}
 }
 
+// TestRegisterInAnnotationUpdatesCacheOnSuccessfulPatch verifies the happy
+// path: once PatchNodeAnnotations succeeds, deviceCache is updated to the
+// newly patched value and the call reports changed=true with no error.
+func TestRegisterInAnnotationUpdatesCacheOnSuccessfulPatch(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	previousKubeClient := client.KubeClient
+	previousNodeName := util.NodeName
+	util.NodeName = "test-node"
+	defer func() {
+		client.KubeClient = previousKubeClient
+		util.NodeName = previousNodeName
+	}()
+
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	client.KubeClient = fake.NewSimpleClientset(node)
+
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if err != nil {
+		t.Fatalf("RegisterInAnnotation() error = %v, want nil on a successful patch", err)
+	}
+	if !changed {
+		t.Fatal("RegisterInAnnotation() changed = false, want true (a patch was applied)")
+	}
+	if plugin.deviceCache == "" {
+		t.Fatal("deviceCache is empty after a successful patch, want it set to the patched device string")
+	}
+
+	// A second call with the same device set must now see deviceCache as
+	// up to date and skip re-patching.
+	changed, err = plugin.RegisterInAnnotation()
+	if err != nil {
+		t.Fatalf("second RegisterInAnnotation() error = %v, want nil", err)
+	}
+	if changed {
+		t.Fatal("second RegisterInAnnotation() changed = true, want false (device info unchanged, patch should be skipped)")
+	}
+}
+
 // TestRegisterInAnnotationRetriesAfterPatchFailure verifies that a failed
 // node-annotation patch does not poison deviceCache: the next call must
 // still see the device info as "changed" and retry the patch, instead of
