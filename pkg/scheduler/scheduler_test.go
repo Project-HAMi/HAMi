@@ -2898,6 +2898,41 @@ func Test_getNodesUsage_WithInitContainers(t *testing.T) {
 	assert.Equal(t, int32(10), v.Devices.DeviceLists[0].Device.Usedcores)
 }
 
+func Test_getNodesUsage_WithMultipleAppContainersSharingDevice(t *testing.T) {
+	nodeMage := newNodeManager()
+	nodeMage.addNode("node1", &device.NodeInfo{
+		ID: "node1", Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}},
+		Devices: map[string][]device.DeviceInfo{
+			nvidia.NvidiaGPUDevice: {{
+				ID: "GPU0", Index: 0, Count: 10, Devmem: 102400, Devcore: 100,
+				Numa: 1, Mode: "hami", Health: true,
+			}},
+		},
+	})
+	podMap := device.NewPodManager()
+	collapsed := device.CollapseInitContainerUsage(
+		&corev1.Pod{Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "app0"}, {Name: "app1"}},
+		}},
+		device.PodDevices{
+			nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+				{{Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5}},
+				{{Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5}},
+			},
+		},
+	)
+	podMap.AddPod(&corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{UID: "apppod", Name: "apppod", Namespace: "default"},
+	}, "node1", collapsed)
+
+	s := Scheduler{nodeManager: nodeMage, podManager: podMap}
+	nodes := []string{"node1"}
+	cachenodeMap, _, _, err := s.getNodesUsage(&nodes, nil)
+	require.NoError(t, err)
+	v := (*cachenodeMap)["node1"]
+	assert.Equal(t, int32(2), v.Devices.DeviceLists[0].Device.Used)
+}
+
 func Test_onAddPod_BadDeviceAnnotation(t *testing.T) {
 	device.SupportDevices["TEST"] = "hami.io/test-allocated"
 	t.Cleanup(func() { delete(device.SupportDevices, "TEST") })

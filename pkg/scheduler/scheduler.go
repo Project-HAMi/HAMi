@@ -778,7 +778,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 						deviceID := udevice.UUID
 						if d.Device.ID == deviceID {
 							matched = true
-							d.Device.Used++
+							// Raw entries carry no slot count; clamp to at least one.
+							slots := max(udevice.Slots, 1)
+							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							d.Device.PodInfos = append(d.Device.PodInfos, p)

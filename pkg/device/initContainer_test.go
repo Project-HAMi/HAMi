@@ -62,7 +62,7 @@ func TestCollapseInitContainerUsage_NoInitContainers(t *testing.T) {
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 2},
 			},
 		},
 	}
@@ -81,7 +81,7 @@ func TestCollapseInitContainerUsage_OnlyInitContainers(t *testing.T) {
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 30},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 30, Slots: 1},
 			},
 		},
 	}
@@ -100,7 +100,7 @@ func TestCollapseInitContainerUsage_MixedInitAndApp(t *testing.T) {
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50, Slots: 1},
 			},
 		},
 	}
@@ -118,7 +118,7 @@ func TestCollapseInitContainerUsage_InitLargerThanApp(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 1000, Usedcores: 80}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 1000, Usedcores: 80, Slots: 1}},
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
@@ -136,7 +136,7 @@ func TestCollapseInitContainerUsage_AppLargerThanInit(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50, Slots: 2}},
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
@@ -155,7 +155,7 @@ func TestCollapseInitContainerUsage_MultipleInitContainersPeak(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 1}},
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
@@ -176,10 +176,10 @@ func TestCollapseInitContainerUsage_MultipleDeviceTypes(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 500, Usedcores: 50, Slots: 1}},
 		},
 		"kunlun": PodSingleDevice{
-			{ContainerDevice{UUID: "xpu0", Type: "kunlun", Usedmem: 300, Usedcores: 30}},
+			{ContainerDevice{UUID: "xpu0", Type: "kunlun", Usedmem: 300, Usedcores: 30, Slots: 1}},
 		},
 	}
 	result := CollapseInitContainerUsage(pod, raw)
@@ -203,8 +203,8 @@ func TestCollapseInitContainerUsage_MultipleDevicesSameContainer(t *testing.T) {
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 20},
-				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 300, Usedcores: 30},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 20, Slots: 1},
+				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 1},
 			},
 		},
 	}
@@ -231,6 +231,21 @@ func TestCollapseInitContainerUsage_EmptyContainerDeviceList(t *testing.T) {
 	assert.DeepEqual(t, expected, result)
 }
 
+// TestCollapseInitContainerUsage_MultiAppSameGPUSlots guards the regression: three
+// app containers sharing one GPU must collapse to three slots, not one.
+func TestCollapseInitContainerUsage_MultiAppSameGPUSlots(t *testing.T) {
+	pod := makePod("test", 0, 3)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}},
+		},
+	}
+	result := CollapseInitContainerUsage(pod, raw)
+	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(3))
+}
+
 func TestAppContainersOnlyDeviceUsage_NilInput(t *testing.T) {
 	result := AppContainersOnlyDeviceUsage(nil, nil)
 	assert.Assert(t, result == nil)
@@ -250,7 +265,7 @@ func TestAppContainersOnlyDeviceUsage_OnlyAppContainers(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 2}},
 		},
 	}
 	result := AppContainersOnlyDeviceUsage(pod, raw)
@@ -268,7 +283,7 @@ func TestAppContainersOnlyDeviceUsage_IgnoresInitContainers(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 300, Usedcores: 30, Slots: 2}},
 		},
 	}
 	result := AppContainersOnlyDeviceUsage(pod, raw)
@@ -289,10 +304,10 @@ func TestAppContainersOnlyDeviceUsage_MultipleDeviceTypes(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 20}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 200, Usedcores: 20, Slots: 1}},
 		},
 		"kunlun": PodSingleDevice{
-			{ContainerDevice{UUID: "xpu0", Type: "kunlun", Usedmem: 400, Usedcores: 40}},
+			{ContainerDevice{UUID: "xpu0", Type: "kunlun", Usedmem: 400, Usedcores: 40, Slots: 1}},
 		},
 	}
 	result := AppContainersOnlyDeviceUsage(pod, raw)
@@ -316,11 +331,26 @@ func TestAppContainersOnlyDeviceUsage_MultipleDevicesPerContainer(t *testing.T) 
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10},
-				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 200, Usedcores: 20},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10, Slots: 1},
+				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 200, Usedcores: 20, Slots: 1},
 			},
 		},
 	}
 	result := AppContainersOnlyDeviceUsage(pod, raw)
 	assert.DeepEqual(t, expected, result)
+}
+
+// TestAppContainersOnlyDeviceUsage_MultiAppSameGPUSlots guards that the app-only
+// shrink path also preserves the per-container slot count.
+func TestAppContainersOnlyDeviceUsage_MultiAppSameGPUSlots(t *testing.T) {
+	pod := makePod("test", 1, 2)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 999, Usedcores: 99}}, // init
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}}, // app0
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 100, Usedcores: 10}}, // app1
+		},
+	}
+	result := AppContainersOnlyDeviceUsage(pod, raw)
+	assert.Equal(t, result["NVIDIA"][0][0].Slots, int32(2))
 }
