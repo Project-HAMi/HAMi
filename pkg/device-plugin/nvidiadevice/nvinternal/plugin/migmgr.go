@@ -59,6 +59,9 @@ type migInstance struct {
 
 // MigInstanceManager is the single authority over live MIG GI+CI state on a
 // node. Keys are the scheduler-reserved profile and physical placement.
+//
+// Callers must invoke Init once before using other methods, and Shutdown
+// once when done; NVML is not re-initialized per call.
 type MigInstanceManager struct {
 	mu                  sync.Mutex
 	gpuLocks            map[int]*sync.Mutex
@@ -71,6 +74,24 @@ func NewMigInstanceManager() *MigInstanceManager {
 		gpuLocks:            make(map[int]*sync.Mutex),
 		byAllocation:        make(map[migAllocationKey]*migInstance),
 		byAllocationMigUUID: make(map[string]migAllocationKey),
+	}
+}
+
+// Init initializes NVML for this manager. It must be called exactly once,
+// before any other MigInstanceManager method, and paired with a single
+// later call to Shutdown.
+func (m *MigInstanceManager) Init() error {
+	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
+		return fmt.Errorf("nvml Init: %s", nvml.ErrorString(nvret))
+	}
+	return nil
+}
+
+// Shutdown releases the NVML session acquired by Init. Safe to call once,
+// when the manager is no longer needed.
+func (m *MigInstanceManager) Shutdown() {
+	if nvret := nvml.Shutdown(); nvret != nvml.SUCCESS {
+		klog.ErrorS(fmt.Errorf("%s", nvml.ErrorString(nvret)), "nvml Shutdown failed")
 	}
 }
 
