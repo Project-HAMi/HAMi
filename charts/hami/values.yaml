@@ -83,6 +83,11 @@ scheduler:
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
   replicas: 1
+  # podDisruptionBudget only takes effect when leaderElect is true.
+  podDisruptionBudget:
+    enabled: true
+    minAvailable: 1
+    # maxUnavailable: 1
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
