@@ -274,11 +274,52 @@ func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
 	return err
 }
 
+// IsValidGPUSchedulerPolicy reports whether policy names GPU scheduling
+// policies HAMi recognizes. The value is read as a comma-separated ordered
+// list, the same way PolicyContains and the sort-key chain read it, so
+// "binpack,numa" and "mutex,topology-aware" are both accepted. An empty or
+// blank value is not.
+func IsValidGPUSchedulerPolicy(policy string) bool {
+	if strings.TrimSpace(policy) == "" {
+		return false
+	}
+	for p := range strings.SplitSeq(policy, ",") {
+		switch SchedulerPolicyName(strings.TrimSpace(p)) {
+		case GPUSchedulerPolicyBinpack, GPUSchedulerPolicySpread, GPUSchedulerPolicyNuma,
+			GPUSchedulerPolicyMutex, GPUSchedulerPolicyTopology:
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
+// policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
+// single name is meaningful here.
+func IsValidNodeSchedulerPolicy(policy string) bool {
+	switch SchedulerPolicyName(policy) {
+	case NodeSchedulerPolicyBinpack, NodeSchedulerPolicySpread:
+		return true
+	default:
+		return false
+	}
+}
+
+// GetGPUSchedulerPolicyByPod returns the GPU scheduling policy to apply to
+// task, preferring its GPUSchedulerPolicyAnnotationKey annotation over
+// defaultPolicy. An annotation that does not name a known policy is ignored
+// with a warning, so defaultPolicy stands.
 func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	userGPUPolicy := defaultPolicy
 	if task != nil && task.Annotations != nil {
 		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
-			userGPUPolicy = value
+			if IsValidGPUSchedulerPolicy(value) {
+				userGPUPolicy = value
+			} else {
+				klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, defaultPolicy)
+			}
 		}
 	}
 	return userGPUPolicy

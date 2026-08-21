@@ -136,10 +136,18 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 	return true, ""
 }
 
+// resolveNodeSchedulerPolicy returns the node scheduling policy to apply to
+// task, preferring its NodeSchedulerPolicyAnnotationKey annotation over
+// config.NodeSchedulerPolicy. An annotation that does not name a known policy
+// is ignored with a warning, so the configured policy stands.
 func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
-			return value
+			if util.IsValidNodeSchedulerPolicy(value) {
+				return value
+			}
+			klog.Warningf("ignoring unrecognized %s=%q on pod %s/%s, using configured policy %q",
+				util.NodeSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, config.NodeSchedulerPolicy)
 		}
 	}
 	return config.NodeSchedulerPolicy
