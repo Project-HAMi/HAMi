@@ -158,6 +158,10 @@ These are the primary metrics if `--legacy-metrics=false`:
 **Namespace/quota-level aggregation**
 - `hami_resource_quota_used`
 
+**Scheduler state**
+- `hami_scheduler_is_leader`
+- `hami_scheduler_cache_synced`
+
 **Build metadata**
 - `hami_build_info`
 
@@ -736,6 +740,8 @@ If the user asks in English, answer in English.
 | `hami_host_gpu_memory_used_bytes` | Runtime physical GPU memory used from vGPU monitor | runtime/device |
 | `hami_host_gpu_utilization_ratio` | Runtime physical GPU utilization from vGPU monitor | runtime/device |
 | `hami_vgpu_memory_used_bytes` | Runtime per-container vGPU memory used from vGPU monitor | runtime/container |
+| `hami_scheduler_is_leader` | 1 when this scheduler instance is the active leader, 0 otherwise | scheduler |
+| `hami_scheduler_cache_synced` | 1 when the internal node/device cache is fully synced, 0 otherwise | scheduler |
 | `hami_build_info` | HAMi version/build metadata | cluster |
 
 ---

@@ -71,6 +71,8 @@ on the metrics port; the scheduler and the vGPU monitor each expose a subset):
 | `hami_vgpu_memory_used_bytes` | vGPU monitor | Per-container vGPU memory used. |
 | `hami_vgpu_memory_limit_bytes` | vGPU monitor | Per-container vGPU memory limit. |
 | `hami_container_device_utilization_ratio` | vGPU monitor | Per-container utilization (0-100). |
+| `hami_scheduler_is_leader` | scheduler | 1 when this instance is the active leader, 0 otherwise. |
+| `hami_scheduler_cache_synced` | scheduler | 1 when the internal node/device cache is fully synced, 0 otherwise. |
 
 > Utilization and allocation-ratio metrics are reported on a 0-100 scale, so the
 > percentage panels display them directly without rescaling.
