@@ -133,6 +133,9 @@ spec:
             {{- if .caFile }}
             - name: HAMI_SCHEDULER_CA_FILE
               value: {{ .caFile | quote }}
+            {{- else if .caSecret }}
+            - name: HAMI_SCHEDULER_CA_FILE
+              value: "/etc/hami/numa-refit-ca/ca.crt"
             {{- end }}
             {{- end }}
             {{- end }}
@@ -161,6 +164,11 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
+            - name: numa-refit-ca
+              mountPath: /etc/hami/numa-refit-ca
+              readOnly: true
+            {{- end }}
             {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
@@ -219,6 +227,11 @@ spec:
             - name: hosttmp
               mountPath: /tmp
       volumes:
+        {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
+        - name: numa-refit-ca
+          secret:
+            secretName: {{ .Values.devicePlugin.numaRefit.caSecret }}
+        {{- end }}
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}
