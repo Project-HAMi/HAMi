@@ -103,8 +103,6 @@ func NewScheduler() *Scheduler {
 				}
 			},
 			OnStoppedLeading: func() {
-				s.lock.Lock()
-				defer s.lock.Unlock()
 				s.synced.Store(false)
 			},
 		}
