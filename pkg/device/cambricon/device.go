@@ -261,6 +261,10 @@ func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "cambricon device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found cambricon devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
