@@ -389,7 +389,7 @@ func TestCollapseInitContainerUsage_SidecarAddsToAppSum(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80, Slots: 2}},
 		},
 	}
 	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
@@ -411,14 +411,14 @@ func TestCollapseAndSteadyState_SidecarWithInitAndApp(t *testing.T) {
 	}
 	expectedCollapsed := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 22000, Usedcores: 70}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 22000, Usedcores: 70, Slots: 2}},
 		},
 	}
 	assert.DeepEqual(t, expectedCollapsed, CollapseInitContainerUsage(pod, raw))
 
 	expectedSteady := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 12000, Usedcores: 40}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 12000, Usedcores: 40, Slots: 2}},
 		},
 	}
 	assert.DeepEqual(t, expectedSteady, SteadyStateDeviceUsage(pod, raw))
@@ -436,7 +436,7 @@ func TestCollapseInitContainerUsage_NilRestartPolicyUnchanged(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 40, Slots: 1}},
 		},
 	}
 	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
@@ -456,7 +456,7 @@ func TestCollapseInitContainerUsage_AllSidecars(t *testing.T) {
 	}
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 9000, Usedcores: 35}},
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 9000, Usedcores: 35, Slots: 3}},
 		},
 	}
 	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
@@ -478,8 +478,8 @@ func TestCollapseInitContainerUsage_SidecarMultiUUID(t *testing.T) {
 	expected := PodDevices{
 		"NVIDIA": PodSingleDevice{
 			{
-				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 40},
-				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 7000, Usedcores: 70},
+				ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 40, Slots: 2},
+				ContainerDevice{UUID: "gpu1", Type: "NVIDIA", Usedmem: 7000, Usedcores: 70, Slots: 1},
 			},
 		},
 	}
