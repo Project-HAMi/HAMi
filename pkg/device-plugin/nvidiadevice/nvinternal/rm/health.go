@@ -118,10 +118,10 @@ func (r *nvmlResourceManager) checkHealth(stop <-chan interface{}, devices Devic
 		}
 
 		ret = gpu.RegisterEvents(eventMask&supportedEvents, eventSet)
-		if ret == nvml.ERROR_NOT_SUPPORTED {
+		switch {
+		case ret == nvml.ERROR_NOT_SUPPORTED:
 			klog.Warningf("Device %v is too old to support healthchecking.", d.ID)
-		}
-		if ret != nvml.SUCCESS {
+		case ret != nvml.SUCCESS:
 			klog.Infof("Marking device %v as unhealthy: %v", d.ID, ret)
 			unhealthy <- d
 		}

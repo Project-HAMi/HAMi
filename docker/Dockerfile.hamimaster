@@ -1,4 +1,4 @@
-ARG GOLANG_IMAGE=golang:1.26.5-bookworm@sha256:1ecb7edf62a0408027bd5729dfd6b1b8766e578e8df93995b225dfd0944eb651
+ARG GOLANG_IMAGE=golang:1.26.6-bookworm@sha256:116d58cbd88c1297624acc6e967a060012422bacf9930927e23fb719189c6f36
 ARG HAMICORE_IMAGE
 FROM $GOLANG_IMAGE AS build
 FROM $HAMICORE_IMAGE AS corebuild
@@ -8,7 +8,6 @@ ADD . /k8s-vgpu
 ARG VERSION
 RUN go env -w GO111MODULE=on
 RUN cd /k8s-vgpu && make all VERSION=$VERSION
-RUN go install github.com/NVIDIA/mig-parted/cmd/nvidia-mig-parted@v0.14.4
 
 FROM nvidia/cuda:13.3.1-base-ubuntu22.04@sha256:ea2a388e99273207c6389b3098a61ebca5ab41d31168dfc4350d0cfa614703e4
 RUN apt-get update && \
@@ -26,7 +25,6 @@ LABEL version="$VERSION"
 LABEL maintainer="opensource@4paradigm.com"
 COPY ./LICENSE /k8s-vgpu/LICENSE
 COPY --from=GOBUILD /k8s-vgpu/bin /k8s-vgpu/bin
-COPY --from=GOBUILD /go/bin/nvidia-mig-parted /k8s-vgpu/bin/
 COPY ./docker/entrypoint.sh /k8s-vgpu/bin/entrypoint.sh
 COPY ./docker/vgpu-init.sh /k8s-vgpu/bin/vgpu-init.sh
 COPY ./lib /k8s-vgpu/lib

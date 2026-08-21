@@ -64,15 +64,17 @@ func (s *stubInfo) DeviceMemoryOffset(int) uint64        { return 0 }
 func (s *stubInfo) DeviceMemoryTotal(i int) uint64       { return slot(s.total, i) }
 func (s *stubInfo) DeviceSmUtil(i int) uint64            { return slot(s.smUtil, i) }
 func (s *stubInfo) SetDeviceSmLimit(uint64)              {}
-func (s *stubInfo) IsValidUUID(i int) bool               { return i < len(s.uuids) }
-func (s *stubInfo) DeviceMemoryLimit(i int) uint64       { return slot(s.limit, i) }
-func (s *stubInfo) SetDeviceMemoryLimit(uint64)          {}
-func (s *stubInfo) LastKernelTime() int64                { return s.lastKernel }
-func (s *stubInfo) GetPriority() int                     { return s.priority }
-func (s *stubInfo) GetRecentKernel() int32               { return 1 }
-func (s *stubInfo) SetRecentKernel(int32)                {}
-func (s *stubInfo) GetUtilizationSwitch() int32          { return 0 }
-func (s *stubInfo) SetUtilizationSwitch(int32)           {}
+func (s *stubInfo) IsValidUUID(i int) bool {
+	return i >= 0 && i < len(s.uuids) && len(s.uuids[i]) > 0 && s.uuids[i][0] != 0
+}
+func (s *stubInfo) DeviceMemoryLimit(i int) uint64 { return slot(s.limit, i) }
+func (s *stubInfo) SetDeviceMemoryLimit(uint64)    {}
+func (s *stubInfo) LastKernelTime() int64          { return s.lastKernel }
+func (s *stubInfo) GetPriority() int               { return s.priority }
+func (s *stubInfo) GetRecentKernel() int32         { return 1 }
+func (s *stubInfo) SetRecentKernel(int32)          {}
+func (s *stubInfo) GetUtilizationSwitch() int32    { return 0 }
+func (s *stubInfo) SetUtilizationSwitch(int32)     {}
 
 func TestCheckFunctionsHighPriority(t *testing.T) {
 	sw := map[string]UtilizationPerDevice{"gpu-0": {0, 1}}

@@ -20,6 +20,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -150,7 +151,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -158,7 +159,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -169,10 +170,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -180,10 +181,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -194,8 +195,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			args: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, 0, nil},
 					},
 				},
 			},
@@ -203,8 +204,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, nil},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30, nil},
+						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{0, "UUID2", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -380,6 +381,21 @@ func TestMarshalNodeDevices(t *testing.T) {
 	}
 }
 
+func TestMigProfileUsesCompactWireFormat(t *testing.T) {
+	raw, err := json.Marshal(MigProfile{
+		Name:          "1g.5gb",
+		MemoryMB:      4864,
+		Core:          15,
+		SliceCount:    1,
+		InstanceCount: 7,
+		Placements:    []MigPlacement{{Start: 6, Size: 1}},
+	})
+	assert.NilError(t, err)
+
+	want := `{"name":"1g.5gb","memoryMB":4864,"core":15,"sliceCount":1,"placements":[{"start":6,"size":1}]}`
+	assert.Equal(t, string(raw), want)
+}
+
 func TestUnMarshalNodeDevices(t *testing.T) {
 	type args struct {
 		str string
@@ -462,7 +478,62 @@ func Test_DecodeNodeDevices(t *testing.T) {
 		}
 	}{
 		{
-			name: "args is invalid",
+			name: "args is empty",
+			args: "",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args is only delimiter",
+			args: ":",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args is multiple delimiters",
+			args: "::",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: nil,
+			},
+		},
+		{
+			name: "args missing delimiter with comma",
+			args: ",",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("node annotation missing device separator"),
+			},
+		},
+		{
+			name: "args has comma and delimiter but empty fields",
+			args: ",:",
+			want: struct {
+				di  []*DeviceInfo
+				err error
+			}{
+				di:  nil,
+				err: errors.New("unexpected field count 2 in node annotation"),
+			},
+		},
+		{
+			name: "args is invalid format missing split symbol",
 			args: "a",
 			want: struct {
 				di  []*DeviceInfo
@@ -472,6 +543,7 @@ func Test_DecodeNodeDevices(t *testing.T) {
 				err: errors.New("node annotation missing device separator"),
 			},
 		},
+
 		{
 			name: "str is old format",
 			args: "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4,10,7680,100,NVIDIA-Tesla P4,0,true:",
@@ -1459,6 +1531,26 @@ func TestCheckType(t *testing.T) {
 			cardType: "NVIDIA-A100",
 			want:     false,
 		},
+		// Regression: a trailing/leading/double comma leaves an empty split member, and
+		// strings.Contains(cardType, "") is always true, so it must not match every card.
+		{
+			name:     "nouse with trailing comma only excludes named type",
+			annos:    map[string]string{noUseKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "nouse with leading comma only excludes named type",
+			annos:    map[string]string{noUseKey: ",V100"},
+			cardType: "NVIDIA-A100",
+			want:     true,
+		},
+		{
+			name:     "use with trailing comma matches named type only",
+			annos:    map[string]string{useKey: "V100,"},
+			cardType: "NVIDIA-A100",
+			want:     false,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -1628,6 +1720,28 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 	f.Fuzz(func(t *testing.T, str string) {
 		// Must never panic on arbitrary pod-annotation input.
 		_, _ = DecodeContainerDevices(str)
+	})
+}
+
+func FuzzEncodeDecodeContainerDevices(f *testing.F) {
+	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10))
+	f.Add("", "", int32(0), int32(0))
+	f.Add("GPU-boundary", "NVIDIA", int32(-2147483648), int32(2147483647))
+	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores int32) {
+		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
+			t.Skip()
+		}
+
+		want := ContainerDevices{{
+			UUID:      uuid,
+			Type:      deviceType,
+			Usedmem:   usedmem,
+			Usedcores: usedcores,
+		}}
+		encoded := EncodeContainerDevices(want)
+		got, err := DecodeContainerDevices(encoded)
+		assert.NilError(t, err)
+		assert.DeepEqual(t, want, got)
 	})
 }
 

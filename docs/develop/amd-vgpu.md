@@ -23,14 +23,14 @@ resolved it. The existing NVIDIA LD_PRELOAD path is unchanged.
 
 **Advantages of CU masking, compared to hardware partitioning (CPX/NPS).**
 Masking (`HSA_CU_MASK`) assigns fine-grained, hardware-valid per-pod CU
-partitioning at container start ([AMD Docs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html)).
+partitioning at container start ([AMD Docs](https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html)).
 On the other hand, hardware partitioning (CPX/NPS) slices only at fixed XCD
 granularity and is set per physical GPU.
 
 **WGP pairing and rollout scope.** ROCm documents that not every CU mask is
 valid on every device: on GPUs where two CUs form a Work Group Processor
 (WGP) and kernels run in WGP mode, disabling only one CU of a pair is
-invalid ([setting CUs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html)).
+invalid ([setting CUs](https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html)).
 WGP is an **RDNA** construct (GFX10+); HIP describes it under the RDNA hardware
 model ([HIP hardware implementation](https://rocm.docs.amd.com/projects/HIP/en/latest/understand/hardware_implementation.html)).
 **CDNA** devices (e.g. Instinct MI300X, `gfx942`) keep independent CUs and are
@@ -162,7 +162,7 @@ residual interference remains (as reported in #1707).
 - **WGP-aware CU allocation is phased.** First ship CU partitioning on
   non-WGP devices (CDNA / Instinct). RDNA (GFX10+) devices need WGP pair
   alignment when building `HSA_CU_MASK`
-  ([setting CUs](https://rocm.docs.amd.com/en/latest/how-to/setting-cus.html))
+  ([setting CUs](https://rocm.docs.amd.com/en/latest/reference/system-optimization/gpu-isolation.html))
   and land in a follow-up.
 
 ## 7. Multi-GPU validation required

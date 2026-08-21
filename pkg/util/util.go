@@ -159,8 +159,22 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	}
 	return err
 }
+func AllInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Status.InitContainerStatuses) == 0 {
+		return false
+	}
+	for _, s := range pod.Status.InitContainerStatuses {
+		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+			return false
+		}
+	}
+	return true
+}
 
 func PatchPodAnnotations(pod *corev1.Pod, annotations map[string]string) error {
+	if pod == nil {
+		return fmt.Errorf("pod is nil")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 		Labels      map[string]string `json:"labels,omitempty"`
@@ -270,15 +284,37 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	return userGPUPolicy
 }
 
+// PolicyContains reports whether policy names name, treating policy as a
+// comma-separated ordered list (e.g. "binpack,numa"). A single value with no
+// comma is compared directly, so existing single-policy callers are unaffected.
+func PolicyContains(policy string, name SchedulerPolicyName) bool {
+	target := name.String()
+	for p := range strings.SplitSeq(policy, ",") {
+		if strings.TrimSpace(p) == target {
+			return true
+		}
+	}
+	return false
+}
+
 func IsPodInTerminatedState(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return pod.Status.Phase == corev1.PodFailed || pod.Status.Phase == corev1.PodSucceeded
 }
 
 func IsPodTerminating(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return pod.DeletionTimestamp != nil
 }
 
 func AllContainersCreated(pod *corev1.Pod) bool {
+	if pod == nil {
+		return false
+	}
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
 }
 

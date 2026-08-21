@@ -70,6 +70,21 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+
+	// 1. Process InitContainers
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
+
+	// 2. Process Regular Containers (Keep your existing loop here)
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		for _, val := range device.GetDevices() {
@@ -139,15 +154,30 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// container spec here. It applies its own memory factor, defaults and
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
-		var memoryReq, coresReq int64
+		var appMemoryReq, appCoresReq int64
 		for i := range pod.Spec.Containers {
 			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if req.Nums == 0 {
 				continue
 			}
-			memoryReq += int64(req.Memreq) * int64(req.Nums)
-			coresReq += int64(req.Coresreq) * int64(req.Nums)
+			appMemoryReq += int64(req.Memreq) * int64(req.Nums)
+			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
 		}
+
+		// Init containers run sequentially, so the pod's effective request is
+		// max(sum(app containers), max(init containers)).
+		var initMemoryReq, initCoresReq int64
+		for i := range pod.Spec.InitContainers {
+			req := dev.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			if req.Nums == 0 {
+				continue
+			}
+			initMemoryReq = max(initMemoryReq, int64(req.Memreq)*int64(req.Nums))
+			initCoresReq = max(initCoresReq, int64(req.Coresreq)*int64(req.Nums))
+		}
+
+		memoryReq := max(appMemoryReq, initMemoryReq)
+		coresReq := max(appCoresReq, initCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}

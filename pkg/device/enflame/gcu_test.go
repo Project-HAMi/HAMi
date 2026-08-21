@@ -612,9 +612,37 @@ func TestGCUDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    2,
 			wantDevIDs: []string{},
 			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     1,
+				Usedmem:   0,
+				Totalmem:  100,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      EnflameGCUDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           100,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+				Type:             EnflameGCUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -630,10 +658,10 @@ func TestGCUDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[EnflameGCUDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameGCUDevice]))
+			}
 			if test.wantFit {
-				if len(result[EnflameGCUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[EnflameGCUDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[EnflameGCUDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[EnflameGCUDevice][idx].UUID)

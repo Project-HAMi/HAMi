@@ -592,6 +592,18 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Coresreq:         int32(1),
 			},
 		},
+		{
+			name: "oversized dcu memory request exceeds int32 range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+						"hygon.com/dcumem": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -602,6 +614,71 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+}
+
+func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
+	tests := []struct {
+		name string
+		args *corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			name: "oversized dcu count exceeds int32 range",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative dcu cores",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"hygon.com/dcunum":   resource.MustParse("1"),
+						"hygon.com/dcucores": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := DCUDevices{}
+			fs := flag.FlagSet{}
+			ParseConfig(&fs)
+			result := dev.GenerateResourceRequests(test.args)
+			assert.DeepEqual(t, result, test.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers the case where the
+// raw memory request fits in int32 but overflows once MemoryFactor is applied.
+func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
+	origFactor := MemoryFactor
+	MemoryFactor = 1024
+	defer func() { MemoryFactor = origFactor }()
+
+	dev := DCUDevices{}
+	fs := flag.FlagSet{}
+	ParseConfig(&fs)
+
+	// 3000000 fits in int32, but 3000000 * 1024 exceeds math.MaxInt32.
+	ctr := &corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+				"hygon.com/dcumem": resource.MustParse("3000000"),
+			},
+		},
+	}
+	result := dev.GenerateResourceRequests(ctr)
+	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
 }
 
 func TestDevices_LockNode(t *testing.T) {
@@ -1070,7 +1147,7 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    1,
 			wantDevIDs: []string{},
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
@@ -1171,9 +1248,37 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    2,
 			wantDevIDs: []string{},
 			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      HygonDCUDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             HygonDCUDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -1189,10 +1294,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[HygonDCUDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[HygonDCUDevice]))
+			}
 			if test.wantFit {
-				if len(result[HygonDCUDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[HygonDCUDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[HygonDCUDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[HygonDCUDevice][idx].UUID)

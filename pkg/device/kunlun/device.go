@@ -184,10 +184,29 @@ func (kl *KunlunDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
-	alloc := graghSelect(devices, request, FitXPU)
+	// graghSelect decides topology from the position of a device in the slice,
+	// so the uuid constraint has to be applied through fitFn rather than by
+	// filtering the slice first.
+	uuidMismatches := make(map[string]bool)
+	fitFn := func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
+		if !device.CheckUUID(pod.GetAnnotations(), d.ID, UseUUIDAnno, NoUseUUIDAnno, kl.CommonWord()) ||
+			!device.CheckUUID(pod.GetAnnotations(), d.ID, KunlunUseUUID, KunlunNoUseUUID, kl.CommonWord()) {
+			uuidMismatches[d.ID] = true
+			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", d.ID)
+			return false
+		}
+		return FitXPU(d, r)
+	}
+
+	alloc := graghSelect(devices, request, fitFn)
 	if len(alloc) == 0 {
-		reason[common.NumaNotFit]++
-		klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+		uuidMismatch := len(uuidMismatches)
+		if uuidMismatch > 0 {
+			reason[common.CardUUIDMismatch] += uuidMismatch
+		} else {
+			reason[common.NumaNotFit]++
+			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums, "numa")
+		}
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 
@@ -217,5 +236,5 @@ func (dev *KunlunDevices) GetResourceNames() device.ResourceNames {
 }
 
 func FitXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
-	return device.Used == 0
+	return device.Used == 0 && device.Health
 }

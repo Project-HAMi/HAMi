@@ -366,6 +366,14 @@ func TestPatchPodAnnotations(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "patch nil pod",
+			pod:  nil,
+			annotations: map[string]string{
+				"test-key": "test-value",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -429,6 +437,11 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -444,6 +457,11 @@ func Test_AllContainersCreated(t *testing.T) {
 		args *corev1.Pod
 		want bool
 	}{
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 		{
 			name: "all containers created",
 			args: &corev1.Pod{
@@ -727,6 +745,11 @@ func Test_IsPodTerminating(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -760,6 +783,29 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, GetGPUSchedulerPolicyByPod(tt.defaultPolicy, tt.pod))
+		})
+	}
+}
+
+func TestPolicyContains(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		target SchedulerPolicyName
+		want   bool
+	}{
+		{"single value match", "mutex", GPUSchedulerPolicyMutex, true},
+		{"single value no match", "spread", GPUSchedulerPolicyMutex, false},
+		{"empty policy", "", GPUSchedulerPolicyMutex, false},
+		{"comma list match first", "mutex,spread", GPUSchedulerPolicyMutex, true},
+		{"comma list match last", "spread,numa,mutex", GPUSchedulerPolicyMutex, true},
+		{"comma list no match", "binpack,spread", GPUSchedulerPolicyMutex, false},
+		{"comma list with spaces", "mutex, spread, numa", GPUSchedulerPolicyNuma, true},
+		{"chain of sort keys, no filter", "binpack,spread,numa", GPUSchedulerPolicyTopology, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, PolicyContains(tt.policy, tt.target))
 		})
 	}
 }

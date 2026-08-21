@@ -127,8 +127,8 @@ func TestFitQuota(t *testing.T) {
 	coreName := "nvidia.com/gpucore"
 
 	qm.Quotas[ns] = &DeviceQuota{
-		memName:  &Quota{Used: 1000, Limit: 2000},
-		coreName: &Quota{Used: 200, Limit: 400},
+		memName:  &Quota{Used: 1000, Limit: 2000, LimitSet: true},
+		coreName: &Quota{Used: 200, Limit: 400, LimitSet: true},
 	}
 
 	// Should fit
@@ -158,6 +158,26 @@ func TestFitQuota(t *testing.T) {
 	// Should fit if device not present
 	if !qm.FitQuota(ns, 1000, 1, 100, "unknown-device") {
 		t.Error("FitQuota should return true if device not present")
+	}
+}
+
+func TestFitQuotaExplicitZeroBlocks(t *testing.T) {
+	initTest()
+	qm := &QuotaManager{Quotas: make(map[string]*DeviceQuota)}
+	ns := "team-zero"
+	memName := "nvidia.com/gpumem"
+
+	// An operator sets a ResourceQuota of "0" to block all GPU memory in the namespace.
+	rq := &corev1.ResourceQuota{}
+	rq.Namespace = ns
+	rq.Spec.Hard = corev1.ResourceList{
+		corev1.ResourceName("limits." + memName): *resource.NewQuantity(0, resource.DecimalSI),
+	}
+	qm.AddQuota(rq)
+
+	// The explicit zero must block any positive request, not be read as "unlimited".
+	if qm.FitQuota(ns, 500, 1, 0, "NVIDIA") {
+		t.Error(`FitQuota admitted a 500 request under limits.nvidia.com/gpumem: "0"; an explicit zero quota must block`)
 	}
 }
 

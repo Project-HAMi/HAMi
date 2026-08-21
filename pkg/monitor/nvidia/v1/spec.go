@@ -16,7 +16,10 @@ limitations under the License.
 
 package v1
 
-import "unsafe"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 const maxDevices = 16
 
@@ -92,7 +95,7 @@ func (s Spec) DeviceMax() int {
 }
 
 func (s Spec) DeviceNum() int {
-	return int(s.sr.num)
+	return int(min(s.sr.num, uint64(maxDevices)))
 }
 
 // activeProcs returns the process slots currently in use. procnum is read from
@@ -172,7 +175,7 @@ func (s Spec) DeviceSmUtil(idx int) uint64 {
 func (s Spec) SetDeviceSmLimit(l uint64) {
 	n := min(s.sr.num, maxDevices)
 	for idx := range n {
-		s.sr.smLimit[idx] = l
+		atomic.StoreUint64(&s.sr.smLimit[idx], l)
 	}
 }
 
@@ -185,18 +188,18 @@ func (s Spec) DeviceUUID(idx int) string {
 }
 
 func (s Spec) DeviceMemoryLimit(idx int) uint64 {
-	return s.sr.limit[idx]
+	return atomic.LoadUint64(&s.sr.limit[idx])
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
 	n := min(s.sr.num, maxDevices)
 	for idx := range n {
-		s.sr.limit[idx] = l
+		atomic.StoreUint64(&s.sr.limit[idx], l)
 	}
 }
 
 func (s Spec) LastKernelTime() int64 {
-	return s.sr.lastKernelTime
+	return atomic.LoadInt64(&s.sr.lastKernelTime)
 }
 
 func CastSpec(data []byte) Spec {
@@ -220,17 +223,17 @@ func (s Spec) GetPriority() int {
 }
 
 func (s Spec) GetRecentKernel() int32 {
-	return s.sr.recentKernel
+	return atomic.LoadInt32(&s.sr.recentKernel)
 }
 
 func (s Spec) SetRecentKernel(v int32) {
-	s.sr.recentKernel = v
+	atomic.StoreInt32(&s.sr.recentKernel, v)
 }
 
 func (s Spec) GetUtilizationSwitch() int32 {
-	return s.sr.utilizationSwitch
+	return atomic.LoadInt32(&s.sr.utilizationSwitch)
 }
 
 func (s Spec) SetUtilizationSwitch(v int32) {
-	s.sr.utilizationSwitch = v
+	atomic.StoreInt32(&s.sr.utilizationSwitch, v)
 }

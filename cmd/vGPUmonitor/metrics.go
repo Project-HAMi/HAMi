@@ -19,12 +19,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -61,12 +58,18 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_utilization_ratio",
 		"GPU core utilization ratio (0-100)",
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUMemoryUtilizationdesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_controller_utilization_ratio",
+		"GPU memory controller utilization ratio (0-100)",
 		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
@@ -98,8 +101,8 @@ var (
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
 		"hami_mig_device_info",
-		"MIG device information for container",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
+		"MIG runtime identity for a container allocation",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "mig_uuid", "profile", "gpu_instance_id", "compute_instance_id"}, nil,
 	)
 	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_context_bytes",
@@ -136,12 +139,12 @@ func initLegacyDescriptors() {
 	legacyHostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyHostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyCtrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
@@ -191,6 +194,7 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
+	ch <- hostGPUMemoryUtilizationdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
 	ch <- ctrDeviceLastKernelDesc
@@ -313,22 +317,32 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 
 	deviceName = "NVIDIA-" + deviceName
 
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUdesc,
 		prometheus.GaugeValue,
 		float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
 	return nil
 }
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
-	util, nvret := hdev.GetUtilizationRates()
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
+	utilRates, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
 	}
@@ -348,13 +362,20 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 	ch <- prometheus.MustNewConstMetric(
 		hostGPUUtilizationdesc,
 		prometheus.GaugeValue,
-		float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+		float64(utilRates.Gpu),
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
 
-	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
+	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu),
+		nodeName, fmt.Sprint(index), uuid, deviceName,
 	)
+
+	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
+		float64(utilRates.Memory),
+		fmt.Sprint(index), uuid, deviceName,
+	); err != nil {
+		return fmt.Errorf("nvml send memory controller utilization: %w", err)
+	}
 
 	return nil
 }
@@ -428,14 +449,13 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 
 	// Iterate through each device
 	for i := range c.Info.DeviceNum() {
-		uuid := c.Info.DeviceUUID(i)
-		if len(uuid) < 40 {
-			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UUID length %d (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name, len(uuid))
+		if !c.Info.IsValidUUID(i) {
+			klog.Warningf("Device %d in Pod %s/%s, Container %s UUID not yet initialised; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
 			continue
 		}
-		uuid = uuid[0:40] // Ensure UUID is truncated to 40 characters
+		uuid := c.Info.DeviceUUID(i)[0:40]
 		if !utf8.ValidString(uuid) {
-			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
+			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
 			continue
 		}
 
@@ -515,41 +535,53 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 	for _, pod := range pods {
-		pdevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
-			klog.Errorf("failed to decode pod devices for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			continue
 		}
-		for ctrIdx, container := range pod.Spec.Containers {
-			for ctrDevIdx, ctrDevices := range pdevices[nv.NvidiaGPUDevice] {
-				if len(ctrDevices) == 0 || ctrIdx != ctrDevIdx {
-					continue
-				}
-				for _, ctrDev := range ctrDevices {
-					if strings.Contains(ctrDev.UUID, "[") {
-						uuid := strings.Split(ctrDev.UUID, "[")[0]
-						_, idx, err := device.ExtractMigTemplatesFromUUID(ctrDev.UUID)
-						if err != nil {
-							klog.Errorf("Failed to get mig template for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							continue
-						}
-						gpuInstanceId, err := dp.GetMigGpuInstanceIdFromIndex(ctrDev.UUID, idx)
-						if err != nil {
-							klog.Errorf("Failed to get mig InstanceId for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							continue
-						}
-						labels := []string{pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
-						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
-							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							return err
-						}
-						sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1, labels...)
-					}
-				}
+		for _, allocation := range allocations {
+			if allocation.MigUUID == "" || allocation.GPUInstanceID == nil || allocation.ComputeInstanceID == nil {
+				continue
 			}
+			containerName, ok := migAllocationContainerName(pod, allocation.ContainerIndex)
+			if !ok {
+				klog.Errorf("MIG allocation container index %d out of range for Pod %s/%s", allocation.ContainerIndex, pod.Namespace, pod.Name)
+				continue
+			}
+			metricLabels := []string{
+				pod.Namespace,
+				pod.Name,
+				containerName,
+				fmt.Sprint(allocation.DeviceIndex),
+				allocation.GPUUUID,
+				allocation.MigUUID,
+				allocation.Profile,
+				fmt.Sprint(*allocation.GPUInstanceID),
+				fmt.Sprint(*allocation.ComputeInstanceID),
+			}
+			if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, metricLabels...); err != nil {
+				return fmt.Errorf("send MIG info metric for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1,
+				pod.Namespace, pod.Name, containerName, fmt.Sprint(allocation.DeviceIndex), allocation.GPUUUID, fmt.Sprint(*allocation.GPUInstanceID))
 		}
 	}
 	return nil
+}
+
+func migAllocationContainerName(pod *corev1.Pod, containerIndex int) (string, bool) {
+	if containerIndex < 0 {
+		return "", false
+	}
+	if containerIndex < len(pod.Spec.InitContainers) {
+		return pod.Spec.InitContainers[containerIndex].Name, true
+	}
+	containerIndex -= len(pod.Spec.InitContainers)
+	if containerIndex >= len(pod.Spec.Containers) {
+		return "", false
+	}
+	return pod.Spec.Containers[containerIndex].Name, true
 }
 
 func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) error {

@@ -27,6 +27,12 @@ import (
 type Quota struct {
 	Used  int64
 	Limit int64
+	// LimitSet distinguishes an explicitly configured limit (including an
+	// explicit 0, which blocks all usage) from an entry auto-created by usage
+	// tracking, which carries Limit 0 but means "no limit configured". FitQuota
+	// gates on this rather than Limit != 0 so that a ResourceQuota of "0" is
+	// honored as a hard block instead of being read as unlimited.
+	LimitSet bool
 }
 
 type DeviceQuota map[string]*Quota
@@ -75,13 +81,13 @@ func (q *QuotaManager) FitQuota(ns string, memreq int64, memoryFactor int32, cor
 		if memoryFactor > 1 {
 			limit = limit * int64(memoryFactor)
 		}
-		if limit != 0 && memQuota.Used+memreq > limit {
+		if memQuota.LimitSet && memQuota.Used+memreq > limit {
 			klog.V(4).InfoS("resourceMem quota not fitted", "limit", limit, "used", memQuota.Used, "alloc", memreq)
 			return false
 		}
 	}
 	coreQuota, ok := (*dq)[coreResourceName]
-	if ok && coreQuota.Limit != 0 && coreQuota.Used+coresreq > coreQuota.Limit {
+	if ok && coreQuota.LimitSet && coreQuota.Used+coresreq > coreQuota.Limit {
 		klog.V(4).InfoS("resourceCores quota not fitted", "limit", coreQuota.Limit, "used", coreQuota.Used, "alloc", coresreq)
 		return false
 	}
@@ -117,29 +123,29 @@ func (q *QuotaManager) AddUsage(pod *corev1.Pod, podDev PodDevices) {
 	}
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	if q.Quotas[pod.Namespace] == nil {
-		q.Quotas[pod.Namespace] = &DeviceQuota{}
-	}
-	dp, ok := q.Quotas[pod.Namespace]
-	if !ok {
-		return
-	}
-	for idx, val := range usage {
-		_, ok := (*dp)[idx]
-		if !ok {
-			(*dp)[idx] = &Quota{
-				Used:  0,
-				Limit: 0,
-			}
-		}
-		(*dp)[idx].Used += val
-	}
+	q.addUsageLocked(pod.Namespace, usage)
 	if klog.V(4).Enabled() {
 		for _, val := range q.Quotas {
 			for idx, val1 := range *val {
 				klog.V(4).Infoln("add usage val=", idx, ":", val1)
 			}
 		}
+	}
+}
+
+func (q *QuotaManager) addUsageLocked(namespace string, usage map[string]int64) {
+	if q.Quotas[namespace] == nil {
+		q.Quotas[namespace] = &DeviceQuota{}
+	}
+	dp := q.Quotas[namespace]
+	for idx, val := range usage {
+		if _, ok := (*dp)[idx]; !ok {
+			(*dp)[idx] = &Quota{
+				Used:  0,
+				Limit: 0,
+			}
+		}
+		(*dp)[idx].Used += val
 	}
 }
 
@@ -150,7 +156,18 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 	}
 	q.mutex.Lock()
 	defer q.mutex.Unlock()
-	dp, ok := q.Quotas[pod.Namespace]
+	q.rmUsageLocked(pod.Namespace, usage)
+	if klog.V(4).Enabled() {
+		for _, val := range q.Quotas {
+			for idx, val1 := range *val {
+				klog.V(4).Infoln("after val=", idx, ":", val1)
+			}
+		}
+	}
+}
+
+func (q *QuotaManager) rmUsageLocked(namespace string, usage map[string]int64) {
+	dp, ok := q.Quotas[namespace]
 	if !ok {
 		return
 	}
@@ -163,13 +180,17 @@ func (q *QuotaManager) RmUsage(pod *corev1.Pod, podDev PodDevices) {
 			}
 		}
 	}
-	if klog.V(4).Enabled() {
-		for _, val := range q.Quotas {
-			for idx, val1 := range *val {
-				klog.V(4).Infoln("after val=", idx, ":", val1)
-			}
-		}
+}
+func (q *QuotaManager) ReplaceUsage(pod *corev1.Pod, oldDevices, newDevices PodDevices) {
+	oldUsage := countPodDevices(oldDevices)
+	newUsage := countPodDevices(newDevices)
+	if len(oldUsage) == 0 && len(newUsage) == 0 {
+		return
 	}
+	q.mutex.Lock()
+	defer q.mutex.Unlock()
+	q.rmUsageLocked(pod.Namespace, oldUsage)
+	q.addUsageLocked(pod.Namespace, newUsage)
 }
 
 func IsManagedQuota(quotaName string) bool {
@@ -238,6 +259,7 @@ func (q *QuotaManager) addQuotaLocked(quota *corev1.ResourceQuota) {
 				}
 			}
 			(*dp)[dn].Limit = value
+			(*dp)[dn].LimitSet = true
 			klog.V(4).InfoS("quota set:", "idx=", idx, "val", value)
 		}
 	}
@@ -256,6 +278,7 @@ func (q *QuotaManager) delQuotaLocked(quota *corev1.ResourceQuota) {
 			if dq, ok := q.Quotas[quota.Namespace]; ok {
 				if quotaInfo, ok := (*dq)[dn]; ok {
 					quotaInfo.Limit = 0
+					quotaInfo.LimitSet = false
 				}
 			}
 		}
@@ -295,8 +318,9 @@ func (q *QuotaManager) GetResourceQuota() map[string]*DeviceQuota {
 		curDQ := &DeviceQuota{}
 		for name, quota := range *dq {
 			(*curDQ)[name] = &Quota{
-				Used:  quota.Used,
-				Limit: quota.Limit,
+				Used:     quota.Used,
+				Limit:    quota.Limit,
+				LimitSet: quota.LimitSet,
 			}
 		}
 		quotasCopy[ns] = curDQ

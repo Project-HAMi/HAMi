@@ -18,6 +18,7 @@ package scheduler
 
 import (
 	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -504,4 +505,99 @@ func TestGetNode_DeepCopy(t *testing.T) {
 	if err == nil {
 		t.Error("expected error for nonexistent node, got nil")
 	}
+}
+
+// RegisterFromNodeAnnotations hands addNode a *corev1.Node straight from
+// nodeLister.List, and cambricon's ReleaseNodeLock deletes an annotation from
+// that same shared object. Storing the pointer left GetNode and ListNodes
+// deep-copying it while that delete ran.
+func TestAddNodeCopiesSharedNodeObject(t *testing.T) {
+	m := newNodeManager()
+
+	shared := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:        "node1",
+			Annotations: map[string]string{"cambricon.com/dsmlu.lock": "held"},
+		},
+	}
+	m.addNode("node1", &device.NodeInfo{
+		ID:   "node1",
+		Node: shared,
+		Devices: map[string][]device.DeviceInfo{
+			"NVIDIA": {{ID: "dev-0", Count: 10, Devmem: 1024}},
+		},
+	})
+
+	var wg sync.WaitGroup
+	stop := make(chan struct{})
+
+	wg.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+				delete(shared.Annotations, "cambricon.com/dsmlu.lock")
+				shared.Annotations["cambricon.com/dsmlu.lock"] = "held"
+			}
+		}
+	})
+
+	wg.Go(func() {
+		for range 20000 {
+			if n, err := m.GetNode("node1"); err == nil && n.Node != nil {
+				_ = n.Node.Annotations
+			}
+			_, _ = m.ListNodes()
+		}
+		close(stop)
+	})
+
+	wg.Wait()
+}
+
+// What the caller keeps must not reach into the manager, and vice versa.
+func TestAddNodeStoresDetachedCopy(t *testing.T) {
+	m := newNodeManager()
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1", Annotations: map[string]string{"k": "v"}},
+	}
+	info := &device.NodeInfo{
+		ID:   "node1",
+		Node: node,
+		Devices: map[string][]device.DeviceInfo{
+			"NVIDIA": {{ID: "dev-0", Count: 10, Devmem: 1024}},
+		},
+	}
+	m.addNode("node1", info)
+
+	// mutate everything the caller still holds
+	node.Annotations["k"] = "tampered"
+	info.Devices["NVIDIA"][0].Devmem = 9999
+
+	got, err := m.GetNode("node1")
+	assert.NilError(t, err)
+	assert.Equal(t, "v", got.Node.Annotations["k"])
+	assert.Equal(t, int32(1024), got.Devices["NVIDIA"][0].Devmem)
+
+	// and the update path must copy too
+	node2 := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: "node1", Annotations: map[string]string{"k": "v2"}},
+	}
+	info2 := &device.NodeInfo{
+		ID:   "node1",
+		Node: node2,
+		Devices: map[string][]device.DeviceInfo{
+			"NVIDIA": {{ID: "dev-0", Count: 10, Devmem: 2048}},
+		},
+	}
+	m.addNode("node1", info2)
+	node2.Annotations["k"] = "tampered2"
+	info2.Devices["NVIDIA"][0].Devmem = 7777
+
+	got, err = m.GetNode("node1")
+	assert.NilError(t, err)
+	assert.Equal(t, "v2", got.Node.Annotations["k"])
+	assert.Equal(t, int32(2048), got.Devices["NVIDIA"][0].Devmem)
 }
