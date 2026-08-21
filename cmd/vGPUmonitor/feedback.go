@@ -39,6 +39,9 @@ type UtilizationPerDevice []int
 
 func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
+		if !c.Info.IsValidUUID(i) {
+			continue
+		}
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
@@ -55,6 +58,9 @@ func CheckBlocking(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.
 // Check whether task with higher priority use GPU or there are other tasks with the same priority.
 func CheckPriority(utSwitchOn map[string]UtilizationPerDevice, p int, c *nvidia.ContainerUsage) bool {
 	for i := range c.Info.DeviceMax() {
+		if !c.Info.IsValidUUID(i) {
+			continue
+		}
 		uuid := c.Info.DeviceUUID(i)
 		_, ok := utSwitchOn[uuid]
 		if ok {
