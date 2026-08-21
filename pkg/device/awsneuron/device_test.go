@@ -449,6 +449,72 @@ func Test_PatchAnnotations(t *testing.T) {
 				AWSNeuronAssignedNode:                  "",
 			},
 		},
+		{
+			// Regression test for a pod with two containers, each requesting its own
+			// AWS Neuron device: AWSNeuronAssignedIndex must carry both containers'
+			// indices ("0,1"), not just the last container processed.
+			name: "multi-container neuron devices",
+			args: struct {
+				annoinput *map[string]string
+				pod       corev1.Pod
+				pd        device.PodDevices
+			}{
+				annoinput: &map[string]string{},
+				pod: corev1.Pod{
+					Spec: corev1.PodSpec{
+						Containers: []corev1.Container{
+							{
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"aws.amazon.com/neuron": resource.MustParse("1"),
+									},
+								},
+							},
+							{
+								Resources: corev1.ResourceRequirements{
+									Limits: corev1.ResourceList{
+										"aws.amazon.com/neuron": resource.MustParse("1"),
+									},
+								},
+							},
+						},
+					},
+				},
+				pd: device.PodDevices{
+					AWSNeuronDevice: device.PodSingleDevice{
+						device.ContainerDevices{
+							{
+								Idx:       0,
+								UUID:      "test1",
+								Type:      AWSNeuronDevice,
+								Usedmem:   int32(0),
+								Usedcores: int32(3),
+								CustomInfo: map[string]any{
+									AWSUsageInfo: 3,
+								},
+							},
+						},
+						device.ContainerDevices{
+							{
+								Idx:       1,
+								UUID:      "test2",
+								Type:      AWSNeuronDevice,
+								Usedmem:   int32(0),
+								Usedcores: int32(3),
+								CustomInfo: map[string]any{
+									AWSUsageInfo: 3,
+								},
+							},
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				device.SupportDevices[AWSNeuronDevice]: "test1,AWSNeuron,0,3:;test2,AWSNeuron,0,3:;",
+				AWSNeuronAssignedIndex:                 "0,1",
+				AWSNeuronAssignedNode:                  "",
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
