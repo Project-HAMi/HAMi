@@ -18,7 +18,9 @@ package v0
 
 import (
 	"reflect"
+	"sync"
 	"testing"
+	"unsafe"
 )
 
 type specTest struct {
@@ -783,6 +785,39 @@ func TestSpec_LastKernelTime(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestSpec_ConcurrentAtomicAccess(t *testing.T) {
+	data := make([]byte, unsafe.Sizeof(sharedRegionT{}))
+	sr := (*sharedRegionT)(unsafe.Pointer(&data[0]))
+	sr.num = 4
+
+	s := Spec{sr: sr}
+
+	var wg sync.WaitGroup
+	goroutines := 50
+	iterations := 200
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := range iterations {
+				val := uint64(id*iterations + j)
+				s.SetDeviceMemoryLimit(val)
+				s.SetDeviceSmLimit(val)
+				s.SetRecentKernel(int32(j))
+				s.SetUtilizationSwitch(int32(j))
+
+				_ = s.DeviceMemoryLimit(0)
+				_ = s.DeviceMemoryLimit(1)
+				_ = s.GetRecentKernel()
+				_ = s.GetUtilizationSwitch()
+			}
+		}(i)
+	}
+
+	wg.Wait()
 }
 
 func TestV0SharedRegionTLayoutSize(t *testing.T) {
