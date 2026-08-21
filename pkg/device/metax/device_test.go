@@ -210,6 +210,90 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func Test_PatchAnnotations(t *testing.T) {
+	config := MetaxConfig{
+		ResourceCountName: "metax-tech.com/gpu",
+	}
+	InitMetaxDevice(config)
+
+	tests := []struct {
+		name      string
+		annoinput map[string]string
+		pd        device.PodDevices
+		want      map[string]string
+	}{
+		{
+			name:      "no metax device requested",
+			annoinput: map[string]string{},
+			pd:        device.PodDevices{},
+			want:      map[string]string{},
+		},
+		{
+			name:      "single container, single device",
+			annoinput: map[string]string{},
+			pd: device.PodDevices{
+				MetaxGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{
+							Idx:       0,
+							UUID:      "metax-0",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(50),
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				device.InRequestDevices[MetaxGPUDevice]: "metax-0,Metax-GPU,1000,50:;",
+				device.SupportDevices[MetaxGPUDevice]:   "metax-0,Metax-GPU,1000,50:;",
+			},
+		},
+		{
+			// Regression test: PatchAnnotations must carry every container's
+			// device assignment, not just the last one processed.
+			name:      "multi-container, one device each",
+			annoinput: map[string]string{},
+			pd: device.PodDevices{
+				MetaxGPUDevice: device.PodSingleDevice{
+					device.ContainerDevices{
+						{
+							Idx:       0,
+							UUID:      "metax-0",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(1000),
+							Usedcores: int32(50),
+						},
+					},
+					device.ContainerDevices{
+						{
+							Idx:       1,
+							UUID:      "metax-1",
+							Type:      MetaxGPUDevice,
+							Usedmem:   int32(2000),
+							Usedcores: int32(30),
+						},
+					},
+				},
+			},
+			want: map[string]string{
+				device.InRequestDevices[MetaxGPUDevice]: "metax-0,Metax-GPU,1000,50:;metax-1,Metax-GPU,2000,30:;",
+				device.SupportDevices[MetaxGPUDevice]:   "metax-0,Metax-GPU,1000,50:;metax-1,Metax-GPU,2000,30:;",
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := MetaxDevices{}
+			annoinput := test.annoinput
+			result := dev.PatchAnnotations(&corev1.Pod{}, &annoinput, test.pd)
+			assert.Equal(t, result[device.InRequestDevices[MetaxGPUDevice]], test.want[device.InRequestDevices[MetaxGPUDevice]])
+			assert.Equal(t, result[device.SupportDevices[MetaxGPUDevice]], test.want[device.SupportDevices[MetaxGPUDevice]])
+		})
+	}
+}
+
 func Test_checkType(t *testing.T) {
 	tests := []struct {
 		name string
