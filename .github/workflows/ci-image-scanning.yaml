@@ -2,6 +2,7 @@ name: Trivy Scan
 on:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
