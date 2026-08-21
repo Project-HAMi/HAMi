@@ -78,7 +78,7 @@ type Scheduler struct {
 	started        uint32 // 0 = false, 1 = true
 
 	lock   sync.RWMutex
-	synced bool
+	synced atomic.Bool
 }
 
 func NewScheduler() *Scheduler {
@@ -89,7 +89,6 @@ func NewScheduler() *Scheduler {
 		nodeNotify:     make(chan struct{}, 1),
 		leaderNotify:   make(chan struct{}, 1),
 		started:        0,
-		synced:         false,
 	}
 	s.nodeManager = newNodeManager()
 	s.podManager = device.NewPodManager()
@@ -104,9 +103,7 @@ func NewScheduler() *Scheduler {
 				}
 			},
 			OnStoppedLeading: func() {
-				s.lock.Lock()
-				defer s.lock.Unlock()
-				s.synced = false
+				s.synced.Store(false)
 			},
 		}
 		s.leaderManager = leaderelection.NewLeaderManager(config.HostName, config.LeaderElectResourceNamespace, config.LeaderElectResourceName, callbacks)
@@ -552,7 +549,7 @@ func (s *Scheduler) register(labelSelector labels.Selector, printedLog map[strin
 	s.overviewstatus = *overallnodeMap
 
 	// Set synced to true only after getNodeUsage() succeeds
-	s.synced = true
+	s.synced.Store(true)
 }
 
 func (s *Scheduler) updateSchedulerLabel() {
@@ -612,11 +609,17 @@ func (s *Scheduler) updateSchedulerLabel() {
 	}
 }
 
+// IsSynced returns true when the scheduler's internal node/device cache has
+// completed at least one successful sync cycle and is ready to serve requests.
+// It uses atomic lock-free reads and is safe to call from Prometheus Collect callbacks
+// without contending on the scheduler's write lock during cache refreshes.
+func (s *Scheduler) IsSynced() bool {
+	return s.synced.Load()
+}
+
 func (s *Scheduler) WaitForCacheSync(ctx context.Context) bool {
 	err := wait.PollUntilContextCancel(ctx, syncedPollPeriod, true, func(context.Context) (done bool, err error) {
-		s.lock.RLock()
-		defer s.lock.RUnlock()
-		return s.synced, nil
+		return s.synced.Load(), nil
 	})
 	if err != nil {
 		klog.ErrorS(err, "failed to poll until context cancel")
