@@ -499,28 +499,45 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 	}
 	cd := strings.Split(str, OneContainerMultiDeviceSplitSymbol)
 	contdev := ContainerDevices{}
-	tmpdev := ContainerDevice{}
 	klog.V(5).Infof("Start to decode container device %s", str)
 	for _, val := range cd {
-		if strings.Contains(val, ",") {
-			tmpstr := strings.Split(val, ",")
-			if len(tmpstr) < 4 {
-				return nil, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
-			}
-			tmpdev.UUID = tmpstr[0]
-			tmpdev.Type = tmpstr[1]
-			devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid memory field: %w", err)
-			}
-			tmpdev.Usedmem = int32(devmem)
-			devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
-			if err != nil {
-				return nil, fmt.Errorf("invalid core field: %w", err)
-			}
-			tmpdev.Usedcores = int32(devcores)
-			contdev = append(contdev, tmpdev)
+		if val == "" {
+			continue
 		}
+		if !strings.Contains(val, ",") {
+			return nil, fmt.Errorf("malformed container device annotation segment: %q", val)
+		}
+		tmpstr := strings.Split(val, ",")
+		if len(tmpstr) < 4 {
+			return nil, fmt.Errorf("pod annotation format error, missing fields, do not use nodeName in task spec")
+		}
+		if tmpstr[0] == "" {
+			return nil, fmt.Errorf("pod annotation format error, missing device UUID")
+		}
+		if tmpstr[1] == "" {
+			return nil, fmt.Errorf("pod annotation format error, missing device type")
+		}
+		devmem, err := strconv.ParseInt(tmpstr[2], 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid memory field: %w", err)
+		}
+		if devmem < 0 {
+			return nil, fmt.Errorf("memory field must not be negative: %d", devmem)
+		}
+		devcores, err := strconv.ParseInt(tmpstr[3], 10, 32)
+		if err != nil {
+			return nil, fmt.Errorf("invalid core field: %w", err)
+		}
+		if devcores < 0 {
+			return nil, fmt.Errorf("core field must not be negative: %d", devcores)
+		}
+		tmpdev := ContainerDevice{
+			UUID:      tmpstr[0],
+			Type:      tmpstr[1],
+			Usedmem:   int32(devmem),
+			Usedcores: int32(devcores),
+		}
+		contdev = append(contdev, tmpdev)
 	}
 	klog.V(5).Infof("Finished decoding container devices. Total devices: %d", len(contdev))
 	return contdev, nil
