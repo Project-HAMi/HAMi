@@ -124,7 +124,10 @@ func (plugin *NvidiaDevicePlugin) tryNumaRefit(ctx context.Context, pod *corev1.
 			klog.InfoS("NUMA refit succeeded", "pod", klog.KObj(pod), "container", containerIndex, "devices", replicas)
 			return replicas, nil
 		}
-		err = fmt.Errorf("refit-selected devices are not allocatable: %w", selectErr)
+		// The scheduler has already committed the move at this point.
+		// Falling back to kubelet's own selection would leave runtime and
+		// accounting divergent, so fail the allocation in both modes.
+		return nil, fmt.Errorf("numa refit committed but kubelet cannot honor the selection: %w", selectErr)
 	}
 
 	if mode == util.NumaAlignmentStrict {

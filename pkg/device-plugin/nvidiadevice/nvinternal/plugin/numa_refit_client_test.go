@@ -212,3 +212,31 @@ func TestNumaRefitTLSConfigInsecureOptOut(t *testing.T) {
 	config := numaRefitTLSConfig()
 	require.True(t, config.InsecureSkipVerify)
 }
+
+// A committed refit whose devices kubelet cannot honor must fail the
+// allocation even in best-effort mode: falling back would leave scheduler
+// accounting and runtime divergent.
+func TestGetPreferredAllocationRefitCommittedButUnmappable(t *testing.T) {
+	refitted := device.ContainerDevices{{UUID: numaTestGPUA, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
+	server, _ := numaRefitTestServer(t, device.NumaRefitResponse{
+		Succeeded:        true,
+		ContainerDevices: device.EncodeContainerDevices(refitted),
+	})
+	t.Setenv(SchedulerEndpointEnvName, server.URL)
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	setupInRequestDevices(t)
+
+	pod := numaRefitTestPod("best-effort")
+	mockAllocateGlobals(t, pod)
+
+	plugin := &NvidiaDevicePlugin{}
+	_, err := plugin.GetPreferredAllocation(context.Background(), &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{{
+			AvailableDeviceIDs: []string{numaTestGPUB + "-0"},
+			AllocationSize:     1,
+		}},
+	})
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "committed")
+}

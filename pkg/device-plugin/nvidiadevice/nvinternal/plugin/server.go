@@ -671,10 +671,11 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 				refitDevices, refitErr := plugin.tryNumaRefit(ctx, pendingPod, annotationIndices[idx], req, err)
 				switch {
 				case refitErr != nil:
-					// Strict mode: failing the call terminally fails the
-					// pod's admission rather than running misaligned. Mark
-					// the bind failed so the node lock is released instead
-					// of blocking the node until the lock timeout.
+					// Strict mode, or a committed refit kubelet cannot
+					// honor: fail the pod's admission rather than running
+					// misaligned or diverging from accounting. Mark the
+					// bind failed so the node lock is released instead of
+					// blocking the node until the lock timeout.
 					if nodename != "" && pendingPod != nil {
 						PodAllocationFailed(nodename, pendingPod, NodeLockNvidia)
 					}
