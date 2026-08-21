@@ -80,6 +80,12 @@ func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 		t.Errorf("hostGPUUtilizationdesc does not contain 'node' label: %s", hostGPUUtilString)
 	}
 
+	hostGPUMemoryUtilString := hostGPUMemoryUtilizationdesc.String()
+	if !strings.Contains(hostGPUMemoryUtilString, `"node"`) && !strings.Contains(hostGPUMemoryUtilString, `node`) {
+		t.Errorf("hostGPUMemoryUtilizationdesc does not contain 'node' label: %s", hostGPUMemoryUtilString)
+	}
+
+	// Verify legacy host GPU descriptors include "nodeid" label
 	legacyHostGPUString := legacyHostGPUdesc.String()
 	if !strings.Contains(legacyHostGPUString, `"nodeid"`) && !strings.Contains(legacyHostGPUString, `nodeid`) {
 		t.Errorf("legacyHostGPUdesc does not contain 'nodeid' label: %s", legacyHostGPUString)
