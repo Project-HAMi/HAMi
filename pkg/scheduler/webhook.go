@@ -164,7 +164,7 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
 		}
 
-		var initMemoryReq, initCoresReq int64
+		var initPeakMemoryReq, initPeakCoresReq int64
 		var sidecarMemoryReq, sidecarCoresReq int64
 		for i := range pod.Spec.InitContainers {
 			c := &pod.Spec.InitContainers[i]
@@ -172,17 +172,21 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			if req.Nums == 0 {
 				continue
 			}
+			mem := int64(req.Memreq) * int64(req.Nums)
+			cores := int64(req.Coresreq) * int64(req.Nums)
 			if util.IsSidecarContainer(c) {
-				sidecarMemoryReq += int64(req.Memreq) * int64(req.Nums)
-				sidecarCoresReq += int64(req.Coresreq) * int64(req.Nums)
+				sidecarMemoryReq += mem
+				sidecarCoresReq += cores
+				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
 				continue
 			}
-			initMemoryReq = max(initMemoryReq, int64(req.Memreq)*int64(req.Nums))
-			initCoresReq = max(initCoresReq, int64(req.Coresreq)*int64(req.Nums))
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
 		}
 
-		memoryReq := sidecarMemoryReq + max(appMemoryReq, initMemoryReq)
-		coresReq := sidecarCoresReq + max(appCoresReq, initCoresReq)
+		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
+		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}

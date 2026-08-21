@@ -24,11 +24,6 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
-type deviceKey struct {
-	devType string
-	uuid    string
-}
-
 type usage struct {
 	mem   int32
 	cores int32
@@ -48,74 +43,65 @@ func CollapseInitContainerUsage(pod *corev1.Pod, raw PodDevices) PodDevices {
 		return nil
 	}
 	numInit := len(pod.Spec.InitContainers)
-	initPeak := make(map[deviceKey]usage)
-	appSum := make(map[deviceKey]usage)
-	sidecarSum := make(map[deviceKey]usage)
 
-	for devType, podSingle := range raw {
-		for cidx, ctrDevs := range podSingle {
-			for _, dev := range ctrDevs {
-				key := deviceKey{devType: devType, uuid: dev.UUID}
-				switch {
-				case cidx < numInit && isSidecarAt(pod, cidx):
-					cur := sidecarSum[key]
-					cur.mem += dev.Usedmem
-					cur.cores += dev.Usedcores
-					// Sidecars run concurrently with app containers: each occurrence is an additional slot.
-					cur.slots++
-					sidecarSum[key] = cur
-				case cidx < numInit:
-					cur := initPeak[key]
-					if dev.Usedmem > cur.mem {
-						cur.mem = dev.Usedmem
-					}
-					if dev.Usedcores > cur.cores {
-						cur.cores = dev.Usedcores
-					}
-					// Init containers run sequentially: peak concurrency is one slot per device.
-					cur.slots = 1
-					initPeak[key] = cur
-				default:
-					cur := appSum[key]
-					cur.mem += dev.Usedmem
-					cur.cores += dev.Usedcores
-					// App containers run concurrently: each occurrence is an additional slot.
-					cur.slots++
-					appSum[key] = cur
-				}
-			}
-		}
+	type devState struct {
+		sc   usage // running sum of sidecars declared so far
+		peak usage // peak concurrent usage observed during the init phase
+		app  usage // sum over app containers
 	}
 
 	collapsed := make(PodDevices)
-	for devType := range raw {
-		uuidSet := make(map[string]struct{})
-		for _, m := range []map[deviceKey]usage{initPeak, appSum, sidecarSum} {
-			for k := range m {
-				if k.devType == devType {
-					uuidSet[k.uuid] = struct{}{}
+	for devType, podSingle := range raw {
+		states := make(map[string]*devState)
+		get := func(uuid string) *devState {
+			s, ok := states[uuid]
+			if !ok {
+				s = &devState{}
+				states[uuid] = s
+			}
+			return s
+		}
+
+		for cidx, ctrDevs := range podSingle {
+			switch {
+			case cidx < numInit && isSidecarAt(pod, cidx):
+				for _, dev := range ctrDevs {
+					s := get(dev.UUID)
+					// A sidecar starts and never exits: it permanently
+					// joins the set of running containers.
+					s.sc.mem += dev.Usedmem
+					s.sc.cores += dev.Usedcores
+					s.sc.slots++
+					s.peak.mem = max(s.peak.mem, s.sc.mem)
+					s.peak.cores = max(s.peak.cores, s.sc.cores)
+					s.peak.slots = max(s.peak.slots, s.sc.slots)
+				}
+			case cidx < numInit:
+				for _, dev := range ctrDevs {
+					s := get(dev.UUID)
+					s.peak.mem = max(s.peak.mem, s.sc.mem+dev.Usedmem)
+					s.peak.cores = max(s.peak.cores, s.sc.cores+dev.Usedcores)
+					s.peak.slots = max(s.peak.slots, s.sc.slots+1)
+				}
+			default:
+				for _, dev := range ctrDevs {
+					s := get(dev.UUID)
+					s.app.mem += dev.Usedmem
+					s.app.cores += dev.Usedcores
+					s.app.slots++
 				}
 			}
 		}
 
 		collapsedSingle := make(PodSingleDevice, 1)
 		var containerDevs ContainerDevices
-
-		for uuid := range uuidSet {
-			initU := initPeak[deviceKey{devType, uuid}]
-			appU := appSum[deviceKey{devType, uuid}]
-			scU := sidecarSum[deviceKey{devType, uuid}]
-
-			effMem := scU.mem + max(initU.mem, appU.mem)
-			effCores := scU.cores + max(initU.cores, appU.cores)
-			effSlots := max(scU.slots+max(initU.slots, appU.slots), 1)
-
+		for uuid, s := range states {
 			containerDevs = append(containerDevs, ContainerDevice{
 				UUID:      uuid,
 				Type:      devType,
-				Usedmem:   effMem,
-				Usedcores: effCores,
-				Slots:     effSlots,
+				Usedmem:   max(s.peak.mem, s.sc.mem+s.app.mem),
+				Usedcores: max(s.peak.cores, s.sc.cores+s.app.cores),
+				Slots:     max(max(s.peak.slots, s.sc.slots+s.app.slots), 1),
 			})
 		}
 		sort.Slice(containerDevs, func(i, j int) bool {

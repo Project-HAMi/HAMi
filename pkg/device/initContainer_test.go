@@ -395,17 +395,19 @@ func TestCollapseInitContainerUsage_SidecarAddsToAppSum(t *testing.T) {
 	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
 }
 
-// Design case "shrink restored": init 20000 + sidecar 2000 + app 10000 →
-// collapse = 2000 + max(20000, 10000) = 22000; steady state = 12000, and the
-// steady state must still contain the sidecar's share (the pin that a fixed
-// gate plus an unfixed target would violate).
+// Design case "shrink restored": sidecar 2000 + init 20000 + app 10000.
+// The sidecar must be declared BEFORE the regular init for the design
+// numbers to hold — only then do the two overlap:
+// collapse = max(2000+20000, 2000+10000) = 22000, steady state = 12000.
+// The reverse declaration order is pinned by
+// TestCollapseInitContainerUsage_LateSidecarDoesNotInflatePeak.
 func TestCollapseAndSteadyState_SidecarWithInitAndApp(t *testing.T) {
 	always := corev1.ContainerRestartPolicyAlways
-	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil, &always}, 1)
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{&always, nil}, 1)
 	raw := PodDevices{
 		"NVIDIA": PodSingleDevice{
-			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 20000, Usedcores: 60}}, // init (regular)
 			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 2000, Usedcores: 10}},  // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 20000, Usedcores: 60}}, // init (regular)
 			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 10000, Usedcores: 30}}, // app
 		},
 	}
@@ -484,4 +486,100 @@ func TestCollapseInitContainerUsage_SidecarMultiUUID(t *testing.T) {
 		},
 	}
 	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// Sidecar never overlaps with it — the init has exited when the sidecar
+// starts. Effective usage is max(5000, 8000) = 8000 on ONE slot, not
+// 5000+8000 on two.
+func TestCollapseInitContainerUsage_RegularThenSidecarNoOverlap(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil, &always}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 50}}, // init (regular)
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80}}, // sidecar
+			{}, // app without GPU
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80, Slots: 1}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// Same two containers in the opposite order: the sidecar starts first and
+// is still running while the regular init runs, so their usage stacks:
+// peak = 8000 + 5000 = 13000 on two slots. (This passes under both the old
+// and new formulas — it's the control showing overlap is still charged.)
+func TestCollapseInitContainerUsage_SidecarThenRegularOverlap(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{&always, nil}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 8000, Usedcores: 80}}, // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 50}}, // init (regular)
+			{}, // app without GPU
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 13000, Usedcores: 130, Slots: 2}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// Interleaved order exercises the per-step running sum: the second regular
+// init overlaps only with the sidecar declared before it.
+// Peak walks 5000 → max(5000, 3000) → max(5000, 3000+4000) = 7000;
+// steady state = 3000 + 1000 = 4000; effective = 7000.
+// The order-blind formula charged 3000 + max(5000, 1000) = 8000.
+func TestCollapseInitContainerUsage_InterleavedRunningSum(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil, &always, nil}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 5000, Usedcores: 10}}, // init (regular)
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 3000, Usedcores: 30}}, // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 4000, Usedcores: 20}}, // init (regular)
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 1000, Usedcores: 5}},  // app
+		},
+	}
+	expected := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 7000, Usedcores: 50, Slots: 2}},
+		},
+	}
+	assert.DeepEqual(t, expected, CollapseInitContainerUsage(pod, raw))
+}
+
+// The design case's containers in the OLD declaration order: with the
+// regular init first, the late sidecar must not inflate the init-phase
+// peak. Collapse = max(20000, 2000+10000) = 20000 (was 22000 under the
+// order-blind formula), and the shrink target keeps the sidecar's share.
+func TestCollapseInitContainerUsage_LateSidecarDoesNotInflatePeak(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	pod := makePodWithSidecars("test", []*corev1.ContainerRestartPolicy{nil, &always}, 1)
+	raw := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 20000, Usedcores: 60}}, // init (regular)
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 2000, Usedcores: 10}},  // sidecar
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 10000, Usedcores: 30}}, // app
+		},
+	}
+	expectedCollapsed := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 20000, Usedcores: 60, Slots: 2}},
+		},
+	}
+	assert.DeepEqual(t, expectedCollapsed, CollapseInitContainerUsage(pod, raw))
+
+	expectedSteady := PodDevices{
+		"NVIDIA": PodSingleDevice{
+			{ContainerDevice{UUID: "gpu0", Type: "NVIDIA", Usedmem: 12000, Usedcores: 40, Slots: 2}},
+		},
+	}
+	assert.DeepEqual(t, expectedSteady, SteadyStateDeviceUsage(pod, raw))
 }
