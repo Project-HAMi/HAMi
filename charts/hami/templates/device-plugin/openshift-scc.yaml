@@ -1,0 +1,38 @@
+{{- if and .Values.platform.openshift .Values.openshift.securityContextConstraints.create .Values.openshift.securityContextConstraints.name }}
+apiVersion: security.openshift.io/v1
+kind: SecurityContextConstraints
+metadata:
+  name: {{ .Values.openshift.securityContextConstraints.name }}
+  labels:
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+allowPrivilegedContainer: true
+allowPrivilegeEscalation: true
+allowHostDirVolumePlugin: true
+allowHostPID: true
+allowHostIPC: false
+allowHostNetwork: false
+allowHostPorts: false
+allowedCapabilities:
+  - SYS_ADMIN
+defaultAddCapabilities: []
+requiredDropCapabilities:
+  - ALL
+volumes:
+  - configMap
+  - downwardAPI
+  - emptyDir
+  - hostPath
+  - projected
+  - secret
+runAsUser:
+  type: RunAsAny
+seLinuxContext:
+  type: RunAsAny
+fsGroup:
+  type: RunAsAny
+supplementalGroups:
+  type: RunAsAny
+seccompProfiles:
+  - runtime/default
+  - unconfined
+{{- end }}

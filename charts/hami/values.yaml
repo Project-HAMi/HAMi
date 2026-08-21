@@ -21,6 +21,22 @@ nameOverride: ""
 fullnameOverride: ""
 namespaceOverride: ""
 
+platform:
+  openshift: false
+
+openshift:
+  securityContextConstraints:
+    # Used only when platform.openshift=true. By default, the chart creates and
+    # grants its dedicated device-plugin SCC.
+    create: true
+    name: "hami-device-plugin"
+
+# SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
+selinux:
+  enabled: false
+  type: container_file_t
+  level: s0
+
 #Nvidia GPU Parameters
 resourceName: "nvidia.com/gpu"
 resourceMem: "nvidia.com/gpumem"
@@ -262,6 +278,7 @@ scheduler:
     podAnnotations: {}
     nodeSelector: {}
     tolerations: []
+    # OpenShift omits this value at render time so its SCC can allocate an allowed UID.
     runAsUser: 2000
   service:
     type: NodePort  # Default type is NodePort, can be changed to ClusterIP
@@ -269,7 +286,8 @@ scheduler:
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
     monitorTargetPort: 9395
-    httpTargetPort: 443
+    # Keep the container on an unprivileged port; the Service still exposes 443.
+    httpTargetPort: 9443
     labels: {}
     annotations: {}
 
@@ -409,7 +427,6 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
-  hostNetwork: false
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true
@@ -418,7 +435,11 @@ devicePlugin:
       add: ["SYS_ADMIN"]
   nvidiaNodeSelector:
     gpu: "on"
-  tolerations: []
+  # NVIDIA GPU Operator commonly taints GPU nodes with this NoSchedule taint.
+  tolerations:
+    - key: nvidia.com/gpu
+      operator: Exists
+      effect: NoSchedule
   updateStrategy:
     type: RollingUpdate
     rollingUpdate:

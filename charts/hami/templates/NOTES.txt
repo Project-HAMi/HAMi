@@ -1,3 +1,34 @@
 ** Please be patient while the chart is being deployed **
 Resource name: {{ .Values.resourceName }}
+{{- if .Values.platform.openshift }}
+{{- $namespace := include "hami-vgpu.namespace" . }}
 
+OpenShift support is enabled.
+Install HAMi in a dedicated project rather than a highly privileged default project such as `kube-system`.
+After the pods start, verify their assigned SCC:
+  oc get pods -n {{ $namespace }} \
+    -o 'custom-columns=NAME:.metadata.name,SCC:.metadata.annotations.openshift\.io/scc'
+{{- if .Values.openshift.securityContextConstraints.name }}
+{{- if .Values.openshift.securityContextConstraints.create }}
+The chart creates the `{{ .Values.openshift.securityContextConstraints.name }}`
+SecurityContextConstraints resource.
+{{- end }}
+The chart grants the `{{ .Values.openshift.securityContextConstraints.name }}`
+SecurityContextConstraints resource to the enabled device plugin service accounts
+in this namespace. The scheduler and admission service accounts are not granted
+this SCC and are expected to run under the platform's restricted SCC.
+{{- else }}
+No SCC RoleBinding is created by default. Grant a suitable SCC only to the enabled
+device plugin service accounts, or explicitly set
+`openshift.securityContextConstraints.name`.
+{{- end }}
+{{- end }}
+{{- if .Values.selinux.enabled }}
+
+SELinux relabeling is enabled.
+The device plugin relabels shared vGPU host directories under
+{{ .Values.devicePlugin.libPath }}, {{ .Values.devicePlugin.monitor.ctrPath }}, and
+/tmp/vgpulock for SELinux access. These operations also create or update host
+directory permissions. Uninstalling this Helm release does not restore the host
+SELinux labels or directory permissions; restore them manually if required.
+{{- end }}
