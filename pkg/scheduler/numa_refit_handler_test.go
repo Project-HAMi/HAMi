@@ -51,13 +51,16 @@ func refitFixture(t *testing.T, gpuBDevmem int32) (*Scheduler, *corev1.Pod) {
 	})
 
 	reserved := device.PodSingleDevice{{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		UID: refitPodUID, Name: refitPodName, Namespace: "default",
-		Annotations: map[string]string{
-			device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
-			device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+			},
 		},
-	}}
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
 	pods := device.NewPodManager()
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 
@@ -230,12 +233,12 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 		{
 			name:       "container index out of range",
 			mutate:     func(r *device.NumaRefitRequest) { r.ContainerIndex = 3 },
-			wantReason: "no pending",
+			wantReason: "outside the pod's containers",
 		},
 		{
 			name:       "negative container index",
 			mutate:     func(r *device.NumaRefitRequest) { r.ContainerIndex = -1 },
-			wantReason: "negative",
+			wantReason: "outside the pod's containers",
 		},
 		{
 			name:       "incomplete request",
@@ -335,13 +338,16 @@ func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 	pods := device.NewPodManager()
 	makePod := func(uid, name string) *corev1.Pod {
 		reserved := device.PodSingleDevice{{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 15000, Usedcores: 10}}}
-		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-			UID: k8stypes.UID(uid), Name: name, Namespace: "default",
-			Annotations: map[string]string{
-				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
-				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+		pod := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				UID: k8stypes.UID(uid), Name: name, Namespace: "default",
+				Annotations: map[string]string{
+					device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+					device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+				},
 			},
-		}}
+			Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+		}
 		pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 		return pod
 	}
@@ -372,9 +378,7 @@ func TestRefitNumaAllocationCompetingRefits(t *testing.T) {
 }
 
 func TestRefitNumaAllocationContainerNameMismatch(t *testing.T) {
-	s, pod := refitFixture(t, 40000)
-	pod.Spec.Containers = []corev1.Container{{Name: "main"}}
-	s.podManager.UpdatePod(pod)
+	s, _ := refitFixture(t, 40000)
 	_, calls := stubRefitPatch(t, nil)
 
 	request := refitTestRequestFor("GPU-b")
@@ -401,13 +405,16 @@ func TestRefitNumaAllocationRejectsMigDevice(t *testing.T) {
 		}},
 	})
 	reserved := device.PodSingleDevice{{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		UID: refitPodUID, Name: refitPodName, Namespace: "default",
-		Annotations: map[string]string{
-			device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
-			device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+			},
 		},
-	}}
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
 	pods := device.NewPodManager()
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
@@ -437,13 +444,16 @@ func TestRefitNumaAllocationHeterogeneousReservation(t *testing.T) {
 		{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 40000, Usedcores: 30},
 		{UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30},
 	}}
-	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-		UID: refitPodUID, Name: refitPodName, Namespace: "default",
-		Annotations: map[string]string{
-			device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
-			device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+			},
 		},
-	}}
+		Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "main"}}},
+	}
 	pods := device.NewPodManager()
 	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
 	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}

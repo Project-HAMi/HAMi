@@ -17,6 +17,8 @@ limitations under the License.
 package scheduler
 
 import (
+	"context"
+	"encoding/json"
 	"fmt"
 	"maps"
 	"strings"
@@ -29,10 +31,27 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
-// patchPodAnnotations is a test seam around util.PatchPodAnnotations.
-var patchPodAnnotations = util.PatchPodAnnotations
+// patchPodAnnotations patches only the given annotations, with the pod's
+// resourceVersion as a precondition so a stale refit cannot overwrite a
+// newer update to the same annotations (for example Allocate consuming a
+// to-allocate entry). Conflicts fail the refit; there is no retry with
+// cached values. Also a test seam.
+var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) error {
+	metadata := map[string]any{"annotations": annotations}
+	if pod.ResourceVersion != "" {
+		metadata["resourceVersion"] = pod.ResourceVersion
+	}
+	payload, err := json.Marshal(map[string]any{"metadata": metadata})
+	if err != nil {
+		return err
+	}
+	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
+		Patch(context.Background(), pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
+	return err
+}
 
 // maxAllowedDeviceUUIDs bounds the allowed set a refit request may carry.
 const maxAllowedDeviceUUIDs = 512
@@ -84,10 +103,11 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 		return s.numaRefitFailureEvent(pod, "pod %s/%s is tracked on node %s, not %s", pod.Namespace, pod.Name, pi.NodeID, req.NodeName)
 	}
 
-	if req.ContainerIndex < 0 {
-		return s.numaRefitFailureEvent(pod, "container index %d is negative", req.ContainerIndex)
+	name, ok := containerNameAt(pod, req.ContainerIndex)
+	if !ok {
+		return s.numaRefitFailureEvent(pod, "container index %d is outside the pod's containers", req.ContainerIndex)
 	}
-	if name, ok := containerNameAt(pod, req.ContainerIndex); req.ContainerName != "" && ok && name != req.ContainerName {
+	if req.ContainerName != "" && name != req.ContainerName {
 		return s.numaRefitFailureEvent(pod, "container index %d is %q, not %q", req.ContainerIndex, name, req.ContainerName)
 	}
 
