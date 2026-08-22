@@ -223,7 +223,7 @@ func applyPeakUsage(node *NodeUsage, appNodeCopy *NodeUsage, peakUsage map[strin
 	}
 }
 
-// fitInDevices keys rows by request type ("NVIDIA") while nodes may register model-specific types ("NVIDIA A100-SXM4-40GB"); union both so padding/merge never drops fitted rows.
+// fitInDevices keys rows by request type ("NVIDIA") while nodes may register model-specific types ("NVIDIA A100-SXM4-40GB"); union both so padding never drops fitted rows.
 func allocationTypeKeys(resourceReqs device.PodDeviceRequests, baseTypes map[string]struct{}) map[string]struct{} {
 	allocTypes := make(map[string]struct{}, len(baseTypes))
 	for typ := range baseTypes {
@@ -247,55 +247,37 @@ func sidecarInitIndexes(task *corev1.Pod) map[int]struct{} {
 	return idx
 }
 
-func allocateSidecarContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
-	sidecarAllocs := make(device.PodDevices)
-
-	for i := 0; i < numInitContainers && i < len(resourceReqs); i++ {
-		req := resourceReqs[i]
-		_, isSidecar := sidecarIdx[i]
-		if !isSidecar || len(req) == 0 {
-			for typ := range allocTypes {
-				sidecarAllocs[typ] = append(sidecarAllocs[typ], device.ContainerDevices{})
-			}
-			continue
-		}
-		fit, reason := fitInDevices(appNodeCopy, req, task, nodeInfo, &sidecarAllocs, weights)
-		if !fit {
-			klog.V(4).InfoS("Sidecar container does not fit",
-				"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
-			return nil, false, reason
-		}
-		for typ := range allocTypes {
-			if len(sidecarAllocs[typ]) == i {
-				sidecarAllocs[typ] = append(sidecarAllocs[typ], device.ContainerDevices{})
-			}
-		}
-	}
-	return sidecarAllocs, true, ""
-}
-
-func allocateInitContainers(initBase *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
+func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
 	initAllocs := make(device.PodDevices)
 
 	for i, req := range resourceReqs {
 		if i >= numInitContainers {
 			break
 		}
-		_, isSidecar := sidecarIdx[i]
-		if isSidecar || len(req) == 0 {
+		if len(req) == 0 {
 			for typ := range allocTypes {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
 			}
 			continue
 		}
-		nodeCopy := initBase.DeepCopy()
-		fit, reason := fitInDevices(nodeCopy, req, task, nodeInfo, &initAllocs, weights)
-		if !fit {
-			klog.V(4).InfoS("Init container does not fit",
-				"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
-			return nil, false, reason
+		if _, isSidecar := sidecarIdx[i]; isSidecar {
+			fit, reason := fitInDevices(appNodeCopy, req, task, nodeInfo, &initAllocs, weights)
+			if !fit {
+				klog.V(4).InfoS("Sidecar container does not fit",
+					"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
+				return nil, false, reason
+			}
+			updatePeakUsage(peakUsage, appNodeCopy)
+		} else {
+			nodeCopy := appNodeCopy.DeepCopy()
+			fit, reason := fitInDevices(nodeCopy, req, task, nodeInfo, &initAllocs, weights)
+			if !fit {
+				klog.V(4).InfoS("Init container does not fit",
+					"pod", klog.KObj(task), "node", nodeID, "containerIndex", i, "reason", reason)
+				return nil, false, reason
+			}
+			updatePeakUsage(peakUsage, nodeCopy)
 		}
-		updatePeakUsage(peakUsage, nodeCopy)
 		for typ := range allocTypes {
 			if len(initAllocs[typ]) == i {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
@@ -303,28 +285,6 @@ func allocateInitContainers(initBase *NodeUsage, nodeID string, resourceReqs dev
 		}
 	}
 	return initAllocs, true, ""
-}
-
-func mergeInitRangeAllocs(allocTypes map[string]struct{}, sidecarIdx map[int]struct{}, numInitContainers int, sidecarAllocs, initAllocs device.PodDevices) device.PodDevices {
-	merged := make(device.PodDevices)
-	for typ := range allocTypes {
-		rows := make(device.PodSingleDevice, 0, numInitContainers)
-		for i := range numInitContainers {
-			var row device.ContainerDevices
-			if _, ok := sidecarIdx[i]; ok {
-				if sidecarAllocs != nil && i < len(sidecarAllocs[typ]) {
-					row = sidecarAllocs[typ][i]
-				}
-			} else {
-				if initAllocs != nil && i < len(initAllocs[typ]) {
-					row = initAllocs[typ][i]
-				}
-			}
-			rows = append(rows, row)
-		}
-		merged[typ] = rows
-	}
-	return merged
 }
 
 func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
@@ -395,19 +355,9 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	var sidecarAllocs device.PodDevices
-	if len(sidecarIdx) > 0 {
-		allocs, fit, reason := allocateSidecarContainers(appNodeCopy, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, weights)
-		if !fit {
-			return nodeScoreResult{reason: reason}
-		}
-		sidecarAllocs = allocs
-	}
-
 	var initAllocs device.PodDevices
-	if numInitContainers > len(sidecarIdx) {
-		initBase := appNodeCopy.DeepCopy() // node + sidecars
-		allocs, fit, reason := allocateInitContainers(initBase, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, peakUsage, weights)
+	if numInitContainers > 0 {
+		allocs, fit, reason := allocateInitContainers(appNodeCopy, nodeID, resourceReqs, task, nodeInfo, allocTypes, sidecarIdx, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
@@ -418,9 +368,8 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 		return nodeScoreResult{reason: reason}
 	}
 
-	if numInitContainers > 0 {
-		mergedInit := mergeInitRangeAllocs(allocTypes, sidecarIdx, numInitContainers, sidecarAllocs, initAllocs)
-		for devType, initConList := range mergedInit {
+	if numInitContainers > 0 && initAllocs != nil {
+		for devType, initConList := range initAllocs {
 			score.Devices[devType] = append(initConList, score.Devices[devType]...)
 		}
 	}
