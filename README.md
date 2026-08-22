@@ -160,6 +160,7 @@ The default monitor port is `31993`. You can change it with Helm values such as 
 
 HAMi also provides:
 
+- [Alerting Guide & Runbooks](docs/alerting-guide.md) for Prometheus metrics, semantics, and alert runbooks.
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) for visual cluster and device management.
 - [Grafana dashboards](dashboards/) for accelerator monitoring.
 - Benchmark material for evaluating workload behavior and scheduling effects.
