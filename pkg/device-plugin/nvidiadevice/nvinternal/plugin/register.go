@@ -89,12 +89,12 @@ func GetNumaNode(d nvml.Device) (bool, int, error) {
 // nvmlInit is overridable in tests to simulate NVML init failures without a real driver.
 var nvmlInit = nvml.Init
 
-func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
+func (plugin *NvidiaDevicePlugin) getAPIDevices() (*[]*device.DeviceInfo, error) {
 	devs := plugin.Devices()
 	klog.V(5).InfoS("getAPIDevices", "devices", devs)
 	if nvret := nvmlInit(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
+		return nil, fmt.Errorf("nvml Init failed: %v", nvret)
 	}
 	// Shutdown is deferred only after Init succeeds, since calling it after a failed Init crashes the process.
 	defer nvml.Shutdown()
@@ -110,12 +110,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		ndev, ret := nvml.DeviceGetHandleByUUID(UUID)
 		if ret != nvml.SUCCESS {
 			klog.Errorln("nvml new device by index error uuid=", UUID, "err=", ret)
-			panic(0)
+			return nil, fmt.Errorf("failed to get device handle for uuid %s: %v", UUID, ret)
 		}
 		idx, ret := ndev.GetIndex()
 		if ret != nvml.SUCCESS {
 			klog.Errorln("nvml get index error ret=", ret)
-			panic(0)
+			return nil, fmt.Errorf("failed to get device index: %v", ret)
 		}
 		memoryTotal := 0
 		memory, ret := ndev.GetMemoryInfo()
@@ -137,12 +137,12 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 			}
 		default:
 			klog.Error("nvml get memory error ret=", ret)
-			panic(0)
+			return nil, fmt.Errorf("failed to get memory info: %v", ret)
 		}
 		Model, ret := ndev.GetName()
 		if ret != nvml.SUCCESS {
 			klog.Error("nvml get name error ret=", ret)
-			panic(0)
+			return nil, fmt.Errorf("failed to get device name: %v", ret)
 		}
 
 		registeredmem := int32(memoryTotal / 1024 / 1024)
@@ -203,7 +203,7 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		res = append(res, info)
 		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
-	return &res
+	return &res, nil
 }
 
 func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model string) []device.MigProfile {
@@ -256,7 +256,11 @@ func (plugin *NvidiaDevicePlugin) discoverMigProfiles(dev nvml.Device, model str
 // RegisterInAnnotation scans devices and patches node annotations.
 // Returns (changed, error) where changed indicates whether the annotation was actually updated.
 func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
-	devices := plugin.getAPIDevices()
+	devices, err := plugin.getAPIDevices()
+	if err != nil {
+		klog.ErrorS(err, "failed to get API devices")
+		return false, err
+	}
 
 	// Log compact summary at V(3); full details at V(5)
 	klog.V(3).Infof("Discovered %d device(s) for registration", len(*devices))
