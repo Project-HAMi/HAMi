@@ -201,3 +201,92 @@ the existing scheduling behavior. When present, the annotation must specify
 all three non-negative integer weights, and at least one weight must be
 positive. Invalid annotations prevent the Pod from being scheduled until the
 annotation is corrected.
+
+## Per-Pod Scheduler Policy Annotations
+
+Both the node and GPU scheduler policies can be overridden per-pod using
+annotations. These take priority over the cluster-wide `--node-scheduler-policy`
+and `--gpu-scheduler-policy` flags.
+
+### `hami.io/node-scheduler-policy`
+
+Accepted values: `binpack`, `spread`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-gpu-pod
+  annotations:
+    hami.io/node-scheduler-policy: "spread"
+spec:
+  containers:
+    - name: my-container
+      image: nvidia/cuda:12.0-base
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+```
+
+### `hami.io/gpu-scheduler-policy`
+
+Accepted values: `binpack`, `spread`, `topology-aware`, `mutex`, `numa`
+
+```yaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: my-gpu-pod
+  annotations:
+    hami.io/gpu-scheduler-policy: "binpack"
+spec:
+  containers:
+    - name: my-container
+      image: nvidia/cuda:12.0-base
+      resources:
+        limits:
+          nvidia.com/gpu: "1"
+```
+
+Both annotations can be set together on the same pod:
+
+```yaml
+annotations:
+  hami.io/node-scheduler-policy: "binpack"
+  hami.io/gpu-scheduler-policy: "spread"
+```
+
+## `--node-lock-retry-timeout` and Extender Timeout Alignment
+
+When multiple pods in a PodGroup are scheduled concurrently and target the
+same node, one pod acquires the node lock and the others receive a
+`ErrNodeLockContention` error. The scheduler retries for up to
+`--node-lock-retry-timeout` (default `28s`) before giving up.
+
+This timeout must be aligned with the `httpTimeout` field in the extender
+configuration inside `KubeSchedulerConfiguration`. If `httpTimeout` is
+shorter than `--node-lock-retry-timeout`, kube-scheduler will cancel the
+request before the retry loop completes, causing the pod to fail scheduling
+silently.
+
+Example alignment in `KubeSchedulerConfiguration`:
+
+```yaml
+extenders:
+  - urlPrefix: http://hami-scheduler.kube-system.svc
+    filterVerb: filter
+    bindVerb: bind
+    httpTimeout: 30s        # must be >= node-lock-retry-timeout (default 28s)
+    nodeCacheCapable: false
+    ignorable: false
+```
+
+And the corresponding scheduler flag:
+
+```shell
+--node-lock-retry-timeout=28s
+```
+
+Set `--node-lock-retry-timeout=0` to disable retry entirely (only the first
+scheduling attempt is made per cycle).
+
