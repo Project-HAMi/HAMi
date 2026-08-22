@@ -28,6 +28,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
+	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -115,18 +116,34 @@ func TestGetNumaNode(t *testing.T) {
 	})
 }
 
-func TestGetAPIDevicesPanicsOnNVMLInitFailure(t *testing.T) {
+func TestGetAPIDevicesErrorsOnNVMLInitFailure(t *testing.T) {
 	originalInit := nvmlInit
 	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
 	defer func() { nvmlInit = originalInit }()
 
 	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
-	defer func() {
-		if recover() == nil {
-			t.Fatal("getAPIDevices did not panic when NVML initialization failed")
-		}
-	}()
-	plugin.getAPIDevices()
+	devices, err := plugin.getAPIDevices()
+	if err == nil {
+		t.Fatal("getAPIDevices did not return an error when NVML initialization failed")
+	}
+	if devices != nil {
+		t.Fatalf("getAPIDevices() = %v on NVML init failure, want nil", devices)
+	}
+}
+
+func TestRegisterInAnnotationPropagatesNVMLInitError(t *testing.T) {
+	originalInit := nvmlInit
+	nvmlInit = func() nvml.Return { return nvml.ERROR_LIBRARY_NOT_FOUND }
+	defer func() { nvmlInit = originalInit }()
+
+	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
+	changed, err := plugin.RegisterInAnnotation()
+	if err == nil {
+		t.Fatal("RegisterInAnnotation did not propagate the NVML init error")
+	}
+	if changed {
+		t.Fatal("RegisterInAnnotation() changed = true on NVML init failure, want false")
+	}
 }
 
 func TestGetAPIDevicesShutsDownAfterNVMLInit(t *testing.T) {
@@ -140,9 +157,149 @@ func TestGetAPIDevicesShutsDownAfterNVMLInit(t *testing.T) {
 	}()
 
 	plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rm.Devices{} }}}
-	devices := plugin.getAPIDevices()
+	devices, err := plugin.getAPIDevices()
+	if err != nil {
+		t.Fatalf("getAPIDevices() returned unexpected error: %v", err)
+	}
 	if devices == nil || len(*devices) != 0 {
 		t.Fatalf("getAPIDevices() = %v, want non-nil empty slice", devices)
+	}
+}
+
+func TestGetAPIDevicesSkipsOnPerDeviceNVMLFailures(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	originalGetHandleByUUID := nvml.DeviceGetHandleByUUID
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+		nvml.DeviceGetHandleByUUID = originalGetHandleByUUID
+	}()
+
+	const testUUID = "GPU-test-uuid"
+	tests := []struct {
+		name            string
+		getHandleReturn nvml.Return
+		device          *nvmlmock.Device
+	}{
+		{
+			name:            "DeviceGetHandleByUUID fails",
+			getHandleReturn: nvml.ERROR_UNINITIALIZED,
+			device:          &nvmlmock.Device{},
+		},
+		{
+			name:            "GetIndex fails",
+			getHandleReturn: nvml.SUCCESS,
+			device: &nvmlmock.Device{
+				GetIndexFunc: func() (int, nvml.Return) {
+					return 0, nvml.ERROR_UNKNOWN
+				},
+			},
+		},
+		{
+			name:            "GetMemoryInfo fails",
+			getHandleReturn: nvml.SUCCESS,
+			device: &nvmlmock.Device{
+				GetIndexFunc: func() (int, nvml.Return) {
+					return 0, nvml.SUCCESS
+				},
+				GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+					return nvml.Memory{}, nvml.ERROR_UNKNOWN
+				},
+			},
+		},
+		{
+			name:            "GetName fails",
+			getHandleReturn: nvml.SUCCESS,
+			device: &nvmlmock.Device{
+				GetIndexFunc: func() (int, nvml.Return) {
+					return 0, nvml.SUCCESS
+				},
+				GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+					return nvml.Memory{Total: 8 * 1024 * 1024 * 1024}, nvml.SUCCESS
+				},
+				GetNameFunc: func() (string, nvml.Return) {
+					return "", nvml.ERROR_UNKNOWN
+				},
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+				return tt.device, tt.getHandleReturn
+			}
+			plugin := &NvidiaDevicePlugin{rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
+				return rm.Devices{testUUID: &rm.Device{}}
+			}}}
+			devices, err := plugin.getAPIDevices()
+			if err != nil {
+				t.Fatalf("getAPIDevices returned unexpected error on per-device failure: %v", err)
+			}
+			if devices == nil || len(*devices) != 0 {
+				t.Fatalf("getAPIDevices() = %v on per-device NVML failure, want empty list", devices)
+			}
+		})
+	}
+}
+
+func TestGetAPIDevicesRegistersHealthyDevice(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	originalGetHandleByUUID := nvml.DeviceGetHandleByUUID
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+		return &nvmlmock.Device{
+			GetIndexFunc: func() (int, nvml.Return) {
+				return 3, nvml.SUCCESS
+			},
+			GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+				return nvml.Memory{Total: 8 * 1024 * 1024 * 1024}, nvml.SUCCESS
+			},
+			GetNameFunc: func() (string, nvml.Return) {
+				return "Tesla T4", nvml.SUCCESS
+			},
+			GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+				return nvml.PciInfo{}, nvml.ERROR_UNKNOWN
+			},
+		}, nvml.SUCCESS
+	}
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+		nvml.DeviceGetHandleByUUID = originalGetHandleByUUID
+	}()
+
+	const testUUID = "GPU-test-uuid"
+	plugin := &NvidiaDevicePlugin{
+		rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices {
+			return rm.Devices{testUUID: &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: testUUID, Health: "healthy"}}}
+		}},
+		schedulerConfig: nvidia.NvidiaConfig{
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceSplitCount:    ptr[uint](2),
+				DeviceMemoryScaling: ptr[float64](1),
+				DeviceCoreScaling:   ptr[float64](1),
+			},
+		},
+	}
+	devices, err := plugin.getAPIDevices()
+	if err != nil {
+		t.Fatalf("getAPIDevices() returned unexpected error: %v", err)
+	}
+	if devices == nil || len(*devices) != 1 {
+		t.Fatalf("getAPIDevices() = %v, want exactly one device", devices)
+	}
+	got := (*devices)[0]
+	wantDevmem := int32(8 * 1024)
+	if got.ID != testUUID || got.Index != 3 || got.Count != 2 ||
+		got.Devmem != wantDevmem || got.Devcore != 100 ||
+		got.Type != "NVIDIA-Tesla T4" || !got.Health {
+		t.Fatalf("getAPIDevices()[0] = %+v, mismatched device info", got)
 	}
 }
 

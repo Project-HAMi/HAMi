@@ -143,31 +143,6 @@ func patchErasedAnnotation(pod *corev1.Pod, dtype string, podSingleDev device.Po
 	return nil
 }
 
-func GetIndexAndTypeFromUUID(uuid string) (string, int) {
-	defer nvml.Shutdown()
-	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
-		klog.Errorln("nvml Init err: ", nvret)
-		panic(0)
-	}
-	originuuid := strings.Split(uuid, "[")[0]
-	ndev, ret := nvml.DeviceGetHandleByUUID(originuuid)
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get handlebyuuid error ret=", ret)
-		panic(0)
-	}
-	Model, ret := ndev.GetName()
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get name error ret=", ret)
-		panic(0)
-	}
-	index, ret := ndev.GetIndex()
-	if ret != nvml.SUCCESS {
-		klog.Error("nvml get index error ret=", ret)
-		panic(0)
-	}
-	return Model, index
-}
-
 func GetMigGpuInstanceIdFromIndex(uuid string, idx int) (int, error) {
 	if nvret := nvml.Init(); nvret != nvml.SUCCESS {
 		klog.Errorln("nvml Init err: ", nvret)
