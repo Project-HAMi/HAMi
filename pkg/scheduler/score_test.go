@@ -4446,3 +4446,129 @@ func Test_fitInDevices_MultiTypePartition(t *testing.T) {
 	assert.Equal(t, len((*devinput)["mockB"][0]), 1)
 	assert.Equal(t, (*devinput)["mockB"][0][0].UUID, "uuid-b")
 }
+
+func Test_calcScore_SidecarInitOrdering(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+
+	newNodes := func(totalMem int32) *map[string]*NodeUsage {
+		node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+		return &map[string]*NodeUsage{
+			"node1": {
+				Node:     node,
+				NodeInfo: &device.NodeInfo{ID: node.Name, Node: node},
+				Devices: policy.DeviceUsageList{
+					Policy: util.GPUSchedulerPolicyBinpack.String(),
+					DeviceLists: []*policy.DeviceListsScore{
+						{Device: &device.DeviceUsage{
+							ID: "uuid1", Index: 0, Type: nvidia.NvidiaGPUDevice, Health: true,
+							Count: 10, Used: 0, Totalcore: 100, Usedcores: 0,
+							Totalmem: totalMem, Usedmem: 0,
+						}},
+					},
+				},
+			},
+		}
+	}
+
+	gpuReq := func(mem int32) map[string]device.ContainerDeviceRequest {
+		return map[string]device.ContainerDeviceRequest{
+			nvidia.NvidiaGPUDevice: {
+				Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: mem, Coresreq: 10,
+			},
+		}
+	}
+	row := func(mem int32) device.ContainerDevices {
+		return device.ContainerDevices{
+			{Idx: 0, UUID: "uuid1", Type: nvidia.NvidiaGPUDevice, Usedcores: 10, Usedmem: mem},
+		}
+	}
+	initC := func(name string, sidecar bool) corev1.Container {
+		c := corev1.Container{Name: name}
+		if sidecar {
+			c.RestartPolicy = &always
+		}
+		return c
+	}
+
+	tests := []struct {
+		name        string
+		totalMem    int32
+		inits       []corev1.Container
+		requests    device.PodDeviceRequests
+		wantDevices device.PodDevices
+		wantFailed  map[string]string
+		wantUsedmem int32
+	}{
+		{
+			name:     "regular then sidecar never overlap and fit",
+			totalMem: 10000,
+			inits:    []corev1.Container{initC("reg", false), initC("sc", true)},
+			requests: device.PodDeviceRequests{gpuReq(5000), gpuReq(8000), {}},
+			wantDevices: device.PodDevices{
+				nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+					row(5000), // regular init: transient, only in the peak
+					row(8000), // sidecar: persists into steady state
+					{},        // app container without a GPU request
+				},
+			},
+			wantUsedmem: 8000,
+		},
+		{
+			name:       "sidecar then regular overlap and are rejected",
+			totalMem:   10000,
+			inits:      []corev1.Container{initC("sc", true), initC("reg", false)},
+			requests:   device.PodDeviceRequests{gpuReq(8000), gpuReq(5000), {}},
+			wantFailed: map[string]string{"node1": "1/1 CardInsufficientMemory"},
+		},
+		{
+			name:     "interleaved inits use the running sidecar sum",
+			totalMem: 7500,
+			inits:    []corev1.Container{initC("reg-a", false), initC("sc", true), initC("reg-b", false)},
+			requests: device.PodDeviceRequests{gpuReq(5000), gpuReq(3000), gpuReq(4000), gpuReq(1000)},
+			wantDevices: device.PodDevices{
+				nvidia.NvidiaGPUDevice: device.PodSingleDevice{
+					row(5000),
+					row(3000),
+					row(4000),
+					row(1000),
+				},
+			},
+			wantUsedmem: 7000,
+		},
+		{
+			name:       "sidecar plus app steady state is summed",
+			totalMem:   7500,
+			inits:      []corev1.Container{initC("sc", true)},
+			requests:   device.PodDeviceRequests{gpuReq(4000), gpuReq(4000)},
+			wantFailed: map[string]string{"node1": "1/1 CardInsufficientMemory"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "sidecar-order", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: tc.inits,
+					Containers:     []corev1.Container{{Name: "app"}},
+				},
+			}
+			failedNodes := map[string]string{}
+			nodes := newNodes(tc.totalMem)
+			got, err := (&Scheduler{}).calcScoreWithOptions(nodes, tc.requests, pod, failedNodes, false, false)
+			assert.NilError(t, err)
+
+			if tc.wantFailed != nil {
+				assert.Equal(t, len(got.NodeList), 0)
+				assert.DeepEqual(t, tc.wantFailed, failedNodes)
+				return
+			}
+			assert.Equal(t, len(failedNodes), 0)
+			assert.Equal(t, len(got.NodeList), 1)
+			assert.DeepEqual(t, tc.wantDevices, got.NodeList[0].Devices)
+
+			usage := (*nodes)["node1"].Devices.DeviceLists[0].Device
+			assert.Equal(t, usage.Usedmem, tc.wantUsedmem)
+		})
+	}
+}
