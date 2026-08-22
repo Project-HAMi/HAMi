@@ -1,6 +1,6 @@
 # HAMi GPU Metrics Alerting Guide and Runbooks
 
-This guide provides operational guidance, metric semantics, reference PromQL queries, and runbooks for setting up Prometheus alerting on HAMi GPU metrics.
+This guide provides operational guidance, metric semantics, reference PromQL queries, Helm configuration options, and runbooks for setting up Prometheus alerting on HAMi GPU metrics.
 
 ---
 
@@ -27,73 +27,96 @@ HAMi exports cluster-level and container-level metrics through the scheduler mon
 
 ---
 
-## 3. Recommended Operational Alerts & PromQL
+## 3. Standard Operational Alerts & PromQL
 
-### 3.1. High Node GPU Memory Allocation (`HAMiGPUNodeMemoryHigh`)
+### 3.1. Node GPU Memory Exhaustion (`HAMiGPUMemoryNearlyExhausted`)
 
-- **Description**: Triggers when a GPU device on a node has allocated over 90% of its memory capacity.
+- **Description**: Fires when a node's scheduler-allocated GPU memory percentage exceeds 90%.
 - **PromQL**:
   ```promql
-  (hami_gpu_memory_allocated_bytes / hami_gpu_memory_limit_bytes) * 100 > 90
+  100 * hami_node_gpu_memory_allocated_ratio > 90
   ```
-- **Severity**: Warning (over 90%), Critical (over 98%)
+- **Duration (`for`)**: `10m`
+- **Default Severity**: `warning`
 - **Runbook**:
-  1. Identify the node and `device_uuid` from the alert labels.
+  1. Identify the affected node and `device_uuid` from the alert labels:
+     `kubectl get nodes -o wide`
   2. Inspect workloads running on that node:
      `kubectl get pods -A -o wide --field-selector spec.nodeName=<node>`
   3. Verify if new pod scheduling attempts are failing due to `CardInsufficientMemory`.
-  4. Consider expanding node pool or tuning pod memory limits.
+  4. Consider expanding node pool capacity or tuning pod memory allocations.
 
 ---
 
-### 3.2. High Node GPU Core Allocation (`HAMiGPUNodeCoreHigh`)
+### 3.2. Node GPU Core Exhaustion (`HAMiGPUCoresNearlyExhausted`)
 
-- **Description**: Triggers when compute core allocation on a GPU device exceeds 90%.
+- **Description**: Fires when a device's scheduler-allocated GPU compute cores exceed 90%.
 - **PromQL**:
   ```promql
   hami_gpu_core_allocated_ratio > 90
   ```
-- **Severity**: Warning
+- **Duration (`for`)**: `10m`
+- **Default Severity**: `warning`
 - **Runbook**:
-  1. Check node device core utilization metrics.
-  2. Verify if pods requiring exclusive GPU core allocation (`coresreq = 100`) are pending.
+  1. Check device core allocation and usage metrics.
+  2. Verify if pods requiring exclusive GPU core allocation (`coresreq = 100`) are stuck in Pending state.
 
 ---
 
-### 3.3. High Container Device Sharing Contention (`HAMiGPUSharedDeviceContention`)
+### 3.3. Container vGPU Memory Near Limit (`HAMivGPUMemoryNearLimit`)
 
-- **Description**: Triggers when more than 8 containers share a single physical GPU device, which may lead to time-slicing overhead and latency spikes.
+- **Description**: Fires when a container is consuming over 95% of its allocated vGPU memory limit and may hit an out-of-memory error.
 - **PromQL**:
   ```promql
-  hami_gpu_shared_count > 8
+  100 * (hami_vgpu_memory_allocated_bytes / hami_gpu_memory_limit_bytes) > 95
   ```
-- **Severity**: Warning
+- **Duration (`for`)**: `5m`
+- **Default Severity**: `warning`
 - **Runbook**:
-  1. Inspect the pods assigned to `device_uuid`.
-  2. Evaluate workload latency sensitivity.
-  3. Adjust scheduler time-slicing concurrency limits or node anti-affinity rules.
+  1. Identify the container, pod, and namespace from alert labels.
+  2. Inspect container memory logs and application heap usage.
+  3. Increase the container `gpu.memory` resource limit if necessary.
 
 ---
 
-### 3.4. Namespace Resource Quota Exhaustion (`HAMiResourceQuotaNearLimit`)
+### 3.4. Scheduler Metrics Absent (`HAMiSchedulerMetricsAbsent`)
 
-- **Description**: Triggers when a namespace reaches over 85% of its allocated HAMi GPU resource quota limit.
+- **Description**: Fires when HAMi scheduler metrics are completely absent, indicating a potential scheduler monitor service outage.
 - **PromQL**:
   ```promql
-  (hami_resource_quota_used / on(namespace, quota_name) scalar(hami_resource_quota_used)) * 100 > 85
+  absent(hami_gpu_memory_limit_bytes) == 1
   ```
-- **Severity**: Warning
+- **Duration (`for`)**: `15m`
+- **Default Severity**: `critical` (Disabled by default in Helm chart)
 - **Runbook**:
-  1. Check namespace usage across GPU memory and core requests.
-  2. Notify namespace owners or adjust `DeviceQuota` limits if necessary.
+  1. Check HAMi scheduler pod status:
+     `kubectl get pods -n hami-system -l app.kubernetes.io/component=scheduler`
+  2. Verify scheduler logs for crashes or endpoint failures:
+     `kubectl logs -n hami-system -l app.kubernetes.io/component=scheduler`
 
 ---
 
-## 4. Threshold Tuning Guidelines for Operators
+## 4. Helm Chart Monitoring Configuration
+
+HAMi Helm chart supports opt-in `PrometheusRule` provisioning. The following table lists key Helm values under `prometheus.alerts`:
+
+| Parameter | Description | Default Value |
+| --- | --- | --- |
+| `prometheus.enabled` | Enable Prometheus integration (ServiceMonitor and alerts) | `false` |
+| `prometheus.alerts.enabled` | Install a `PrometheusRule` with HAMi GPU alerts | `false` |
+| `prometheus.alerts.labels` | Extra labels on the `PrometheusRule` for operator `ruleSelector` | `{}` |
+| `prometheus.alerts.rules.gpuMemoryNearlyExhausted` | Threshold and duration for node GPU memory alert | `{enabled: true, threshold: 90, for: 10m, severity: warning}` |
+| `prometheus.alerts.rules.gpuCoresNearlyExhausted` | Threshold and duration for node GPU cores alert | `{enabled: true, threshold: 90, for: 10m, severity: warning}` |
+| `prometheus.alerts.rules.vgpuMemoryNearLimit` | Threshold and duration for container vGPU memory alert | `{enabled: true, threshold: 95, for: 5m, severity: warning}` |
+| `prometheus.alerts.rules.schedulerMetricsAbsent` | Duration and severity for missing scheduler metrics alert | `{enabled: false, for: 15m, severity: critical}` |
+
+---
+
+## 5. Threshold Tuning Guidelines for Operators
 
 Different workload profiles require different alert thresholds:
 
-1. **AI Training Workloads**: Training jobs typically require dedicated memory and compute. Set `HAMiGPUNodeMemoryHigh` threshold to 95% and monitor `hami_gpu_shared_count > 1` to ensure non-oversubscribed allocation.
+1. **AI Training Workloads**: Training jobs typically require dedicated memory and compute. Set `gpuMemoryNearlyExhausted` threshold to 95% and monitor `hami_gpu_shared_count > 1` to ensure non-oversubscribed allocation.
 2. **Inference Workloads**: Inference microservices often rely on time-slicing. Monitor latency metrics alongside `hami_gpu_shared_count` to ensure container density does not impact SLA.
 3. **Heterogeneous Hardware Backends**:
    - **NVIDIA MIG Mode**: Track `hami_node_gpu_mig_instance_info` to ensure MIG profiles match pod requests.
