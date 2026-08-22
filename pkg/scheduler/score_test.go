@@ -4497,12 +4497,9 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 		requests    device.PodDeviceRequests
 		wantDevices device.PodDevices
 		wantFailed  map[string]string
+		wantUsedmem int32
 	}{
 		{
-			// DSFans2014's review case: the regular init has exited before
-			// the sidecar starts, so 5000 and 8000 never coexist. Peak is
-			// 8000 <= 10000 and the node must fit. A two-phase allocation
-			// (all sidecars first) wrongly rejects this node.
 			name:     "regular then sidecar never overlap and fit",
 			totalMem: 10000,
 			inits:    []corev1.Container{initC("reg", false), initC("sc", true)},
@@ -4514,12 +4511,9 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 					{},        // app container without a GPU request
 				},
 			},
+			wantUsedmem: 8000,
 		},
 		{
-			// Same containers, opposite order: the sidecar is already
-			// running while the regular init runs, so 8000+5000=13000 is
-			// correctly charged and exceeds the card. Rejects under both
-			// the old and the ordered allocation (control).
 			name:       "sidecar then regular overlap and are rejected",
 			totalMem:   10000,
 			inits:      []corev1.Container{initC("sc", true), initC("reg", false)},
@@ -4527,11 +4521,6 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 			wantFailed: map[string]string{"node1": "1/1 CardInsufficientMemory"},
 		},
 		{
-			// Interleaved order exercises the running sidecar sum: the
-			// second regular init overlaps only the sidecar declared before
-			// it. Peak walks 5000 -> 3000 -> 3000+4000 = 7000 <= 7500, and
-			// the steady state is 3000+1000 = 4000. The two-phase
-			// allocation charged 3000+5000 = 8000 and rejected the node.
 			name:     "interleaved inits use the running sidecar sum",
 			totalMem: 7500,
 			inits:    []corev1.Container{initC("reg-a", false), initC("sc", true), initC("reg-b", false)},
@@ -4544,11 +4533,9 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 					row(1000),
 				},
 			},
+			wantUsedmem: 7000,
 		},
 		{
-			// Steady state must SUM sidecar and app: 4000+4000 = 8000 >
-			// 7500. Guards that the ordered walk still persists sidecars
-			// into the state the app containers are fitted against.
 			name:       "sidecar plus app steady state is summed",
 			totalMem:   7500,
 			inits:      []corev1.Container{initC("sc", true)},
@@ -4567,7 +4554,8 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 				},
 			}
 			failedNodes := map[string]string{}
-			got, err := (&Scheduler{}).calcScoreWithOptions(newNodes(tc.totalMem), tc.requests, pod, failedNodes, false, false)
+			nodes := newNodes(tc.totalMem)
+			got, err := (&Scheduler{}).calcScoreWithOptions(nodes, tc.requests, pod, failedNodes, false, false)
 			assert.NilError(t, err)
 
 			if tc.wantFailed != nil {
@@ -4578,6 +4566,9 @@ func Test_calcScore_SidecarInitOrdering(t *testing.T) {
 			assert.Equal(t, len(failedNodes), 0)
 			assert.Equal(t, len(got.NodeList), 1)
 			assert.DeepEqual(t, tc.wantDevices, got.NodeList[0].Devices)
+
+			usage := (*nodes)["node1"].Devices.DeviceLists[0].Device
+			assert.Equal(t, usage.Usedmem, tc.wantUsedmem)
 		})
 	}
 }

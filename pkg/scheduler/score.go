@@ -287,7 +287,7 @@ func allocateInitContainers(appNodeCopy *NodeUsage, nodeID string, resourceReqs 
 	return initAllocs, true, ""
 }
 
-func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
+func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
 	appIndex := 0
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
@@ -298,7 +298,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			sums += int(k.Nums)
 		}
 		if sums == 0 {
-			for typ := range baseTypes {
+			for typ := range allocTypes {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
 			appIndex++
@@ -309,7 +309,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 			return reason, false
 		}
-		for typ := range baseTypes {
+		for typ := range allocTypes {
 			if len(score.Devices[typ]) == appIndex {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
@@ -364,7 +364,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 		initAllocs = allocs
 	}
 
-	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, nodeID, weights); !fit {
+	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
 
