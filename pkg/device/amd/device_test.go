@@ -274,6 +274,21 @@ func Test_GenerateResourceRequests(t *testing.T) {
 		assert.Equal(t, int32(100), got.Coresreq)
 	})
 
+	t.Run("uses core percentage from requests when limits omitted", func(t *testing.T) {
+		ctr := &corev1.Container{
+			Resources: corev1.ResourceRequirements{
+				Limits: corev1.ResourceList{
+					"amd.com/gpu": *resource.NewQuantity(1, resource.DecimalSI),
+				},
+				Requests: corev1.ResourceList{
+					"amd.com/gpu-core-pct": *resource.NewQuantity(42, resource.DecimalSI),
+				},
+			},
+		}
+		got := dev.GenerateResourceRequests(ctr)
+		assert.Equal(t, int32(42), got.Coresreq)
+	})
+
 	t.Run("cores 1, 50, 100 accepted and out-of-range rejected", func(t *testing.T) {
 		for _, cores := range []int64{1, 50, 100} {
 			ctr := &corev1.Container{
@@ -293,6 +308,18 @@ func Test_GenerateResourceRequests(t *testing.T) {
 					Limits: corev1.ResourceList{
 						"amd.com/gpu":          *resource.NewQuantity(1, resource.DecimalSI),
 						"amd.com/gpu-core-pct": *resource.NewQuantity(cores, resource.DecimalSI),
+					},
+				},
+			}
+			got := dev.GenerateResourceRequests(ctr)
+			assert.DeepEqual(t, device.ContainerDeviceRequest{}, got)
+		}
+		for _, rawCore := range []string{"50m", "99.1"} {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"amd.com/gpu":          *resource.NewQuantity(1, resource.DecimalSI),
+						"amd.com/gpu-core-pct": resource.MustParse(rawCore),
 					},
 				},
 			}
@@ -422,6 +449,25 @@ func TestDevices_Fit(t *testing.T) {
 			assert.Equal(t, false, ok)
 			assert.Equal(t, "core limit out of range", reason)
 		}
+	})
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, Coresreq: 150}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "core limit out of range", reason)
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, Coresreq: -1}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Equal(t, "core limit out of range", reason)
 	})
 
 	t.Run("insufficient memory", func(t *testing.T) {

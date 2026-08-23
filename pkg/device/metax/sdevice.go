@@ -241,13 +241,12 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		coreQuantity, ok = ctr.Resources.Requests[corev1.ResourceName(MetaxResourceNameVCore)]
 	}
 	if ok {
-		if v, ok := coreQuantity.AsInt64(); ok {
-			if v < 0 || v > 100 {
-				klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
-				return device.ContainerDeviceRequest{}
-			}
-			core = v
+		v, valid := coreQuantity.AsInt64()
+		if !valid || v < 0 || v > 100 {
+			klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
+			return device.ContainerDeviceRequest{}
 		}
+		core = v
 	}
 
 	mem := int64(0)

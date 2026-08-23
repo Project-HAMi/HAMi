@@ -296,6 +296,10 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -342,10 +346,6 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
-		}
-		if k.Coresreq > 100 || k.Coresreq < 0 {
-			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
-			return false, tmpDevs, "core limit out of range"
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

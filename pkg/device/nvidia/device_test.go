@@ -3190,3 +3190,91 @@ func TestFit_CoresValidation(t *testing.T) {
 		})
 	}
 }
+
+func Test_MutateAdmission_CoresValidation(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+
+	tests := []struct {
+		name      string
+		cores     string
+		wantValid bool
+	}{
+		{name: "0 cores accepted", cores: "0", wantValid: true},
+		{name: "50 cores accepted", cores: "50", wantValid: true},
+		{name: "100 cores accepted", cores: "100", wantValid: true},
+		{name: "-1 cores rejected", cores: "-1", wantValid: false},
+		{name: "101 cores rejected", cores: "101", wantValid: false},
+		{name: "50m cores rejected", cores: "50m", wantValid: false},
+		{name: "99.1 cores rejected", cores: "99.1", wantValid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      resource.MustParse("1"),
+						"nvidia.com/gpucores": resource.MustParse(tt.cores),
+					},
+				},
+			}
+			_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+			if tt.wantValid {
+				assert.NilError(t, err)
+			} else {
+				assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			}
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+
+	tests := []struct {
+		name    string
+		cores   string
+		wantOk  bool
+		wantVal int32
+	}{
+		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
+		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
+		{name: "100 cores", cores: "100", wantOk: true, wantVal: 100},
+		{name: "101 cores", cores: "101", wantOk: false},
+		{name: "150 cores", cores: "150", wantOk: false},
+		{name: "200 cores", cores: "200", wantOk: false},
+		{name: "-1 cores", cores: "-1", wantOk: false},
+		{name: "fractional 50m", cores: "50m", wantOk: false},
+		{name: "fractional 99.1", cores: "99.1", wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      resource.MustParse("1"),
+						"nvidia.com/gpucores": resource.MustParse(tt.cores),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Coresreq, tt.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
+		})
+	}
+}

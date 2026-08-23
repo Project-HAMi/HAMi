@@ -1418,4 +1418,31 @@ func TestFit_CoresValidation(t *testing.T) {
 			assert.Equal(t, ok, tt.wantOk)
 		})
 	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     MthreadsGPUDevice,
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     MthreadsGPUDevice,
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
 }

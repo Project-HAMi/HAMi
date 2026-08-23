@@ -2734,6 +2734,7 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 	tests := []struct {
 		name    string
 		cores   int64
+		rawCore string
 		wantReq bool
 	}{
 		{
@@ -2771,15 +2772,29 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			cores:   -1,
 			wantReq: false,
 		},
+		{
+			name:    "fractional cores 50m rejected",
+			rawCore: "50m",
+			wantReq: false,
+		},
+		{
+			name:    "fractional cores 99.1 rejected",
+			rawCore: "99.1",
+			wantReq: false,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			coreQty := *resource.NewQuantity(tt.cores, resource.DecimalSI)
+			if tt.rawCore != "" {
+				coreQty = resource.MustParse(tt.rawCore)
+			}
 			ctr := &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
 						"huawei.com/Ascend910":      resource.MustParse("1"),
-						"huawei.com/Ascend910-core": *resource.NewQuantity(tt.cores, resource.DecimalSI),
+						"huawei.com/Ascend910-core": coreQty,
 					},
 				},
 			}
@@ -2875,4 +2890,31 @@ func TestFit_CoresValidation(t *testing.T) {
 			assert.Equal(t, ok, tt.wantOk)
 		})
 	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     "Ascend910A",
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     "Ascend910A",
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
 }

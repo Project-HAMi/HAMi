@@ -1476,4 +1476,69 @@ func TestFit_CoresValidation(t *testing.T) {
 			assert.Equal(t, ok, tt.wantOk)
 		})
 	}
+
+	t.Run("empty devices with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     HygonDCUDevice,
+			Memreq:   1000,
+			Coresreq: 150,
+		}
+		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+
+	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
+		req := device.ContainerDeviceRequest{
+			Nums:     1,
+			Type:     HygonDCUDevice,
+			Memreq:   1000,
+			Coresreq: -1,
+		}
+		mismatchDevs := []*device.DeviceUsage{
+			{ID: "other-0", Type: "OtherType", Health: true},
+		}
+		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, ok, false)
+		assert.Equal(t, reason, "core limit out of range")
+	})
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := &DCUDevices{}
+	for _, tt := range []struct {
+		name    string
+		cores   string
+		wantOk  bool
+		wantVal int32
+	}{
+		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
+		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
+		{name: "100 cores", cores: "100", wantOk: true, wantVal: 100},
+		{name: "101 cores", cores: "101", wantOk: false},
+		{name: "150 cores", cores: "150", wantOk: false},
+		{name: "200 cores", cores: "200", wantOk: false},
+		{name: "-1 cores", cores: "-1", wantOk: false},
+		{name: "fractional 50m", cores: "50m", wantOk: false},
+		{name: "fractional 99.1", cores: "99.1", wantOk: false},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(HygonResourceCount): resource.MustParse("1"),
+						corev1.ResourceName(HygonResourceCores): resource.MustParse(tt.cores),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Coresreq, tt.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
+		})
+	}
 }

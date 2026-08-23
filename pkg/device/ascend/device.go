@@ -359,8 +359,8 @@ func (dev *Devices) GenerateResourceRequests(ctr *corev1.Container) device.Conta
 					cv, ok = ctr.Resources.Requests[ascendResourceCore]
 				}
 				if ok {
-					corenums := cv.Value()
-					if corenums < 0 || corenums > 100 {
+					corenums, valid := cv.AsInt64()
+					if !valid || corenums < 0 || corenums > 100 {
 						klog.ErrorS(nil, "ascend device core request is out of range", "container", ctr.Name, "request", cv.String())
 						return device.ContainerDeviceRequest{}
 					}
@@ -447,6 +447,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 
 	vnpuMode := ""
@@ -518,10 +522,6 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
-		}
-		if k.Coresreq > 100 || k.Coresreq < 0 {
-			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
-			return false, tmpDevs, "core limit out of range"
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

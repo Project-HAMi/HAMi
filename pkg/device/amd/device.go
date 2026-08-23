@@ -285,6 +285,10 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -325,11 +329,6 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memReq)
 			continue
-		}
-
-		if k.Coresreq > 100 || k.Coresreq < 0 {
-			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
-			return false, tmpDevs, "core limit out of range"
 		}
 
 		coreReq := int32(0)

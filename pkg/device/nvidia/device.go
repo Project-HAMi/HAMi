@@ -399,9 +399,18 @@ func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) err
 }
 
 func (dev *NvidiaGPUDevices) validateCores(ctr *corev1.Container) error {
-	if cores, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceCoreName)); ok {
-		if cores < 0 || cores > 100 {
-			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceCoreName, cores, ctr.Name)
+	name := corev1.ResourceName(dev.config.ResourceCoreName)
+	if name == "" || ctr == nil {
+		return nil
+	}
+	qty, ok := ctr.Resources.Limits[name]
+	if !ok {
+		qty, ok = ctr.Resources.Requests[name]
+	}
+	if ok {
+		cores, valid := qty.AsInt64()
+		if !valid || cores < 0 || cores > 100 {
+			return fmt.Errorf("invalid %s value %s in container %s: must be an integer between 0 and 100", dev.config.ResourceCoreName, qty.String(), ctr.Name)
 		}
 	}
 	return nil
