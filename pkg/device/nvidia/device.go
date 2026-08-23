@@ -785,7 +785,8 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		if k.Coresreq > 100 || k.Coresreq < 0 {
 			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
-			return false, tmpDevs, "core limit out of range"
+			reason[common.CardInsufficientCore]++
+			continue
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

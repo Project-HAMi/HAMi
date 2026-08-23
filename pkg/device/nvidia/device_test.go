@@ -1079,7 +1079,7 @@ func TestDevices_Fit(t *testing.T) {
 			wantFit:    false,
 			wantLen:    0,
 			wantDevIDs: []string{},
-			wantReason: "core limit out of range",
+			wantReason: "1/1 CardInsufficientCore",
 		},
 		{
 			name: "fit fail:  card exclusively",
