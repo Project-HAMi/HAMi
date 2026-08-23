@@ -1842,7 +1842,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "gpu count + memory percentage above 100 — clamped to 100",
+			name: "gpu count + memory percentage above 100 — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1851,16 +1851,10 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "gpu count + memory percentage beyond int32 range — clamped to 100 without wrapping",
+			name: "gpu count + memory percentage beyond int32 range — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1869,16 +1863,10 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
-			name: "gpu count + memory percentage equal to sentinel 101 — clamped to 100",
+			name: "gpu count + memory percentage equal to sentinel 101 — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1887,13 +1875,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "gpu count + explicit cores",
@@ -1976,7 +1958,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "negative memory percentage — treated as unset",
+			name: "negative memory percentage — rejected",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1985,13 +1967,7 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{
-				Nums:             1,
-				Type:             NvidiaGPUDevice,
-				Memreq:           0,
-				MemPercentagereq: 100,
-				Coresreq:         0,
-			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "memory percentage of 0 + explicit memory — explicit memory wins",
