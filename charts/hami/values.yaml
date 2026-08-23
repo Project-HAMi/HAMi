@@ -83,6 +83,11 @@ scheduler:
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
   replicas: 1
+  # PodDisruptionBudget for the hami-scheduler Deployment, only rendered when leaderElect is true.
+  # Set minAvailable to null when overriding maxUnavailable, since only one of the two may be set.
+  podDisruptionBudget:
+    minAvailable: 1
+    maxUnavailable:
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true

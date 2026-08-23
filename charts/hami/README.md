@@ -77,6 +77,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
 | `scheduler.leaderElect` | Whether to enable leader election | `true` |
 | `scheduler.replicas` | Number of replicas | `1` |
+| `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true`) | `1` |
+| `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; set `minAvailable` to `null` when using this | `nil` |
 
 ### Kube Scheduler Configuration
 
