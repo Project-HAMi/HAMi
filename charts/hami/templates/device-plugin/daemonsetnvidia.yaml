@@ -41,6 +41,7 @@ spec:
       serviceAccountName: {{ include "hami-vgpu.device-plugin" . }}
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
+      hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if or .Values.selinux.enabled .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:

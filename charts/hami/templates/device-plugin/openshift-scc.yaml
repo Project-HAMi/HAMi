@@ -1,3 +1,6 @@
+{{- if and .Values.platform.openshift .Values.openshift.securityContextConstraints.create (eq .Values.openshift.securityContextConstraints.name "privileged") }}
+{{- fail "openshift.securityContextConstraints.create must be false when openshift.securityContextConstraints.name is privileged because OpenShift provides this SCC" }}
+{{- end }}
 {{- if and .Values.platform.openshift .Values.openshift.securityContextConstraints.create .Values.openshift.securityContextConstraints.name }}
 apiVersion: security.openshift.io/v1
 kind: SecurityContextConstraints
@@ -10,7 +13,7 @@ allowPrivilegeEscalation: true
 allowHostDirVolumePlugin: true
 allowHostPID: true
 allowHostIPC: false
-allowHostNetwork: false
+allowHostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
 allowHostPorts: false
 allowedCapabilities:
   - SYS_ADMIN

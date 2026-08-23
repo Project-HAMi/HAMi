@@ -26,9 +26,10 @@ platform:
 
 openshift:
   securityContextConstraints:
-    # Used only when platform.openshift=true. By default, the chart creates and
-    # grants its dedicated device-plugin SCC.
+    # openshift.securityContextConstraints.create -- Create and grant the named device-plugin SCC when OpenShift support is enabled. Set this to false when using an existing SCC such as `privileged`.
     create: true
+
+    # openshift.securityContextConstraints.name -- SCC created or granted to enabled device-plugin service accounts. The built-in `privileged` SCC requires `create=false`.
     name: "hami-device-plugin"
 
 # SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.
@@ -427,6 +428,8 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
+  # devicePlugin.hostNetwork -- Use the host network for device plugin Pods.
+  hostNetwork: false
   securityContext:
     privileged: true
     allowPrivilegeEscalation: true
