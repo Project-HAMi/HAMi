@@ -139,27 +139,52 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	}
 	tests := []struct {
 		name    string
-		pct     int64
+		rawPct  string
 		wantErr bool
 	}{
 		{
 			name:    "percentage of 0 is accepted",
-			pct:     0,
+			rawPct:  "0",
+			wantErr: false,
+		},
+		{
+			name:    "percentage of 50 is accepted",
+			rawPct:  "50",
 			wantErr: false,
 		},
 		{
 			name:    "percentage of 100 is accepted",
-			pct:     100,
+			rawPct:  "100",
 			wantErr: false,
 		},
 		{
+			name:    "fractional percentage 50m is rejected",
+			rawPct:  "50m",
+			wantErr: true,
+		},
+		{
+			name:    "fractional percentage 50.5 is rejected",
+			rawPct:  "50.5",
+			wantErr: true,
+		},
+		{
+			name:    "fractional percentage 99.1 is rejected",
+			rawPct:  "99.1",
+			wantErr: true,
+		},
+		{
 			name:    "percentage of 101 is rejected",
-			pct:     101,
+			rawPct:  "101",
 			wantErr: true,
 		},
 		{
 			name:    "percentage above 100 is rejected",
-			pct:     150,
+			rawPct:  "150",
+			wantErr: true,
+		},
+		{
+			name:    "negative percentage is rejected",
+			rawPct:  "-1",
 			wantErr: true,
 		},
 	}
@@ -169,17 +194,37 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 				Name: "test",
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"nvidia.com/gpu":               *resource.NewQuantity(1, resource.BinarySI),
-						"nvidia.com/gpumem-percentage": *resource.NewQuantity(test.pct, resource.DecimalSI),
+						"nvidia.com/gpu":               resource.MustParse("1"),
+						"nvidia.com/gpumem-percentage": resource.MustParse(test.rawPct),
 					},
 				},
 			}
 			_, err := gpuDevices.MutateAdmission(ctr, &corev1.Pod{})
 			if test.wantErr && err == nil {
-				t.Fatalf("expected MutateAdmission to reject percentage %d, but got no error", test.pct)
+				t.Fatalf("expected MutateAdmission to reject percentage %s in limits, but got no error", test.rawPct)
 			}
 			if !test.wantErr && err != nil {
-				t.Fatalf("expected MutateAdmission to accept percentage %d, but got error: %v", test.pct, err)
+				t.Fatalf("expected MutateAdmission to accept percentage %s in limits, but got error: %v", test.rawPct, err)
+			}
+
+			// Also test percentage in Requests
+			ctrReq := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": resource.MustParse("1"),
+					},
+					Requests: corev1.ResourceList{
+						"nvidia.com/gpumem-percentage": resource.MustParse(test.rawPct),
+					},
+				},
+			}
+			_, err = gpuDevices.MutateAdmission(ctrReq, &corev1.Pod{})
+			if test.wantErr && err == nil {
+				t.Fatalf("expected MutateAdmission to reject percentage %s in requests, but got no error", test.rawPct)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected MutateAdmission to accept percentage %s in requests, but got error: %v", test.rawPct, err)
 			}
 		})
 	}
@@ -241,6 +286,15 @@ func TestMutateAdmissionDefaultsExclusiveCore(t *testing.T) {
 			limits: corev1.ResourceList{
 				"nvidia.com/gpu":               resource.MustParse("1"),
 				"nvidia.com/gpumem-percentage": resource.MustParse("50"),
+			},
+			wantCore: false,
+		},
+		{
+			name:   "fractional percentage 99.1 treated as non-exclusive",
+			config: defaultConfig,
+			limits: corev1.ResourceList{
+				"nvidia.com/gpu":               resource.MustParse("1"),
+				"nvidia.com/gpumem-percentage": resource.MustParse("99.1"),
 			},
 			wantCore: false,
 		},
@@ -2931,4 +2985,86 @@ func TestNodeDeleted_ReuseAfterDeletion(t *testing.T) {
 	healthy, needUpdate := dev.CheckHealth("NVIDIA", node)
 	assert.Equal(t, healthy, true, "re-created node should be healthy")
 	assert.Equal(t, needUpdate, true, "re-created node must trigger an update (stale bookkeeping was cleared)")
+}
+
+func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
+	tests := []struct {
+		name       string
+		rawPct     string
+		wantNums   int32
+		wantMemPct int32
+	}{
+		{
+			name:       "percentage 0 is accepted and ignored (defaults to 100)",
+			rawPct:     "0",
+			wantNums:   1,
+			wantMemPct: 100,
+		},
+		{
+			name:       "percentage 50 is accepted",
+			rawPct:     "50",
+			wantNums:   1,
+			wantMemPct: 50,
+		},
+		{
+			name:       "percentage 100 is accepted",
+			rawPct:     "100",
+			wantNums:   1,
+			wantMemPct: 100,
+		},
+		{
+			name:     "fractional percentage 50m is rejected",
+			rawPct:   "50m",
+			wantNums: 0,
+		},
+		{
+			name:     "fractional percentage 50.5 is rejected",
+			rawPct:   "50.5",
+			wantNums: 0,
+		},
+		{
+			name:     "fractional percentage 99.1 is rejected",
+			rawPct:   "99.1",
+			wantNums: 0,
+		},
+		{
+			name:     "percentage 101 is rejected",
+			rawPct:   "101",
+			wantNums: 0,
+		},
+		{
+			name:     "negative percentage is rejected",
+			rawPct:   "-1",
+			wantNums: 0,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               resource.MustParse("1"),
+						"nvidia.com/gpumem-percentage": resource.MustParse(test.rawPct),
+					},
+				},
+			}
+			req := gpuDevices.GenerateResourceRequests(ctr)
+			if test.wantNums == 0 {
+				assert.Equal(t, int32(0), req.Nums)
+			} else {
+				assert.Equal(t, test.wantNums, req.Nums)
+				assert.Equal(t, test.wantMemPct, req.MemPercentagereq)
+			}
+		})
+	}
 }
