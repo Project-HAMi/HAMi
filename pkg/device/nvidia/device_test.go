@@ -3191,7 +3191,7 @@ func TestFit_CoresValidation(t *testing.T) {
 	}
 }
 
-func Test_MutateAdmission_CoresValidation(t *testing.T) {
+func TestMutateAdmission_CoresValidation_InvalidCores(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
 		ResourceMemoryName:           "nvidia.com/gpumem",
