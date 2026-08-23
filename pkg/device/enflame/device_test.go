@@ -494,3 +494,73 @@ func TestFit_OversizedProfileRejected(t *testing.T) {
 	assert.Equal(t, fit, false)
 	assert.Equal(t, len(result[EnflameVGCUDevice]), 0)
 }
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := InitEnflameDevice(EnflameConfig{
+		ResourceNameDRSGCU: "enflame.com/drs-gcu",
+		ResourceNameMemory: "enflame.com/gcu-memory",
+		ResourceNameCore:   "enflame.com/gcu-core",
+	})
+
+	tests := []struct {
+		name    string
+		cores   int64
+		wantReq bool
+	}{
+		{
+			name:    "cores 0 accepted",
+			cores:   0,
+			wantReq: true,
+		},
+		{
+			name:    "cores 50 accepted",
+			cores:   50,
+			wantReq: true,
+		},
+		{
+			name:    "cores 100 accepted",
+			cores:   100,
+			wantReq: true,
+		},
+		{
+			name:    "cores 101 rejected",
+			cores:   101,
+			wantReq: false,
+		},
+		{
+			name:    "cores 150 rejected",
+			cores:   150,
+			wantReq: false,
+		},
+		{
+			name:    "cores 200 rejected",
+			cores:   200,
+			wantReq: false,
+		},
+		{
+			name:    "negative cores -1 rejected",
+			cores:   -1,
+			wantReq: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"enflame.com/gcu-memory": resource.MustParse("20480"),
+						"enflame.com/gcu-core":   *resource.NewQuantity(tt.cores, resource.DecimalSI),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantReq {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Coresreq, int32(tt.cores))
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
+		})
+	}
+}

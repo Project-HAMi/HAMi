@@ -488,6 +488,108 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 			expected: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "vcore 0 is accepted",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("0"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "vcore 50 is accepted",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("50"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         50,
+			},
+		},
+		{
+			name: "vcore 100 is accepted",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("100"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "vcore 101 is rejected",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("101"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "vcore 150 is rejected",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("150"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "vcore 200 is rejected",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("200"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative vcore -1 is rejected",
+			container: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu":  resource.MustParse("1"),
+						"metax-tech.com/vcore": resource.MustParse("-1"),
+					},
+				},
+			},
+			expected: device.ContainerDeviceRequest{},
+		},
 	} {
 		t.Run(ts.name, func(t *testing.T) {
 			metaxSDevice := &MetaxSDevices{}
@@ -1041,7 +1143,7 @@ func TestMetaxSDevices_Fit(t *testing.T) {
 			wantFit:    false,
 			wantLen:    0,
 			wantDevIDs: []string{},
-			wantReason: "1/1 CardInsufficientCore",
+			wantReason: "core limit out of range",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -3040,5 +3142,87 @@ func TestMetaxSDevicesImplementsPolicyNeutralScorer(t *testing.T) {
 	var dev device.Devices = &MetaxSDevices{}
 	if _, ok := dev.(policyNeutralScorer); !ok {
 		t.Errorf("MetaxSDevices does not implement the PolicyNeutralScore marker")
+	}
+}
+
+func TestSDeviceFit_CoresValidation(t *testing.T) {
+	sdev := &MetaxSDevices{}
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "GPU-1",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      MetaxSGPUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		coresreq int32
+		wantOk   bool
+	}{
+		{
+			name:     "cores 0 is accepted",
+			coresreq: 0,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 50 is accepted",
+			coresreq: 50,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 100 is accepted",
+			coresreq: 100,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 101 is rejected",
+			coresreq: 101,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 150 is rejected and not converted to 100",
+			coresreq: 150,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 200 is rejected",
+			coresreq: 200,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -1 is rejected",
+			coresreq: -1,
+			wantOk:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             MetaxSGPUDevice,
+				Memreq:           1000,
+				MemPercentagereq: 0,
+				Coresreq:         tt.coresreq,
+			}
+			ok, _, _ := sdev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			if ok != tt.wantOk {
+				t.Errorf("Fit() ok = %v, want %v", ok, tt.wantOk)
+			}
+		})
 	}
 }

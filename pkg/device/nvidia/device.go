@@ -349,6 +349,9 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 	if err := dev.validateMemoryPercentage(ctr); err != nil {
 		return false, err
 	}
+	if err := dev.validateCores(ctr); err != nil {
+		return false, err
+	}
 	priority, ok := ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourcePriority)]
 	if ok {
 		ctr.Env = append(ctr.Env, corev1.EnvVar{
@@ -390,6 +393,15 @@ func (dev *NvidiaGPUDevices) validateMemoryPercentage(ctr *corev1.Container) err
 	if pct, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceMemoryPercentageName)); ok {
 		if pct < 0 || pct > 100 {
 			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceMemoryPercentageName, pct, ctr.Name)
+		}
+	}
+	return nil
+}
+
+func (dev *NvidiaGPUDevices) validateCores(ctr *corev1.Container) error {
+	if cores, ok := resourceValue(ctr, corev1.ResourceName(dev.config.ResourceCoreName)); ok {
+		if cores < 0 || cores > 100 {
+			return fmt.Errorf("invalid %s value %d in container %s: must be an integer between 0 and 100", dev.config.ResourceCoreName, cores, ctr.Name)
 		}
 	}
 	return nil
@@ -583,9 +595,11 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 			if ok {
 				corenums, ok := core.AsInt64()
-				if ok {
-					corenum = int32(corenums)
+				if !ok || corenums < 0 || corenums > 100 {
+					klog.ErrorS(nil, "nvidia core request is out of range", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}
 				}
+				corenum = int32(corenums)
 			}
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
@@ -769,10 +783,9 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
-		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Coresreq = 100
-			//return false, tmpDevs
+		if k.Coresreq > 100 || k.Coresreq < 0 {
+			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
+			return false, tmpDevs, "core limit out of range"
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

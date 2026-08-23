@@ -241,6 +241,9 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			// allocated GPU. This also keeps memory-only AMD requests valid.
 			corePercentageNum := int32(100)
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
+			if !corePercentageOK {
+				corePercentage, corePercentageOK = ctr.Resources.Requests[amdResourceCore]
+			}
 			if corePercentageOK {
 				corePercentageNums, ok := corePercentage.AsInt64()
 				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
@@ -322,6 +325,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 			reason[common.CardInsufficientMemory]++
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memReq)
 			continue
+		}
+
+		if k.Coresreq > 100 || k.Coresreq < 0 {
+			klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "device", dev.ID, "coresreq", k.Coresreq)
+			return false, tmpDevs, "core limit out of range"
 		}
 
 		coreReq := int32(0)

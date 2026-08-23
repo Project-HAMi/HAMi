@@ -350,8 +350,8 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		klog.ErrorS(nil, "gcu memory request is too large", "container", ctr.Name, "request", memReq)
 		return device.ContainerDeviceRequest{}
 	}
-	if hasCore && coreReq > math.MaxInt32 {
-		klog.ErrorS(nil, "gcu core request is too large", "container", ctr.Name, "request", coreReq)
+	if hasCore && (coreReq < 0 || coreReq > 100) {
+		klog.ErrorS(nil, "gcu core request is out of range (must be 0-100)", "container", ctr.Name, "request", coreReq)
 		return device.ContainerDeviceRequest{}
 	}
 	klog.Info("Found enflame memory/core based request")
