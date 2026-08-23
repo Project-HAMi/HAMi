@@ -560,8 +560,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-core":   resource.MustParse("101"),
+						"mthreads.com/vgpu":      resource.MustParse("1"),
+						"mthreads.com/sgpu-core": resource.MustParse("101"),
 					},
 				},
 			},
@@ -572,8 +572,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-core":   resource.MustParse("150"),
+						"mthreads.com/vgpu":      resource.MustParse("1"),
+						"mthreads.com/sgpu-core": resource.MustParse("150"),
 					},
 				},
 			},
@@ -584,8 +584,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-core":   resource.MustParse("200"),
+						"mthreads.com/vgpu":      resource.MustParse("1"),
+						"mthreads.com/sgpu-core": resource.MustParse("200"),
 					},
 				},
 			},
@@ -596,8 +596,8 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			args: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						"mthreads.com/vgpu":        resource.MustParse("1"),
-						"mthreads.com/sgpu-core":   resource.MustParse("-1"),
+						"mthreads.com/vgpu":      resource.MustParse("1"),
+						"mthreads.com/sgpu-core": resource.MustParse("-1"),
 					},
 				},
 			},

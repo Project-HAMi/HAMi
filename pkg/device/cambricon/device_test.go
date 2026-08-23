@@ -1480,8 +1480,8 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 			ctr := &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
-						corev1.ResourceName(MLUResourceCount): resource.MustParse("1"),
-						corev1.ResourceName(MLUResourceCores): *resource.NewQuantity(tt.cores, resource.DecimalSI),
+						corev1.ResourceName(MLUResourceCount):  resource.MustParse("1"),
+						corev1.ResourceName(MLUResourceCores):  *resource.NewQuantity(tt.cores, resource.DecimalSI),
 						corev1.ResourceName(MLUResourceMemory): resource.MustParse("1000"),
 					},
 				},
