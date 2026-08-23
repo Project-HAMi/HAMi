@@ -296,9 +296,11 @@ func IsValidGPUSchedulerPolicy(policy string) bool {
 
 // IsValidNodeSchedulerPolicy reports whether policy names a node scheduling
 // policy HAMi recognizes. NodeScoreList.Less has no chain form, so only a
-// single name is meaningful here.
+// single name is meaningful here. The value is trimmed before it is compared,
+// so surrounding whitespace is read the same way IsValidGPUSchedulerPolicy
+// reads it.
 func IsValidNodeSchedulerPolicy(policy string) bool {
-	switch SchedulerPolicyName(policy) {
+	switch SchedulerPolicyName(strings.TrimSpace(policy)) {
 	case NodeSchedulerPolicyBinpack, NodeSchedulerPolicySpread:
 		return true
 	default:

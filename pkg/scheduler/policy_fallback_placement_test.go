@@ -191,6 +191,7 @@ func TestResolveNodeSchedulerPolicy(t *testing.T) {
 			want        string
 		}{
 			{"valid value overrides the configured policy", withPolicy(override), override},
+			{"surrounding whitespace is trimmed off an accepted value", withPolicy(" " + override + " "), override},
 			{"unrecognized value keeps the configured policy", withPolicy("spraed"), clusterDefault},
 			{"empty value keeps the configured policy", withPolicy(""), clusterDefault},
 			{"chain form is not a node policy", withPolicy("binpack,spread"), clusterDefault},

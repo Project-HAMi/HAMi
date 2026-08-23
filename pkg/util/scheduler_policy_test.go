@@ -58,7 +58,10 @@ func TestIsValidNodeSchedulerPolicy(t *testing.T) {
 	}{
 		{"binpack", true},
 		{"spread", true},
+		{" binpack", true},
+		{"spread ", true},
 		{"", false},
+		{"   ", false},
 		{"binpakc", false},
 		{"Spread", false},
 		{"binpack,spread", false},
