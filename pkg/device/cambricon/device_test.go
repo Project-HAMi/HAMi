@@ -105,6 +105,36 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "model label without MLU keeps the device schedulable",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+					Labels: map[string]string{
+						MLUModelLabel: "370-X4",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"cambricon.com/mlu.smlu.vcore":   *resource.NewQuantity(1, resource.DecimalSI),
+						"cambricon.com/mlu.smlu.vmemory": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         CambriconMLUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
+				},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

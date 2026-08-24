@@ -42,8 +42,9 @@ import (
 const (
 	CambriconMLUDevice     = "MLU"
 	CambriconMLUCommonWord = "MLU"
-	// MLUModelLabel is published by cambricon-k8s-device-plugin when node label
-	// reporting is enabled.
+	// MLUModelLabel is published by cambricon-k8s-device-plugin v2.0.20 and later
+	// when --node-label is enabled. See:
+	// https://github.com/Cambricon/cambricon-k8s-device-plugin/blob/v2.0.20/device-plugin/README.md#mlu-device-label-management
 	MLUModelLabel     = "Model"
 	MluMemSplitLimit  = "CAMBRICON_SPLIT_MEMS"
 	MluMemSplitIndex  = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
@@ -218,7 +219,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
 	mluType := strings.TrimSpace(n.Labels[MLUModelLabel])
-	if mluType == "" {
+	if !strings.Contains(strings.ToUpper(mluType), CambriconMLUDevice) {
 		mluType = CambriconMLUDevice
 	}
 	for int64(i)*100 < cards {
