@@ -26,10 +26,10 @@ platform:
 
 openshift:
   securityContextConstraints:
-    # openshift.securityContextConstraints.create -- Create and grant the named device-plugin SCC when OpenShift support is enabled. Set this to false when using an existing SCC such as `privileged`.
+    # openshift.securityContextConstraints.create -- Create the named device-plugin SCC and its use ClusterRole when OpenShift support is enabled. Set this to false only when both the SCC and `system:openshift:scc:<name>` ClusterRole already exist, such as for the built-in `privileged` SCC.
     create: true
 
-    # openshift.securityContextConstraints.name -- SCC created or granted to enabled device-plugin service accounts. The built-in `privileged` SCC requires `create=false`.
+    # openshift.securityContextConstraints.name -- SCC granted to enabled device-plugin service accounts. When `create=false`, the matching `system:openshift:scc:<name>` ClusterRole must already exist. The built-in `privileged` SCC requires `create=false`.
     name: "hami-device-plugin"
 
 # SELinux relabeling is available on any SELinux-enabled Kubernetes distribution.

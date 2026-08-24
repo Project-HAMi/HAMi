@@ -12,6 +12,10 @@ After the pods start, verify their assigned SCC:
 {{- if .Values.openshift.securityContextConstraints.create }}
 The chart creates the `{{ .Values.openshift.securityContextConstraints.name }}`
 SecurityContextConstraints resource.
+{{- else }}
+The chart reuses the existing `{{ .Values.openshift.securityContextConstraints.name }}`
+SecurityContextConstraints resource. Its matching ClusterRole must already exist:
+  oc get clusterrole system:openshift:scc:{{ .Values.openshift.securityContextConstraints.name }}
 {{- end }}
 The chart grants the `{{ .Values.openshift.securityContextConstraints.name }}`
 SecurityContextConstraints resource to the enabled device plugin service accounts
