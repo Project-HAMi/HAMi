@@ -159,9 +159,15 @@ func (s *Scheduler) onAddPod(obj any) {
 		return
 	}
 	if util.IsPodTerminating(pod) {
-		klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
-		s.podManager.UpdatePod(pod)
-		return
+		// A terminating pod still holds its devices. When it is already
+		// cached, refresh the object; when it is not (the informer's initial
+		// sync after a scheduler restart replays it as an add), fall through
+		// so its usage is accounted instead of silently dropped.
+		if _, cached := s.podManager.GetPod(pod); cached {
+			klog.V(5).InfoS("Pod is terminating but holding locks, preserving cache", "pod", pod.Name)
+			s.podManager.UpdatePod(pod)
+			return
+		}
 	}
 
 	rawDevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
@@ -197,6 +203,12 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 	}
 
 	if util.IsPodTerminating(newPod) {
+		// Same as onAddPod: a resync update for a terminating pod that is
+		// missing from the cache must be accounted, not dropped.
+		if _, cached := s.podManager.GetPod(newPod); !cached {
+			s.onAddPod(newPod)
+			return
+		}
 		s.podManager.UpdatePod(newPod)
 		return
 	}
