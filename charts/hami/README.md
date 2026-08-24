@@ -184,6 +184,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
 | `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
+| `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
 | `devicePlugin.hostNetwork` | Use the host network for device plugin Pods. | `false` |
 

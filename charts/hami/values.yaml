@@ -409,6 +409,8 @@ devicePlugin:
   passDeviceSpecsEnabled: false
   deviceListStrategy: "envvar"
   nvidiaHookPath: null
+
+  # devicePlugin.nvidiaDriverRoot -- NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers.
   nvidiaDriverRoot: null
   gdrcopyEnabled: null
   gdsEnabled: null

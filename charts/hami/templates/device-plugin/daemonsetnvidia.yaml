@@ -214,6 +214,12 @@ spec:
               value: "{{ .Values.global.gpuHookPath }}/vgpu"
             - name: HAMI_RESYNC_INTERVAL
               value: {{ .Values.devicePlugin.monitor.resyncInterval | default "5m" | quote }}
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            # fake-gpu-operator validation requires the monitor to receive the
+            # same driver-root configuration as the device plugin.
+            - name: NVIDIA_DRIVER_ROOT
+              value: {{ .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- end }}
             {{- with .Values.devicePlugin.monitor.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -236,6 +242,12 @@ spec:
               mountPath: /hostvar
             - name: hosttmp
               mountPath: /tmp
+            {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
+            - name: driver-root
+              mountPath: /driver-root
+              readOnly: true
+              mountPropagation: HostToContainer
+            {{- end }}
       volumes:
         - name: ctrs
           hostPath:
