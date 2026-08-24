@@ -1029,8 +1029,9 @@ func TestGetNode(t *testing.T) {
 
     for _, tt := range tests {
         t.Run(tt.name, func(t *testing.T) {
+						previousClient := client.KubeClient
             client.KubeClient = tt.setupClient()
-            defer func() { client.KubeClient = nil }()
+            t.Cleanup(func() { client.KubeClient = previousClient })
 
             got, err := GetNode(tt.nodeName)
             if (err != nil) != tt.wantErr {
