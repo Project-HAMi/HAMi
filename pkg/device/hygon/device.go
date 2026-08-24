@@ -102,10 +102,18 @@ func checkDCUtype(annos map[string]string, cardtype string) bool {
 
 func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	found := false
-	for _, val := range p.Spec.Containers {
+	for _, val := range p.Spec.InitContainers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
 			found = true
 			break
+		}
+	}
+	if !found {
+		for _, val := range p.Spec.Containers {
+			if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+				found = true
+				break
+			}
 		}
 	}
 	if !found {
@@ -116,10 +124,18 @@ func (dev *DCUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 
 func (dev *DCUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	found := false
-	for _, val := range p.Spec.Containers {
+	for _, val := range p.Spec.InitContainers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
 			found = true
 			break
+		}
+	}
+	if !found {
+		for _, val := range p.Spec.Containers {
+			if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+				found = true
+				break
+			}
 		}
 	}
 	if !found {

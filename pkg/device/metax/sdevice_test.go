@@ -17,16 +17,20 @@ limitations under the License.
 package metax
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"reflect"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
+	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func TestMutateAdmission(t *testing.T) {
@@ -3040,5 +3044,165 @@ func TestMetaxSDevicesImplementsPolicyNeutralScorer(t *testing.T) {
 	var dev device.Devices = &MetaxSDevices{}
 	if _, ok := dev.(policyNeutralScorer); !ok {
 		t.Errorf("MetaxSDevices does not implement the PolicyNeutralScore marker")
+	}
+}
+
+func TestMetaxSDevices_LockNode(t *testing.T) {
+	config := MetaxConfig{
+		ResourceVCountName: "metax-tech.com/sgpu",
+	}
+
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name:    "no containers requesting metax sgpu",
+			pod:     &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock: false,
+		},
+		{
+			name: "container requesting metax sgpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"metax-tech.com/sgpu": resource.MustParse("1"),
+				}},
+			}}}},
+			hasLock: true,
+		},
+		{
+			name: "initContainer only requesting metax sgpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock: true,
+		},
+		{
+			name: "both initContainer and container requesting metax sgpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					}},
+				}},
+			}},
+			hasLock: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sdev := InitMetaxSDevice(config)
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "lock-node"}}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			err = sdev.LockNode(node, test.pod)
+			assert.NilError(t, err)
+
+			got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := got.Annotations[MetaxNodeLock]
+			assert.Equal(t, ok, test.hasLock)
+		})
+	}
+}
+
+func TestMetaxSDevices_ReleaseNodeLock(t *testing.T) {
+	config := MetaxConfig{
+		ResourceVCountName: "metax-tech.com/sgpu",
+	}
+
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name:    "no containers requesting metax sgpu leaves lock",
+			pod:     &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock: true,
+		},
+		{
+			name: "container requesting metax sgpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"metax-tech.com/sgpu": resource.MustParse("1"),
+					}},
+				}}},
+			},
+			hasLock: false,
+		},
+		{
+			name: "initContainer only requesting metax sgpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"metax-tech.com/sgpu": resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			hasLock: false,
+		},
+		{
+			name: "both initContainer and container requesting metax sgpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"metax-tech.com/sgpu": resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"metax-tech.com/sgpu": resource.MustParse("1"),
+						}},
+					}},
+				},
+			},
+			hasLock: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			sdev := InitMetaxSDevice(config)
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "release-node",
+					Annotations: map[string]string{MetaxNodeLock: "2026-08-24T00:00:00Z,default,owner-pod"},
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			err = sdev.ReleaseNodeLock(node, test.pod)
+			assert.NilError(t, err)
+
+			got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := got.Annotations[MetaxNodeLock]
+			assert.Equal(t, ok, test.hasLock)
+		})
 	}
 }

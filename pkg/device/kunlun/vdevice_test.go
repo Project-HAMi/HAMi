@@ -322,6 +322,34 @@ func Test_KunlunVDevices_LockNode(t *testing.T) {
 			}}}},
 			hasLock: true,
 		},
+		{
+			name: "initContainer only requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock: true,
+		},
+		{
+			name: "both initContainer and container requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+			}},
+			hasLock: true,
+		},
 	}
 
 	for _, test := range tests {
@@ -364,6 +392,40 @@ func Test_KunlunVDevices_ReleaseNodeLock(t *testing.T) {
 						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
 					}},
 				}}},
+			},
+			hasLock: false,
+		},
+		{
+			name: "initContainer only requesting xpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			hasLock: false,
+		},
+		{
+			name: "both initContainer and container requesting xpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+						}},
+					}},
+				},
 			},
 			hasLock: false,
 		},

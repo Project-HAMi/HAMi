@@ -17,17 +17,20 @@ limitations under the License.
 package amd
 
 import (
+	"context"
 	"math"
 	"strings"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device/common"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 )
 
 func Test_MutateAdmission(t *testing.T) {
@@ -506,6 +509,162 @@ func TestCheckAMDType(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			got := checkAMDType(tt.annos, tt.cardType)
 			assert.Equal(t, tt.want, got)
+		})
+	}
+}
+
+func TestAMDDevices_LockNode(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name:    "no containers requesting amd gpu",
+			pod:     &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock: false,
+		},
+		{
+			name: "container requesting amd gpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
+				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+					"amd.com/gpu": resource.MustParse("1"),
+				}},
+			}}}},
+			hasLock: true,
+		},
+		{
+			name: "initContainer only requesting amd gpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock: true,
+		},
+		{
+			name: "both initContainer and container requesting amd gpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("1"),
+					}},
+				}},
+			}},
+			hasLock: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &AMDDevices{
+				resourceCountName: "amd.com/gpu",
+			}
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "lock-node"}}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			err = dev.LockNode(node, test.pod)
+			assert.NilError(t, err)
+
+			got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := got.Annotations[NodeLockAMD]
+			assert.Equal(t, ok, test.hasLock)
+		})
+	}
+}
+
+func TestAMDDevices_ReleaseNodeLock(t *testing.T) {
+	tests := []struct {
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
+	}{
+		{
+			name:    "no containers requesting amd gpu leaves lock",
+			pod:     &corev1.Pod{Spec: corev1.PodSpec{}},
+			hasLock: true,
+		},
+		{
+			name: "container requesting amd gpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						"amd.com/gpu": resource.MustParse("1"),
+					}},
+				}}},
+			},
+			hasLock: false,
+		},
+		{
+			name: "initContainer only requesting amd gpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"amd.com/gpu": resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			hasLock: false,
+		},
+		{
+			name: "both initContainer and container requesting amd gpu releases matching lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "owner-pod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"amd.com/gpu": resource.MustParse("1"),
+						}},
+					}},
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+							"amd.com/gpu": resource.MustParse("1"),
+						}},
+					}},
+				},
+			},
+			hasLock: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := &AMDDevices{
+				resourceCountName: "amd.com/gpu",
+			}
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "release-node",
+					Annotations: map[string]string{NodeLockAMD: "2026-08-24T00:00:00Z,default,owner-pod"},
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
+			err = dev.ReleaseNodeLock(node, test.pod)
+			assert.NilError(t, err)
+
+			got, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := got.Annotations[NodeLockAMD]
+			assert.Equal(t, ok, test.hasLock)
 		})
 	}
 }

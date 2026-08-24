@@ -430,11 +430,37 @@ func TestDevices_LockNode(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with non-zero resource requests in container",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"vastaitech.com/va": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests in initContainer only",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},
@@ -491,7 +517,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with non-zero resource requests in container",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 				Name:      "nozerorr",
@@ -499,6 +525,38 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"vastaitech.com/va": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     false,
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests in initContainer only",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "nozerorr",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     false,
+			expectError: false,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "nozerorr",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"vastaitech.com/va": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     false,
 			expectError: false,
 		},

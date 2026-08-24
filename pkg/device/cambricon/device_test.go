@@ -579,6 +579,42 @@ func Test_LockNode(t *testing.T) {
 	}
 }
 
+func Test_LockNode_InitContainers(t *testing.T) {
+	node, _, teardown, clientset := setupTest(t)
+	client.KubeClient = clientset
+	defer teardown()
+
+	dev := InitMLUDevice(CambriconConfig{
+		ResourceCountName:  MLUResourceCount,
+		ResourceMemoryName: MLUResourceMemory,
+		ResourceCoreName:   MLUResourceCores,
+	})
+
+	initOnlyPod := &corev1.Pod{
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{
+				Name: "init-mlu",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						corev1.ResourceName(MLUResourceCount): resource.MustParse("1"),
+					},
+				},
+			}},
+			Containers: []corev1.Container{{Name: "cpu-app"}},
+		},
+	}
+
+	err := dev.LockNode(node, initOnlyPod)
+	if err != nil {
+		t.Fatalf("LockNode() unexpected error = %v", err)
+	}
+
+	fetchedNode, _ := clientset.CoreV1().Nodes().Get(context.TODO(), node.Name, metav1.GetOptions{})
+	if _, ok := fetchedNode.Annotations[DsmluLockTime]; !ok {
+		t.Error("Expected node to be locked for initContainer-only pod but it wasn't")
+	}
+}
+
 func Test_ReleaseNodeLock(t *testing.T) {
 	clientset := fake.NewClientset()
 	client.KubeClient = clientset

@@ -135,10 +135,18 @@ func (dev *KunlunVDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 
 func (dev *KunlunVDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	found := false
-	for _, val := range p.Spec.Containers {
+	for _, val := range p.Spec.InitContainers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
 			found = true
 			break
+		}
+	}
+	if !found {
+		for _, val := range p.Spec.Containers {
+			if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+				found = true
+				break
+			}
 		}
 	}
 	if !found {
@@ -149,10 +157,18 @@ func (dev *KunlunVDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 
 func (dev *KunlunVDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
 	found := false
-	for _, val := range p.Spec.Containers {
+	for _, val := range p.Spec.InitContainers {
 		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
 			found = true
 			break
+		}
+	}
+	if !found {
+		for _, val := range p.Spec.Containers {
+			if (dev.GenerateResourceRequests(&val).Nums) > 0 {
+				found = true
+				break
+			}
 		}
 	}
 	if !found {

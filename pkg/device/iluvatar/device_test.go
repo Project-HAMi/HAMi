@@ -17,6 +17,7 @@ limitations under the License.
 package iluvatar
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -24,11 +25,14 @@ import (
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
 )
 
@@ -698,15 +702,33 @@ func TestDevices_LockNode(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Test with non-zero resource requests",
+			name:        "Test with non-zero resource requests in container",
 			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}}}},
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests in initContainer only",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}},
+				Containers:     []corev1.Container{{Name: "cpu-app"}},
+			}},
 			expectError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
 			dev := &IluvatarDevices{
 				config: IluvatarConfig{
 					CommonWord:         "MR-V100",
@@ -716,7 +738,7 @@ func TestDevices_LockNode(t *testing.T) {
 					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
 				},
 			}
-			err := dev.LockNode(tt.node, tt.pod)
+			err = dev.LockNode(node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {
@@ -740,15 +762,42 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name:        "Test with non-zero resource requests",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{}}}}}},
+			name: "Test with non-zero resource requests in container",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "testPod", Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}}},
+			},
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests in initContainer only",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "testPod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}},
+					Containers:     []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
 			expectError: false,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			client.KubeClient = fake.NewClientset()
+			node := &corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "testNode",
+					Annotations: map[string]string{
+						nodelock.NodeLockKey: "2026-08-24T00:00:00Z," + tt.pod.Namespace + "," + tt.pod.Name,
+					},
+				},
+			}
+			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+			assert.NilError(t, err)
+
 			dev := &IluvatarDevices{
 				config: IluvatarConfig{
 					CommonWord:         "MR-V100",
@@ -758,7 +807,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 					ResourceCoreName:   "iluvatar.ai/MR-V100.vCore",
 				},
 			}
-			err := dev.ReleaseNodeLock(tt.node, tt.pod)
+			err = dev.ReleaseNodeLock(node, tt.pod)
 			if tt.expectError {
 				assert.Equal(t, err != nil, true)
 			} else {

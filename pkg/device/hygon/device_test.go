@@ -697,11 +697,37 @@ func TestDevices_LockNode(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with non-zero resource requests in container",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with non-zero resource requests in initContainer only",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},
@@ -747,27 +773,54 @@ func TestDevices_LockNode(t *testing.T) {
 func TestDevices_ReleaseNodeLock(t *testing.T) {
 	tests := []struct {
 		name        string
-		node        *corev1.Node
 		pod         *corev1.Pod
 		hasLock     bool
 		expectError bool
 	}{
 		{
-			name:        "Test with no containers",
-			node:        &corev1.Node{},
+			name:        "Test with no containers leaves lock",
 			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
 			hasLock:     true,
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
-			node: &corev1.Node{},
-			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
-				Name:      "nozerorr",
-				Namespace: "default",
-			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
-				"hygon.com/dcunum": resource.MustParse("1"),
-			}}}}}},
+			name: "Test with resource requests in container releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "nozerorr", Namespace: "default"},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}}},
+			},
+			hasLock:     false,
+			expectError: false,
+		},
+		{
+			name: "Test with resource requests in initContainer only releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "nozerorr", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+					}}}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			hasLock:     false,
+			expectError: false,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "nozerorr", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+					}}}},
+					Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+						"hygon.com/dcunum": resource.MustParse("1"),
+					}}}},
+				},
+			},
 			hasLock:     false,
 			expectError: false,
 		},
@@ -775,16 +828,16 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Initialize fake clientset and pre-load test data
 			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values,default,nozerorr"},
+					Name: "testNode",
+					Annotations: map[string]string{
+						NodeLockDCU: "lock-values,default,nozerorr",
+					},
 				},
 			}
 
-			// Add the node to the fake clientset
 			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
 			if err != nil {
 				t.Fatalf("Failed to create test node: %v", err)
@@ -803,7 +856,6 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			}
 			node, err = client.KubeClient.CoreV1().Nodes().Get(context.Background(), node.Name, metav1.GetOptions{})
 			assert.NilError(t, err)
-			fmt.Println(node.Annotations)
 			_, ok := node.Annotations[NodeLockDCU]
 			assert.Equal(t, ok, tt.hasLock)
 		})
