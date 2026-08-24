@@ -165,6 +165,10 @@ func LoadNvidiaDevicePluginConfig() (*config.Config, string, error) {
 	if err != nil {
 		klog.Errorf("readFromConfigFile err:%s", err.Error())
 	}
+	if os.Getenv("REPORT_NODE_CAPACITY") == "true" || os.Getenv("REPORT_NODE_CAPACITY") == "1" {
+		t := true
+		sConfig.NvidiaConfig.ReportNodeCapacity = &t
+	}
 	return sConfig, mode, nil
 }
 
@@ -187,15 +191,15 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)
 	}
-	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
-		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
-	}
 	var migMgr *MigInstanceManager
 	if mode == "mig" {
 		migMgr = NewMigInstanceManager()
 		if err := migMgr.Init(); err != nil {
 			return nil, fmt.Errorf("init MIG instance manager: %w", err)
 		}
+	}
+	if nvconfig != nil && nvconfig.ReportNodeCapacity != nil {
+		sConfig.NvidiaConfig.ReportNodeCapacity = nvconfig.ReportNodeCapacity
 	}
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,

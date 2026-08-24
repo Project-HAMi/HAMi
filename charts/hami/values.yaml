@@ -377,6 +377,9 @@ devicePlugin:
     # Name of a Secret (key ca.crt) to mount as the CA bundle instead; used
     # when caFile is empty.
     caSecret: ""
+  # Report GPU memory and core resources (e.g. nvidia.com/gpumem, nvidia.com/gpucores)
+  # to Node capacity and allocatable fields. Defaults to false.
+  reportNodeCapacity: false
   # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
