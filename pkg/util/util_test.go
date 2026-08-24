@@ -26,7 +26,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes/fake"
-
+	"k8s.io/client-go/kubernetes"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
@@ -976,4 +976,70 @@ func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
 			assert.Equal(t, tc.want, got)
 		})
 	}
+}
+
+func TestGetNode(t *testing.T) {
+    tests := []struct {
+        name        string
+        setupClient func() kubernetes.Interface
+        nodeName    string
+        wantErr     bool
+        checkNode   func(*testing.T, *corev1.Node)
+    }{
+        {
+            name: "empty node name",
+            setupClient: func() kubernetes.Interface {
+                return fake.NewClientset()
+            },
+            nodeName: "",
+            wantErr:  true,
+        },
+        {
+            name: "client not initialized",
+            setupClient: func() kubernetes.Interface {
+                return nil
+            },
+            nodeName: "test-node",
+            wantErr:  true,
+        },
+        {
+            name: "node not found",
+            setupClient: func() kubernetes.Interface {
+                return fake.NewClientset()
+            },
+            nodeName: "non-existent-node",
+            wantErr:  true,
+        },
+        {
+            name: "success",
+            setupClient: func() kubernetes.Interface {
+                clientset := fake.NewClientset()
+                clientset.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+                    ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+                }, metav1.CreateOptions{})
+                return clientset
+            },
+            nodeName: "test-node",
+            wantErr:  false,
+            checkNode: func(t *testing.T, node *corev1.Node) {
+                assert.Equal(t, node.Name, "test-node")
+            },
+        },
+    }
+
+    for _, tt := range tests {
+        t.Run(tt.name, func(t *testing.T) {
+            client.KubeClient = tt.setupClient()
+            defer func() { client.KubeClient = nil }()
+
+            got, err := GetNode(tt.nodeName)
+            if (err != nil) != tt.wantErr {
+                t.Errorf("GetNode() error = %v, wantErr %v", err, tt.wantErr)
+                return
+            }
+            if !tt.wantErr && tt.checkNode != nil {
+                tt.checkNode(t, got)
+            }
+        })
+    }
 }
