@@ -106,13 +106,13 @@ func TestRecordScheduleBindingResultEvent(t *testing.T) {
 				}
 				event := events.Items[0]
 				if test.schedulerErr != nil {
-					assert.Equal(t, event.Type, corev1.EventTypeWarning)
+					assert.Equal(t, corev1.EventTypeWarning, event.Type)
 				} else {
-					assert.Equal(t, event.Type, corev1.EventTypeNormal)
+					assert.Equal(t, corev1.EventTypeNormal, event.Type)
 				}
 			} else {
 				events, _ = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
-				assert.Equal(t, len(events.Items), 0)
+				assert.Empty(t, events.Items)
 			}
 		})
 	}
@@ -193,13 +193,13 @@ func TestRecordScheduleFilterResultEvent(t *testing.T) {
 				}
 				event := events.Items[0]
 				if test.schedulerErr != nil {
-					assert.Equal(t, event.Type, corev1.EventTypeWarning)
+					assert.Equal(t, corev1.EventTypeWarning, event.Type)
 				} else {
-					assert.Equal(t, event.Type, corev1.EventTypeNormal)
+					assert.Equal(t, corev1.EventTypeNormal, event.Type)
 				}
 			} else {
 				events, _ = fakeClient.CoreV1().Events(metav1.NamespaceAll).List(context.Background(), metav1.ListOptions{})
-				assert.Equal(t, len(events.Items), 0)
+				assert.Empty(t, events.Items)
 			}
 		})
 	}
