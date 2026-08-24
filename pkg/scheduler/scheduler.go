@@ -202,22 +202,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	s.podManager.UpdatePod(newPod)
 
-	if !pi.InitContainerResourceReleased && util.AllInitContainersSucceeded(newPod) {
+	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
 			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
 			return
 		}
 
-		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
+		steadyStateDevices := device.SteadyStateDeviceUsage(newPod, rawDevices)
 
-		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, appOnlyDevices)
+		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, steadyStateDevices)
 		if ok {
-			s.quotaManager.ReplaceUsage(newPod, oldDevices, appOnlyDevices)
-			klog.InfoS("Init containers completed, shrunk usage",
+			s.quotaManager.ReplaceUsage(newPod, oldDevices, steadyStateDevices)
+			klog.InfoS("Non-sidecar init containers completed, shrunk usage to steady state",
 				"pod", klog.KObj(newPod),
 				"oldUsage", oldDevices,
-				"newUsage", appOnlyDevices,
+				"newUsage", steadyStateDevices,
 			)
 		}
 	}
