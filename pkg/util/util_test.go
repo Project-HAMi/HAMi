@@ -980,68 +980,68 @@ func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
 }
 
 func TestGetNode(t *testing.T) {
-    tests := []struct {
-        name        string
-        setupClient func() kubernetes.Interface
-        nodeName    string
-        wantErr     bool
-        checkNode   func(*testing.T, *corev1.Node)
-    }{
-        {
-            name: "empty node name",
-            setupClient: func() kubernetes.Interface {
-                return fake.NewClientset()
-            },
-            nodeName: "",
-            wantErr:  true,
-        },
-        {
-            name: "client not initialized",
-            setupClient: func() kubernetes.Interface {
-                return nil
-            },
-            nodeName: "test-node",
-            wantErr:  true,
-        },
-        {
-            name: "node not found",
-            setupClient: func() kubernetes.Interface {
-                return fake.NewClientset()
-            },
-            nodeName: "non-existent-node",
-            wantErr:  true,
-        },
-        {
-            name: "success",
-            setupClient: func() kubernetes.Interface {
-                clientset := fake.NewClientset()
-                clientset.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
-                    ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
-                }, metav1.CreateOptions{})
-                return clientset
-            },
-            nodeName: "test-node",
-            wantErr:  false,
-            checkNode: func(t *testing.T, node *corev1.Node) {
-                assert.Equal(t, node.Name, "test-node")
-            },
-        },
-    }
+	tests := []struct {
+		name        string
+		setupClient func() kubernetes.Interface
+		nodeName    string
+		wantErr     bool
+		checkNode   func(*testing.T, *corev1.Node)
+	}{
+		{
+			name: "empty node name",
+			setupClient: func() kubernetes.Interface {
+				return fake.NewClientset()
+			},
+			nodeName: "",
+			wantErr:  true,
+		},
+		{
+			name: "client not initialized",
+			setupClient: func() kubernetes.Interface {
+				return nil
+			},
+			nodeName: "test-node",
+			wantErr:  true,
+		},
+		{
+			name: "node not found",
+			setupClient: func() kubernetes.Interface {
+				return fake.NewClientset()
+			},
+			nodeName: "non-existent-node",
+			wantErr:  true,
+		},
+		{
+			name: "success",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.CoreV1().Nodes().Create(context.TODO(), &corev1.Node{
+					ObjectMeta: metav1.ObjectMeta{Name: "test-node"},
+				}, metav1.CreateOptions{})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  false,
+			checkNode: func(t *testing.T, node *corev1.Node) {
+				assert.Equal(t, node.Name, "test-node")
+			},
+		},
+	}
 
-    for _, tt := range tests {
-        t.Run(tt.name, func(t *testing.T) {
-						previousClient := client.KubeClient
-            client.KubeClient = tt.setupClient()
-            t.Cleanup(func() { client.KubeClient = previousClient })
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			previousClient := client.KubeClient
+			client.KubeClient = tt.setupClient()
+			t.Cleanup(func() { client.KubeClient = previousClient })
 
-            got, err := GetNode(tt.nodeName)
-            if (err != nil) != tt.wantErr {
-                t.Errorf("GetNode() error = %v, wantErr %v", err, tt.wantErr)
-                return
-            }
-            if !tt.wantErr && tt.checkNode != nil {
-                tt.checkNode(t, got)
-            }
-        })
-    }
+			got, err := GetNode(tt.nodeName)
+			if (err != nil) != tt.wantErr {
+				t.Errorf("GetNode() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+			if !tt.wantErr && tt.checkNode != nil {
+				tt.checkNode(t, got)
+			}
+		})
+	}
 }
