@@ -114,3 +114,7 @@ local-deploy: docker
 .PHONY: e2e-test
 e2e-test:
 	./hack/e2e-test.sh "${E2E_TYPE}" "${KUBE_CONF}"
+
+.PHONY: e2e-policy-test
+e2e-policy-test:
+	HAMI_E2E_REQUIRE_POLICY_TOPOLOGY=true bash ./hack/e2e-policy-test.sh "${KUBE_CONF}"
