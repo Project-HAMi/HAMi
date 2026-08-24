@@ -24,16 +24,16 @@ import (
 	"maps"
 	"testing"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/util/client"
-	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
-
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/kubernetes/fake"
 	"k8s.io/klog/v2"
+
+	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
 
 func TestGetNodeDevices(t *testing.T) {
@@ -690,31 +690,65 @@ func Test_Fit(t *testing.T) {
 
 func TestDevices_LockNode(t *testing.T) {
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		pod         *corev1.Pod
-		expectError bool
+		name    string
+		pod     *corev1.Pod
+		hasLock bool
 	}{
 		{
-			name:        "Test with no containers",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
-			expectError: false,
+			name: "Test with no containers — no lock acquired",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-dev", Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "cpu-app"}}},
+			},
+			hasLock: false,
 		},
 		{
-			name:        "Test with non-zero resource requests in container",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}}}},
-			expectError: false,
+			name: "Test with non-zero resource requests in container — acquires lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-container", Namespace: "default"},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+					},
+				}}},
+			},
+			hasLock: true,
 		},
 		{
-			name: "Test with non-zero resource requests in initContainer only",
-			node: &corev1.Node{},
-			pod: &corev1.Pod{Spec: corev1.PodSpec{
-				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}},
-				Containers:     []corev1.Container{{Name: "cpu-app"}},
-			}},
-			expectError: false,
+			// Regression: old implementation ignored InitContainers and would NOT
+			// acquire the lock for this pod, leaving hasLock == false.
+			name: "Test with non-zero resource requests in initContainer only — acquires lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-init", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			hasLock: true,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container — acquires lock once",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-both", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+				},
+			},
+			hasLock: true,
 		},
 	}
 
@@ -723,7 +757,8 @@ func TestDevices_LockNode(t *testing.T) {
 			client.KubeClient = fake.NewClientset()
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
-					Name: "testNode",
+					Name:        "testNode",
+					Annotations: map[string]string{},
 				},
 			}
 			_, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
@@ -739,48 +774,79 @@ func TestDevices_LockNode(t *testing.T) {
 				},
 			}
 			err = dev.LockNode(node, tt.pod)
-			if tt.expectError {
-				assert.Equal(t, err != nil, true)
-			} else {
-				assert.NilError(t, err)
-			}
+			assert.NilError(t, err)
+
+			// Verify the node-lock annotation was actually persisted.
+			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "testNode", metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := updated.Annotations[nodelock.NodeLockKey]
+			assert.Equal(t, ok, tt.hasLock,
+				"expected annotation %q presence=%v, got %v", nodelock.NodeLockKey, tt.hasLock, ok)
 		})
 	}
 }
 
 func TestDevices_ReleaseNodeLock(t *testing.T) {
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		pod         *corev1.Pod
-		expectError bool
+		name    string
+		pod     *corev1.Pod
+		hasLock bool // whether NodeLockKey annotation should remain after release
 	}{
 		{
-			name:        "Test with no containers",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
-			expectError: false,
+			name: "Test with no containers — lock not released (no device request)",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-dev", Namespace: "default"},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "cpu-app"}}},
+			},
+			hasLock: true,
 		},
 		{
-			name: "Test with non-zero resource requests in container",
-			node: &corev1.Node{},
+			name: "Test with non-zero resource requests in container — releases lock",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "testPod", Namespace: "default"},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+					},
+				}}},
 			},
-			expectError: false,
+			hasLock: false,
 		},
 		{
-			name: "Test with non-zero resource requests in initContainer only",
-			node: &corev1.Node{},
+			// Regression: old implementation ignored InitContainers and would NOT
+			// call ReleaseNodeLock, leaving the annotation in place (hasLock true).
+			name: "Test with non-zero resource requests in initContainer only — releases lock",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "testPod", Namespace: "default"},
 				Spec: corev1.PodSpec{
-					InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")}}}},
-					Containers:     []corev1.Container{{Name: "cpu-app"}},
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
 				},
 			},
-			expectError: false,
+			hasLock: false,
+		},
+		{
+			name: "Test with resource requests in both initContainer and container — releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "testPod", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Resources: corev1.ResourceRequirements{
+							Requests: corev1.ResourceList{"iluvatar.ai/MR-V100-vgpu": resource.MustParse("1")},
+						},
+					}},
+				},
+			},
+			hasLock: false,
 		},
 	}
 
@@ -808,11 +874,14 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 				},
 			}
 			err = dev.ReleaseNodeLock(node, tt.pod)
-			if tt.expectError {
-				assert.Equal(t, err != nil, true)
-			} else {
-				assert.NilError(t, err)
-			}
+			assert.NilError(t, err)
+
+			// Verify the node-lock annotation was actually removed (or preserved).
+			updated, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), "testNode", metav1.GetOptions{})
+			assert.NilError(t, err)
+			_, ok := updated.Annotations[nodelock.NodeLockKey]
+			assert.Equal(t, ok, tt.hasLock,
+				"expected annotation %q presence=%v, got %v", nodelock.NodeLockKey, tt.hasLock, ok)
 		})
 	}
 }
