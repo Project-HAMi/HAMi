@@ -137,6 +137,13 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}
@@ -151,7 +158,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	if err != nil {
 		return err
 	}
-	_, err = client.GetClient().CoreV1().Nodes().
+	_, err = c.CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
@@ -259,6 +266,9 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 }
 
 func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
 	annos := make(map[string]any, len(annotationKeys))
 	for _, key := range annotationKeys {
 		annos[key] = nil
