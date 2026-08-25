@@ -68,6 +68,12 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.V(3).Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
+	// Reject invalid numa-alignment values at admission, so a typo surfaces
+	// to the user instead of only appearing in a device-plugin log later.
+	if _, err := util.GetNumaAlignmentModeByPod(pod); err != nil {
+		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+		return admission.Denied(err.Error())
+	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
