@@ -753,3 +753,22 @@ func CheckType(annos map[string]string, cardType, useKey, noUseKey string) bool 
 	}
 	return true
 }
+
+// PodRequiresDevice returns true if any container (init container or regular container)
+// in the pod requests resources from the specified device generator.
+func PodRequiresDevice(dev Devices, p *corev1.Pod) bool {
+	if p == nil || dev == nil {
+		return false
+	}
+	for i := range p.Spec.InitContainers {
+		if dev.GenerateResourceRequests(&p.Spec.InitContainers[i]).Nums > 0 {
+			return true
+		}
+	}
+	for i := range p.Spec.Containers {
+		if dev.GenerateResourceRequests(&p.Spec.Containers[i]).Nums > 0 {
+			return true
+		}
+	}
+	return false
+}

@@ -2239,15 +2239,63 @@ func TestLockNode(t *testing.T) {
 			name: "no GPU containers — skip lock",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-gpu", Namespace: "default"},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Name: "init-no-gpu"}},
+					Containers:     []corev1.Container{{Name: "app"}},
+				},
 			},
 			hasLock: false,
 		},
 		{
-			name: "has GPU container — acquires lock",
+			name: "regular-container-only GPU request — acquires lock",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod-gpu", Namespace: "default"},
 				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "gpu-app",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+				},
+			},
+			hasLock: true,
+		},
+		{
+			name: "init-container-only GPU request — acquires lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-init-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Name: "gpu-init",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Name: "cpu-app",
+					}},
+				},
+			},
+			hasLock: true,
+		},
+		{
+			name: "init and regular container GPU request — acquires lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-init-and-reg-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Name: "gpu-init",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
 					Containers: []corev1.Container{{
 						Name: "gpu-app",
 						Resources: corev1.ResourceRequirements{
@@ -2524,18 +2572,23 @@ func TestReleaseNodeLock(t *testing.T) {
 	tests := []struct {
 		name    string
 		pod     *corev1.Pod
+		lockVal string
 		hasLock bool
 	}{
 		{
 			name: "no GPU containers — skip release, lock remains",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod-no-gpu", Namespace: "default"},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "app"}}},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{Name: "init-no-gpu"}},
+					Containers:     []corev1.Container{{Name: "app"}},
+				},
 			},
+			lockVal: "lock-values,default,pod-no-gpu",
 			hasLock: true,
 		},
 		{
-			name: "has GPU container — releases lock",
+			name: "regular-container-only GPU request — releases lock",
 			pod: &corev1.Pod{
 				ObjectMeta: metav1.ObjectMeta{Name: "pod-gpu", Namespace: "default"},
 				Spec: corev1.PodSpec{
@@ -2549,6 +2602,52 @@ func TestReleaseNodeLock(t *testing.T) {
 					}},
 				},
 			},
+			lockVal: "lock-values,default,pod-gpu",
+			hasLock: false,
+		},
+		{
+			name: "init-container-only GPU request — releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-init-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Name: "gpu-init",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+					Containers: []corev1.Container{{Name: "cpu-app"}},
+				},
+			},
+			lockVal: "lock-values,default,pod-init-gpu",
+			hasLock: false,
+		},
+		{
+			name: "init and regular container GPU request — releases lock",
+			pod: &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{Name: "pod-init-reg-gpu", Namespace: "default"},
+				Spec: corev1.PodSpec{
+					InitContainers: []corev1.Container{{
+						Name: "gpu-init",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+					Containers: []corev1.Container{{
+						Name: "gpu-app",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{
+								"nvidia.com/gpu": *resource.NewQuantity(1, resource.BinarySI),
+							},
+						},
+					}},
+				},
+			},
+			lockVal: "lock-values,default,pod-init-reg-gpu",
 			hasLock: false,
 		},
 	}
@@ -2556,11 +2655,15 @@ func TestReleaseNodeLock(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			client.KubeClient = fake.NewClientset()
+			lockVal := tt.lockVal
+			if lockVal == "" {
+				lockVal = "lock-values,default," + tt.pod.Name
+			}
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name: "test-node",
 					Annotations: map[string]string{
-						nodelock.NodeLockKey: "lock-values,default,pod-gpu",
+						nodelock.NodeLockKey: lockVal,
 					},
 				},
 			}
