@@ -1572,7 +1572,7 @@ func TestFit_CoresValidation(t *testing.T) {
 				Coresreq: tt.coresreq,
 			}
 			ok, _, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
-			assert.Equal(t, ok, tt.wantOk)
+			assert.Equal(t, tt.wantOk, ok)
 		})
 	}
 
@@ -1584,8 +1584,8 @@ func TestFit_CoresValidation(t *testing.T) {
 			Coresreq: 150,
 		}
 		ok, _, reason := dev.Fit([]*device.DeviceUsage{}, req, pod, &device.NodeInfo{}, &device.PodDevices{})
-		assert.Equal(t, ok, false)
-		assert.Equal(t, reason, "core limit out of range")
+		assert.False(t, ok)
+		assert.Equal(t, "core limit out of range", reason)
 	})
 
 	t.Run("mismatched device type with invalid coresreq returns out of range", func(t *testing.T) {
@@ -1599,7 +1599,7 @@ func TestFit_CoresValidation(t *testing.T) {
 			{ID: "other-0", Type: "OtherType", Health: true},
 		}
 		ok, _, reason := dev.Fit(mismatchDevs, req, pod, &device.NodeInfo{}, &device.PodDevices{})
-		assert.Equal(t, ok, false)
-		assert.Equal(t, reason, "core limit out of range")
+		assert.False(t, ok)
+		assert.Equal(t, "core limit out of range", reason)
 	})
 }
