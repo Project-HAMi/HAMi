@@ -212,7 +212,7 @@ func TestClientRealNodePerformance(t *testing.T) {
 				t.Logf("Using node %s for testing", nodeName)
 			}
 			start := time.Now()
-			for i := 0; i < tt.updates; i++ {
+			for i := range tt.updates {
 				labelValue := fmt.Sprintf("perf-test-value-%d", i)
 				node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {

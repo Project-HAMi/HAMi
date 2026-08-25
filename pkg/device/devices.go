@@ -566,7 +566,7 @@ func GetDevicesUUIDList(infos []*DeviceInfo) []string {
 // Deprecated: dynamic NVIDIA MIG constructs candidates from MigProfiles.
 func PlatternMIG(n *MigInUse, templates []Geometry, templateIdx int) {
 	for _, value := range templates[templateIdx] {
-		for count := int32(0); count < value.Count; count++ {
+		for range value.Count {
 			n.Index = int32(templateIdx)
 			n.UsageList = append(n.UsageList, MigTemplateUsage{Name: value.Name, Memory: value.Memory, Core: value.Core})
 		}

@@ -678,7 +678,7 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	indexToDevice := make(map[int]device.ContainerDevice)
 	var npuIndices []int
 	for _, dev := range containerDevices {
-		idx := int(dev.Idx)
+		idx := dev.Idx
 		indexToDevice[idx] = dev
 		npuIndices = append(npuIndices, idx)
 	}

@@ -591,8 +591,8 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				Nums:             int32(n),
 				Type:             NvidiaGPUDevice,
 				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
-				Coresreq:         int32(corenum),
+				MemPercentagereq: mempnum,
+				Coresreq:         corenum,
 			}
 		}
 	}
@@ -959,7 +959,7 @@ func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.Con
 	for _, partition := range combinations {
 		totalScore := 0
 
-		for i := 0; i < len(partition)-1; i++ {
+		for i := range len(partition) - 1 {
 			dev1 := partition[i]
 			scoreMapDev1 := deviceScoreMap[dev1.UUID]
 			for z := i + 1; z < len(partition); z++ {
