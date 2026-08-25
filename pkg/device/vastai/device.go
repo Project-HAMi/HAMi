@@ -98,28 +98,14 @@ func (dev *VastaiDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) 
 }
 
 func (dev *VastaiDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, nodelock.NodeLockKey, p)
 }
 
 func (dev *VastaiDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, nodelock.NodeLockKey, p, false)
@@ -231,7 +217,7 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	dieMode := isDieMode(devices)
 	// Under mutex a physical card (AIC) is exclusive: in die mode a card is made
 	// of several dies, so if any die on a card is in use none of its sibling dies
@@ -249,7 +235,11 @@ func (va *VastaiDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	}
 	for i, dev := range slices.Backward(devices) {
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, _ := va.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++

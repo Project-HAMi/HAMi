@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
 
@@ -38,6 +39,14 @@ func checkBody(w http.ResponseWriter, r *http.Request) bool {
 		return false
 	}
 	return true
+}
+
+func writeResponse(w http.ResponseWriter, code int, body []byte) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(code)
+	if _, err := w.Write(body); err != nil {
+		klog.ErrorS(err, "Failed to write response")
+	}
 }
 
 func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
@@ -58,6 +67,12 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 		if err := json.NewDecoder(body).Decode(&extenderArgs); err != nil {
 			klog.ErrorS(err, "Failed to decode extender arguments")
+			extenderFilterResult = &extenderv1.ExtenderFilterResult{
+				Error: err.Error(),
+			}
+		} else if extenderArgs.Pod == nil {
+			err := fmt.Errorf("extender args missing pod")
+			klog.ErrorS(err, "Rejecting filter request with no pod")
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: err.Error(),
 			}
@@ -83,17 +98,15 @@ func PredicateRoute(s *scheduler.Scheduler) httprouter.Handle {
 
 		if resultBody, err := json.Marshal(extenderFilterResult); err != nil {
 			klog.ErrorS(err, "Failed to marshal extender filter result", "result", extenderFilterResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
 			extenderFilterResult = &extenderv1.ExtenderFilterResult{
 				Error: fmt.Sprintf("Failed to marshal extender filter result: %s", err.Error()),
 			}
 			resultBody, _ = json.Marshal(extenderFilterResult)
-			w.Write(resultBody)
+			// Note: write error in this fallback path is not explicitly tested
+			// as it requires both a marshal failure and a write failure.
+			writeResponse(w, http.StatusInternalServerError, resultBody)
 		} else {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(resultBody)
+			writeResponse(w, http.StatusOK, resultBody)
 		}
 	}
 }
@@ -128,18 +141,16 @@ func Bind(s *scheduler.Scheduler) httprouter.Handle {
 
 		if response, err := json.Marshal(extenderBindingResult); err != nil {
 			klog.ErrorS(err, "Failed to marshal binding result", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusInternalServerError)
 			extenderBindingResult = &extenderv1.ExtenderBindingResult{
 				Error: fmt.Sprintf("Failed to marshal binding result: %s", err.Error()),
 			}
 			response, _ := json.Marshal(extenderBindingResult)
-			w.Write(response)
+			// Note: write error in this fallback path is not explicitly tested
+			// as it requires both a marshal failure and a write failure.
+			writeResponse(w, http.StatusInternalServerError, response)
 		} else {
 			klog.V(5).InfoS("Returning bind response", "result", extenderBindingResult)
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusOK)
-			w.Write(response)
+			writeResponse(w, http.StatusOK, response)
 		}
 	}
 }
@@ -172,5 +183,42 @@ func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 			klog.V(3).Infoln("Scheduler extender has not become leader yet")
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// NumaRefit handles device-plugin requests to move a pending allocation onto
+// kubelet's NUMA-restricted device set. See issue #2080.
+func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
+	klog.Infoln("Initializing NumaRefit Route")
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		if !checkBody(w, r) {
+			return
+		}
+
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		body := io.LimitReader(r.Body, maxRequestSize)
+
+		var response device.NumaRefitResponse
+		var request device.NumaRefitRequest
+		if err := json.NewDecoder(body).Decode(&request); err != nil {
+			klog.ErrorS(err, "Failed to decode NUMA refit request")
+			response = device.NumaRefitResponse{FailureReason: err.Error()}
+		} else if !s.WaitForCacheSync(r.Context()) {
+			// Poll may return false when context is cancelled
+			err := fmt.Errorf("context cancelled")
+			klog.ErrorS(err, "Cache not synced, cannot refit")
+			response = device.NumaRefitResponse{FailureReason: err.Error()}
+		} else {
+			response = s.RefitNumaAllocation(request)
+		}
+
+		resultBody, err := json.Marshal(response)
+		if err != nil {
+			klog.ErrorS(err, "Failed to marshal NUMA refit response", "response", response)
+			resultBody, _ = json.Marshal(device.NumaRefitResponse{FailureReason: err.Error()})
+			writeResponse(w, http.StatusInternalServerError, resultBody)
+			return
+		}
+		writeResponse(w, http.StatusOK, resultBody)
 	}
 }

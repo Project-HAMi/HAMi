@@ -458,4 +458,54 @@ func TestDevices_Fit(t *testing.T) {
 		assert.Equal(t, false, ok)
 		assert.Assert(t, strings.Contains(reason, common.CardTimeSlicingExhausted))
 	})
+
+	t.Run("unhealthy device is rejected", func(t *testing.T) {
+		devices := []*device.DeviceUsage{
+			{
+				ID: "dev-0", Index: 0, Used: 0, Count: 2,
+				Usedmem: 0, Totalmem: 1000, Totalcore: 100, Usedcores: 0,
+				Type: AMDDevice, Health: false, CustomInfo: map[string]any{},
+			},
+		}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, MemPercentagereq: 0, Coresreq: 10}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+
+		ok, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.CardNotHealth))
+	})
+}
+
+func TestCheckAMDType(t *testing.T) {
+	tests := []struct {
+		name     string
+		annos    map[string]string
+		cardType string
+		want     bool
+	}{
+		{"no annotations", map[string]string{}, "MI300X", true},
+		{"matching use type", map[string]string{AMDInUse: "MI300"}, "MI300X", true},
+		{"non-matching use type", map[string]string{AMDInUse: "MI250"}, "MI300X", false},
+		{"matching nouse type excludes card", map[string]string{AMDNoUse: "MI300"}, "MI300X", false},
+		{"non-matching nouse type keeps card", map[string]string{AMDNoUse: "MI250"}, "MI300X", true},
+		// Regression: an empty nouse-gputype annotation must not exclude every card.
+		{"empty nouse annotation keeps card", map[string]string{AMDNoUse: ""}, "MI300X", true},
+		{"empty use annotation keeps card", map[string]string{AMDInUse: ""}, "MI300X", true},
+		{"whitespace-only nouse annotation keeps card", map[string]string{AMDNoUse: "   "}, "MI300X", true},
+		{"whitespace-only use annotation keeps card", map[string]string{AMDInUse: "   "}, "MI300X", true},
+		// Regression: a trailing/leading empty member in a comma-separated list must not
+		// match every card via strings.Contains(cardType, "").
+		{"nouse with trailing comma only excludes named type", map[string]string{AMDNoUse: "MI250,"}, "MI300X", true},
+		{"nouse with leading comma only excludes named type", map[string]string{AMDNoUse: ",MI250"}, "MI300X", true},
+		{"nouse with blank member still excludes named type", map[string]string{AMDNoUse: " MI250 , "}, "MI250X", false},
+		{"nouse with only commas keeps card", map[string]string{AMDNoUse: ", "}, "MI300X", true},
+		{"use with trailing comma matches named type only", map[string]string{AMDInUse: "MI300,"}, "MI250X", false},
+		{"use with only commas rejects card", map[string]string{AMDInUse: ", "}, "MI300X", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := checkAMDType(tt.annos, tt.cardType)
+			assert.Equal(t, tt.want, got)
+		})
+	}
 }

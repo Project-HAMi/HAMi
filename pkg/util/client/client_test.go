@@ -29,18 +29,10 @@ import (
 	"gotest.tools/v3/assert"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
-)
-
-// Mock functions for testing.
-var (
-	buildConfigFromFlags = clientcmd.BuildConfigFromFlags
-	inClusterConfig      = rest.InClusterConfig
 )
 
 // TestGetClient tests the GetClient function.
 func TestGetClient(t *testing.T) {
-	InitGlobalClient()
 	tests := []struct {
 		name           string
 		kubeConfig     string
@@ -48,7 +40,6 @@ func TestGetClient(t *testing.T) {
 		buildConfigErr error
 		inCluster      *rest.Config
 		inClusterErr   error
-		expectError    bool
 	}{
 		{
 			name:           "Success from kubeconfig",
@@ -57,7 +48,6 @@ func TestGetClient(t *testing.T) {
 			buildConfigErr: nil,
 			inCluster:      nil,
 			inClusterErr:   nil,
-			expectError:    false,
 		},
 		{
 			name:           "Fallback to in-cluster config",
@@ -66,7 +56,6 @@ func TestGetClient(t *testing.T) {
 			buildConfigErr: errors.New("kubeconfig error"),
 			inCluster:      &rest.Config{Host: "https://in-cluster.example.com"},
 			inClusterErr:   nil,
-			expectError:    false,
 		},
 	}
 
@@ -91,16 +80,15 @@ func TestGetClient(t *testing.T) {
 			os.Setenv("KUBECONFIG", tt.kubeConfig)
 			defer os.Setenv("KUBECONFIG", oldKubeConfig)
 
+			// Reset sync.Once and initialize the global client using the injected mocks
+			KubeClient = nil
+			once = sync.Once{}
+			InitGlobalClient()
+
 			// Call GetClient and check the result.
 			client := GetClient()
-			if tt.expectError {
-				if client != nil {
-					t.Errorf("Expected error, but got a valid client")
-				}
-			} else {
-				if client == nil {
-					t.Errorf("Expected a valid client, but got nil")
-				}
+			if client == nil {
+				t.Errorf("Expected a valid client, but got nil")
 			}
 		})
 	}
@@ -110,6 +98,13 @@ func TestGetClient(t *testing.T) {
 func TestClientWithOptions(t *testing.T) {
 	KubeClient = nil
 	once = sync.Once{}
+
+	// Mock the config loader to prevent failure on environments without kubeconfig
+	oldBuildConfigFromFlags := buildConfigFromFlags
+	buildConfigFromFlags = func(masterUrl, kubeconfigPath string) (*rest.Config, error) {
+		return &rest.Config{Host: "https://example.com"}, nil
+	}
+	defer func() { buildConfigFromFlags = oldBuildConfigFromFlags }()
 
 	timeout := 1
 	client, _ := NewClient(WithTimeout(timeout))
@@ -152,9 +147,9 @@ func TestClientWithOptions(t *testing.T) {
 // TestClientRealNodePerformance tests the performance with a real Kubernetes cluster if available.
 func TestClientRealNodePerformance(t *testing.T) {
 
-	skipRealClusterTest := true
+	skipRealClusterTest := os.Getenv("TEST_WITH_REAL_CLUSTER") != "true"
 	// Skip this test by default as it requires a real Kubernetes cluster.
-	if skipRealClusterTest == true {
+	if skipRealClusterTest {
 		t.Skip("Skipping real cluster test. Set TEST_WITH_REAL_CLUSTER=true to run this test.")
 	}
 
@@ -217,7 +212,7 @@ func TestClientRealNodePerformance(t *testing.T) {
 				t.Logf("Using node %s for testing", nodeName)
 			}
 			start := time.Now()
-			for i := 0; i < tt.updates; i++ {
+			for i := range tt.updates {
 				labelValue := fmt.Sprintf("perf-test-value-%d", i)
 				node, err := client.CoreV1().Nodes().Get(context.TODO(), nodeName, metav1.GetOptions{})
 				if err != nil {

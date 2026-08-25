@@ -78,6 +78,8 @@ const (
 	GPUSchedulerPolicyTopology SchedulerPolicyName = "topology-aware"
 	// GPUSchedulerPolicyMutex is GPU use mutex scheduler, only idle GPUs are allocated.
 	GPUSchedulerPolicyMutex SchedulerPolicyName = "mutex"
+	// GPUSchedulerPolicyNuma is GPU use numa scheduler, chained as a sort key alongside binpack/spread.
+	GPUSchedulerPolicyNuma SchedulerPolicyName = "numa"
 )
 
 const (
@@ -85,6 +87,12 @@ const (
 	NodeSchedulerPolicyAnnotationKey = "hami.io/node-scheduler-policy"
 	// GPUSchedulerPolicyAnnotationKey is user set Pod annotation to change this default GPU policy.
 	GPUSchedulerPolicyAnnotationKey = "hami.io/gpu-scheduler-policy"
+	// DeviceScoringWeightsAnnotationKey configures per-Pod slot, core, and memory scoring weights.
+	DeviceScoringWeightsAnnotationKey = "hami.io/device-scoring-weights"
+	// NumaAlignmentAnnotationKey is a per-Pod annotation selecting how HAMi
+	// reconciles the scheduler-selected GPU with the NUMA-aligned replica
+	// preferred by kubelet's Topology Manager. See NumaAlignmentMode.
+	NumaAlignmentAnnotationKey = "hami.io/numa-alignment"
 )
 
 func (s SchedulerPolicyName) String() string {

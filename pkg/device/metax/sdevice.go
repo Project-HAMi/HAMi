@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"math"
 	"slices"
 	"sort"
 	"strconv"
@@ -170,16 +171,7 @@ func (sdev *MetaxSDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 }
 
 func (sdev *MetaxSDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-
-	for _, val := range p.Spec.Containers {
-		if (sdev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if !device.PodRequiresDevice(sdev, p) {
 		return nil
 	}
 
@@ -187,16 +179,7 @@ func (sdev *MetaxSDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (sdev *MetaxSDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-
-	for _, val := range p.Spec.Containers {
-		if (sdev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-
-	if !found {
+	if !device.PodRequiresDevice(sdev, p) {
 		return nil
 	}
 
@@ -229,11 +212,19 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			ctr.Name, MetaxResourceNameVCount)
 		return device.ContainerDeviceRequest{}
 	}
+	if count <= 0 || count > math.MaxInt32 {
+		klog.ErrorS(nil, "metax sgpu device count request is out of range", "container", ctr.Name, "request", count)
+		return device.ContainerDeviceRequest{}
+	}
 
 	core := int64(100)
 	coreQuantity, ok := ctr.Resources.Limits[corev1.ResourceName(MetaxResourceNameVCore)]
 	if ok {
 		if v, ok := coreQuantity.AsInt64(); ok {
+			if v < 0 || v > math.MaxInt32 {
+				klog.ErrorS(nil, "metax sgpu device core request is out of range", "container", ctr.Name, "request", coreQuantity.String())
+				return device.ContainerDeviceRequest{}
+			}
 			core = v
 		}
 	}
@@ -250,7 +241,15 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 			if hasUnit {
 				mem = v / 1024 / 1024
 			} else {
-				mem = v * MemoryFactor
+				if v < 0 || v > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
+					return device.ContainerDeviceRequest{}
+				}
+				mem = v * int64(MemoryFactor)
+			}
+			if mem < 0 || mem > math.MaxInt32 {
+				klog.ErrorS(nil, "metax sgpu device memory request is out of range", "container", ctr.Name, "request", memQuantity.String())
+				return device.ContainerDeviceRequest{}
 			}
 		}
 	}
@@ -271,22 +270,24 @@ func (sdev *MetaxSDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 	}
 }
 
+// ScoreNode returns a policy-independent score for the node following a
+// "higher score is a better node" convention. The shared scheduler policy layer
+// is responsible for weighting this score and adapting it to the active
+// scheduling policy (for example, inverting it under the Spread policy).
 func (sdev *MetaxSDevices) ScoreNode(node *corev1.Node, podDevices device.PodSingleDevice, previous []*device.DeviceUsage, policy string) float32 {
-	// TODO: score should not depend on policy
-	// we have to give it a smaller value because of Spread policy
-	weight := 10000
-	if policy == string(util.NodeSchedulerPolicySpread) {
-		weight = -10000
-	}
-
 	if appClassOnlineEnable(podDevices) {
-		return float32(weight * scoreOnlineDevices(podDevices, previous))
+		return float32(scoreOnlineDevices(podDevices, previous))
 	} else if topologyAwareEnable(podDevices) {
-		return float32(weight * scoreExclusiveDevices(podDevices, previous))
+		return float32(scoreExclusiveDevices(podDevices, previous))
 	}
 
 	return 0
 }
+
+// PolicyNeutralScore marks MetaxSDevices as returning a policy-independent
+// score from ScoreNode, so the shared scheduler policy layer owns the weighting
+// and Spread-policy sign inversion.
+func (sdev *MetaxSDevices) PolicyNeutralScore() {}
 
 func (sdev *MetaxSDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, ctr *device.ContainerDevice) error {
 	n.Used++
@@ -315,7 +316,7 @@ func (mats *MetaxSDevices) Fit(devices []*device.DeviceUsage, request device.Con
 
 	// filter device
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	candidateDevices := []*device.DeviceUsage{}
 	for i, v := range slices.Backward(devices) {
 		dev := v

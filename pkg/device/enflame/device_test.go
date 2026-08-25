@@ -167,6 +167,7 @@ func TestFit_SelectProfileByRequest(t *testing.T) {
 			Used:     0,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",
@@ -203,6 +204,7 @@ func TestFit_SelectProfileByMemoryCoreRequest(t *testing.T) {
 			Used:     0,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",
@@ -289,6 +291,7 @@ func TestFit_MutexRejectsUsedDevice(t *testing.T) {
 			Used:     1,
 			Totalmem: 40960,
 			Type:     EnflameVGCUDevice,
+			Health:   true,
 			CustomInfo: map[string]any{
 				"minor": "0",
 				"index": "0",
@@ -309,6 +312,38 @@ func TestFit_MutexRejectsUsedDevice(t *testing.T) {
 	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: annos}}, &device.NodeInfo{}, &device.PodDevices{})
 	assert.Equal(t, fit, false)
 	assert.Equal(t, reason, "1/1 ExclusiveDeviceAllocateConflict")
+}
+
+func TestFit_UnhealthyDeviceRejected(t *testing.T) {
+	dev := InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
+	devices := []*device.DeviceUsage{
+		{
+			ID:       "node-a-enflame-drs-0",
+			Index:    0,
+			Count:    6,
+			Used:     0,
+			Totalmem: 40960,
+			Type:     EnflameVGCUDevice,
+			Health:   false,
+			CustomInfo: map[string]any{
+				"minor": "0",
+				"index": "0",
+				"profiles": map[string]string{
+					"1g.6gb":  "0",
+					"3g.20gb": "1",
+					"6g.40gb": "2",
+				},
+			},
+		},
+	}
+	req := device.ContainerDeviceRequest{
+		Nums:   1,
+		Type:   EnflameVGCUDevice,
+		Memreq: 3,
+	}
+	fit, _, reason := dev.Fit(devices, req, &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, "CardNotHealth"))
 }
 
 func TestPatchAnnotations_DRSFields(t *testing.T) {

@@ -31,6 +31,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
@@ -67,9 +68,30 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.V(3).Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
+	// Reject invalid numa-alignment values at admission, so a typo surfaces
+	// to the user instead of only appearing in a device-plugin log later.
+	if _, err := util.GetNumaAlignmentModeByPod(pod); err != nil {
+		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+		return admission.Denied(err.Error())
+	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+
+	// 1. Process InitContainers
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
+
+	// 2. Process Regular Containers (Keep your existing loop here)
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		for _, val := range device.GetDevices() {
@@ -131,7 +153,6 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
 		resourceNames := dev.GetResourceNames()
 		if len(resourceNames.ResourceMemoryName) == 0 && len(resourceNames.ResourceCoreName) == 0 {
-			// Nothing this backend exposes can carry a quota.
 			continue
 		}
 
@@ -139,15 +160,39 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 		// container spec here. It applies its own memory factor, defaults and
 		// template rounding, which is what the scheduler later records as used,
 		// so this keeps admission and the scheduler on the same numbers.
-		var memoryReq, coresReq int64
+		var appMemoryReq, appCoresReq int64
 		for i := range pod.Spec.Containers {
 			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
 			if req.Nums == 0 {
 				continue
 			}
-			memoryReq += int64(req.Memreq) * int64(req.Nums)
-			coresReq += int64(req.Coresreq) * int64(req.Nums)
+			appMemoryReq += int64(req.Memreq) * int64(req.Nums)
+			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
 		}
+
+		var initPeakMemoryReq, initPeakCoresReq int64
+		var sidecarMemoryReq, sidecarCoresReq int64
+		for i := range pod.Spec.InitContainers {
+			c := &pod.Spec.InitContainers[i]
+			req := dev.GenerateResourceRequests(c)
+			if req.Nums == 0 {
+				continue
+			}
+			mem := int64(req.Memreq) * int64(req.Nums)
+			cores := int64(req.Coresreq) * int64(req.Nums)
+			if util.IsSidecarContainer(c) {
+				sidecarMemoryReq += mem
+				sidecarCoresReq += cores
+				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
+				continue
+			}
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
+		}
+
+		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
+		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}

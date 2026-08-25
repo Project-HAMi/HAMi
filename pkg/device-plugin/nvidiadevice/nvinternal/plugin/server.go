@@ -33,14 +33,12 @@
 package plugin
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
 	"os"
-	"os/exec"
 	"path"
 	"path/filepath"
 	"strconv"
@@ -48,12 +46,15 @@ import (
 	"sync"
 	"time"
 
+	"github.com/NVIDIA/go-nvml/pkg/nvml"
 	spec "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/google/uuid"
 	"github.com/imdario/mergo"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
-	"k8s.io/apimachinery/pkg/util/yaml"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8stypes "k8s.io/apimachinery/pkg/types"
 	"k8s.io/klog/v2"
 	kubeletdevicepluginv1beta1 "k8s.io/kubelet/pkg/apis/deviceplugin/v1beta1"
 	cdiapi "tags.cncf.io/container-device-interface/pkg/cdi"
@@ -65,6 +66,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 	"github.com/Project-HAMi/HAMi/pkg/util"
+	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
 // Constants for use by the 'volume-mounts' device list strategy
@@ -109,8 +111,12 @@ type NvidiaDevicePlugin struct {
 	cdiAnnotationPrefix string
 
 	operatingMode string
-	migCurrent    nvidia.MigPartedSpec
 	deviceCache   string
+
+	// migMgr tracks live MIG GI+CI instances so we can destroy and recreate
+	// them per-task rather than resharding the whole card. Only set when
+	// operatingMode == "mig".
+	migMgr *MigInstanceManager
 
 	imexChannels imex.Channels
 
@@ -181,6 +187,16 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 	if err := config.InitDevicesWithConfig(sConfig); err != nil {
 		klog.Fatalf("failed to initialize devices: %v", err)
 	}
+	if err := nvidia.ValidateMigProfileAllowlist(sConfig.NvidiaConfig.MigProfileAllowlist); err != nil {
+		return nil, fmt.Errorf("validate MIG profile allowlist: %w", err)
+	}
+	var migMgr *MigInstanceManager
+	if mode == "mig" {
+		migMgr = NewMigInstanceManager()
+		if err := migMgr.Init(); err != nil {
+			return nil, fmt.Errorf("init MIG instance manager: %w", err)
+		}
+	}
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
 		rm:                         resourceManager,
@@ -197,7 +213,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
 		schedulerConfig:            sConfig.NvidiaConfig,
 		operatingMode:              mode,
-		migCurrent:                 nvidia.MigPartedSpec{},
+		migMgr:                     migMgr,
 		deviceCache:                "",
 
 		// These will be reinitialized every
@@ -234,17 +250,6 @@ func (plugin *NvidiaDevicePlugin) Devices() rm.Devices {
 	return plugin.rm.Devices()
 }
 
-// BuildFallbackMigConfig - fallback to non-MIG mode
-func (plugin *NvidiaDevicePlugin) buildFallbackMigConfig(deviceNumbers int) {
-	plugin.migCurrent.MigConfigs = make(map[string]nvidia.MigConfigSpecSlice)
-	configSlice := nvidia.MigConfigSpecSlice{}
-	for i := 0; i < deviceNumbers; i++ {
-		conf := nvidia.MigConfigSpec{MigEnabled: false, Devices: []int32{int32(i)}}
-		configSlice = append(configSlice, conf)
-	}
-	plugin.migCurrent.MigConfigs["current"] = configSlice
-}
-
 // Start starts the gRPC server, registers the device plugin with the Kubelet,and starts the device healthchecks.
 func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	plugin.initialize()
@@ -257,6 +262,54 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	deviceNames, err := GetDeviceNames()
 	if err != nil {
 		return err
+	}
+
+	// Prepare the lock directory before any dynamic MIG operation. A stale
+	// lock can be left behind when the previous plugin process exits midway.
+	if err = CreateMigApplyLockDir(); err != nil {
+		klog.Fatalf("CreateMIGLockSubDir failed: %v", err)
+	}
+	if err = RemoveMigApplyLock(); err != nil {
+		klog.Fatalf("RemoveMigApplyLock failed: %v", err)
+	}
+
+	deviceSupportMig := len(deviceNames) > 0
+	for _, name := range deviceNames {
+		supported := false
+		for _, allowlist := range plugin.schedulerConfig.MigProfileAllowlist {
+			if containsModel(name, allowlist.Models) {
+				supported = true
+				break
+			}
+		}
+		if !supported {
+			deviceSupportMig = false
+			break
+		}
+	}
+	if plugin.operatingMode == "mig" {
+		if deviceSupportMig {
+			inUse, detectErr := collectInUseGPUs(plugin.ctx, os.Getenv(util.NodeNameEnvName))
+			if detectErr != nil {
+				// Startup reset is destructive. If Kubernetes allocation state
+				// cannot be read reliably, preserve every GPU rather than risk
+				// removing an allocation that is still active.
+				klog.InfoS("mig init: allocation detection failed; preserving all GPUs", "err", detectErr)
+				for i := 0; i < deviceNumbers; i++ {
+					inUse[i] = struct{}{}
+				}
+			}
+			reset, err := plugin.migMgr.ResetIdleGPUs(deviceNumbers, inUse)
+			if err != nil {
+				klog.InfoS("mig init: failed to reset idle GPUs", "err", err)
+			}
+			klog.InfoS("mig init: resolved startup layout",
+				"inUseGPUs", sortedIntSetKeys(inUse),
+				"resetGPUs", reset)
+			if err := plugin.primeMigManagerFromAnnotations(deviceNames); err != nil {
+				klog.InfoS("mig init: failed to adopt active MIG allocations", "err", err)
+			}
+		}
 	}
 
 	err = plugin.Serve()
@@ -275,62 +328,6 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	}
 	klog.Infof("Registered device plugin for '%s' with Kubelet", plugin.rm.Resource())
 
-	migApplied := false
-	if plugin.operatingMode == "mig" {
-		deviceSupportMig := true
-		for _, name := range deviceNames {
-			supported := false
-			for _, migTemplate := range plugin.schedulerConfig.MigGeometriesList {
-				if containsModel(name, migTemplate.Models) {
-					supported = true
-					break
-				}
-			}
-			if !supported {
-				deviceSupportMig = false
-				break
-			}
-		}
-
-		if deviceSupportMig {
-			err = CreateMigApplyLockDir()
-			if err != nil {
-				klog.Fatalf("CreateMIGLockSubDir failed: %v", err)
-			}
-			err = RemoveMigApplyLock()
-			if err != nil {
-				klog.Fatalf("RemoveMigApplyLock failed: %v", err)
-			}
-
-			cmd := exec.Command("nvidia-mig-parted", "export")
-			var stdout, stderr bytes.Buffer
-			cmd.Stdout = &stdout
-			cmd.Stderr = &stderr
-			err := cmd.Run()
-			if err != nil {
-				klog.Errorf("nvidia-mig-parted failed: %v (stderr: %s)", err, stderr.String())
-				klog.Warning("Falling back to non‑MIG configuration")
-			} else {
-				outStr := stdout.Bytes()
-				yaml.Unmarshal(outStr, &plugin.migCurrent)
-				writeMigConfig(outStr)
-
-				HamiInitMigConfig, err := plugin.processMigConfigs(plugin.migCurrent.MigConfigs, deviceNumbers)
-				if err != nil {
-					klog.Infof("no device in node: %v", err)
-				} else {
-					plugin.migCurrent.MigConfigs["current"] = HamiInitMigConfig
-					migApplied = true
-				}
-			}
-		}
-	}
-
-	if !migApplied {
-		plugin.buildFallbackMigConfig(deviceNumbers)
-		klog.Infoln("Using non‑MIG configuration")
-	}
-
 	go func() {
 		err := plugin.rm.CheckHealth(plugin.stop, plugin.health, plugin.disableHealthChecks, plugin.ackDisableHealthChecks)
 		if err != nil {
@@ -341,12 +338,166 @@ func (plugin *NvidiaDevicePlugin) Start(kubeletSocket string) error {
 	go func() {
 		plugin.WatchAndRegister(plugin.disableWatchAndRegister, plugin.ackDisableWatchAndRegister)
 	}()
-
-	if migApplied {
-		plugin.ApplyMigTemplate()
+	if plugin.operatingMode == "mig" {
+		// Pod annotations are the allocation source of truth. Periodically
+		// reconcile the manager with live Pods so completed or deleted Pods
+		// release their exact profile+placement allocation.
+		go plugin.runMigAnnotationReconciler(5 * time.Second)
+		// The manager's NVML session is owned by the plugin's lifetime, not
+		// by individual Start/Stop cycles (Stop only restarts the gRPC
+		// server); release it once when the plugin is finally torn down.
+		go func() {
+			<-plugin.ctx.Done()
+			plugin.migMgr.Shutdown()
+		}()
 	}
 
 	return nil
+}
+
+func activeMigAllocationKeys(pods []corev1.Pod) (map[migAllocationKey]struct{}, error) {
+	active := make(map[migAllocationKey]struct{})
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
+		if err != nil {
+			return nil, fmt.Errorf("decode MIG allocations for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+		}
+		for _, allocation := range allocations {
+			gpuIndex, ok := gpuUUIDToIndex(allocation.GPUUUID)
+			if !ok {
+				return nil, fmt.Errorf("resolve active MIG parent GPU %q", allocation.GPUUUID)
+			}
+			active[allocationKey(gpuIndex, allocation.Profile, nvml.GpuInstancePlacement{Start: allocation.Placement.Start, Size: allocation.Placement.Size})] = struct{}{}
+		}
+	}
+	return active, nil
+}
+
+func (plugin *NvidiaDevicePlugin) annotateMigRuntimeInfo(pod *corev1.Pod) error {
+	allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
+	if err != nil {
+		return err
+	}
+	updated := false
+	for i := range allocations {
+		gpuIndex, ok := gpuUUIDToIndex(allocations[i].GPUUUID)
+		if !ok {
+			return fmt.Errorf("resolve MIG parent GPU %q", allocations[i].GPUUUID)
+		}
+		info, ok := plugin.migMgr.AllocationRuntimeInfo(gpuIndex, allocations[i].Profile, nvml.GpuInstancePlacement{Start: allocations[i].Placement.Start, Size: allocations[i].Placement.Size})
+		if !ok {
+			continue // A later Allocate call may own another container's allocation.
+		}
+		allocations[i].MigUUID = info.MigUUID
+		allocations[i].GPUInstanceID = uint32Ptr(info.GIID)
+		allocations[i].ComputeInstanceID = uint32Ptr(info.CIID)
+		updated = true
+	}
+	if !updated {
+		return errors.New("no realised MIG allocation found for pod")
+	}
+	raw, err := json.Marshal(allocations)
+	if err != nil {
+		return err
+	}
+	patch, err := json.Marshal(map[string]any{
+		"metadata": map[string]any{
+			"resourceVersion": pod.ResourceVersion,
+			"annotations": map[string]string{
+				nvidia.MigAllocationsAnnotation: string(raw),
+			},
+		},
+	})
+	if err != nil {
+		return err
+	}
+	if _, err := client.GetClient().CoreV1().Pods(pod.Namespace).Patch(plugin.ctx, pod.Name, k8stypes.MergePatchType, patch, metav1.PatchOptions{}); err != nil {
+		return err
+	}
+	pod.Annotations[nvidia.MigAllocationsAnnotation] = string(raw)
+	return nil
+}
+
+func uint32Ptr(value uint32) *uint32 {
+	return &value
+}
+
+func (plugin *NvidiaDevicePlugin) reconcileActiveMigAllocations() error {
+	active, err := plugin.listActiveMigAllocationKeys()
+	if err != nil {
+		return err
+	}
+	return plugin.migMgr.ReconcileActiveAllocations(active)
+}
+
+func (plugin *NvidiaDevicePlugin) listActiveMigAllocationKeys() (map[migAllocationKey]struct{}, error) {
+	pods, err := client.GetClient().CoreV1().Pods("").List(plugin.ctx, metav1.ListOptions{
+		FieldSelector: "spec.nodeName=" + os.Getenv(util.NodeNameEnvName),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return activeMigAllocationKeys(pods.Items)
+}
+
+func (plugin *NvidiaDevicePlugin) primeMigManagerFromAnnotations(_ []string) error {
+	pods, err := client.GetClient().CoreV1().Pods("").List(plugin.ctx, metav1.ListOptions{
+		FieldSelector: "spec.nodeName=" + os.Getenv(util.NodeNameEnvName),
+	})
+	if err != nil {
+		return err
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil || pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			continue
+		}
+		allocations, err := nvidia.DecodeMigAllocations(pod.Annotations[nvidia.MigAllocationsAnnotation])
+		if err != nil {
+			return err
+		}
+		for _, allocation := range allocations {
+			if allocation.MigUUID == "" || allocation.GPUInstanceID == nil || allocation.ComputeInstanceID == nil {
+				return fmt.Errorf("active pod %s/%s MIG allocation lacks runtime identity", pod.Namespace, pod.Name)
+			}
+			gpuIndex, ok := gpuUUIDToIndex(allocation.GPUUUID)
+			if !ok {
+				return fmt.Errorf("resolve active MIG parent GPU %q", allocation.GPUUUID)
+			}
+			if err := plugin.migMgr.AdoptAllocation(
+				gpuIndex,
+				allocation.Profile,
+				allocation.MigUUID,
+				nvml.GpuInstancePlacement{Start: allocation.Placement.Start, Size: allocation.Placement.Size},
+				*allocation.GPUInstanceID,
+				*allocation.ComputeInstanceID,
+			); err != nil {
+				return fmt.Errorf("adopt pod %s/%s MIG allocation: %w", pod.Namespace, pod.Name, err)
+			}
+		}
+	}
+	return nil
+}
+
+func (plugin *NvidiaDevicePlugin) runMigAnnotationReconciler(interval time.Duration) {
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-plugin.ctx.Done():
+			return
+		case <-ticker.C:
+			if err := plugin.reconcileActiveMigAllocations(); err != nil {
+				// Reconciliation is destructive, so API or annotation errors are
+				// fail-closed and leave current MIG instances untouched.
+				klog.InfoS("periodic MIG reconciliation skipped", "err", err)
+			}
+		}
+	}
 }
 
 // Stop stops the gRPC server.
@@ -454,7 +605,11 @@ func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubel
 
 // ListAndWatch lists devices and update that list according to the health status
 func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Empty, s kubeletdevicepluginv1beta1.DevicePlugin_ListAndWatchServer) error {
-	s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+	if err != nil {
+		klog.Errorf("Failed to send ListAndWatch response: %v", err)
+		return err
+	}
 
 	for {
 		select {
@@ -464,7 +619,10 @@ func (plugin *NvidiaDevicePlugin) ListAndWatch(e *kubeletdevicepluginv1beta1.Emp
 			// FIXME: there is no way to recover from the Unhealthy state.
 			d.Health = kubeletdevicepluginv1beta1.Unhealthy
 			klog.Infof("'%s' device marked unhealthy: %s", plugin.rm.Resource(), d.ID)
-			s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()})
+			if err := s.Send(&kubeletdevicepluginv1beta1.ListAndWatchResponse{Devices: plugin.apiDevices()}); err != nil {
+				klog.Errorf("Failed to send health-update ListAndWatch response: %v", err)
+				return nil
+			}
 		}
 	}
 }
@@ -474,10 +632,12 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	response := &kubeletdevicepluginv1beta1.PreferredAllocationResponse{}
 
 	var annotatedRequests device.PodSingleDevice
+	var pendingPod *corev1.Pod
 	nodename := os.Getenv(util.NodeNameEnvName)
 	if nodename != "" {
 		current, err := getPendingPod(ctx, nodename)
 		if err == nil && current != nil {
+			pendingPod = current
 			if podRequests, decodeErr := device.DecodePodDevices(device.InRequestDevices, current.Annotations); decodeErr == nil {
 				annotatedRequests = podRequests[nvidia.NvidiaGPUDevice]
 			}
@@ -487,10 +647,14 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 	// Filter out empty annotations to match kubelet's ContainerRequests order.
 	// Kubelet only sends requests for containers that need GPUs, but annotations
 	// include all containers (init + regular), some of which may be empty.
+	// annotationIndices keeps each entry's original PodDevices container
+	// position, which the NUMA refit protocol requires.
 	var nonEmptyAnnotations []device.ContainerDevices
-	for _, ann := range annotatedRequests {
+	var annotationIndices []int
+	for i, ann := range annotatedRequests {
 		if len(ann) > 0 {
 			nonEmptyAnnotations = append(nonEmptyAnnotations, ann)
+			annotationIndices = append(annotationIndices, i)
 		}
 	}
 
@@ -504,10 +668,61 @@ func (plugin *NvidiaDevicePlugin) GetPreferredAllocation(ctx context.Context, r 
 				})
 			} else {
 				klog.Warningf("err: %v", err)
+				refitDevices, refitErr := plugin.tryNumaRefit(ctx, pendingPod, annotationIndices[idx], req, err)
+				switch {
+				case refitErr != nil:
+					// Strict mode, or a committed refit kubelet cannot
+					// honor: fail the pod's admission rather than running
+					// misaligned or diverging from accounting. Mark the
+					// bind failed so the node lock is released instead of
+					// blocking the node until the lock timeout.
+					if nodename != "" && pendingPod != nil {
+						PodAllocationFailed(nodename, pendingPod, NodeLockNvidia)
+					}
+					return nil, refitErr
+				case len(refitDevices) > 0:
+					response.ContainerResponses = append(response.ContainerResponses, &kubeletdevicepluginv1beta1.ContainerPreferredAllocationResponse{
+						DeviceIDs: refitDevices,
+					})
+				default:
+					plugin.reportAnnotatedDeviceMismatch(pendingPod, idx, err)
+				}
 			}
 		}
 	}
 	return response, nil
+}
+
+// errAnnotatedDeviceUnavailable indicates kubelet's available device set
+// contains no replica of a scheduler-annotated GPU, typically because the
+// Topology Manager restricted the allocation to a different NUMA node.
+var errAnnotatedDeviceUnavailable = errors.New("no available slice device found for annotated GPU")
+
+// reportAnnotatedDeviceMismatch surfaces an annotated-GPU mismatch for Pods
+// that opt into NUMA alignment via the hami.io/numa-alignment annotation.
+// Detection only: the preferred allocation response is left unchanged, so
+// kubelet still falls back to its own device selection. The NUMA refit that
+// acts on this condition is tracked in issue #2080.
+func (plugin *NvidiaDevicePlugin) reportAnnotatedDeviceMismatch(pod *corev1.Pod, containerRequest int, err error) {
+	if pod == nil || plugin.operatingMode == nvidia.MigMode || !errors.Is(err, errAnnotatedDeviceUnavailable) {
+		return
+	}
+
+	mode, parseErr := util.GetNumaAlignmentModeByPod(pod)
+	if parseErr != nil {
+		klog.Warningf("ignoring invalid numa-alignment annotation on pod %s/%s: %v", pod.Namespace, pod.Name, parseErr)
+		return
+	}
+	if mode == util.NumaAlignmentNone {
+		return
+	}
+
+	const message = "scheduler-annotated GPU has no replica in kubelet's available devices and the NUMA refit did not handle it, so kubelet will select a device on its own"
+	if mode == util.NumaAlignmentStrict {
+		klog.ErrorS(err, message, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
+		return
+	}
+	klog.InfoS(message, "err", err, "pod", klog.KObj(pod), "containerRequest", containerRequest, "numaAlignment", string(mode))
 }
 
 func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(available, required []string, desired device.ContainerDevices, allocationSize int) ([]string, error) {
@@ -541,13 +756,17 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 		}
 		candidates := availableByPhysical[physicalID]
 		if len(candidates) == 0 {
-			return nil, fmt.Errorf("no available slice device found for annotated GPU %s", physicalID)
+			return nil, fmt.Errorf("%w %s", errAnnotatedDeviceUnavailable, physicalID)
 		}
 		selected = append(selected, candidates[0])
 		availableByPhysical[physicalID] = candidates[1:]
 	}
 
 	if len(selected) != allocationSize {
+		// This can also indicate kubelet-vs-scheduler divergence, for
+		// example MustIncludeDeviceIDs carrying replicas of a GPU the
+		// scheduler never annotated. Classifying that case is deferred to
+		// the NUMA refit (issue #2080).
 		return nil, fmt.Errorf("preferred allocation selected %d devices, want %d", len(selected), allocationSize)
 	}
 
@@ -557,10 +776,6 @@ func (plugin *NvidiaDevicePlugin) selectPreferredDeviceIDsFromAnnotatedDevices(a
 func physicalDeviceID(id string) string {
 	if strings.Contains(id, "::") {
 		return rm.AnnotatedID(id).GetID()
-	}
-	// Handle MIG format: GPU-UUID[tidx-idx] -> GPU-UUID
-	if bracketIdx := strings.Index(id, "["); bracketIdx != -1 {
-		return id[:bracketIdx]
 	}
 	// Handle virtual device format: GPU-UUID-N -> GPU-UUID
 	// NVIDIA GPU UUID has exactly 5 dashes (GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)
@@ -591,6 +806,12 @@ func (plugin *NvidiaDevicePlugin) alignContainerDevicesWithAllocatedIDs(devreq d
 
 // Allocate which return list of devices.
 func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdevicepluginv1beta1.AllocateRequest) (*kubeletdevicepluginv1beta1.AllocateResponse, error) {
+	// Kubelet may issue Allocate calls concurrently. The pending-pod
+	// annotation protocol and dynamic MIG preparation are node-global, so keep
+	// pod selection, GI/CI creation, and annotation consumption atomic.
+	plugin.applyMutex.Lock()
+	defer plugin.applyMutex.Unlock()
+
 	klog.InfoS("Allocate", "request", reqs)
 	responses := kubeletdevicepluginv1beta1.AllocateResponse{}
 	nodename := os.Getenv(util.NodeNameEnvName)
@@ -600,6 +821,12 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 	}
 	klog.Infof("Allocate pod name is %s/%s, annotation is %+v", current.Namespace, current.Name, current.Annotations)
+
+	podSingleDev, err := decodePodSingleDevice(nvidia.NvidiaGPUDevice, current)
+	if err != nil {
+		PodAllocationFailed(nodename, current, NodeLockNvidia)
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+	}
 
 	for idx, req := range reqs.ContainerRequests {
 		// If the devices being allocated are replicas, then (conditionally)
@@ -627,7 +854,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			}
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		} else {
-			currentCtr, devreq, err := GetNextDeviceRequest(nvidia.NvidiaGPUDevice, *current)
+			currentCtr, devreq, err := popNextContainerDevices(current, podSingleDev)
 			klog.Infoln("deviceAllocateFromAnnotation=", devreq)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
@@ -637,6 +864,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return &kubeletdevicepluginv1beta1.AllocateResponse{}, errors.New("device number not matched")
 			}
+
 			if enableGetPreferredAllocation && plugin.operatingMode != "mig" {
 				alignedDevreq, err := plugin.alignContainerDevicesWithAllocatedIDs(devreq, reqs.ContainerRequests[idx].DevicesIds)
 				if err != nil {
@@ -645,16 +873,21 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 				}
 				devreq = alignedDevreq
 			}
-			response, err := plugin.getAllocateResponse(plugin.GetContainerDeviceStrArray(devreq))
+			requestIDs, err := plugin.GetContainerDeviceStrArray(devreq, current, currentCtr.Name)
+			if err != nil {
+				PodAllocationFailed(nodename, current, NodeLockNvidia)
+				return nil, fmt.Errorf("resolve allocated NVIDIA devices: %w", err)
+			}
+			if plugin.operatingMode == "mig" {
+				if err := plugin.annotateMigRuntimeInfo(current); err != nil {
+					PodAllocationFailed(nodename, current, NodeLockNvidia)
+					return nil, fmt.Errorf("record MIG runtime placement: %w", err)
+				}
+			}
+			response, err := plugin.getAllocateResponse(requestIDs)
 			if err != nil {
 				PodAllocationFailed(nodename, current, NodeLockNvidia)
 				return nil, fmt.Errorf("failed to get allocate response: %v", err)
-			}
-
-			err = eraseNextDeviceTypeFromAnnotation(nvidia.NvidiaGPUDevice, *current)
-			if err != nil {
-				PodAllocationFailed(nodename, current, NodeLockNvidia)
-				return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
 			}
 
 			if plugin.operatingMode != "mig" {
@@ -727,6 +960,13 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 			responses.ContainerResponses = append(responses.ContainerResponses, response)
 		}
 	}
+
+	if err := patchErasedAnnotation(current, nvidia.NvidiaGPUDevice, podSingleDev); err != nil {
+		klog.Errorf("erase allocated containers annotation error: %v", err)
+		PodAllocationFailed(nodename, current, NodeLockNvidia)
+		return &kubeletdevicepluginv1beta1.AllocateResponse{}, err
+	}
+
 	klog.Infoln("Allocate Response", responses.ContainerResponses)
 	PodAllocationTrySuccess(nodename, nvidia.NvidiaGPUDevice, NodeLockNvidia, current)
 	return &responses, nil
@@ -956,48 +1196,4 @@ func (plugin *NvidiaDevicePlugin) apiDeviceSpecs(devRoot string, ids []string) [
 func (plugin *NvidiaDevicePlugin) apiDevices() []*kubeletdevicepluginv1beta1.Device {
 	numaTopology := plugin.schedulerConfig.EnableNUMATopology != nil && *plugin.schedulerConfig.EnableNUMATopology
 	return plugin.Devices().GetPluginDevices(*plugin.schedulerConfig.DeviceSplitCount, numaTopology)
-}
-
-func (plugin *NvidiaDevicePlugin) processMigConfigs(migConfigs map[string]nvidia.MigConfigSpecSlice, deviceCount int) (nvidia.MigConfigSpecSlice, error) {
-	if migConfigs == nil {
-		return nil, fmt.Errorf("migConfigs cannot be nil")
-	}
-	if deviceCount <= 0 {
-		return nil, fmt.Errorf("deviceCount must be positive")
-	}
-
-	transformConfigs := func() (nvidia.MigConfigSpecSlice, error) {
-		var result nvidia.MigConfigSpecSlice
-
-		if len(migConfigs["current"]) == 1 && len(migConfigs["current"][0].Devices) == 0 {
-			for i := 0; i < deviceCount; i++ {
-				config := deepCopyMigConfig(migConfigs["current"][0])
-				config.Devices = []int32{int32(i)}
-				result = append(result, config)
-			}
-			return result, nil
-		}
-
-		deviceToConfig := make(map[int32]*nvidia.MigConfigSpec)
-		for i := range migConfigs["current"] {
-			for _, device := range migConfigs["current"][i].Devices {
-				deviceToConfig[device] = &migConfigs["current"][i]
-			}
-		}
-
-		for i := 0; i < deviceCount; i++ {
-			deviceIndex := int32(i)
-			config, exists := deviceToConfig[deviceIndex]
-			if !exists {
-				return nil, fmt.Errorf("device %d does not match any MIG configuration", i)
-			}
-			newConfig := deepCopyMigConfig(*config)
-			newConfig.Devices = []int32{deviceIndex}
-			result = append(result, newConfig)
-
-		}
-		return result, nil
-	}
-
-	return transformConfigs()
 }

@@ -423,18 +423,44 @@ func TestDevices_LockNode(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name:        "Test with no containers",
+			name:        "no containers — skip lock",
 			node:        &corev1.Node{},
 			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
 			hasLock:     false,
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "regular-container GPU request — acquires lock",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"birentech.com/gpu": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init-container-only GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init+regular GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},
@@ -734,7 +760,7 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    1,
 			wantDevIDs: []string{},
 			wantReason: "1/1 AllocatedCardsInsufficientRequest",
 		},
@@ -807,9 +833,37 @@ func TestDevices_Fit(t *testing.T) {
 			},
 			annos:      map[string]string{},
 			wantFit:    false,
-			wantLen:    0,
+			wantLen:    2,
 			wantDevIDs: []string{},
 			wantReason: "2/2 AllocatedCardsInsufficientRequest",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     1,
+				Usedmem:   0,
+				Totalmem:  0,
+				Totalcore: 0,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      BirenDevice,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           0,
+				MemPercentagereq: 0,
+				Coresreq:         0,
+				Type:             BirenDevice,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 	}
 
@@ -825,10 +879,10 @@ func TestDevices_Fit(t *testing.T) {
 			if fit != test.wantFit {
 				t.Errorf("Fit: got %v, want %v", fit, test.wantFit)
 			}
+			if len(result[BirenDevice]) != test.wantLen {
+				t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[BirenDevice]))
+			}
 			if test.wantFit {
-				if len(result[BirenDevice]) != test.wantLen {
-					t.Errorf("expected len: %d, got len %d", test.wantLen, len(result[BirenDevice]))
-				}
 				for idx, id := range test.wantDevIDs {
 					if id != result[BirenDevice][idx].UUID {
 						t.Errorf("expected device id: %s, got device id %s", id, result[BirenDevice][idx].UUID)

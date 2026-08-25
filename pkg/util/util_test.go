@@ -366,6 +366,14 @@ func TestPatchPodAnnotations(t *testing.T) {
 			},
 			wantErr: true,
 		},
+		{
+			name: "patch nil pod",
+			pod:  nil,
+			annotations: map[string]string{
+				"test-key": "test-value",
+			},
+			wantErr: true,
+		},
 	}
 
 	for _, tt := range tests {
@@ -429,6 +437,11 @@ func Test_IsPodInTerminatedState(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -444,6 +457,11 @@ func Test_AllContainersCreated(t *testing.T) {
 		args *corev1.Pod
 		want bool
 	}{
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 		{
 			name: "all containers created",
 			args: &corev1.Pod{
@@ -727,6 +745,11 @@ func Test_IsPodTerminating(t *testing.T) {
 			},
 			want: false,
 		},
+		{
+			name: "pod is nil",
+			args: nil,
+			want: false,
+		},
 	}
 
 	for _, test := range tests {
@@ -760,6 +783,29 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			assert.Equal(t, tt.want, GetGPUSchedulerPolicyByPod(tt.defaultPolicy, tt.pod))
+		})
+	}
+}
+
+func TestPolicyContains(t *testing.T) {
+	tests := []struct {
+		name   string
+		policy string
+		target SchedulerPolicyName
+		want   bool
+	}{
+		{"single value match", "mutex", GPUSchedulerPolicyMutex, true},
+		{"single value no match", "spread", GPUSchedulerPolicyMutex, false},
+		{"empty policy", "", GPUSchedulerPolicyMutex, false},
+		{"comma list match first", "mutex,spread", GPUSchedulerPolicyMutex, true},
+		{"comma list match last", "spread,numa,mutex", GPUSchedulerPolicyMutex, true},
+		{"comma list no match", "binpack,spread", GPUSchedulerPolicyMutex, false},
+		{"comma list with spaces", "mutex, spread, numa", GPUSchedulerPolicyNuma, true},
+		{"chain of sort keys, no filter", "binpack,spread,numa", GPUSchedulerPolicyTopology, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			assert.Equal(t, tt.want, PolicyContains(tt.policy, tt.target))
 		})
 	}
 }
@@ -873,4 +919,120 @@ func TestEmitNodeWarningEvent(t *testing.T) {
 		// Old event still present plus one new event.
 		assert.Equal(t, 2, len(events.Items))
 	})
+}
+
+func TestIsSidecarContainer(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	other := corev1.ContainerRestartPolicy("Never")
+
+	assert.Assert(t, !IsSidecarContainer(nil))
+	assert.Assert(t, !IsSidecarContainer(&corev1.Container{Name: "c"}))
+	assert.Assert(t, !IsSidecarContainer(&corev1.Container{Name: "c", RestartPolicy: &other}))
+	assert.Assert(t, IsSidecarContainer(&corev1.Container{Name: "c", RestartPolicy: &always}))
+}
+
+func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
+	always := corev1.ContainerRestartPolicyAlways
+	sidecar := corev1.Container{Name: "sc", RestartPolicy: &always}
+	initC := corev1.Container{Name: "init"} // nil restartPolicy → regular init
+
+	term0 := corev1.ContainerStatus{Name: "init",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}
+	term1 := corev1.ContainerStatus{Name: "init",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 1}}}
+	running := corev1.ContainerStatus{Name: "init",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}
+	scRunning := corev1.ContainerStatus{Name: "sc",
+		State: corev1.ContainerState{Running: &corev1.ContainerStateRunning{}}}
+	// A crash-looping sidecar momentarily shows Terminated exit 0 — the
+	// exit-0 gap from the design. It must be irrelevant to the gate.
+	scGap := corev1.ContainerStatus{Name: "sc",
+		State: corev1.ContainerState{Terminated: &corev1.ContainerStateTerminated{ExitCode: 0}}}
+
+	cases := []struct {
+		name   string
+		spec   []corev1.Container
+		status []corev1.ContainerStatus
+		want   bool
+	}{
+		{"no init containers", nil, nil, false},
+		{"init running, sidecar running", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{running, scRunning}, false},
+		{"init exit0, sidecar running", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{term0, scRunning}, true},
+		{"init exit0, sidecar in exit-0 gap", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{term0, scGap}, true},
+		{"init running, sidecar in exit-0 gap must NOT open gate", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{running, scGap}, false},
+		{"init nonzero exit holds", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{term1, scRunning}, false},
+		{"all sidecars: gate immediately satisfied", []corev1.Container{sidecar}, []corev1.ContainerStatus{scRunning}, true},
+		{"missing status for non-sidecar init", []corev1.Container{initC, sidecar}, []corev1.ContainerStatus{scRunning}, false},
+		{"plain init pod, all exit0 (legacy behavior)", []corev1.Container{initC}, []corev1.ContainerStatus{term0}, true},
+		{"plain init pod, still running (legacy behavior)", []corev1.Container{initC}, []corev1.ContainerStatus{running}, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				Spec:   corev1.PodSpec{InitContainers: tc.spec},
+				Status: corev1.PodStatus{InitContainerStatuses: tc.status},
+			}
+			got := AllNonSidecarInitContainersSucceeded(pod)
+			assert.Equal(t, tc.want, got)
+		})
+	}
+}
+
+func TestPatchNodeAnnotations_NilNode(t *testing.T) {
+	err := PatchNodeAnnotations(nil, map[string]string{"hami.io/test": "bar"})
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestPatchNodeAnnotations_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, "bar", updated.Annotations["hami.io/test"])
+}
+
+func TestRemoveNodeAnnotation_NilNode(t *testing.T) {
+	err := RemoveNodeAnnotation(nil, "hami.io/test")
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestRemoveNodeAnnotation_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				"hami.io/test": "bar",
+			},
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := RemoveNodeAnnotation(node, "hami.io/test")
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, hasAnno := updated.Annotations["hami.io/test"]
+	assert.Assert(t, !hasAnno)
+}
+
+func TestPatchNodeAnnotations_NilClient(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = nil
+	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
+	assert.ErrorContains(t, err, "kubernetes client is not initialized")
 }

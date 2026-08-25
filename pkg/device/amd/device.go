@@ -131,28 +131,14 @@ func (dev *AMDDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[string]s
 }
 
 func (dev *AMDDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, NodeLockAMD, p)
 }
 
 func (dev *AMDDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, NodeLockAMD, p, false)
@@ -164,18 +150,20 @@ func (dev *AMDDevices) NodeCleanUp(nn string) error {
 
 func checkAMDType(annos map[string]string, cardType string) bool {
 	cardType = strings.ToUpper(cardType)
-	if inuse, ok := annos[AMDInUse]; ok {
+	if inuse, ok := annos[AMDInUse]; ok && strings.TrimSpace(inuse) != "" {
 		useTypes := strings.Split(inuse, ",")
 		if !slices.ContainsFunc(useTypes, func(useType string) bool {
-			return strings.Contains(cardType, strings.ToUpper(strings.TrimSpace(useType)))
+			useType = strings.TrimSpace(useType)
+			return useType != "" && strings.Contains(cardType, strings.ToUpper(useType))
 		}) {
 			return false
 		}
 	}
-	if noUse, ok := annos[AMDNoUse]; ok {
+	if noUse, ok := annos[AMDNoUse]; ok && strings.TrimSpace(noUse) != "" {
 		noUseTypes := strings.Split(noUse, ",")
 		if slices.ContainsFunc(noUseTypes, func(noUseType string) bool {
-			return strings.Contains(cardType, strings.ToUpper(strings.TrimSpace(noUseType)))
+			noUseType = strings.TrimSpace(noUseType)
+			return noUseType != "" && strings.Contains(cardType, strings.ToUpper(noUseType))
 		}) {
 			return false
 		}
@@ -280,11 +268,15 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type, "dev=", dev)
 		_, found, _ := amddevice.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {

@@ -35,6 +35,7 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	v0 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v0"
 	v1 "github.com/Project-HAMi/HAMi/pkg/monitor/nvidia/v1"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 )
@@ -43,6 +44,11 @@ import (
 // every field of the real v1 sharedRegionT; using a smaller fixture would
 // leave usage.Info backed by an out-of-bounds pointer.
 var v1CacheFileSize = v1.MinSize()
+
+// v0CacheFileSize is the minimum byte count for v0.CastSpec to safely
+// dereference every field of the v0 sharedRegionT; using a smaller fixture
+// would leave usage.Info backed by an out-of-bounds pointer.
+var v0CacheFileSize = v0.MinSize()
 
 // fakePodLister is a minimal corelisters.PodLister used to drive Update()'s
 // error path without touching a real (or fake) Kubernetes API server.
@@ -80,6 +86,22 @@ func writeCacheFile(t *testing.T, dir, name string, content []byte) string {
 	p := filepath.Join(dir, name)
 	assert.NilError(t, os.WriteFile(p, content, 0666))
 	return p
+}
+
+// makeV0CacheBytes builds a minimal v0 shared-memory cache payload with the
+// given device count and per-device memory limits. Field offsets are derived
+// from unsafe.Offsetof applied to the unexported v0.sharedRegionT:
+//
+//	num   @ byte 48   (uint64, little-endian)
+//	limit @ byte 1592 (16 × uint64, one per device slot, little-endian)
+func makeV0CacheBytes(numDevices int, limits []uint64) []byte {
+	buf := make([]byte, v0.MinSize())
+	binary.LittleEndian.PutUint32(buf[0:4], uint32(SharedRegionMagicFlag))
+	binary.LittleEndian.PutUint64(buf[48:56], uint64(numDevices))
+	for i, l := range limits {
+		binary.LittleEndian.PutUint64(buf[1592+i*8:1592+(i+1)*8], l)
+	}
+	return buf
 }
 
 func Test_ContainerLister_Accessors(t *testing.T) {
@@ -217,6 +239,32 @@ func Test_loadCache(t *testing.T) {
 		assert.ErrorContains(t, err, "cache num not matched")
 	})
 
+	t.Run("ignores unrelated files when one cache file exists", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		writeCacheFile(t, dir, "notes.txt", []byte("x"))
+		writeCacheFile(t, dir, "debug.log", []byte("x"))
+
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.Info != nil)
+		defer func() { _ = syscall.Munmap(usage.data) }()
+	})
+
+	t.Run("ignores files that contain cache suffix in the middle", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v1CacheFileSize, SharedRegionMagicFlag, 1, 0))
+		writeCacheFile(t, dir, "debug.cache.bak", []byte("x"))
+		writeCacheFile(t, dir, "trace.cache.tmp", []byte("x"))
+
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.Info != nil)
+		defer func() { _ = syscall.Munmap(usage.data) }()
+	})
+
 	t.Run("empty directory", func(t *testing.T) {
 		usage, err := loadCache(t.TempDir())
 		assert.NilError(t, err)
@@ -270,7 +318,17 @@ func Test_loadCache(t *testing.T) {
 		defer func() { _ = syscall.Munmap(usage.data) }()
 	})
 
-	t.Run("v0 cache file (exact legacy size)", func(t *testing.T) {
+	t.Run("v0 cache file (struct-derived size)", func(t *testing.T) {
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", headerBytes(v0CacheFileSize, SharedRegionMagicFlag, 0, 0))
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.Info != nil)
+		defer func() { _ = syscall.Munmap(usage.data) }()
+	})
+
+	t.Run("v0 cache file (empirical legacy size 1197897)", func(t *testing.T) {
 		dir := t.TempDir()
 		writeCacheFile(t, dir, "x.cache", headerBytes(1197897, SharedRegionMagicFlag, 0, 0))
 		usage, err := loadCache(dir)
@@ -278,6 +336,25 @@ func Test_loadCache(t *testing.T) {
 		assert.Assert(t, usage != nil)
 		assert.Assert(t, usage.Info != nil)
 		defer func() { _ = syscall.Munmap(usage.data) }()
+	})
+
+	t.Run("v0 cache file (e2e: field data round-trips through loadCache)", func(t *testing.T) {
+		const (
+			wantNum    = 2
+			wantLimit0 = 4 * 1024 * 1024 * 1024
+			wantLimit1 = 2 * 1024 * 1024 * 1024
+		)
+		dir := t.TempDir()
+		writeCacheFile(t, dir, "x.cache", makeV0CacheBytes(wantNum, []uint64{wantLimit0, wantLimit1}))
+		usage, err := loadCache(dir)
+		assert.NilError(t, err)
+		assert.Assert(t, usage != nil)
+		assert.Assert(t, usage.Info != nil)
+		defer func() { _ = syscall.Munmap(usage.data) }()
+
+		assert.Equal(t, wantNum, usage.Info.DeviceNum())
+		assert.Equal(t, uint64(wantLimit0), usage.Info.DeviceMemoryLimit(0))
+		assert.Equal(t, uint64(wantLimit1), usage.Info.DeviceMemoryLimit(1))
 	})
 
 	t.Run("open file fails", func(t *testing.T) {
