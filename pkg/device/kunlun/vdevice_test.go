@@ -314,12 +314,40 @@ func Test_KunlunVDevices_LockNode(t *testing.T) {
 			hasLock: false,
 		},
 		{
-			name: "container requesting xpu locks node",
+			name: "regular container requesting xpu locks node",
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
 				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
 					corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
 				}},
 			}}}},
+			hasLock: true,
+		},
+		{
+			name: "init-container-only requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock: true,
+		},
+		{
+			name: "init+regular both requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+			}},
 			hasLock: true,
 		},
 	}

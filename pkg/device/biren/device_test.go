@@ -423,18 +423,44 @@ func TestDevices_LockNode(t *testing.T) {
 		expectError bool
 	}{
 		{
-			name:        "Test with no containers",
+			name:        "no containers — skip lock",
 			node:        &corev1.Node{},
 			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
 			hasLock:     false,
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "regular-container GPU request — acquires lock",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"birentech.com/gpu": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init-container-only GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "init+regular GPU request — acquires lock",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"birentech.com/gpu": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},

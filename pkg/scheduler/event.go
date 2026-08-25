@@ -40,6 +40,11 @@ const (
 	EventReasonBindingFailed = "BindingFailed"
 	// EventReasonBindingSucceed indicates that  binding succeed.
 	EventReasonBindingSucceed = "BindingSucceed"
+
+	// EventReasonNumaRefitFailed indicates that a NUMA refit failed.
+	EventReasonNumaRefitFailed = "NumaRefitFailed"
+	// EventReasonNumaRefitSucceed indicates that a NUMA refit succeeded.
+	EventReasonNumaRefitSucceed = "NumaRefitSucceed"
 )
 
 func (s *Scheduler) addAllEventHandlers() {
@@ -62,6 +67,19 @@ func (s *Scheduler) recordScheduleBindingResultEvent(pod *corev1.Pod, eventReaso
 		s.eventRecorder.Event(pod, corev1.EventTypeNormal, eventReason, successMsg)
 	} else {
 		s.eventRecorder.Event(pod, corev1.EventTypeWarning, eventReason, schedulerErr.Error())
+	}
+}
+
+// recordNumaRefitResultEvent emits the outcome of a NUMA refit on the pod.
+func (s *Scheduler) recordNumaRefitResultEvent(pod *corev1.Pod, successMsg string, refitErr error) {
+	// eventRecorder maybe  nil
+	if pod == nil || s.eventRecorder == nil {
+		return
+	}
+	if refitErr == nil {
+		s.eventRecorder.Event(pod, corev1.EventTypeNormal, EventReasonNumaRefitSucceed, successMsg)
+	} else {
+		s.eventRecorder.Event(pod, corev1.EventTypeWarning, EventReasonNumaRefitFailed, refitErr.Error())
 	}
 }
 
