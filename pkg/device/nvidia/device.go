@@ -465,13 +465,6 @@ func resourceQuantity(ctr *corev1.Container, name corev1.ResourceName) (resource
 	return resource.Quantity{}, false
 }
 
-func resourceValue(ctr *corev1.Container, name corev1.ResourceName) (int64, bool) {
-	if qty, ok := resourceQuantity(ctr, name); ok {
-		return qty.Value(), true
-	}
-	return 0, false
-}
-
 func resourcePresent(ctr *corev1.Container, name corev1.ResourceName) bool {
 	if ctr == nil || name == "" {
 		return false
@@ -565,15 +558,27 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			}
 			if ok {
 				mempnums, ok := mem.AsInt64()
-				if !ok || mempnums < 0 || mempnums > 100 {
+				if !ok {
+					// Fractional or invalid quantity: pass an out-of-range percentage so Fit rejects the request rather than silently ignoring the GPU.
+					klog.ErrorS(nil, "fractional or invalid memory percentage request", "container", ctr.Name, "requested", mem.String())
+					mempnum = math.MaxInt32
+				} else if mempnums < 0 || mempnums > 100 {
 					klog.ErrorS(nil, "memory percentage request out of range", "container", ctr.Name, "requested", mem.String())
-					return device.ContainerDeviceRequest{}
-				}
-				if mempnums > 0 {
+					if mempnums == 101 {
+						// 101 is the internal sentinel for "unset", so use an explicit out-of-range value to ensure rejection.
+						mempnum = 102
+					} else if mempnums < 0 {
+						mempnum = -1
+					} else if mempnums > math.MaxInt32 {
+						mempnum = math.MaxInt32
+					} else {
+						mempnum = int32(mempnums)
+					}
+				} else if mempnums > 0 {
 					mempnum = int32(mempnums)
 				} else {
 					// 0 would inject CUDA_DEVICE_MEMORY_LIMIT=0m, which hami-core reads as "no limit", so keep the "unset" sentinel and let the default below apply, like nvidia.com/gpumem: 0.
-					klog.ErrorS(nil, "memory percentage request is not positive, ignoring it", "container", ctr.Name, "requested", mempnums)
+					klog.V(4).InfoS("memory percentage request is 0, applying default memory percentage", "container", ctr.Name)
 					mempnum = 101
 				}
 			}
@@ -781,6 +786,11 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
 			k.Coresreq = 100
 			//return false, tmpDevs
+		}
+		if (k.MemPercentagereq < 0 || k.MemPercentagereq > 100) && k.MemPercentagereq != 101 {
+			reason[common.CardInsufficientMemory]++
+			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "invalid MemPercentagereq", k.MemPercentagereq)
+			continue
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

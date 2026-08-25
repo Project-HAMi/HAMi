@@ -1,4 +1,4 @@
-/*/*
+/*
 Copyright 2024 The HAMi Authors.
 
 Licensed under the Apache License, Version 2.0 (the "License");
@@ -19,6 +19,7 @@ package nvidia
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -1851,7 +1853,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 150,
+				Coresreq:         0,
+			},
 		},
 		{
 			name: "gpu count + memory percentage beyond int32 range — rejected",
@@ -1863,7 +1871,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: math.MaxInt32,
+				Coresreq:         0,
+			},
 		},
 		{
 			name: "gpu count + memory percentage equal to sentinel 101 — rejected",
@@ -1875,7 +1889,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 102,
+				Coresreq:         0,
+			},
 		},
 		{
 			name: "gpu count + explicit cores",
@@ -1967,7 +1987,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: -1,
+				Coresreq:         0,
+			},
 		},
 		{
 			name: "memory percentage of 0 + explicit memory — explicit memory wins",
@@ -2432,13 +2458,11 @@ func TestDefaultExclusiveCoreIfNeeded_NilContainer(t *testing.T) {
 	assert.Equal(t, dev.defaultExclusiveCoreIfNeeded(nil), false)
 }
 
-func TestResourceValue_NilAndEmpty(t *testing.T) {
-	v, ok := resourceValue(nil, "nvidia.com/gpu")
-	assert.Equal(t, v, int64(0))
+func TestResourceQuantity_NilAndEmpty(t *testing.T) {
+	_, ok := resourceQuantity(nil, "nvidia.com/gpu")
 	assert.Equal(t, ok, false)
 
-	v, ok = resourceValue(&corev1.Container{}, "")
-	assert.Equal(t, v, int64(0))
+	_, ok = resourceQuantity(&corev1.Container{}, "")
 	assert.Equal(t, ok, false)
 }
 
@@ -2998,29 +3022,40 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
 			wantMemPct: 100,
 		},
 		{
-			name:     "fractional percentage 50m is rejected",
-			rawPct:   "50m",
-			wantNums: 0,
+			name:       "fractional percentage 50m is rejected",
+			rawPct:     "50m",
+			wantNums:   1,
+			wantMemPct: math.MaxInt32,
 		},
 		{
-			name:     "fractional percentage 50.5 is rejected",
-			rawPct:   "50.5",
-			wantNums: 0,
+			name:       "fractional percentage 50.5 is rejected",
+			rawPct:     "50.5",
+			wantNums:   1,
+			wantMemPct: math.MaxInt32,
 		},
 		{
-			name:     "fractional percentage 99.1 is rejected",
-			rawPct:   "99.1",
-			wantNums: 0,
+			name:       "fractional percentage 99.1 is rejected",
+			rawPct:     "99.1",
+			wantNums:   1,
+			wantMemPct: math.MaxInt32,
 		},
 		{
-			name:     "percentage 101 is rejected",
-			rawPct:   "101",
-			wantNums: 0,
+			name:       "percentage 101 is rejected",
+			rawPct:     "101",
+			wantNums:   1,
+			wantMemPct: 102,
 		},
 		{
-			name:     "negative percentage is rejected",
-			rawPct:   "-1",
-			wantNums: 0,
+			name:       "percentage 150 is rejected",
+			rawPct:     "150",
+			wantNums:   1,
+			wantMemPct: 150,
+		},
+		{
+			name:       "negative percentage is rejected",
+			rawPct:     "-1",
+			wantNums:   1,
+			wantMemPct: -1,
 		},
 	}
 	for _, test := range tests {
@@ -3035,11 +3070,77 @@ func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
 				},
 			}
 			req := gpuDevices.GenerateResourceRequests(ctr)
-			if test.wantNums == 0 {
-				assert.Equal(t, int32(0), req.Nums)
+			assert.Equal(t, test.wantNums, req.Nums)
+			assert.Equal(t, test.wantMemPct, req.MemPercentagereq)
+		})
+	}
+}
+
+func TestFit_MemoryPercentageValidation(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	nv := InitNvidiaDevice(config)
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "GPU-0",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8192,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      NvidiaGPUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name       string
+		rawPct     string
+		wantFit    bool
+		wantMemReq int32
+	}{
+		{name: "50% memory fits", rawPct: "50", wantFit: true, wantMemReq: 4096},
+		{name: "100% memory fits", rawPct: "100", wantFit: true, wantMemReq: 8192},
+		{name: "0% memory defaults to 100%", rawPct: "0", wantFit: true, wantMemReq: 8192},
+		{name: "101% memory is rejected", rawPct: "101", wantFit: false},
+		{name: "150% memory is rejected", rawPct: "150", wantFit: false},
+		{name: "negative memory percentage is rejected", rawPct: "-1", wantFit: false},
+		{name: "fractional 50m memory percentage is rejected", rawPct: "50m", wantFit: false},
+		{name: "fractional 99.1 memory percentage is rejected", rawPct: "99.1", wantFit: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":               resource.MustParse("1"),
+						"nvidia.com/gpumem-percentage": resource.MustParse(tt.rawPct),
+					},
+				},
+			}
+			req := nv.GenerateResourceRequests(ctr)
+			assert.Equal(t, req.Nums, int32(1))
+			fit, result, reason := nv.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, fit, tt.wantFit)
+			if tt.wantFit {
+				assert.Equal(t, len(result[NvidiaGPUDevice]), 1)
+				assert.Equal(t, result[NvidiaGPUDevice][0].Usedmem, tt.wantMemReq)
 			} else {
-				assert.Equal(t, test.wantNums, req.Nums)
-				assert.Equal(t, test.wantMemPct, req.MemPercentagereq)
+				assert.Assert(t, strings.Contains(reason, common.CardInsufficientMemory), "expected CardInsufficientMemory in reason: %s", reason)
 			}
 		})
 	}
