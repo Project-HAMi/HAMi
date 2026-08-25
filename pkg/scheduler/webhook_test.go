@@ -1276,3 +1276,102 @@ func TestHandleNumaAlignmentAnnotation(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleSchedulerPolicyAnnotations(t *testing.T) {
+	tests := []struct {
+		name        string
+		annotations map[string]string
+		wantDenied  bool
+	}{
+		{
+			name:        "valid gpu policy chain is admitted",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "binpack,numa"},
+		},
+		{
+			name:        "valid node policy is admitted",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "spread"},
+		},
+		{
+			name:        "unrecognized gpu policy is denied",
+			annotations: map[string]string{util.GPUSchedulerPolicyAnnotationKey: "topology"},
+			wantDenied:  true,
+		},
+		{
+			name:        "unrecognized node policy is denied",
+			annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "numa"},
+			wantDenied:  true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "policy-pod",
+					Namespace:   "default",
+					Annotations: test.annotations,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "container1",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+						},
+					}},
+				},
+			}
+
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+			podBytes, err := runtime.Encode(codec, pod)
+			if err != nil {
+				t.Fatalf("Error encoding pod: %v", err)
+			}
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID: "test-uid", Namespace: "default", Name: "policy-pod",
+					Object: runtime.RawExtension{Raw: podBytes},
+				},
+			}
+
+			wh, err := NewWebHook()
+			if err != nil {
+				t.Fatalf("Error creating webhook: %v", err)
+			}
+			resp := wh.Handle(context.Background(), req)
+
+			if test.wantDenied {
+				if resp.Allowed {
+					t.Fatalf("expected denial, got allowed: %+v", resp.Result)
+				}
+				if !strings.Contains(resp.Result.Message, "invalid") {
+					t.Fatalf("expected invalid-annotation message, got %q", resp.Result.Message)
+				}
+			} else if !resp.Allowed {
+				t.Fatalf("expected admission, got denied: %+v", resp.Result)
+			}
+		})
+	}
+}
+
+func TestResolveNodeSchedulerPolicyFallback(t *testing.T) {
+	previous := config.NodeSchedulerPolicy
+	config.NodeSchedulerPolicy = "spread"
+	t.Cleanup(func() { config.NodeSchedulerPolicy = previous })
+
+	valid := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "binpack"},
+	}}
+	if got := resolveNodeSchedulerPolicy(valid); got != "binpack" {
+		t.Fatalf("valid annotation: got %q, want binpack", got)
+	}
+
+	invalid := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+		Annotations: map[string]string{util.NodeSchedulerPolicyAnnotationKey: "bogus"},
+	}}
+	if got := resolveNodeSchedulerPolicy(invalid); got != "spread" {
+		t.Fatalf("unrecognized annotation: got %q, want configured spread", got)
+	}
+}

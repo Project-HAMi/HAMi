@@ -779,6 +779,16 @@ func TestGetGPUSchedulerPolicyByPod(t *testing.T) {
 				Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: "spread"},
 			},
 		}, "spread"},
+		{"with chain annotation", "binpack", &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: "spread,numa"},
+			},
+		}, "spread,numa"},
+		{"unrecognized annotation keeps configured default", "binpack", &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{GPUSchedulerPolicyAnnotationKey: "bogus"},
+			},
+		}, "binpack"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

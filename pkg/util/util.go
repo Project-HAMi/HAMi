@@ -298,7 +298,12 @@ func GetGPUSchedulerPolicyByPod(defaultPolicy string, task *corev1.Pod) string {
 	userGPUPolicy := defaultPolicy
 	if task != nil && task.Annotations != nil {
 		if value, ok := task.Annotations[GPUSchedulerPolicyAnnotationKey]; ok {
-			userGPUPolicy = value
+			if ValidGPUSchedulerPolicy(value) {
+				userGPUPolicy = value
+			} else {
+				klog.Warningf("ignoring unrecognized %s annotation %q on pod %s/%s, keeping configured policy %q",
+					GPUSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, defaultPolicy)
+			}
 		}
 	}
 	return userGPUPolicy

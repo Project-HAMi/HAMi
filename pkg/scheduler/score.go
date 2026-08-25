@@ -139,7 +139,11 @@ func fitInDevices(node *NodeUsage, requests device.ContainerDeviceRequests, pod 
 func resolveNodeSchedulerPolicy(task *corev1.Pod) string {
 	if task.GetAnnotations() != nil {
 		if value, ok := task.GetAnnotations()[util.NodeSchedulerPolicyAnnotationKey]; ok {
-			return value
+			if util.ValidNodeSchedulerPolicy(value) {
+				return value
+			}
+			klog.Warningf("ignoring unrecognized %s annotation %q on pod %s/%s, keeping configured policy %q",
+				util.NodeSchedulerPolicyAnnotationKey, value, task.Namespace, task.Name, config.NodeSchedulerPolicy)
 		}
 	}
 	return config.NodeSchedulerPolicy

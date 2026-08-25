@@ -74,6 +74,20 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
 		return admission.Denied(err.Error())
 	}
+	// Reject unrecognized scheduler-policy values the same way, instead of
+	// silently discarding the operator's configured default (#2767).
+	if pod.Annotations != nil {
+		if value, ok := pod.Annotations[util.GPUSchedulerPolicyAnnotationKey]; ok && !util.ValidGPUSchedulerPolicy(value) {
+			reason := fmt.Sprintf("invalid %s annotation %q: expected binpack, spread, numa, mutex, topology-aware, or a comma-separated chain of them", util.GPUSchedulerPolicyAnnotationKey, value)
+			klog.Warningf(template+" - Denying admission: %s", pod.Namespace, pod.Name, pod.UID, reason)
+			return admission.Denied(reason)
+		}
+		if value, ok := pod.Annotations[util.NodeSchedulerPolicyAnnotationKey]; ok && !util.ValidNodeSchedulerPolicy(value) {
+			reason := fmt.Sprintf("invalid %s annotation %q: expected binpack or spread", util.NodeSchedulerPolicyAnnotationKey, value)
+			klog.Warningf(template+" - Denying admission: %s", pod.Namespace, pod.Name, pod.UID, reason)
+			return admission.Denied(reason)
+		}
+	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
