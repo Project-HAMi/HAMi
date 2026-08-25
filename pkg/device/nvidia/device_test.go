@@ -3207,9 +3207,6 @@ func TestNodeDeleted_ReuseAfterDeletion(t *testing.T) {
 
 func TestFit_CoresValidation(t *testing.T) {
 	dev := InitNvidiaDevice(NvidiaConfig{
-// migTopologyDevice builds the NVIDIA backend used by the MIG topology tests.
-func migTopologyDevice() *NvidiaGPUDevices {
-	return InitNvidiaDevice(NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
 		ResourceMemoryName:           "nvidia.com/gpumem",
 		ResourceCoreName:             "nvidia.com/gpucores",
@@ -3380,6 +3377,19 @@ func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
 				assert.Equal(t, req.Coresreq, tt.wantVal)
 			} else {
 				assert.Equal(t, req.Nums, int32(0))
+			}
+		})
+	}
+}
+
+// migTopologyDevice builds the NVIDIA backend used by the MIG topology tests.
+func migTopologyDevice() *NvidiaGPUDevices {
+	return InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
 }
 
 // migTopologyDevices builds MIG cards with seven single-slice placements each,
