@@ -979,6 +979,65 @@ func TestAllNonSidecarInitContainersSucceeded(t *testing.T) {
 	}
 }
 
+func TestPatchNodeAnnotations_NilNode(t *testing.T) {
+	err := PatchNodeAnnotations(nil, map[string]string{"hami.io/test": "bar"})
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestPatchNodeAnnotations_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	assert.Equal(t, "bar", updated.Annotations["hami.io/test"])
+}
+
+func TestRemoveNodeAnnotation_NilNode(t *testing.T) {
+	err := RemoveNodeAnnotation(nil, "hami.io/test")
+	assert.ErrorContains(t, err, "node is nil")
+}
+
+func TestRemoveNodeAnnotation_ValidNode(t *testing.T) {
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: "test-node",
+			Annotations: map[string]string{
+				"hami.io/test": "bar",
+			},
+		},
+	}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = fake.NewClientset(node)
+
+	err := RemoveNodeAnnotation(node, "hami.io/test")
+	assert.NilError(t, err)
+
+	updated, err := client.KubeClient.CoreV1().Nodes().Get(context.TODO(), "test-node", metav1.GetOptions{})
+	assert.NilError(t, err)
+	_, hasAnno := updated.Annotations["hami.io/test"]
+	assert.Assert(t, !hasAnno)
+}
+
+func TestPatchNodeAnnotations_NilClient(t *testing.T) {
+	node := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "test-node"}}
+	oldClient := client.KubeClient
+	t.Cleanup(func() { client.KubeClient = oldClient })
+	client.KubeClient = nil
+	err := PatchNodeAnnotations(node, map[string]string{"hami.io/test": "bar"})
+	assert.ErrorContains(t, err, "kubernetes client is not initialized")
+}
+
 func TestGetNode(t *testing.T) {
 	tests := []struct {
 		name        string

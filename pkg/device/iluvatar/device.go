@@ -154,14 +154,7 @@ func (dev *IluvatarDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[str
 }
 
 func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
@@ -169,14 +162,7 @@ func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
