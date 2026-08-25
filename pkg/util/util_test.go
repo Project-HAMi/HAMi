@@ -23,7 +23,7 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -1093,7 +1093,19 @@ func TestGetNode(t *testing.T) {
 			setupClient: func() kubernetes.Interface {
 				clientset := fake.NewClientset()
 				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
-					return false, nil, errors.NewUnauthorized("get nodes")
+					return false, nil, apierrors.NewUnauthorized("get nodes")
+				})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  true,
+		},
+		{
+			name: "generic error",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+					return false, nil, apierrors.NewBadRequest("generic error")
 				})
 				return clientset
 			},
