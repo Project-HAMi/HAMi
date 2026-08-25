@@ -23,10 +23,13 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/kubernetes/fake"
+	k8stesting "k8s.io/client-go/testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -1084,6 +1087,18 @@ func TestGetNode(t *testing.T) {
 			checkNode: func(t *testing.T, node *corev1.Node) {
 				assert.Equal(t, node.Name, "test-node")
 			},
+		},
+		{
+			name: "unauthorized",
+			setupClient: func() kubernetes.Interface {
+				clientset := fake.NewClientset()
+				clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, k8sruntime.Object, error) {
+					return false, nil, errors.NewUnauthorized("get nodes")
+				})
+				return clientset
+			},
+			nodeName: "test-node",
+			wantErr:  true,
 		},
 	}
 
