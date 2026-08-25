@@ -199,5 +199,6 @@ checks remain unchanged.
 When the annotation is absent, all three weights default to `1`, preserving
 the existing scheduling behavior. When present, the annotation must specify
 all three non-negative integer weights, and at least one weight must be
-positive. Invalid annotations prevent the Pod from being scheduled until the
-annotation is corrected.
+positive. When the admission webhook is enabled, invalid annotations are
+rejected when the Pod is created. The scheduler also validates the annotation
+so invalid values cannot be used when admission validation is unavailable.

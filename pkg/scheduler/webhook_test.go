@@ -1276,3 +1276,73 @@ func TestHandleNumaAlignmentAnnotation(t *testing.T) {
 		})
 	}
 }
+
+func TestHandleDeviceScoringWeightsAnnotation(t *testing.T) {
+	tests := []struct {
+		name              string
+		annotationPresent bool
+		value             string
+		wantDenied        bool
+	}{
+		{name: "missing annotation is admitted", wantDenied: false},
+		{name: "valid weights are admitted", annotationPresent: true, value: "slot=1,core=1,memory=3", wantDenied: false},
+		{name: "missing dimension is denied", annotationPresent: true, value: "slot=1,core=1", wantDenied: true},
+		{name: "non-integer weight is denied", annotationPresent: true, value: "slot=1,core=high,memory=3", wantDenied: true},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			var annotations map[string]string
+			if test.annotationPresent {
+				annotations = map[string]string{util.DeviceScoringWeightsAnnotationKey: test.value}
+			}
+			pod := &corev1.Pod{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:        "weights-pod",
+					Namespace:   "default",
+					Annotations: annotations,
+				},
+				Spec: corev1.PodSpec{
+					Containers: []corev1.Container{{
+						Name: "container1",
+						Resources: corev1.ResourceRequirements{
+							Limits: corev1.ResourceList{"nvidia.com/gpu": resource.MustParse("1")},
+						},
+					}},
+				},
+			}
+
+			scheme := runtime.NewScheme()
+			_ = corev1.AddToScheme(scheme)
+			codec := serializer.NewCodecFactory(scheme).LegacyCodec(corev1.SchemeGroupVersion)
+			podBytes, err := runtime.Encode(codec, pod)
+			if err != nil {
+				t.Fatalf("Error encoding pod: %v", err)
+			}
+
+			req := admission.Request{
+				AdmissionRequest: admissionv1.AdmissionRequest{
+					UID: "test-uid", Namespace: "default", Name: "weights-pod",
+					Object: runtime.RawExtension{Raw: podBytes},
+				},
+			}
+
+			wh, err := NewWebHook()
+			if err != nil {
+				t.Fatalf("Error creating webhook: %v", err)
+			}
+			resp := wh.Handle(context.Background(), req)
+
+			if test.wantDenied {
+				if resp.Allowed {
+					t.Fatalf("expected denial, got allowed: %+v", resp.Result)
+				}
+				if !strings.Contains(resp.Result.Message, "invalid") {
+					t.Fatalf("expected invalid-annotation message, got %q", resp.Result.Message)
+				}
+			} else if !resp.Allowed {
+				t.Fatalf("expected admission, got denied: %+v", resp.Result)
+			}
+		})
+	}
+}
