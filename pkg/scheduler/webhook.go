@@ -31,6 +31,7 @@ import (
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
@@ -66,6 +67,12 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		(len(config.SchedulerName) == 0 || pod.Spec.SchedulerName != config.SchedulerName) {
 		klog.V(3).Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
+	}
+	// Reject invalid numa-alignment values at admission, so a typo surfaces
+	// to the user instead of only appearing in a device-plugin log later.
+	if _, err := util.GetNumaAlignmentModeByPod(pod); err != nil {
+		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+		return admission.Denied(err.Error())
 	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
@@ -146,7 +153,6 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
 		resourceNames := dev.GetResourceNames()
 		if len(resourceNames.ResourceMemoryName) == 0 && len(resourceNames.ResourceCoreName) == 0 {
-			// Nothing this backend exposes can carry a quota.
 			continue
 		}
 
@@ -164,20 +170,29 @@ func fitResourceQuota(pod *corev1.Pod) bool {
 			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
 		}
 
-		// Init containers run sequentially, so the pod's effective request is
-		// max(sum(app containers), max(init containers)).
-		var initMemoryReq, initCoresReq int64
+		var initPeakMemoryReq, initPeakCoresReq int64
+		var sidecarMemoryReq, sidecarCoresReq int64
 		for i := range pod.Spec.InitContainers {
-			req := dev.GenerateResourceRequests(&pod.Spec.InitContainers[i])
+			c := &pod.Spec.InitContainers[i]
+			req := dev.GenerateResourceRequests(c)
 			if req.Nums == 0 {
 				continue
 			}
-			initMemoryReq = max(initMemoryReq, int64(req.Memreq)*int64(req.Nums))
-			initCoresReq = max(initCoresReq, int64(req.Coresreq)*int64(req.Nums))
+			mem := int64(req.Memreq) * int64(req.Nums)
+			cores := int64(req.Coresreq) * int64(req.Nums)
+			if util.IsSidecarContainer(c) {
+				sidecarMemoryReq += mem
+				sidecarCoresReq += cores
+				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
+				continue
+			}
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
 		}
 
-		memoryReq := max(appMemoryReq, initMemoryReq)
-		coresReq := max(appCoresReq, initCoresReq)
+		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
+		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
 		if memoryReq == 0 && coresReq == 0 {
 			continue
 		}

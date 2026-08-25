@@ -24,6 +24,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -81,7 +82,7 @@ func Test_GetNodeDevices(t *testing.T) {
 			dev := CambriconDevices{}
 			result, err := dev.GetNodeDevices(test.args)
 			if err != nil {
-				assert.NoError(t, err)
+				require.NoError(t, err)
 			}
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k])
@@ -129,7 +130,7 @@ func Test_MutateAdmission(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
 			result, _ := dev.MutateAdmission(&test.args.ctr, &test.args.pod)
-			assert.Equal(t, result, test.want)
+			assert.Equal(t, test.want, result)
 		})
 	}
 }
@@ -414,7 +415,7 @@ func Test_PatchAnnotations(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			dev := CambriconDevices{}
 			result := dev.PatchAnnotations(&corev1.Pod{}, &test.args.annoinput, test.args.pd)
-			assert.Equal(t, len(test.want), len(result), "Expected length of result to match want")
+			assert.Len(t, result, len(test.want), "Expected length of result to match want")
 			for k, v := range test.want {
 				assert.Equal(t, v, result[k], "pod add annotation key [%s], values is [%s]", k, result[k])
 			}

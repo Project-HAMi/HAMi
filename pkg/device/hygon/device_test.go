@@ -733,11 +733,37 @@ func TestDevices_LockNode(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with regular container resource requests",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with init container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock:     true,
+			expectError: false,
+		},
+		{
+			name: "Test with init and regular container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+				Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+					"hygon.com/dcunum": resource.MustParse("1"),
+				}}}},
+			}},
 			hasLock:     true,
 			expectError: false,
 		},
@@ -782,21 +808,23 @@ func TestDevices_LockNode(t *testing.T) {
 
 func TestDevices_ReleaseNodeLock(t *testing.T) {
 	tests := []struct {
-		name        string
-		node        *corev1.Node
-		pod         *corev1.Pod
-		hasLock     bool
-		expectError bool
+		name           string
+		node           *corev1.Node
+		pod            *corev1.Pod
+		lockAnnotation string
+		hasLock        bool
+		expectError    bool
 	}{
 		{
-			name:        "Test with no containers",
-			node:        &corev1.Node{},
-			pod:         &corev1.Pod{Spec: corev1.PodSpec{}},
-			hasLock:     true,
-			expectError: false,
+			name:           "Test with no containers",
+			node:           &corev1.Node{},
+			pod:            &corev1.Pod{Spec: corev1.PodSpec{}},
+			lockAnnotation: "lock-values,default,nozerorr",
+			hasLock:        true,
+			expectError:    false,
 		},
 		{
-			name: "Test with non-zero resource requests",
+			name: "Test with regular container resource requests",
 			node: &corev1.Node{},
 			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 				Name:      "nozerorr",
@@ -804,8 +832,22 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			}, Spec: corev1.PodSpec{Containers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
 				"hygon.com/dcunum": resource.MustParse("1"),
 			}}}}}},
-			hasLock:     false,
-			expectError: false,
+			lockAnnotation: "lock-values,default,nozerorr",
+			hasLock:        false,
+			expectError:    false,
+		},
+		{
+			name: "Test with init container resource requests",
+			node: &corev1.Node{},
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Name:      "init-dcunum",
+				Namespace: "default",
+			}, Spec: corev1.PodSpec{InitContainers: []corev1.Container{{Resources: corev1.ResourceRequirements{Requests: corev1.ResourceList{
+				"hygon.com/dcunum": resource.MustParse("1"),
+			}}}}}},
+			lockAnnotation: "lock-values,default,init-dcunum",
+			hasLock:        false,
+			expectError:    false,
 		},
 	}
 
@@ -816,7 +858,7 @@ func TestDevices_ReleaseNodeLock(t *testing.T) {
 			node := &corev1.Node{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:        "testNode",
-					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: "lock-values,default,nozerorr"},
+					Annotations: map[string]string{"test-annotation-key": "test-annotation-value", device.InRequestDevices["DCU"]: "some-value", NodeLockDCU: tt.lockAnnotation},
 				},
 			}
 

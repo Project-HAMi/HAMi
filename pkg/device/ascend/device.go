@@ -256,14 +256,7 @@ func (dev *Devices) PatchAnnotations(pod *corev1.Pod, annoInput *map[string]stri
 }
 
 func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
@@ -271,14 +264,7 @@ func (dev *Devices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *Devices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
@@ -677,7 +663,7 @@ func (npudev *Devices) computeBestCombination910C(nodeInfo *device.NodeInfo, req
 	indexToDevice := make(map[int]device.ContainerDevice)
 	var npuIndices []int
 	for _, dev := range containerDevices {
-		idx := int(dev.Idx)
+		idx := dev.Idx
 		indexToDevice[idx] = dev
 		npuIndices = append(npuIndices, idx)
 	}
