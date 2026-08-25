@@ -19,6 +19,7 @@ package cambricon
 import (
 	"context"
 	"flag"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
@@ -285,6 +287,42 @@ func Test_GenerateResourceRequests(t *testing.T) {
 				Memreq:           int32(0),
 				MemPercentagereq: int32(100),
 				Coresreq:         int32(2),
+			},
+		},
+		{
+			name: "memory overflowing int32 is rejected, not truncated to zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             CambriconMLUDevice,
+				Memreq:           math.MaxInt32,
+				MemPercentagereq: 0,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "decimal-form memory request is rejected, not treated as zero",
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"cambricon.com/mlu":              resource.MustParse("1"),
+						"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16.0Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             CambriconMLUDevice,
+				Memreq:           math.MaxInt32,
+				MemPercentagereq: 0,
+				Coresreq:         100,
 			},
 		},
 	}
@@ -1163,4 +1201,43 @@ func TestDevices_AddResourceUsage(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_Fit_InvalidMemoryRejected(t *testing.T) {
+	config := CambriconConfig{
+		ResourceMemoryName: "cambricon.com/mlu.smlu.vmemory",
+		ResourceCoreName:   "cambricon.com/mlu.smlu.vcore",
+		ResourceCountName:  "cambricon.com/mlu",
+	}
+	InitMLUDevice(config)
+	dev := CambriconDevices{}
+
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "mlu-0",
+			Type:      CambriconMLUDevice,
+			Totalmem:  16384,
+			Totalcore: 100,
+			Count:     100,
+			Health:    true,
+		},
+	}
+
+	pod := &corev1.Pod{}
+
+	// Invalid request with Memreq: math.MaxInt32 (generated from invalid memory quantity)
+	req := dev.GenerateResourceRequests(&corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"cambricon.com/mlu":              resource.MustParse("1"),
+				"cambricon.com/mlu.smlu.vmemory": resource.MustParse("16Gi"), // overflows int32
+			},
+		},
+	})
+	assert.Equal(t, int32(1), req.Nums)
+	assert.Equal(t, int32(math.MaxInt32), req.Memreq)
+
+	fit, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.False(t, fit)
+	assert.Contains(t, reason, common.CardInsufficientMemory)
 }

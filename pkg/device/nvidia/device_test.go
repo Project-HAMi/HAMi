@@ -3042,3 +3042,62 @@ func TestFit_TopologyNegativeScores(t *testing.T) {
 		assert.Assert(t, uuids["dev-2"])
 	})
 }
+
+func TestComputeWorstSingleCard_MissingScoreEntries(t *testing.T) {
+	req := device.ContainerDeviceRequest{
+		Type: NvidiaGPUDevice,
+		Nums: 1,
+	}
+	candidates := map[string]device.ContainerDevices{
+		NvidiaGPUDevice: {
+			{UUID: "gpu-0"},
+			{UUID: "gpu-1"},
+		},
+	}
+
+	// 1. Nil nodeInfo does not panic
+	worst := computeWorstSingleCard(nil, req, candidates)
+	assert.Equal(t, len(worst), 1)
+
+	// 2. NodeInfo without device score entries does not panic
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu-0"}, // DevicePairScore is empty/nil
+				{ID: "gpu-1"},
+			},
+		},
+	}
+	worst = computeWorstSingleCard(nodeInfo, req, candidates)
+	assert.Equal(t, len(worst), 1)
+}
+
+func TestComputeBestCombination_MissingScoreEntries(t *testing.T) {
+	combinations := []device.ContainerDevices{
+		{
+			{UUID: "gpu-0"},
+			{UUID: "gpu-1"},
+		},
+		{
+			{UUID: "gpu-1"},
+			{UUID: "gpu-2"},
+		},
+	}
+
+	// 1. Nil nodeInfo does not panic
+	best := computeBestCombination(nil, combinations)
+	assert.Equal(t, len(best), 2)
+
+	// 2. NodeInfo without device score entries does not panic
+	nodeInfo := &device.NodeInfo{
+		Devices: map[string][]device.DeviceInfo{
+			NvidiaGPUDevice: {
+				{ID: "gpu-0"},
+				{ID: "gpu-1"},
+				{ID: "gpu-2"},
+			},
+		},
+	}
+	best = computeBestCombination(nodeInfo, combinations)
+	assert.Equal(t, len(best), 2)
+}

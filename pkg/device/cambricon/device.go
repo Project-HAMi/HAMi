@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"math"
 	"math/rand"
 	"slices"
 	"strings"
@@ -230,30 +231,29 @@ func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceU
 }
 
 func (dev *CambriconDevices) GenerateResourceRequests(ctr *corev1.Container) device.ContainerDeviceRequest {
-	klog.Info("Start to count mlu devices for container ", ctr.Name)
+	klog.V(5).InfoS("Counting MLU devices for container", "container", ctr.Name)
 	mluResourceCount := corev1.ResourceName(MLUResourceCount)
 	mluResourceMem := corev1.ResourceName(MLUResourceMemory)
 	mluResourceCores := corev1.ResourceName(MLUResourceCores)
-	for idx, val := range ctr.Resources.Limits {
-		klog.Infoln("idx=", idx, "val=", val, ctr.Resources.Limits[mluResourceMem])
-	}
 	v, ok := ctr.Resources.Limits[mluResourceCount]
 	if !ok {
 		v, ok = ctr.Resources.Requests[mluResourceCount]
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
-			klog.Info("Found cambricon devices")
+			klog.V(5).InfoS("Found cambricon devices", "container", ctr.Name, "count", n)
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[mluResourceMem]
 			if !ok {
 				mem, ok = ctr.Resources.Requests[mluResourceMem]
 			}
-			klog.Infoln("mluResourceMem", mem, "ok=", ok, "memoryname=", mluResourceMem)
 			if ok {
-				memnums, ok := mem.AsInt64()
-				klog.Infoln("mluResourceMem", mem, memnums)
-				if ok {
+				memnums, parsed := mem.AsInt64()
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "cambricon memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name, "requested", mem.String())
+					memnum = math.MaxInt32
+				} else {
 					memnum = int(memnums) * MemoryFactor
 				}
 			}

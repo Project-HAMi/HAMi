@@ -400,3 +400,32 @@ func TestUpdateQuota(t *testing.T) {
 		t.Errorf("memory limit = %d, want 3000", got)
 	}
 }
+
+func TestGetResourceQuota(t *testing.T) {
+	initTest()
+	qm := NewQuotaManager()
+	ns := "quota-copy-test"
+	t.Cleanup(func() { delete(qm.Quotas, ns) })
+
+	qm.Quotas[ns] = &DeviceQuota{
+		"nvidia.com/gpumem":   &Quota{Used: 1024, Limit: 2048, LimitSet: true},
+		"nvidia.com/gpucores": &Quota{Used: 50, Limit: 100, LimitSet: true},
+	}
+
+	quotas := qm.GetResourceQuota()
+	nsQuotas, ok := quotas[ns]
+	if !ok || nsQuotas == nil {
+		t.Fatalf("expected quotas for %s, got nil", ns)
+	}
+
+	memQuota, ok := (*nsQuotas)["nvidia.com/gpumem"]
+	if !ok || memQuota.Used != 1024 || memQuota.Limit != 2048 || !memQuota.LimitSet {
+		t.Errorf("unexpected memQuota: %+v", memQuota)
+	}
+
+	// Verify deep copy mutation isolation
+	memQuota.Used = 9999
+	if (*qm.Quotas[ns])["nvidia.com/gpumem"].Used == 9999 {
+		t.Errorf("modifying copy mutated original QuotaManager state")
+	}
+}
