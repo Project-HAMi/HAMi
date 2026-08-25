@@ -79,6 +79,13 @@ type Scheduler struct {
 
 	lock   sync.RWMutex
 	synced atomic.Bool
+
+	// allocLock serializes reservation mutations between Filter and the
+	// NUMA refit (RefitNumaAllocation). kube-scheduler already serializes
+	// Filter calls per scheduling cycle, so in the common path this adds no
+	// contention; it exists so a refit cannot interleave with Filter's
+	// take-fit-readd span and observe or produce half-applied accounting.
+	allocLock sync.Mutex
 }
 
 func NewScheduler() *Scheduler {
@@ -199,22 +206,22 @@ func (s *Scheduler) onUpdatePod(oldObj, newObj any) {
 
 	s.podManager.UpdatePod(newPod)
 
-	if !pi.InitContainerResourceReleased && util.AllInitContainersSucceeded(newPod) {
+	if !pi.InitContainerResourceReleased && util.AllNonSidecarInitContainersSucceeded(newPod) {
 		rawDevices, err := device.DecodePodDevices(device.SupportDevices, newPod.Annotations)
 		if err != nil {
 			klog.ErrorS(err, "failed to decode pod devices during shrink", "pod", klog.KObj(newPod))
 			return
 		}
 
-		appOnlyDevices := device.AppContainersOnlyDeviceUsage(newPod, rawDevices)
+		steadyStateDevices := device.SteadyStateDeviceUsage(newPod, rawDevices)
 
-		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, appOnlyDevices)
+		oldDevices, ok := s.podManager.UpdatePodDevice(newPod, steadyStateDevices)
 		if ok {
-			s.quotaManager.ReplaceUsage(newPod, oldDevices, appOnlyDevices)
-			klog.InfoS("Init containers completed, shrunk usage",
+			s.quotaManager.ReplaceUsage(newPod, oldDevices, steadyStateDevices)
+			klog.InfoS("Non-sidecar init containers completed, shrunk usage to steady state",
 				"pod", klog.KObj(newPod),
 				"oldUsage", oldDevices,
-				"newUsage", appOnlyDevices,
+				"newUsage", steadyStateDevices,
 			)
 		}
 	}
@@ -781,7 +788,9 @@ func (s *Scheduler) getNodesUsage(nodes *[]string, task *corev1.Pod) (*map[strin
 						deviceID := udevice.UUID
 						if d.Device.ID == deviceID {
 							matched = true
-							d.Device.Used++
+							// Raw entries carry no slot count; clamp to at least one.
+							slots := max(udevice.Slots, 1)
+							d.Device.Used += slots
 							d.Device.Usedmem += udevice.Usedmem
 							d.Device.Usedcores += udevice.Usedcores
 							d.Device.PodInfos = append(d.Device.PodInfos, p)
@@ -1089,6 +1098,9 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 	if args.Nodes != nil {
 		return s.filterSimulation(args, resourceReqs)
 	}
+
+	s.allocLock.Lock()
+	defer s.allocLock.Unlock()
 
 	if pi, ok := s.podManager.TakeAndDeletePod(args.Pod); ok {
 		s.quotaManager.RmUsage(args.Pod, pi.Devices)

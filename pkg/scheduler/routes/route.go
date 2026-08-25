@@ -27,6 +27,7 @@ import (
 	"k8s.io/klog/v2"
 	extenderv1 "k8s.io/kube-scheduler/extender/v1"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 )
 
@@ -182,5 +183,42 @@ func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 			klog.V(3).Infoln("Scheduler extender has not become leader yet")
 		}
 		w.WriteHeader(http.StatusOK)
+	}
+}
+
+// NumaRefit handles device-plugin requests to move a pending allocation onto
+// kubelet's NUMA-restricted device set. See issue #2080.
+func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
+	klog.Infoln("Initializing NumaRefit Route")
+	return func(w http.ResponseWriter, r *http.Request, _ httprouter.Params) {
+		if !checkBody(w, r) {
+			return
+		}
+
+		// Limit the body size to prevent deep nesting/resource exhaustion attacks
+		body := io.LimitReader(r.Body, maxRequestSize)
+
+		var response device.NumaRefitResponse
+		var request device.NumaRefitRequest
+		if err := json.NewDecoder(body).Decode(&request); err != nil {
+			klog.ErrorS(err, "Failed to decode NUMA refit request")
+			response = device.NumaRefitResponse{FailureReason: err.Error()}
+		} else if !s.WaitForCacheSync(r.Context()) {
+			// Poll may return false when context is cancelled
+			err := fmt.Errorf("context cancelled")
+			klog.ErrorS(err, "Cache not synced, cannot refit")
+			response = device.NumaRefitResponse{FailureReason: err.Error()}
+		} else {
+			response = s.RefitNumaAllocation(request)
+		}
+
+		resultBody, err := json.Marshal(response)
+		if err != nil {
+			klog.ErrorS(err, "Failed to marshal NUMA refit response", "response", response)
+			resultBody, _ = json.Marshal(device.NumaRefitResponse{FailureReason: err.Error()})
+			writeResponse(w, http.StatusInternalServerError, resultBody)
+			return
+		}
+		writeResponse(w, http.StatusOK, resultBody)
 	}
 }

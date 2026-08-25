@@ -51,6 +51,12 @@ const (
 	// GPUNoUseUUID annotation specifies a comma-separated list of GPU UUIDs to exclude.
 	GPUNoUseUUID = "nvidia.com/nouse-gpuuuid"
 	AllocateMode = "nvidia.com/vgpu-mode"
+	// DeviceCordonAnnotation is a node annotation holding a comma-separated list of
+	// GPU UUIDs to exclude from new allocations, without affecting pods already
+	// running on those devices. It's a live, per-GPU equivalent of `kubectl cordon`;
+	// unlike FilterDeviceToRegister, it takes effect immediately and needs no
+	// device-plugin restart.
+	DeviceCordonAnnotation = "hami.io/device-cordon"
 
 	MigMode      = "mig"
 	HamiCoreMode = "hami-core"
@@ -266,28 +272,14 @@ func (dev *NvidiaGPUDevices) CheckHealth(devType string, n *corev1.Node) (bool, 
 }
 
 func (dev *NvidiaGPUDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, NodeLockNvidia, p)
 }
 
 func (dev *NvidiaGPUDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, NodeLockNvidia, p, false)
@@ -585,8 +577,8 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				Nums:             int32(n),
 				Type:             NvidiaGPUDevice,
 				Memreq:           int32(memnum),
-				MemPercentagereq: int32(mempnum),
-				Coresreq:         int32(corenum),
+				MemPercentagereq: mempnum,
+				Coresreq:         corenum,
 			}
 		}
 	}
@@ -684,6 +676,28 @@ func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, alloc
 	klog.V(4).Infoln("Allocating...", mem, "cores", core)
 	return device.GetLocalCache().FitQuota(ns, mem, MemoryFactor, core, NvidiaGPUDevice)
 }
+
+// cordonedDevices parses the DeviceCordonAnnotation off the node into a UUID
+// lookup set. Missing node, missing annotation, or an empty value all mean
+// "nothing cordoned". Malformed entries (stray whitespace/commas) are
+// tolerated by trimming and skipping empties, same as CheckUUID's parsing.
+func cordonedDevices(nodeInfo *device.NodeInfo) map[string]struct{} {
+	cordoned := make(map[string]struct{})
+	if nodeInfo == nil || nodeInfo.Node == nil {
+		return cordoned
+	}
+	raw, ok := nodeInfo.Node.Annotations[DeviceCordonAnnotation]
+	if !ok || strings.TrimSpace(raw) == "" {
+		return cordoned
+	}
+	for uuid := range strings.SplitSeq(raw, ",") {
+		if uuid = strings.TrimSpace(uuid); uuid != "" {
+			cordoned[uuid] = struct{}{}
+		}
+	}
+	return cordoned
+}
+
 func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -695,12 +709,18 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	gpuPolicy := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod)
 	needTopology := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyTopology)
 	isMutex := util.PolicyContains(gpuPolicy, util.GPUSchedulerPolicyMutex)
+	cordoned := cordonedDevices(nodeInfo)
 	for i := len(devices) - 1; i >= 0; i-- {
 		dev := devices[i]
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
 		if !dev.Health {
 			reason[common.CardNotHealth]++
 			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
+		if _, isCordoned := cordoned[dev.ID]; isCordoned {
+			reason[common.CardCordoned]++
+			klog.V(5).InfoS(common.CardCordoned, "pod", klog.KObj(pod), "device", dev.ID)
 			continue
 		}
 		found, numa := nv.checkType(pod.GetAnnotations(), *dev, k)
@@ -819,14 +839,20 @@ func (nv *NvidiaGPUDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			return true, tmpDevs, ""
 		}
 		if len(tmpDevs[k.Type]) > int(originReq) {
+			// A MIG card appears once per free slot; duplicates only inflate the
+			// combination space and win zero-score ties. Collapse when cards suffice.
+			candidates := tmpDevs
+			if distinct := distinctCardCandidates(tmpDevs[k.Type]); len(distinct) >= int(originReq) {
+				candidates = map[string]device.ContainerDevices{k.Type: distinct}
+			}
 			if originReq == 1 {
 				// If requesting a device, select the card with the worst connection to other cards (lowest total score).
-				lowestDevices := computeWorstSingleCard(nodeInfo, request, tmpDevs)
+				lowestDevices := computeWorstSingleCard(nodeInfo, request, candidates)
 				tmpDevs[k.Type] = lowestDevices
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "worst device", lowestDevices)
 			} else {
 				// If requesting multiple devices, select the best combination of cards.
-				combinations := generateCombinations(request, tmpDevs)
+				combinations := generateCombinations(request, candidates)
 				combination := computeBestCombination(nodeInfo, combinations)
 				tmpDevs[k.Type] = combination
 				klog.V(5).InfoS("device allocate success", "pod", klog.KObj(pod), "best device combination", tmpDevs)
@@ -880,6 +906,21 @@ func generateCombinations(request device.ContainerDeviceRequest, tmpDevs map[str
 	return result
 }
 
+// distinctCardCandidates keeps the first candidate of each physical card,
+// preserving the order the Fit loop produced them in.
+func distinctCardCandidates(candidates device.ContainerDevices) device.ContainerDevices {
+	seen := make(map[string]struct{}, len(candidates))
+	distinct := make(device.ContainerDevices, 0, len(candidates))
+	for _, candidate := range candidates {
+		if _, ok := seen[candidate.UUID]; ok {
+			continue
+		}
+		seen[candidate.UUID] = struct{}{}
+		distinct = append(distinct, candidate)
+	}
+	return distinct
+}
+
 func getDevicePairScoreMap(nodeInfo *device.NodeInfo) map[string]*device.DevicePairScore {
 	deviceScoreMap := make(map[string]*device.DevicePairScore)
 
@@ -925,7 +966,7 @@ func computeBestCombination(nodeInfo *device.NodeInfo, combinations []device.Con
 	for _, partition := range combinations {
 		totalScore := 0
 
-		for i := 0; i < len(partition)-1; i++ {
+		for i := range len(partition) - 1 {
 			dev1 := partition[i]
 			scoreMapDev1 := deviceScoreMap[dev1.UUID]
 			for z := i + 1; z < len(partition); z++ {

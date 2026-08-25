@@ -137,6 +137,13 @@ func GetAllocatePodByNode(ctx context.Context, nodeName string) (*corev1.Pod, er
 }
 
 func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
 	type patchMetadata struct {
 		Annotations map[string]string `json:"annotations,omitempty"`
 	}
@@ -151,7 +158,7 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	if err != nil {
 		return err
 	}
-	_, err = client.GetClient().CoreV1().Nodes().
+	_, err = c.CoreV1().Nodes().
 		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{})
 	if err != nil {
 		klog.Infoln("annotations=", annotations)
@@ -159,12 +166,22 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	}
 	return err
 }
-func AllInitContainersSucceeded(pod *corev1.Pod) bool {
-	if len(pod.Status.InitContainerStatuses) == 0 {
+
+func AllNonSidecarInitContainersSucceeded(pod *corev1.Pod) bool {
+	if len(pod.Spec.InitContainers) == 0 {
 		return false
 	}
+	statusByName := make(map[string]corev1.ContainerStatus, len(pod.Status.InitContainerStatuses))
 	for _, s := range pod.Status.InitContainerStatuses {
-		if s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
+		statusByName[s.Name] = s
+	}
+	for i := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[i]
+		if IsSidecarContainer(c) {
+			continue
+		}
+		s, ok := statusByName[c.Name]
+		if !ok || s.State.Terminated == nil || s.State.Terminated.ExitCode != 0 {
 			return false
 		}
 	}
@@ -249,6 +266,9 @@ func MarkAnnotationsToDelete(devType string, nn string) error {
 }
 
 func RemoveNodeAnnotation(node *corev1.Node, annotationKeys ...string) error {
+	if node == nil {
+		return fmt.Errorf("node is nil")
+	}
 	annos := make(map[string]any, len(annotationKeys))
 	for _, key := range annotationKeys {
 		annos[key] = nil
@@ -316,6 +336,11 @@ func AllContainersCreated(pod *corev1.Pod) bool {
 		return false
 	}
 	return len(pod.Status.ContainerStatuses) >= len(pod.Spec.Containers)
+}
+
+func IsSidecarContainer(c *corev1.Container) bool {
+	return c != nil && c.RestartPolicy != nil &&
+		*c.RestartPolicy == corev1.ContainerRestartPolicyAlways
 }
 
 // EmitNodeWarningEvent emits a Warning event on the given Node with deduplication.
