@@ -70,12 +70,18 @@ func TestGetNumaAlignmentModeByPod(t *testing.T) {
 			want: NumaAlignmentBestEffort,
 		},
 		{
-			name: "strict is rejected until the refit can enforce it",
+			name: "strict",
 			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
 				Annotations: map[string]string{NumaAlignmentAnnotationKey: "strict"},
 			}},
-			want:    NumaAlignmentNone,
-			wantErr: true,
+			want: NumaAlignmentStrict,
+		},
+		{
+			name: "mixed case strict is accepted",
+			pod: &corev1.Pod{ObjectMeta: metav1.ObjectMeta{
+				Annotations: map[string]string{NumaAlignmentAnnotationKey: "Strict"},
+			}},
+			want: NumaAlignmentStrict,
 		},
 		{
 			name: "explicit empty value is rejected",

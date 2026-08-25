@@ -28,20 +28,21 @@ import (
 // Manager restricts an allocation to. It is distinct from the
 // nvidia.com/numa-bind annotation, which requests GPU-to-GPU co-location on
 // one NUMA node at scheduling time.
-//
-// Only best-effort exists today. A strict mode that fails the allocation on
-// an unreconcilable mismatch is introduced together with the NUMA refit that
-// can actually enforce it (issue #2080), so the annotation never promises
-// semantics that are not implemented yet.
 type NumaAlignmentMode string
 
 const (
 	// NumaAlignmentNone means the Pod does not opt into NUMA alignment
 	// handling and mismatches are treated exactly as before.
 	NumaAlignmentNone NumaAlignmentMode = ""
-	// NumaAlignmentBestEffort surfaces a mismatch but never fails the
-	// allocation because of it.
+	// NumaAlignmentBestEffort asks for the NUMA refit when it is available
+	// but never fails the allocation: on a refit failure or with the refit
+	// disabled, the mismatch is only surfaced and kubelet's own selection
+	// stands.
 	NumaAlignmentBestEffort NumaAlignmentMode = "best-effort"
+	// NumaAlignmentStrict fails the allocation when the NUMA refit is
+	// enabled on the cluster and cannot reconcile the mismatch. With the
+	// refit disabled, strict only logs the mismatch at error severity.
+	NumaAlignmentStrict NumaAlignmentMode = "strict"
 )
 
 // GetNumaAlignmentModeByPod returns the Pod's NUMA alignment mode, or
@@ -63,10 +64,10 @@ func GetNumaAlignmentModeByPod(pod *corev1.Pod) (NumaAlignmentMode, error) {
 // value. Values are case-insensitive and surrounding whitespace is ignored.
 func ParseNumaAlignmentMode(value string) (NumaAlignmentMode, error) {
 	switch mode := NumaAlignmentMode(strings.ToLower(strings.TrimSpace(value))); mode {
-	case NumaAlignmentBestEffort:
+	case NumaAlignmentBestEffort, NumaAlignmentStrict:
 		return mode, nil
 	default:
-		return NumaAlignmentNone, fmt.Errorf("invalid %s annotation %q: expected %q",
-			NumaAlignmentAnnotationKey, value, NumaAlignmentBestEffort)
+		return NumaAlignmentNone, fmt.Errorf("invalid %s annotation %q: expected %q or %q",
+			NumaAlignmentAnnotationKey, value, NumaAlignmentBestEffort, NumaAlignmentStrict)
 	}
 }
