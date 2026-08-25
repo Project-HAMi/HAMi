@@ -42,6 +42,11 @@ spec:
       priorityClassName: system-node-critical
       hostPID: {{ .Values.devicePlugin.hostPID }}
       hostNetwork: {{ .Values.devicePlugin.hostNetwork | default false }}
+      {{- if .Values.devicePlugin.hostNetwork }}
+      # Cluster DNS is required for the default NUMA refit endpoint, which is
+      # a Service name.
+      dnsPolicy: ClusterFirstWithHostNet
+      {{- end }}
       {{- include "hami.devicePlugin.imagePullSecrets" . | nindent 6 }}
       {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
       initContainers:
