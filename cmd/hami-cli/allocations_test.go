@@ -27,6 +27,12 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 )
 
+// nvidiaPod builds a pod annotated the way nvidia.PatchAnnotations leaves it once the pod
+// is fully running: hami.io/vgpu-devices-to-allocate (the pending work queue) has already
+// been erased container-by-container by the device plugin's Allocate(), while
+// hami.io/vgpu-devices-allocated (the stable record) still holds the full value. Fixtures
+// intentionally mirror this post-bind state rather than the transient bind-time state,
+// since that's the state hami-cli must be able to read.
 func nvidiaPod(namespace, name, node string) corev1.Pod {
 	return corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -34,7 +40,8 @@ func nvidiaPod(namespace, name, node string) corev1.Pod {
 			Name:      name,
 			Annotations: map[string]string{
 				"hami.io/vgpu-node":                node,
-				"hami.io/vgpu-devices-to-allocate": "GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:;",
+				"hami.io/vgpu-devices-to-allocate": "",
+				"hami.io/vgpu-devices-allocated":   "GPU-0fc3eda5-e98b-a25b-5b0d-cf5c855d1448,NVIDIA,3000,0:;",
 			},
 		},
 		Spec: corev1.PodSpec{
@@ -49,12 +56,31 @@ func cambriconPod(namespace, name, node string) corev1.Pod {
 			Namespace: namespace,
 			Name:      name,
 			Annotations: map[string]string{
-				"hami.io/vgpu-node":                         node,
-				"hami.io/cambricon-mlu-devices-to-allocate": "MLU-45013011-2257-0000-0000-000000000000,MLU,23308,0:;",
+				"hami.io/vgpu-node":                       node,
+				"hami.io/cambricon-mlu-devices-allocated": "MLU-45013011-2257-0000-0000-000000000000,MLU,23308,0:;",
 			},
 		},
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{{Name: "infer"}},
+		},
+	}
+}
+
+// kunlunPod exercises the one vendor whose SupportDevices key breaks the common
+// "-devices-allocated" suffix: kunlun registers "hami.io/kunlun-allocated"
+// (pkg/device/kunlun/device.go), with no "-devices-" segment.
+func kunlunPod(namespace, name, node string) corev1.Pod {
+	return corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: namespace,
+			Name:      name,
+			Annotations: map[string]string{
+				"hami.io/vgpu-node":        node,
+				"hami.io/kunlun-allocated": "XPU-1,KUNLUN,4096,0:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "worker"}},
 		},
 	}
 }
@@ -111,8 +137,8 @@ func TestCollectAllocationRows_SkipsMalformedAnnotationWithoutFailingOthers(t *t
 			Namespace: "default",
 			Name:      "broken-job",
 			Annotations: map[string]string{
-				"hami.io/vgpu-node":                "node-a",
-				"hami.io/vgpu-devices-to-allocate": "not-a-valid-device-record",
+				"hami.io/vgpu-node":              "node-a",
+				"hami.io/vgpu-devices-allocated": "not-a-valid-device-record",
 			},
 		},
 	}
@@ -134,7 +160,7 @@ func TestCollectAllocationRows_InitContainerNameMapping(t *testing.T) {
 			Name:      "multi-ctr",
 			Annotations: map[string]string{
 				"hami.io/vgpu-node": "node-a",
-				"hami.io/vgpu-devices-to-allocate": "GPU-init,NVIDIA,1000,0:;" +
+				"hami.io/vgpu-devices-allocated": "GPU-init,NVIDIA,1000,0:;" +
 					"GPU-main,NVIDIA,2000,0:;",
 			},
 		},
@@ -153,6 +179,51 @@ func TestCollectAllocationRows_InitContainerNameMapping(t *testing.T) {
 	}
 	if rows[1].Container != "trainer" {
 		t.Errorf("expected second row's container to resolve to %q, got %q", "trainer", rows[1].Container)
+	}
+}
+
+// TestCollectAllocationRows_IgnoresErasedPendingAnnotation reproduces the state of an
+// already-running pod: the NVIDIA device plugin's Allocate() has erased
+// hami.io/vgpu-devices-to-allocate down to an empty value as each container started
+// (pkg/device-plugin/nvidiadevice/nvinternal/plugin/util.go, patchErasedAnnotation), while
+// hami.io/vgpu-devices-allocated still holds the original allocation. hami-cli must read
+// the row from the -allocated annotation and must not be confused by the empty -to-allocate
+// one sitting alongside it.
+func TestCollectAllocationRows_IgnoresErasedPendingAnnotation(t *testing.T) {
+	pod := corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Namespace: "default",
+			Name:      "running-job",
+			Annotations: map[string]string{
+				"hami.io/vgpu-node":                "node-a",
+				"hami.io/vgpu-devices-to-allocate": "",
+				"hami.io/vgpu-devices-allocated":   "GPU-live,NVIDIA,4000,0:;",
+			},
+		},
+		Spec: corev1.PodSpec{
+			Containers: []corev1.Container{{Name: "trainer"}},
+		},
+	}
+
+	rows := collectAllocationRows([]corev1.Pod{pod})
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row from the -allocated annotation, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].DeviceUUID != "GPU-live" {
+		t.Errorf("expected device UUID from -allocated annotation, got %+v", rows[0])
+	}
+}
+
+// TestCollectAllocationRows_KunlunIrregularSuffix guards against a regression to a suffix
+// match on "-devices-allocated", which would silently miss kunlun's
+// "hami.io/kunlun-allocated" key (pkg/device/kunlun/device.go).
+func TestCollectAllocationRows_KunlunIrregularSuffix(t *testing.T) {
+	rows := collectAllocationRows([]corev1.Pod{kunlunPod("default", "xpu-job", "node-c")})
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row for kunlun's irregular annotation key, got %d: %+v", len(rows), rows)
+	}
+	if rows[0].DeviceUUID != "XPU-1" || rows[0].DeviceType != "KUNLUN" {
+		t.Errorf("unexpected kunlun row: %+v", rows[0])
 	}
 }
 

@@ -55,16 +55,19 @@ hami-cli get allocations --namespace ml-team
 ## Vendor coverage
 
 `hami-cli` does not hardcode a list of supported vendors. Every HAMi device
-backend registers its per-pod annotation key under the pattern
-`hami.io/<slug>-devices-to-allocate` (documented in
-[docs/develop/protocol.md](../../docs/develop/protocol.md)); `hami-cli`
-matches any annotation following that pattern and decodes it with the same
-`device.DecodePodDevices` function the scheduler itself uses. This means
-allocations from every currently-supported vendor (NVIDIA, Cambricon,
+backend writes two annotations per pod with identical values at scheduler
+bind time: `hami.io/<slug>-devices-to-allocate` (a pending work queue that
+the device plugin's `Allocate()` erases entry-by-entry as each container
+starts) and `hami.io/<slug>-allocated` (the stable record, never erased).
+`hami-cli` matches the `-allocated` annotation, since it is the one that
+still holds a value once a pod is fully running, and decodes it with the
+same `device.DecodePodDevices` function the scheduler itself uses. This
+means allocations from every currently-supported vendor (NVIDIA, Cambricon,
 Ascend, AMD, Hygon, Iluvatar, Kunlun, Metax, Mthreads, Biren, Enflame,
 AWS Neuron, Vast.ai) are decoded uniformly, including vendors whose
 annotation key is only known at runtime via chart configuration (Ascend,
-Iluvatar).
+Iluvatar) and Kunlun, whose key (`hami.io/kunlun-allocated`) omits the
+otherwise-common `-devices-` segment.
 
 If a pod's HAMi annotations are malformed, `hami-cli` prints a warning to
 stderr and skips that pod rather than failing the whole command.

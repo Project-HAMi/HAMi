@@ -35,11 +35,18 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 )
 
-// podDeviceAllocateAnnotation matches the per-vendor "hami.io/<slug>-devices-to-allocate"
-// annotation keys documented in docs/develop/protocol.md. Every device backend registers
-// its own key under this suffix (see device.InRequestDevices assignments), so matching by
-// pattern lets hami-cli decode any vendor's allocations without importing vendor packages.
-var podDeviceAllocateAnnotation = regexp.MustCompile(`^hami\.io/(.+)-devices-to-allocate$`)
+// podDeviceAllocateAnnotation matches the per-vendor "hami.io/*-allocated" annotation keys
+// (device.SupportDevices), not "hami.io/*-devices-to-allocate" (device.InRequestDevices).
+// The two are written with identical values at scheduler bind time
+// (see nvidia.PatchAnnotations in pkg/device/nvidia/device.go), but InRequestDevices is a
+// pending work queue: the NVIDIA device plugin's Allocate() erases each container's entry
+// from it as the container starts (popNextContainerDevices/patchErasedAnnotation in
+// pkg/device-plugin/nvidiadevice/nvinternal/plugin/util.go), so an already-running pod
+// reads back empty there. SupportDevices is never erased, so it is the stable source of
+// truth for "what is this pod currently holding". Kunlun's key breaks the otherwise-common
+// "-devices-allocated" suffix (it registers "hami.io/kunlun-allocated"), hence matching on
+// the shorter "-allocated" suffix rather than "-devices-allocated".
+var podDeviceAllocateAnnotation = regexp.MustCompile(`^hami\.io/(.+)-allocated$`)
 
 type allocationRow struct {
 	Node          string
@@ -95,10 +102,10 @@ func runAllocations(ctx context.Context, c kubernetes.Interface, out io.Writer) 
 	return nil
 }
 
-// collectAllocationRows decodes hami.io/*-devices-to-allocate annotations on every pod
-// into a flat, sorted list of allocation rows. Pods with no HAMi annotations are skipped
-// silently; pods with malformed HAMi annotations are skipped with a warning so that one
-// bad pod cannot hide the rest of the cluster's allocation state.
+// collectAllocationRows decodes hami.io/*-allocated annotations on every pod into a flat,
+// sorted list of allocation rows. Pods with no HAMi annotations are skipped silently; pods
+// with malformed HAMi annotations are skipped with a warning so that one bad pod cannot
+// hide the rest of the cluster's allocation state.
 func collectAllocationRows(pods []corev1.Pod) []allocationRow {
 	var rows []allocationRow
 	for _, pod := range pods {
@@ -166,8 +173,8 @@ func collectAllocationRows(pods []corev1.Pod) []allocationRow {
 }
 
 // podContainerNames returns container names in the same order used to build the
-// hami.io/*-devices-to-allocate annotation: init containers first, then regular
-// containers (see device.Resourcereqs for the matching encode-side order).
+// hami.io/*-allocated annotation: init containers first, then regular containers
+// (see device.Resourcereqs for the matching encode-side order).
 func podContainerNames(pod *corev1.Pod) []string {
 	names := make([]string, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
 	for _, c := range pod.Spec.InitContainers {
