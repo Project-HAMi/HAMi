@@ -466,3 +466,62 @@ func TestRefitNumaAllocationHeterogeneousReservation(t *testing.T) {
 	assert.Assert(t, strings.Contains(response.FailureReason, "heterogeneous"), "reason: %s", response.FailureReason)
 	assert.Equal(t, *calls, 0)
 }
+
+func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
+	// A pod whose init-container usage was already released must not have its
+	// reservation re-inflated back to the init peak by a later refit.
+	nodes := newNodeManager()
+	nodes.addNode(refitNode, &device.NodeInfo{
+		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "GPU-a", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-b", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	})
+
+	initDevices := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 30000, Usedcores: 60}}
+	appDevices := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
+	reserved := device.PodSingleDevice{initDevices, appDevices}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(reserved),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(reserved),
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init"}},
+			Containers:     []corev1.Container{{Name: "main"}},
+		},
+	}
+	pods := device.NewPodManager()
+	pods.AddPod(pod, refitNode, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
+	// Simulate the informer's post-init shrink, which arms the released flag.
+	steady := device.SteadyStateDeviceUsage(pod, device.PodDevices{nvidia.NvidiaGPUDevice: reserved})
+	pods.UpdatePodDevice(pod, steady)
+
+	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
+	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	stubRefitPatch(t, nil)
+
+	request := refitTestRequestFor("GPU-b")
+	request.ContainerIndex = 1
+	request.ContainerName = "main"
+	response := s.RefitNumaAllocation(request)
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+
+	pi, ok := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
+	assert.Equal(t, ok, true)
+	assert.Equal(t, pi.InitContainerResourceReleased, true)
+	// Steady state is app-only: the refitted GPU-b at the app amount, with no
+	// re-inflated init-container reservation on GPU-a.
+	total := int32(0)
+	for _, containerDevices := range pi.Devices[nvidia.NvidiaGPUDevice] {
+		for _, d := range containerDevices {
+			total += d.Usedmem
+			assert.Equal(t, d.UUID, "GPU-b", "unexpected device %s after refit", d.UUID)
+		}
+	}
+	assert.Equal(t, total, int32(20000))
+}
