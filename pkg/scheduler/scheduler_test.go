@@ -2707,7 +2707,7 @@ func Test_SchedulerTerminatingPodRetainsCache(t *testing.T) {
 	podDevces := device.PodDevices{
 		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 			[]device.ContainerDevice{
-				{Idx: 0, UUID: "GPU0", Usedmem: 1000, Usedcores: 10},
+				{Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000, Usedcores: 10},
 			},
 		},
 	}
@@ -2808,11 +2808,11 @@ func Test_onUpdatePod_InitContainerShrink(t *testing.T) {
 		nvidia.NvidiaGPUDevice: device.PodSingleDevice{
 			// Init container (index 0)
 			{{
-				Idx: 0, UUID: "GPU0", Usedmem: 20000, Usedcores: 10,
+				Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 10,
 			}},
 			// App container (index 1)
 			{{
-				Idx: 0, UUID: "GPU0", Usedmem: 10000, Usedcores: 5,
+				Idx: 0, UUID: "GPU0", Type: nvidia.NvidiaGPUDevice, Usedmem: 10000, Usedcores: 5,
 			}},
 		},
 	}

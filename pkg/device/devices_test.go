@@ -46,6 +46,195 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 	assert.DeepEqual(t, cd1, cd2)
 }
 
+func TestDecodeContainerDevices(t *testing.T) {
+	tests := []struct {
+		name        string
+		input       string
+		want        ContainerDevices
+		expectError bool
+	}{
+		{
+			name:        "empty string returns empty ContainerDevices",
+			input:       "",
+			want:        ContainerDevices{},
+			expectError: false,
+		},
+		{
+			name:        "trailing delimiters only returns empty ContainerDevices",
+			input:       ":::",
+			want:        ContainerDevices{},
+			expectError: false,
+		},
+		{
+			name:  "valid single device",
+			input: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
+					Type:      "NVIDIA",
+					Usedmem:   500,
+					Usedcores: 3,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:  "valid single device with zero resources",
+			input: "GPU-zero,NVIDIA,0,0:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-zero",
+					Type:      "NVIDIA",
+					Usedmem:   0,
+					Usedcores: 0,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:  "multiple valid devices",
+			input: "GPU-1,NVIDIA,1000,10:GPU-2,Cambricon,2000,20:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+				},
+				{
+					UUID:      "GPU-2",
+					Type:      "Cambricon",
+					Usedmem:   2000,
+					Usedcores: 20,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:  "existing valid fields preserved with extra optional fields",
+			input: "GPU-1,NVIDIA,1000,10,extra1,extra2:",
+			want: ContainerDevices{
+				{
+					UUID:      "GPU-1",
+					Type:      "NVIDIA",
+					Usedmem:   1000,
+					Usedcores: 10,
+				},
+			},
+			expectError: false,
+		},
+		{
+			name:        "malformed segment without comma",
+			input:       "garbage",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "malformed segment without comma and with delimiter",
+			input:       "garbage:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "missing required fields (only 2 fields)",
+			input:       "GPU-1,NVIDIA:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "missing required fields (only 3 fields)",
+			input:       "GPU-1,NVIDIA,1000:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "empty device ID / UUID",
+			input:       ",NVIDIA,1000,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "empty device type",
+			input:       "GPU-1,,1000,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "negative memory value",
+			input:       "GPU-1,NVIDIA,-500,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "negative cores value",
+			input:       "GPU-1,NVIDIA,500,-1:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "invalid non-numeric memory",
+			input:       "GPU-1,NVIDIA,invalid,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "invalid non-numeric core",
+			input:       "GPU-1,NVIDIA,500,invalid:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "memory integer overflow",
+			input:       "GPU-1,NVIDIA,99999999999999999999999999,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "core integer overflow",
+			input:       "GPU-1,NVIDIA,500,99999999999999999999999999:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "valid device followed by malformed device fails entire decode",
+			input:       "GPU-1,NVIDIA,1000,10:malformed_segment:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "malformed device followed by valid device fails entire decode",
+			input:       "malformed_segment:GPU-1,NVIDIA,1000,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "valid device followed by negative resource fails entire decode",
+			input:       "GPU-1,NVIDIA,1000,10:GPU-2,NVIDIA,-100,10:",
+			want:        nil,
+			expectError: true,
+		},
+		{
+			name:        "negative resource followed by valid device fails entire decode",
+			input:       "GPU-1,NVIDIA,1000,-5:GPU-2,NVIDIA,1000,10:",
+			want:        nil,
+			expectError: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := DecodeContainerDevices(tt.input)
+			if tt.expectError {
+				assert.Assert(t, err != nil, "expected error for input %q, got nil", tt.input)
+				assert.Assert(t, got == nil, "expected nil devices on error, got %+v", got)
+			} else {
+				assert.NilError(t, err)
+				assert.DeepEqual(t, tt.want, got)
+			}
+		})
+	}
+}
+
 func TestEmptyPodDeviceCoding(t *testing.T) {
 	pd1 := PodDevices{}
 	s := EncodePodDevices(inRequestDevices, pd1)
@@ -296,9 +485,60 @@ func Test_DecodePodDevices(t *testing.T) {
 
 func TestDecodePodDevices_BadAnnotation(t *testing.T) {
 	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
-	annos := map[string]string{"hami.io/vgpu-devices-to-allocate": "uuid,type,100:;"}
-	_, err := DecodePodDevices(checklist, annos)
-	assert.Assert(t, err != nil)
+	badAnnos := []struct {
+		name string
+		anno string
+	}{
+		{
+			name: "missing required fields (only 3 fields)",
+			anno: "uuid,type,100:;",
+		},
+		{
+			name: "malformed non-empty segment without comma",
+			anno: "malformed_annotation:;",
+		},
+		{
+			name: "negative memory in first container",
+			anno: "GPU-1,NVIDIA,-500,10:;",
+		},
+		{
+			name: "negative cores in second container",
+			anno: "GPU-1,NVIDIA,500,10:;GPU-2,NVIDIA,500,-1:;",
+		},
+		{
+			name: "empty UUID",
+			anno: ",NVIDIA,500,10:;",
+		},
+		{
+			name: "empty type",
+			anno: "GPU-1,,500,10:;",
+		},
+	}
+
+	for _, tt := range badAnnos {
+		t.Run(tt.name, func(t *testing.T) {
+			annos := map[string]string{"hami.io/vgpu-devices-to-allocate": tt.anno}
+			got, err := DecodePodDevices(checklist, annos)
+			assert.Assert(t, err != nil, "expected error for bad annotation %q, got nil", tt.anno)
+			assert.DeepEqual(t, got, PodDevices{})
+		})
+	}
+}
+
+func TestResourceAccounting_NegativeDecodedProtection(t *testing.T) {
+	// Proves that malformed negative allocation annotations cannot be decoded,
+	// preventing negative resource values from improperly decreasing Usedmem/Usedcores.
+	malformedAnno := "GPU-1,NVIDIA,-1000,-10:"
+	devices, err := DecodeContainerDevices(malformedAnno)
+	assert.Assert(t, err != nil, "DecodeContainerDevices must reject negative values")
+	assert.Assert(t, devices == nil, "returned devices must be nil on failure")
+
+	// Ensure PodDevices decoding also fails closed
+	checklist := map[string]string{"NVIDIA": "hami.io/vgpu-devices-to-allocate"}
+	podAnnos := map[string]string{"hami.io/vgpu-devices-to-allocate": malformedAnno + ";"}
+	podDevs, err := DecodePodDevices(checklist, podAnnos)
+	assert.Assert(t, err != nil, "DecodePodDevices must reject negative values")
+	assert.DeepEqual(t, podDevs, PodDevices{})
 }
 
 func TestMarshalNodeDevices(t *testing.T) {
@@ -1725,10 +1965,13 @@ func FuzzDecodeContainerDevices(f *testing.F) {
 
 func FuzzEncodeDecodeContainerDevices(f *testing.F) {
 	f.Add("GPU-uuid", "NVIDIA", int32(1024), int32(10))
-	f.Add("", "", int32(0), int32(0))
-	f.Add("GPU-boundary", "NVIDIA", int32(-2147483648), int32(2147483647))
+	f.Add("GPU-uuid2", "Cambricon", int32(0), int32(0))
+	f.Add("GPU-boundary", "NVIDIA", int32(2147483647), int32(2147483647))
 	f.Fuzz(func(t *testing.T, uuid, deviceType string, usedmem, usedcores int32) {
 		if strings.ContainsAny(uuid, ",:;") || strings.ContainsAny(deviceType, ",:;") {
+			t.Skip()
+		}
+		if uuid == "" || deviceType == "" || usedmem < 0 || usedcores < 0 {
 			t.Skip()
 		}
 
