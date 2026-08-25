@@ -3090,7 +3090,6 @@ func TestNodeDeleted_ReuseAfterDeletion(t *testing.T) {
 	assert.Equal(t, needUpdate, true, "re-created node must trigger an update (stale bookkeeping was cleared)")
 }
 
-
 func Test_GenerateResourceRequests_MemoryPercentageValidation(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
@@ -3245,6 +3244,10 @@ func TestFit_MemoryPercentageValidation(t *testing.T) {
 				assert.Equal(t, result[NvidiaGPUDevice][0].Usedmem, tt.wantMemReq)
 			} else {
 				assert.Assert(t, strings.Contains(reason, common.CardInsufficientMemory), "expected CardInsufficientMemory in reason: %s", reason)
+			}
+		})
+	}
+}
 
 // migTopologyDevice builds the NVIDIA backend used by the MIG topology tests.
 func migTopologyDevice() *NvidiaGPUDevices {
