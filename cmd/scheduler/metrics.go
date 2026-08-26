@@ -136,7 +136,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	)
 	nodeGPUMemoryPercentage := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
-		"GPU Memory Allocated Percentage on a certain GPU",
+		"GPU memory allocated ratio on a certain GPU (0-1)",
 		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodeGPUMigInstance := prometheus.NewDesc(
