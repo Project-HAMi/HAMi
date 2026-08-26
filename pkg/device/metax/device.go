@@ -228,11 +228,15 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, numa := mat.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -241,7 +245,7 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -322,9 +326,9 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }

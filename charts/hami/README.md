@@ -8,7 +8,7 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `global.imageRegistry` | Global Docker image registry | `""` |
 | `global.imagePullSecrets` | Global Docker image pull secrets | `[]` |
-| `global.imageTag` | Image tag | `"v2.9.0"` |
+| `global.imageTag` | Image tag | `"v2.10.0"` |
 | `global.gpuHookPath` | GPU Hook path | `/usr/local` |
 | `global.labels` | Global labels | `{}` |
 | `global.annotations` | Global annotations | `{}` |
@@ -182,7 +182,7 @@ This document provides detailed descriptions of all configurable values paramete
 | `devicePlugin.passDeviceSpecsEnabled` | Whether to enable passing device specs | `false` |
 | `devicePlugin.extraArgs` | Device plugin extra arguments | `["-v=4"]` |
 | `devicePlugin.nodeConfiguration.config` | Node configuration for device plugin by json | An example of default configuration. |
-| `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external congimap | `""` |
+| `devicePlugin.nodeConfiguration.externalConfigName` | Node configuration for device plugin by external configmap | `""` |
 | `devicePlugin.extraEnvs` | Device plugin extra environments | `{}` |
 | `devicePlugin.nvidiaDriverRoot` | NVIDIA driver root path on the host. When set, the chart passes it as `NVIDIA_DRIVER_ROOT` and mounts it read-only at `/driver-root` in both the device-plugin and vGPUmonitor containers. | `null` |
 | `devicePlugin.tolerations` | Tolerations applied to device plugin Pods | `[{"key":"nvidia.com/gpu","operator":"Exists","effect":"NoSchedule"}]` |
@@ -216,7 +216,12 @@ This document provides detailed descriptions of all configurable values paramete
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devices.kunlun.enabled` | Whether to enable | `true` |
-| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu"]` |
+| `devices.kunlun.customresources` | Custom resources | `["kunlunxin.com/xpu", "kunlunxin.com/vxpu", "kunlunxin.com/vxpu-memory"]` |
+
+### Enflame
+| Parameter | Description | Default Value |
+|-----------|-------------|---------------|
+| `devices.enflame.customresources` | Custom resources | `["enflame.com/drs-gcu", "enflame.com/gcu-memory", "enflame.com/gcu-core", "enflame.com/gcu"]` |
 
 ### Mthreads
 | Parameter | Description | Default Value |

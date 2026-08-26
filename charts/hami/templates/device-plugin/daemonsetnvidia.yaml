@@ -154,6 +154,23 @@ spec:
             - name: ENABLE_TOPOLOGY_SCORE
               value: "true"
             {{- end }}
+            {{- with .Values.devicePlugin.numaRefit }}
+            {{- if .enabled }}
+            - name: HAMI_SCHEDULER_ENDPOINT
+              value: {{ .schedulerEndpoint | default (printf "https://%s.%s.svc:%v" (include "hami-vgpu.scheduler" $) (include "hami-vgpu.namespace" $) ($.Values.scheduler.service.httpPort | default 443)) | quote }}
+            {{- if .tlsInsecure }}
+            - name: HAMI_SCHEDULER_TLS_INSECURE
+              value: "true"
+            {{- end }}
+            {{- if .caFile }}
+            - name: HAMI_SCHEDULER_CA_FILE
+              value: {{ .caFile | quote }}
+            {{- else if .caSecret }}
+            - name: HAMI_SCHEDULER_CA_FILE
+              value: "/etc/hami/numa-refit-ca/ca.crt"
+            {{- end }}
+            {{- end }}
+            {{- end }}
             {{- with .Values.devicePlugin.extraEnvs }}
             {{- . | toYaml | nindent 12 }}
             {{- end }}
@@ -179,6 +196,11 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
+            - name: numa-refit-ca
+              mountPath: /etc/hami/numa-refit-ca
+              readOnly: true
+            {{- end }}
             {{- if and (kindIs "string" .Values.devicePlugin.nvidiaDriverRoot) .Values.devicePlugin.nvidiaDriverRoot }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
@@ -249,6 +271,11 @@ spec:
               mountPropagation: HostToContainer
             {{- end }}
       volumes:
+        {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
+        - name: numa-refit-ca
+          secret:
+            secretName: {{ .Values.devicePlugin.numaRefit.caSecret }}
+        {{- end }}
         - name: ctrs
           hostPath:
             path: {{ .Values.devicePlugin.monitor.ctrPath }}

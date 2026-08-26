@@ -19,12 +19,9 @@ package main
 import (
 	"fmt"
 	"os"
-	"strings"
 	"time"
 	"unicode/utf8"
 
-	"github.com/Project-HAMi/HAMi/pkg/device"
-	dp "github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/plugin"
 	nv "github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/monitor/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -38,42 +35,15 @@ import (
 	"k8s.io/klog/v2"
 )
 
-// ClusterManager is an example for a system that might have been built without
-// Prometheus in mind. It models a central manager of jobs running in a
-// cluster. Thus, we implement a custom Collector called
-// ClusterManagerCollector, which collects information from a ClusterManager
-// using its provided methods and turns them into Prometheus Metrics for
-// collection.
-//
-// An additional challenge is that multiple instances of the ClusterManager are
-// run within the same binary, each in charge of a different zone. We need to
-// make use of wrapping Registerers to be able to register each
-// ClusterManagerCollector instance with Prometheus.
+// ClusterManager holds the state the vGPUMonitor's Prometheus collector reads
+// from: the pod and container listers used to gather per-container GPU usage,
+// and the zone label each ClusterManagerCollector is registered under via a
+// wrapping Registerer.
 type ClusterManager struct {
-	Zone string
-	// Contains many more fields not listed in this example.
+	Zone            string
 	PodLister       listerscorev1.PodLister
 	containerLister *nvidia.ContainerLister
 	LegacyMetrics   bool
-}
-
-// ReallyExpensiveAssessmentOfTheSystemState is a mock for the data gathering a
-// real cluster manager would have to do. Since it may actually be really
-// expensive, it must only be called once per collection. This implementation,
-// obviously, only returns some made-up data.
-func (c *ClusterManager) ReallyExpensiveAssessmentOfTheSystemState() (
-	oomCountByHost map[string]int, ramUsageByHost map[string]float64,
-) {
-	// Just example fake data.
-	oomCountByHost = map[string]int{
-		"foo.example.org": 42,
-		"bar.example.org": 2001,
-	}
-	ramUsageByHost = map[string]float64{
-		"foo.example.org": 6.023e23,
-		"bar.example.org": 3.14,
-	}
-	return
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -88,12 +58,18 @@ var (
 	hostGPUdesc = prometheus.NewDesc(
 		"hami_host_gpu_memory_used_bytes",
 		"GPU device memory usage in bytes",
-		[]string{"device_index", "device_uuid", "device_type"}, nil,
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
 	)
 
 	hostGPUUtilizationdesc = prometheus.NewDesc(
 		"hami_host_gpu_utilization_ratio",
 		"GPU core utilization ratio (0-100)",
+		[]string{"node", "device_index", "device_uuid", "device_type"}, nil,
+	)
+
+	hostGPUMemoryUtilizationdesc = prometheus.NewDesc(
+		"hami_host_gpu_memory_controller_utilization_ratio",
+		"GPU memory controller utilization ratio (0-100)",
 		[]string{"device_index", "device_uuid", "device_type"}, nil,
 	)
 
@@ -125,8 +101,8 @@ var (
 	)
 	ctrDeviceMigInfo = prometheus.NewDesc(
 		"hami_mig_device_info",
-		"MIG device information for container",
-		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "instance_id"}, nil,
+		"MIG runtime identity for a container allocation",
+		[]string{"namespace", "pod", "container", "vdevice_index", "device_uuid", "mig_uuid", "profile", "gpu_instance_id", "compute_instance_id"}, nil,
 	)
 	ctrDeviceMemoryContextDesc = prometheus.NewDesc(
 		"hami_vgpu_memory_context_bytes",
@@ -163,12 +139,12 @@ func initLegacyDescriptors() {
 	legacyHostGPUdesc = prometheus.NewDesc(
 		"HostGPUMemoryUsage",
 		"GPU device memory usage",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyHostGPUUtilizationdesc = prometheus.NewDesc(
 		"HostCoreUtilization",
 		"GPU core utilization",
-		[]string{"deviceidx", "deviceuuid", "devicetype"}, nil,
+		[]string{"nodeid", "deviceidx", "deviceuuid", "devicetype"}, nil,
 	)
 	legacyCtrvGPUdesc = prometheus.NewDesc(
 		"vGPU_device_memory_usage_in_bytes",
@@ -211,16 +187,18 @@ func sendLegacyMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueT
 	}
 }
 
-// Describe is implemented with DescribeByCollect. That's possible because the
-// Collect method will always return the same two metrics with the same two
-// descriptors.
+// Describe sends all the metrics descriptors that the collector might use.
+// These descriptors are used by the Prometheus registry to register the metrics.
 func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- hostGPUdesc
 	ch <- ctrvGPUdesc
 	ch <- ctrvGPUlimitdesc
 	ch <- hostGPUUtilizationdesc
+	ch <- hostGPUMemoryUtilizationdesc
 	ch <- ctrDeviceMemorydesc
 	ch <- ctrDeviceUtilizationdesc
+	ch <- ctrDeviceLastKernelDesc
+	ch <- ctrDeviceMigInfo
 	ch <- ctrDeviceMemoryContextDesc
 	ch <- ctrDeviceMemoryModuleDesc
 	ch <- ctrDeviceMemoryBufferDesc
@@ -237,52 +215,9 @@ func (cc ClusterManagerCollector) Describe(ch chan<- *prometheus.Desc) {
 	}
 }
 
-//func parseidstr(podusage string) (string, string, error) {
-//	tmp := strings.Split(podusage, "_")
-//	if len(tmp) > 1 {
-//		return tmp[0], tmp[1], nil
-//	} else {
-//		return "", "", errors.New("parse error")
-//	}
-//}
-//
-//func gettotalusage(usage podusage, vidx int) (deviceMemory, error) {
-//	added := deviceMemory{
-//		bufferSize:  0,
-//		contextSize: 0,
-//		moduleSize:  0,
-//		offset:      0,
-//		total:       0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.bufferSize += val.used[vidx].bufferSize
-//		added.contextSize += val.used[vidx].contextSize
-//		added.moduleSize += val.used[vidx].moduleSize
-//		added.offset += val.used[vidx].offset
-//		added.total += val.used[vidx].total
-//	}
-//	return added, nil
-//}
-//
-//func getTotalUtilization(usage podusage, vidx int) deviceUtilization {
-//	added := deviceUtilization{
-//		decUtil: 0,
-//		encUtil: 0,
-//		smUtil:  0,
-//	}
-//	for _, val := range usage.sr.procs {
-//		added.decUtil += val.deviceUtil[vidx].decUtil
-//		added.encUtil += val.deviceUtil[vidx].encUtil
-//		added.smUtil += val.deviceUtil[vidx].smUtil
-//	}
-//	return added
-//}
-
-// Collect first triggers the ReallyExpensiveAssessmentOfTheSystemState. Then it
-// creates constant metrics for each host on the fly based on the returned data.
-//
-// Note that Collect could be called concurrently, so we depend on
-// ReallyExpensiveAssessmentOfTheSystemState to be concurrency-safe.
+// Collect gathers GPU, pod, and container metrics on each scrape and sends them
+// to the provided channel. It may be called concurrently, so the collection
+// helpers it calls must be concurrency-safe.
 func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	klog.Info("Starting to collect metrics for vGPUMonitor")
 
@@ -382,22 +317,27 @@ func (cc ClusterManagerCollector) collectGPUMemoryMetrics(ch chan<- prometheus.M
 
 	deviceName = "NVIDIA-" + deviceName
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUdesc,
-		prometheus.GaugeValue,
-		float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
-	)
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
 
-	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used),
-		fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUdesc, prometheus.GaugeValue, float64(memory.Used), nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUdesc metric: %v", err)
+	}
+
+	sendLegacyMetric(ch, legacyHostGPUdesc, prometheus.GaugeValue, float64(memory.Used), nodeName, fmt.Sprint(index), uuid, deviceName)
 
 	return nil
 }
 
 func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometheus.Metric, hdev nvml.Device, index int) error {
-	util, nvret := hdev.GetUtilizationRates()
+	nodeName := os.Getenv(util.NodeNameEnvName)
+	if nodeName == "" {
+		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
+	}
+
+	utilRates, nvret := hdev.GetUtilizationRates()
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
 	}
@@ -414,16 +354,18 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 
 	deviceName = "NVIDIA-" + deviceName
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUUtilizationdesc,
-		prometheus.GaugeValue,
-		float64(util.Gpu),
-		fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUUtilizationdesc metric: %v", err)
+	}
 
-	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(util.Gpu),
+	sendLegacyMetric(ch, legacyHostGPUUtilizationdesc, prometheus.GaugeValue, float64(utilRates.Gpu), nodeName, fmt.Sprint(index), uuid, deviceName)
+
+	if err := sendMetric(ch, hostGPUMemoryUtilizationdesc, prometheus.GaugeValue,
+		float64(utilRates.Memory),
 		fmt.Sprint(index), uuid, deviceName,
-	)
+	); err != nil {
+		return fmt.Errorf("nvml send memory controller utilization: %w", err)
+	}
 
 	return nil
 }
@@ -439,6 +381,15 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 		klog.Errorf("Failed to list pods for node %s: %v", nodeName, err)
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
+
+	// Update() can run concurrently on its own resync timer and munmap a
+	// container's backing memory while removing it from the map. c.Info is
+	// backed by that same mmap'd memory, so holding the lister's lock for
+	// the whole read-and-scrape below keeps it alive for as long as we
+	// dereference it - the same use-after-unmap hazard loadCache's error
+	// path guards against, just on the read side instead of the write side.
+	cc.ClusterManager.containerLister.Lock()
+	defer cc.ClusterManager.containerLister.UnLock()
 
 	containers := cc.ClusterManager.containerLister.ListContainers()
 	containerMap := make(map[string][]*nvidia.ContainerUsage) // podUID -> containers
@@ -460,8 +411,11 @@ func (cc ClusterManagerCollector) collectPodAndContainerInfo(ch chan<- prometheu
 
 		klog.V(5).Infof("Processing Pod %s/%s", pod.Namespace, pod.Name)
 
-		// Iterate through each container in the Pod
-		for _, ctr := range pod.Spec.Containers {
+		// Iterate through each container in the Pod (both regular and init containers)
+		allContainers := make([]corev1.Container, 0, len(pod.Spec.InitContainers)+len(pod.Spec.Containers))
+		allContainers = append(allContainers, pod.Spec.InitContainers...)
+		allContainers = append(allContainers, pod.Spec.Containers...)
+		for _, ctr := range allContainers {
 			// Find the matching container
 			for _, c := range podContainers {
 				if c.ContainerName == ctr.Name {
@@ -488,14 +442,13 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 
 	// Iterate through each device
 	for i := range c.Info.DeviceNum() {
-		uuid := c.Info.DeviceUUID(i)
-		if len(uuid) < 40 {
-			klog.Errorf("Invalid UUID length for device %d in Pod %s/%s, Container %s", i, pod.Namespace, pod.Name, ctr.Name)
-			return fmt.Errorf("invalid UUID length for device %d", i)
+		if !c.Info.IsValidUUID(i) {
+			klog.Warningf("Device %d in Pod %s/%s, Container %s UUID not yet initialised; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
+			continue
 		}
-		uuid = uuid[0:40] // Ensure UUID is truncated to 40 characters
+		uuid := c.Info.DeviceUUID(i)[0:40]
 		if !utf8.ValidString(uuid) {
-			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID (shared memory not yet initialised); skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
+			klog.Warningf("Device %d in Pod %s/%s, Container %s has invalid UTF-8 UUID; skipping until next scrape", i, pod.Namespace, pod.Name, ctr.Name)
 			continue
 		}
 
@@ -575,41 +528,53 @@ func (cc ClusterManagerCollector) collectPodAndContainerMigInfo(ch chan<- promet
 		return fmt.Errorf("failed to list pods: %w", err)
 	}
 	for _, pod := range pods {
-		pdevices, err := device.DecodePodDevices(device.SupportDevices, pod.Annotations)
+		allocations, err := nv.DecodeMigAllocations(pod.Annotations[nv.MigAllocationsAnnotation])
 		if err != nil {
-			klog.Errorf("failed to decode pod devices for pod %s/%s: %v", pod.Namespace, pod.Name, err)
+			klog.Errorf("failed to decode MIG allocations for pod %s/%s: %v", pod.Namespace, pod.Name, err)
 			continue
 		}
-		for ctrIdx, container := range pod.Spec.Containers {
-			for ctrDevIdx, ctrDevices := range pdevices[nv.NvidiaGPUDevice] {
-				if len(ctrDevices) == 0 || ctrIdx != ctrDevIdx {
-					continue
-				}
-				for _, ctrDev := range ctrDevices {
-					if strings.Contains(ctrDev.UUID, "[") {
-						uuid := strings.Split(ctrDev.UUID, "[")[0]
-						_, idx, err := device.ExtractMigTemplatesFromUUID(ctrDev.UUID)
-						if err != nil {
-							klog.Errorf("Failed to get mig template for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							continue
-						}
-						gpuInstanceId, err := dp.GetMigGpuInstanceIdFromIndex(ctrDev.UUID, idx)
-						if err != nil {
-							klog.Errorf("Failed to get mig InstanceId for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							continue
-						}
-						labels := []string{pod.Namespace, pod.Name, container.Name, fmt.Sprint(idx), uuid, fmt.Sprint(gpuInstanceId)}
-						if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, labels...); err != nil {
-							klog.Errorf("Failed to send mig info metric for device %s in Pod %s/%s, container %s: %v", ctrDev.UUID, pod.Namespace, pod.Name, container.Name, err)
-							return err
-						}
-						sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1, labels...)
-					}
-				}
+		for _, allocation := range allocations {
+			if allocation.MigUUID == "" || allocation.GPUInstanceID == nil || allocation.ComputeInstanceID == nil {
+				continue
 			}
+			containerName, ok := migAllocationContainerName(pod, allocation.ContainerIndex)
+			if !ok {
+				klog.Errorf("MIG allocation container index %d out of range for Pod %s/%s", allocation.ContainerIndex, pod.Namespace, pod.Name)
+				continue
+			}
+			metricLabels := []string{
+				pod.Namespace,
+				pod.Name,
+				containerName,
+				fmt.Sprint(allocation.DeviceIndex),
+				allocation.GPUUUID,
+				allocation.MigUUID,
+				allocation.Profile,
+				fmt.Sprint(*allocation.GPUInstanceID),
+				fmt.Sprint(*allocation.ComputeInstanceID),
+			}
+			if err := sendMetric(ch, ctrDeviceMigInfo, prometheus.GaugeValue, 1, metricLabels...); err != nil {
+				return fmt.Errorf("send MIG info metric for pod %s/%s: %w", pod.Namespace, pod.Name, err)
+			}
+			sendLegacyMetric(ch, legacyCtrDeviceMigInfo, prometheus.GaugeValue, 1,
+				pod.Namespace, pod.Name, containerName, fmt.Sprint(allocation.DeviceIndex), allocation.GPUUUID, fmt.Sprint(*allocation.GPUInstanceID))
 		}
 	}
 	return nil
+}
+
+func migAllocationContainerName(pod *corev1.Pod, containerIndex int) (string, bool) {
+	if containerIndex < 0 {
+		return "", false
+	}
+	if containerIndex < len(pod.Spec.InitContainers) {
+		return pod.Spec.InitContainers[containerIndex].Name, true
+	}
+	containerIndex -= len(pod.Spec.InitContainers)
+	if containerIndex >= len(pod.Spec.Containers) {
+		return "", false
+	}
+	return pod.Spec.Containers[containerIndex].Name, true
 }
 
 func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType prometheus.ValueType, value float64, labels ...string) error {
@@ -621,11 +586,9 @@ func sendMetric(ch chan<- prometheus.Metric, desc *prometheus.Desc, valueType pr
 	return nil
 }
 
-// NewClusterManager first creates a Prometheus-ignorant ClusterManager
-// instance. Then, it creates a ClusterManagerCollector for the just created
-// ClusterManager. Finally, it registers the ClusterManagerCollector with a
-// wrapping Registerer that adds the zone as a label. In this way, the metrics
-// collected by different ClusterManagerCollectors do not collide.
+// NewClusterManager creates a ClusterManager for the given zone, backs its pod
+// lookups with a shared informer, and registers its collector with reg through
+// a wrapping Registerer that adds the zone as a label.
 func NewClusterManager(zone string, reg prometheus.Registerer, containerLister *nvidia.ContainerLister, legacyMetrics bool) *ClusterManager {
 	if legacyMetrics {
 		initLegacyDescriptors()

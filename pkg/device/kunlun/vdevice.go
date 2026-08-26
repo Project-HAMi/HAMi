@@ -83,6 +83,9 @@ func (dev *KunlunVDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	if ok {
 		trimMem := dev.trimMemory(memory.Value())
 		ctr.Resources.Limits[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
 		ctr.Resources.Requests[corev1.ResourceName(KunlunResourceVMemory)] = resource.MustParse(fmt.Sprint(trimMem))
 		return true, nil
 	}
@@ -131,28 +134,14 @@ func (dev *KunlunVDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[stri
 }
 
 func (dev *KunlunVDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.LockNode(n.Name, NodeLock, p)
 }
 
 func (dev *KunlunVDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 	return nodelock.ReleaseNodeLock(n.Name, NodeLock, p, false)
@@ -230,13 +219,26 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
 
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
-	fitFn := FitFn(FitVXPU)
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
+	base := FitFn(FitVXPU)
 	if isMutex {
 		// mutex: only idle devices are eligible, no sharing onto a used device.
-		fitFn = func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
+		base = func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
 			return d.Used == 0 && FitVXPU(d, r)
 		}
+	}
+	// graghSelect decides topology from the position of a device in the slice,
+	// so the uuid constraint has to be applied through fitFn rather than by
+	// filtering the slice first.
+	uuidMismatches := make(map[string]bool)
+	fitFn := func(d *device.DeviceUsage, r device.ContainerDeviceRequest) bool {
+		if !device.CheckUUID(pod.GetAnnotations(), d.ID, UseUUIDAnno, NoUseUUIDAnno, dev.CommonWord()) ||
+			!device.CheckUUID(pod.GetAnnotations(), d.ID, KunlunUseUUID, KunlunNoUseUUID, dev.CommonWord()) {
+			uuidMismatches[d.ID] = true
+			klog.V(5).InfoS(common.CardUUIDMismatch, "pod", klog.KObj(pod), "device", d.ID)
+			return false
+		}
+		return base(d, r)
 	}
 	alloc := graghSelect(devices, request, fitFn)
 	if len(alloc) == 0 {
@@ -248,11 +250,15 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 				}
 			}
 		}
+		uuidMismatch := len(uuidMismatches)
+		if len(reason) == 0 && uuidMismatch > 0 {
+			reason[common.CardUUIDMismatch] += uuidMismatch
+		}
 		if len(reason) == 0 {
 			reason[common.NumaNotFit]++
 			klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", devices, "request nums", request.Nums)
 		}
-		return false, tmpDevs, common.GenReason(reason, len(reason))
+		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	for _, dev := range alloc {
 		for _, val := range devices {
@@ -272,6 +278,9 @@ func (dev *KunlunVDevices) Fit(devices []*device.DeviceUsage, request device.Con
 }
 
 func FitVXPU(device *device.DeviceUsage, request device.ContainerDeviceRequest) bool {
+	if !device.Health {
+		return false
+	}
 	if request.Memreq+device.Usedmem > device.Totalmem {
 		return false
 	}

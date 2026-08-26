@@ -17,10 +17,63 @@ limitations under the License.
 package v1
 
 import (
+	"sync"
 	"testing"
+	"unsafe"
 
 	"gotest.tools/v3/assert"
 )
+
+func Test_MinSize(t *testing.T) {
+	assert.Equal(t, MinSize(), int(unsafe.Sizeof(sharedRegionT{})))
+}
+
+// TestSharedRegionTLayoutMatchesCABI locks sharedRegionT's field offsets to
+// libvgpu's C `shared_region_t` (multiprocess_memory_limit.h), computed with
+// C's offsetof on linux/amd64 glibc (sizeof(sem_t) == 32 there). MinSize only
+// checks the total size, which is not enough: two structs can have the same
+// total size while individual fields sit at different offsets, in which case
+// CastSpec would silently read the wrong bytes for every field after the
+// first mismatch. If this test fails, the Go mirror has drifted from the C
+// struct and needs to be brought back in line with it, not just have this
+// test's expectations bumped.
+func TestSharedRegionTLayoutMatchesCABI(t *testing.T) {
+	var s sharedRegionT
+	cases := []struct {
+		field string
+		got   uintptr
+		want  uintptr
+	}{
+		{"initializedFlag", unsafe.Offsetof(s.initializedFlag), 0},
+		{"majorVersion", unsafe.Offsetof(s.majorVersion), 4},
+		{"minorVersion", unsafe.Offsetof(s.minorVersion), 8},
+		{"smInitFlag", unsafe.Offsetof(s.smInitFlag), 12},
+		{"ownerPid", unsafe.Offsetof(s.ownerPid), 16},
+		{"sem", unsafe.Offsetof(s.sem), 24},
+		{"num", unsafe.Offsetof(s.num), 56},
+		{"uuids", unsafe.Offsetof(s.uuids), 64},
+		{"limit", unsafe.Offsetof(s.limit), 1600},
+		{"smLimit", unsafe.Offsetof(s.smLimit), 1728},
+		{"procs", unsafe.Offsetof(s.procs), 1856},
+		{"procnum", unsafe.Offsetof(s.procnum), 2008896},
+		{"utilizationSwitch", unsafe.Offsetof(s.utilizationSwitch), 2008900},
+		{"recentKernel", unsafe.Offsetof(s.recentKernel), 2008904},
+		{"priority", unsafe.Offsetof(s.priority), 2008908},
+		{"lastKernelTime", unsafe.Offsetof(s.lastKernelTime), 2008912},
+	}
+	for _, c := range cases {
+		if c.got != c.want {
+			t.Errorf("field %s at offset %d, want %d (libvgpu shared_region_t layout has drifted)", c.field, c.got, c.want)
+		}
+	}
+	assert.Equal(t, int(unsafe.Sizeof(s)), 2008952)
+}
+
+func Test_CastSpec(t *testing.T) {
+	data := make([]byte, MinSize())
+	spec := CastSpec(data)
+	assert.Assert(t, spec.sr != nil)
+}
 
 func Test_DeviceMax(t *testing.T) {
 	tests := []struct {
@@ -82,6 +135,24 @@ func Test_DeviceNum(t *testing.T) {
 			},
 			want: int(4),
 		},
+		{
+			name: "num larger than maxDevices is clamped",
+			args: &Spec{
+				sr: &sharedRegionT{
+					num: 9999,
+				},
+			},
+			want: maxDevices,
+		},
+		{
+			name: "high-bit uint64 num is clamped not negative",
+			args: &Spec{
+				sr: &sharedRegionT{
+					num: 0x8000000000000001,
+				},
+			},
+			want: maxDevices,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -117,6 +188,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										contextSize: 100,
@@ -127,6 +199,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										contextSize: 100,
@@ -154,6 +227,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										contextSize: 100,
@@ -164,6 +238,7 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										contextSize: 100,
@@ -178,6 +253,81 @@ func Test_DeviceMemoryContextSize(t *testing.T) {
 				},
 			},
 			want: uint64(400),
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{
+								status: 1,
+								used: [16]deviceMemory{{
+									contextSize: 200,
+								}},
+							},
+							{
+								status: 0,
+								used: [16]deviceMemory{{
+									contextSize: 999,
+								}},
+							},
+						},
+					},
+				},
+			},
+			want: uint64(200),
+		},
+		{
+			name: "negative procnum is clamped to zero",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: -1,
+						procs: [1024]shrregProcSlotT{
+							{
+								status: 1,
+								used: [16]deviceMemory{{
+									contextSize: 500,
+								}},
+							},
+						},
+					},
+				},
+			},
+			want: uint64(0),
+		},
+		{
+			name: "oversized procnum is clamped to len(procs)",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 9999,
+						procs: [1024]shrregProcSlotT{
+							{
+								status: 1,
+								used: [16]deviceMemory{{
+									contextSize: 300,
+								}},
+							},
+						},
+					},
+				},
+			},
+			want: uint64(300),
 		},
 	}
 	for _, test := range tests {
@@ -210,6 +360,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										moduleSize: 100,
@@ -220,6 +371,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										moduleSize: 100,
@@ -247,6 +399,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										moduleSize: 100,
@@ -257,6 +410,7 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										moduleSize: 100,
@@ -271,6 +425,25 @@ func Test_DeviceMemoryModuleSize(t *testing.T) {
 				},
 			},
 			want: uint64(400),
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{status: 1, used: [16]deviceMemory{{moduleSize: 150}}},
+							{status: 0, used: [16]deviceMemory{{moduleSize: 999}}},
+						},
+					},
+				},
+			},
+			want: uint64(150),
 		},
 	}
 	for _, test := range tests {
@@ -292,6 +465,25 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 		want uint64
 	}{
 		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{status: 1, used: [16]deviceMemory{{bufferSize: 400}}},
+							{status: 0, used: [16]deviceMemory{{bufferSize: 999}}},
+						},
+					},
+				},
+			},
+			want: uint64(400),
+		},
+		{
 			name: "device memory buffer size for idx 0",
 			args: struct {
 				idx  int
@@ -303,6 +495,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										bufferSize: 100,
@@ -313,6 +506,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										bufferSize: 100,
@@ -329,7 +523,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 			want: uint64(200),
 		},
 		{
-			name: "device memory module size for idx 1",
+			name: "device memory buffer size for idx 1",
 			args: struct {
 				idx  int
 				spec *Spec
@@ -340,6 +534,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										bufferSize: 100,
@@ -350,6 +545,7 @@ func Test_DeviceMemoryBufferSize(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										bufferSize: 100,
@@ -396,6 +592,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										offset: 100,
@@ -406,6 +603,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										offset: 100,
@@ -433,6 +631,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										offset: 100,
@@ -443,6 +642,7 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										offset: 100,
@@ -457,6 +657,25 @@ func Test_DeviceMemoryOffset(t *testing.T) {
 				},
 			},
 			want: uint64(400),
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{status: 1, used: [16]deviceMemory{{offset: 100}}},
+							{status: 0, used: [16]deviceMemory{{offset: 999}}},
+						},
+					},
+				},
+			},
+			want: uint64(100),
 		},
 	}
 	for _, test := range tests {
@@ -489,6 +708,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										total: 100,
@@ -499,6 +719,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										total: 100,
@@ -526,6 +747,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										total: 100,
@@ -536,6 +758,7 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								used: [16]deviceMemory{
 									{
 										total: 100,
@@ -550,6 +773,25 @@ func Test_DeviceMemoryTotal(t *testing.T) {
 				},
 			},
 			want: uint64(400),
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{status: 1, used: [16]deviceMemory{{total: 512}}},
+							{status: 0, used: [16]deviceMemory{{total: 999}}},
+						},
+					},
+				},
+			},
+			want: uint64(512),
 		},
 	}
 	for _, test := range tests {
@@ -582,6 +824,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								deviceUtil: [16]deviceUtilization{
 									{
 										smUtil: 100,
@@ -592,6 +835,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								deviceUtil: [16]deviceUtilization{
 									{
 										smUtil: 100,
@@ -619,6 +863,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 						procnum: 2,
 						procs: [1024]shrregProcSlotT{
 							{
+								status: 1,
 								deviceUtil: [16]deviceUtilization{
 									{
 										smUtil: 100,
@@ -629,6 +874,7 @@ func Test_DeviceSmUtil(t *testing.T) {
 								},
 							},
 							{
+								status: 1,
 								deviceUtil: [16]deviceUtilization{
 									{
 										smUtil: 100,
@@ -643,6 +889,25 @@ func Test_DeviceSmUtil(t *testing.T) {
 				},
 			},
 			want: uint64(400),
+		},
+		{
+			name: "dead slot within procnum is excluded",
+			args: struct {
+				idx  int
+				spec *Spec
+			}{
+				idx: int(0),
+				spec: &Spec{
+					sr: &sharedRegionT{
+						procnum: 2,
+						procs: [1024]shrregProcSlotT{
+							{status: 1, deviceUtil: [16]deviceUtilization{{smUtil: 60}}},
+							{status: 0, deviceUtil: [16]deviceUtilization{{smUtil: 999}}},
+						},
+					},
+				},
+			},
+			want: uint64(60),
 		},
 	}
 	for _, test := range tests {
@@ -688,6 +953,13 @@ func Test_SetDeviceSmLimit(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999, smLimit: [16]uint64{}}}
+		s.SetDeviceSmLimit(500)
+		want := [16]uint64{500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500, 500}
+		assert.DeepEqual(t, s.sr.smLimit, want)
+	})
 }
 
 func Test_IsValidUUID(t *testing.T) {
@@ -918,6 +1190,13 @@ func Test_SetDeviceMemoryLimit(t *testing.T) {
 			assert.DeepEqual(t, result, test.want)
 		})
 	}
+
+	t.Run("num larger than maxDevices does not panic", func(t *testing.T) {
+		s := &Spec{sr: &sharedRegionT{num: 9999}}
+		s.SetDeviceMemoryLimit(750)
+		want := [16]uint64{750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750, 750}
+		assert.DeepEqual(t, s.sr.limit, want)
+	})
 }
 
 func Test_LastKernelTime(t *testing.T) {
@@ -1080,6 +1359,67 @@ func Test_SetUtilizationSwitch(t *testing.T) {
 			test.args.spec.SetUtilizationSwitch(test.args.v)
 			result := test.args.spec.sr.utilizationSwitch
 			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+func Test_ConcurrentAtomicAccess(t *testing.T) {
+	data := make([]byte, unsafe.Sizeof(sharedRegionT{}))
+	sr := (*sharedRegionT)(unsafe.Pointer(&data[0]))
+	sr.num = 4
+
+	s := Spec{sr: sr}
+
+	var wg sync.WaitGroup
+	goroutines := 50
+	iterations := 200
+
+	for i := range goroutines {
+		wg.Add(1)
+		go func(id int) {
+			defer wg.Done()
+			for j := range iterations {
+				val := uint64(id*iterations + j)
+				s.SetDeviceMemoryLimit(val)
+				s.SetDeviceSmLimit(val)
+				s.SetRecentKernel(int32(j))
+				s.SetUtilizationSwitch(int32(j))
+
+				_ = s.DeviceMemoryLimit(0)
+				_ = s.DeviceMemoryLimit(1)
+				_ = s.GetRecentKernel()
+				_ = s.GetUtilizationSwitch()
+				_ = s.LastKernelTime()
+			}
+		}(i)
+	}
+
+	wg.Wait()
+}
+
+func TestSpec_CorruptProcnumIsClamped(t *testing.T) {
+	tests := []struct {
+		name     string
+		procnum  int32
+		expected uint64
+	}{
+		// Negative procnum clamps to 0 active slots, so nothing is summed.
+		{name: "negative procnum", procnum: -5, expected: 0},
+		// procnum larger than the backing array clamps to its length; only the
+		// single populated slot contributes.
+		{name: "procnum over backing array", procnum: 2000, expected: 100},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			sr := &sharedRegionT{num: 2, procnum: tt.procnum}
+			sr.procs[0].status = 1
+			sr.procs[0].used[0].total = 100
+			sr.procs[0].deviceUtil[0].smUtil = 100
+			s := Spec{sr: sr}
+			// A corrupt procnum must never panic the slice bound.
+			assert.Equal(t, tt.expected, s.DeviceMemoryTotal(0))
+			assert.Equal(t, tt.expected, s.DeviceSmUtil(0))
 		})
 	}
 }

@@ -17,9 +17,11 @@ limitations under the License.
 package policy
 
 import (
+	"sort"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 
 	"gotest.tools/v3/assert"
 )
@@ -274,6 +276,107 @@ func TestDeviceUsageList_Less(t *testing.T) {
 			deviceLists: []*DeviceListsScore{
 				{Device: &device.DeviceUsage{Used: 0, Numa: 0}},
 				{Device: &device.DeviceUsage{Used: 0, Numa: 1}},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Bare numa: NUMA is the sort key regardless of score",
+			policy: "numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Bare numa: same NUMA falls to deterministic Index tiebreak",
+			policy: "numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Index: 3, Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Index: 1, Numa: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain binpack,numa: score primary, numa tiebreak when scores equal",
+			policy: "binpack,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain spread,numa: score primary, numa tiebreak when scores equal",
+			policy: "spread,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 15},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 15},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain numa,spread: numa primary regardless of score",
+			policy: "numa,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain numa,spread: same NUMA falls back to spread (higher score first)",
+			policy: "numa,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+			},
+			expectedLess: true,
+		},
+		{
+			name:   "Chain mutex,spread: mutex is a Fit() filter, not a sort key; spread decides order",
+			policy: "mutex,spread",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Used: 5}, Score: 10},
+				{Device: &device.DeviceUsage{Used: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain with only filter tokens (mutex,topology-aware) falls back to spread",
+			policy: "mutex,topology-aware",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+			},
+			expectedLess: false,
+		},
+		{
+			name:   "Chain binpack,numa: deterministic Index tiebreak when score and numa both tie",
+			policy: "binpack,numa",
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Index: 5, Numa: 0}, Score: 10},
+				{Device: &device.DeviceUsage{Index: 2, Numa: 0}, Score: 10},
+			},
+			expectedLess: false,
+		},
+		{
+			name:     "Chain binpack,spread + NumaBind: numa forced primary to keep groups contiguous",
+			policy:   "binpack,spread",
+			numaBind: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 99},
+				{Device: &device.DeviceUsage{Numa: 1}, Score: 5},
+			},
+			expectedLess: true,
+		},
+		{
+			name:     "Chain spread,numa + NumaBind: numa moved to front, spread breaks same-NUMA ties",
+			policy:   "spread,numa",
+			numaBind: true,
+			deviceLists: []*DeviceListsScore{
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 20},
+				{Device: &device.DeviceUsage{Numa: 0}, Score: 10},
 			},
 			expectedLess: true,
 		},
@@ -543,11 +646,97 @@ func TestComputeScore(t *testing.T) {
 				Device: tt.device,
 			}
 
-			ds.ComputeScore(tt.requests)
+			ds.ComputeScore(tt.requests, util.DefaultDeviceScoringWeights())
 
 			if ds.Score != tt.expectedScore {
 				t.Errorf("ComputeScore() = %v, want %v", ds.Score, tt.expectedScore)
 			}
 		})
 	}
+}
+
+func TestComputeScoreWithResourceWeights(t *testing.T) {
+	requests := device.ContainerDeviceRequests{
+		"request": {
+			Nums:             1,
+			Type:             "type1",
+			MemPercentagereq: 40,
+			Coresreq:         0,
+		},
+	}
+	newDeviceScore := func(id string, used, usedCores, usedMemory int32) *DeviceListsScore {
+		return &DeviceListsScore{Device: &device.DeviceUsage{
+			ID: id, Type: "type1", Count: 10, Totalcore: 100, Totalmem: 100,
+			Used: used, Usedcores: usedCores, Usedmem: usedMemory,
+		}}
+	}
+
+	t.Run("default weights preserve current score", func(t *testing.T) {
+		gpuA := newDeviceScore("gpu-a", 1, 90, 10)
+		gpuB := newDeviceScore("gpu-b", 7, 10, 20)
+
+		gpuA.ComputeScore(requests, util.DefaultDeviceScoringWeights())
+		gpuB.ComputeScore(requests, util.DefaultDeviceScoringWeights())
+
+		assert.Equal(t, gpuA.Score, float32(16))
+		assert.Equal(t, gpuB.Score, float32(15))
+	})
+
+	t.Run("memory weight changes the device preference", func(t *testing.T) {
+		gpuA := newDeviceScore("gpu-a", 1, 90, 10)
+		gpuB := newDeviceScore("gpu-b", 7, 10, 20)
+		weights := util.DeviceScoringWeights{Slot: 1, Core: 1, Memory: 3}
+
+		gpuA.ComputeScore(requests, weights)
+		gpuB.ComputeScore(requests, weights)
+
+		assert.Equal(t, gpuA.Score, float32(26))
+		assert.Equal(t, gpuB.Score, float32(27))
+
+		binpack := DeviceUsageList{Policy: util.GPUSchedulerPolicyBinpack.String(), DeviceLists: []*DeviceListsScore{gpuA, gpuB}}
+		sort.Sort(binpack)
+		assert.Equal(t, binpack.DeviceLists[len(binpack.DeviceLists)-1].Device.ID, "gpu-b")
+
+		spread := DeviceUsageList{Policy: util.GPUSchedulerPolicySpread.String(), DeviceLists: []*DeviceListsScore{gpuA, gpuB}}
+		sort.Sort(spread)
+		assert.Equal(t, spread.DeviceLists[len(spread.DeviceLists)-1].Device.ID, "gpu-a")
+	})
+
+	t.Run("core weight can independently change the device preference", func(t *testing.T) {
+		gpuA := newDeviceScore("gpu-a", 1, 90, 10)
+		gpuB := newDeviceScore("gpu-b", 7, 10, 20)
+		weights := util.DeviceScoringWeights{Slot: 1, Core: 3, Memory: 1}
+
+		gpuA.ComputeScore(requests, weights)
+		gpuB.ComputeScore(requests, weights)
+
+		assert.Equal(t, gpuA.Score, float32(34))
+		assert.Equal(t, gpuB.Score, float32(17))
+
+		binpack := DeviceUsageList{Policy: util.GPUSchedulerPolicyBinpack.String(), DeviceLists: []*DeviceListsScore{gpuA, gpuB}}
+		sort.Sort(binpack)
+		assert.Equal(t, binpack.DeviceLists[len(binpack.DeviceLists)-1].Device.ID, "gpu-a")
+	})
+
+	t.Run("NUMA ordering remains independent from weighted score", func(t *testing.T) {
+		gpuA := newDeviceScore("gpu-a", 1, 90, 10)
+		gpuB := newDeviceScore("gpu-b", 7, 10, 20)
+		gpuA.Device.Numa = 0
+		gpuB.Device.Numa = 1
+		weights := util.DeviceScoringWeights{Slot: 1, Core: 1, Memory: 3}
+
+		gpuA.ComputeScore(requests, weights)
+		gpuB.ComputeScore(requests, weights)
+
+		devices := DeviceUsageList{
+			Policy:      util.GPUSchedulerPolicyBinpack.String(),
+			NumaBind:    true,
+			DeviceLists: []*DeviceListsScore{gpuA, gpuB},
+		}
+		sort.Sort(devices)
+
+		// Fit consumes the list from the end. NUMA remains the primary key
+		// when NUMA binding is requested, even though gpu-b has a higher score.
+		assert.Equal(t, devices.DeviceLists[len(devices.DeviceLists)-1].Device.ID, "gpu-a")
+	})
 }

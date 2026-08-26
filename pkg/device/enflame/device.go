@@ -385,30 +385,34 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	profile, profileMatch := enf.selectProfileByRequest(devices, k)
 	if !profileMatch {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
-	requiredSlice := int32(profile.Size)
-	if requiredSlice <= 0 {
+	if profile.Size <= 0 || profile.Size > math.MaxInt32 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.MemoryGB <= 0 || profile.MemoryGB > math.MaxInt32/1024 {
+		reason[common.ModeNotFit]++
+		return false, tmpDevs, common.GenReason(reason, len(devices))
+	}
+	if profile.CorePercent > math.MaxInt32 {
 		reason[common.ModeNotFit]++
 		return false, tmpDevs, common.GenReason(reason, len(devices))
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
-	if profileMemoryMiB <= 0 {
-		reason[common.ModeNotFit]++
-		return false, tmpDevs, common.GenReason(reason, len(devices))
-	}
 	profileCorePercent := int32(profile.CorePercent)
-	if profileCorePercent <= 0 {
-		profileCorePercent = 1
-	}
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, _ := enf.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -660,7 +664,6 @@ func parseDRSCapacity(raw any) (int32, error) {
 	}
 }
 
-// clampToInt32 bounds v to the int32 range instead of letting the cast wrap silently.
 func clampToInt32(v int) int32 {
 	if v > math.MaxInt32 {
 		return math.MaxInt32

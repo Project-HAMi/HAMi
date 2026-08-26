@@ -139,12 +139,13 @@ func start() error {
 	defer sher.Stop()
 
 	// start monitor metrics
-	go initMetrics(config.MetricsBindAddress, legacyMetrics)
+	go initMetrics(config.MetricsBindAddress, sher, legacyMetrics)
 
 	// start http server
 	router := httprouter.New()
 	router.POST("/filter", routes.PredicateRoute(sher))
 	router.POST("/bind", routes.Bind(sher))
+	router.POST("/refit", routes.NumaRefit(sher))
 	router.POST("/webhook", routes.WebHookRoute())
 	router.GET("/healthz", routes.HealthzRoute())
 	router.GET("/readyz", routes.ReadyzRoute(sher))

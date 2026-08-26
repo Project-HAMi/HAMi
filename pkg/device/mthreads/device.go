@@ -51,6 +51,9 @@ const (
 	MthreadsPredicateTime    = "mthreads.com/predicate-time"
 	coresPerMthreadsGPU      = 16
 	memoryPerMthreadsGPU     = 96
+	// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+	// HAMi accounts internally. One mthreads vmemory unit is 512 MiB.
+	MemoryFactor = 512
 )
 
 var (
@@ -97,9 +100,15 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 		if count.Value() <= 0 {
 			return false, fmt.Errorf("%s must be greater than 0", MthreadsResourceCount)
 		}
+		if ctr.Resources.Limits == nil {
+			ctr.Resources.Limits = corev1.ResourceList{}
+		}
 		if count.Value() > 1 {
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceCores)] = *resource.NewQuantity(count.Value()*int64(coresPerMthreadsGPU), resource.DecimalSI)
 			ctr.Resources.Limits[corev1.ResourceName(MthreadsResourceMemory)] = *resource.NewQuantity(count.Value()*int64(memoryPerMthreadsGPU), resource.DecimalSI)
+			if p.Annotations == nil {
+				p.Annotations = make(map[string]string)
+			}
 			p.Annotations["mthreads.com/request-gpu-num"] = fmt.Sprint(count.Value())
 			return ok, nil
 		}
@@ -111,7 +120,7 @@ func (dev *MthreadsDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod
 			memnum, _ := mem.AsInt64()
 			found := slices.Contains(legalMemoryslices, memnum)
 			if !found {
-				return true, errors.New("sGPU memory request value is invalid, valid values are [1, 2, 4, 8, 16, 32, 64, 96]")
+				return true, errors.New("sGPU memory request value is invalid, valid values are [2, 4, 8, 16, 32, 64, 96]")
 			}
 		}
 	}
@@ -131,7 +140,7 @@ func (dev *MthreadsDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo,
 			Index:        uint(i),
 			ID:           n.Name + "-mthreads-" + fmt.Sprint(i),
 			Count:        100,
-			Devmem:       int32(memoryTotal * 512 * coresPerMthreadsGPU / cores),
+			Devmem:       int32(memoryTotal * MemoryFactor * coresPerMthreadsGPU / cores),
 			Devcore:      coresPerMthreadsGPU,
 			Type:         MthreadsGPUDevice,
 			Numa:         0,
@@ -213,14 +222,17 @@ func (dev *MthreadsDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				mem, ok = ctr.Resources.Requests[mthreadsResourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					memnum = int(memnums) * 512
-					klog.InfoS("Memory allocation calculated",
-						"container", ctr.Name,
-						"requestedMem", memnums,
-						"allocatedMem", memnum)
+				memnums, parsed := mem.AsInt64()
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "mthreads memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name)
+					return device.ContainerDeviceRequest{}
 				}
+				memnum = int(memnums) * MemoryFactor
+				klog.InfoS("Memory allocation calculated",
+					"container", ctr.Name,
+					"requestedMem", memnums,
+					"allocatedMem", memnum)
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[mthreadsResourceCores]
@@ -282,11 +294,15 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		klog.V(3).InfoS("Type check", "device", dev.Type, "req", k.Type)
 		if !strings.Contains(dev.Type, k.Type) {
 			reason[common.CardTypeMismatch]++
@@ -301,7 +317,7 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 		}
 		if numa && prevnuma != dev.Numa {
 			if k.Nums != originReq {
-				reason[common.NumaNotFit] += len(tmpDevs)
+				reason[common.NumaNotFit] += len(tmpDevs[k.Type])
 				klog.V(5).InfoS(common.NumaNotFit, "pod", klog.KObj(pod), "device", dev.ID, "k.nums", k.Nums, "numa", numa, "prevnuma", prevnuma, "device numa", dev.Numa)
 			}
 			k.Nums = originReq
@@ -382,9 +398,9 @@ func (mth *MthreadsDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			return true, tmpDevs, ""
 		}
 	}
-	if len(tmpDevs) > 0 {
-		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs)
-		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs))
+	if len(tmpDevs[k.Type]) > 0 {
+		reason[common.AllocatedCardsInsufficientRequest] = len(tmpDevs[k.Type])
+		klog.V(5).InfoS(common.AllocatedCardsInsufficientRequest, "pod", klog.KObj(pod), "request", originReq, "allocated", len(tmpDevs[k.Type]))
 	}
 	return false, tmpDevs, common.GenReason(reason, len(devices))
 }
@@ -394,5 +410,6 @@ func (dev *MthreadsDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  MthreadsResourceCount,
 		ResourceMemoryName: MthreadsResourceMemory,
 		ResourceCoreName:   MthreadsResourceCores,
+		MemoryFactor:       MemoryFactor,
 	}
 }

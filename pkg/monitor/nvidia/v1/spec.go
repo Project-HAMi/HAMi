@@ -16,7 +16,10 @@ limitations under the License.
 
 package v1
 
-import "unsafe"
+import (
+	"sync/atomic"
+	"unsafe"
+)
 
 const maxDevices = 16
 
@@ -59,10 +62,17 @@ type sharedRegionT struct {
 	majorVersion    int32
 	minorVersion    int32
 	smInitFlag      int32
-	ownerPid        uint32
-	sem             semT
-	num             uint64
-	uuids           [16]uuid
+	// ownerPid mirrors libvgpu's `_Atomic size_t owner_pid`, which is 8
+	// bytes on the 64-bit Linux ABI this cache format targets. It was
+	// previously typed uint32 (4 bytes); every field after it still lined
+	// up with the C layout only because Go's own 8-byte alignment padding
+	// ahead of `num` happened to absorb the missing 4 bytes. Typing it
+	// uint64 makes the two layouts match for the actual reason instead of
+	// by accident. See TestSharedRegionTLayoutMatchesCABI.
+	ownerPid uint64
+	sem      semT
+	num      uint64
+	uuids    [16]uuid
 
 	limit   [16]uint64
 	smLimit [16]uint64
@@ -85,12 +95,23 @@ func (s Spec) DeviceMax() int {
 }
 
 func (s Spec) DeviceNum() int {
-	return int(s.sr.num)
+	return int(min(s.sr.num, uint64(maxDevices)))
+}
+
+// activeProcs returns the process slots currently in use. procnum is read from
+// the shared-memory region and may be corrupt (negative or larger than the
+// backing array); clamp it to a valid range so slicing can never panic.
+func (s Spec) activeProcs() []shrregProcSlotT {
+	n := min(max(int(s.sr.procnum), 0), len(s.sr.procs))
+	return s.sr.procs[:n]
 }
 
 func (s Spec) DeviceMemoryContextSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.used[idx].contextSize
 	}
 	return v
@@ -98,7 +119,10 @@ func (s Spec) DeviceMemoryContextSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryModuleSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.used[idx].moduleSize
 	}
 	return v
@@ -106,7 +130,10 @@ func (s Spec) DeviceMemoryModuleSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryBufferSize(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.used[idx].bufferSize
 	}
 	return v
@@ -114,7 +141,10 @@ func (s Spec) DeviceMemoryBufferSize(idx int) uint64 {
 
 func (s Spec) DeviceMemoryOffset(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.used[idx].offset
 	}
 	return v
@@ -122,7 +152,10 @@ func (s Spec) DeviceMemoryOffset(idx int) uint64 {
 
 func (s Spec) DeviceMemoryTotal(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.used[idx].total
 	}
 	return v
@@ -130,17 +163,19 @@ func (s Spec) DeviceMemoryTotal(idx int) uint64 {
 
 func (s Spec) DeviceSmUtil(idx int) uint64 {
 	v := uint64(0)
-	for _, p := range s.sr.procs[:int(s.sr.procnum)] {
+	for _, p := range s.activeProcs() {
+		if p.status == 0 {
+			continue
+		}
 		v += p.deviceUtil[idx].smUtil
 	}
 	return v
 }
 
 func (s Spec) SetDeviceSmLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
-		s.sr.smLimit[idx] = l
-		idx += 1
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
+		atomic.StoreUint64(&s.sr.smLimit[idx], l)
 	}
 }
 
@@ -153,25 +188,30 @@ func (s Spec) DeviceUUID(idx int) string {
 }
 
 func (s Spec) DeviceMemoryLimit(idx int) uint64 {
-	return s.sr.limit[idx]
+	return atomic.LoadUint64(&s.sr.limit[idx])
 }
 
 func (s Spec) SetDeviceMemoryLimit(l uint64) {
-	idx := uint64(0)
-	for idx < s.sr.num {
-		s.sr.limit[idx] = l
-		idx += 1
+	n := min(s.sr.num, maxDevices)
+	for idx := range n {
+		atomic.StoreUint64(&s.sr.limit[idx], l)
 	}
 }
 
 func (s Spec) LastKernelTime() int64 {
-	return s.sr.lastKernelTime
+	return atomic.LoadInt64(&s.sr.lastKernelTime)
 }
 
 func CastSpec(data []byte) Spec {
 	return Spec{
 		sr: (*sharedRegionT)(unsafe.Pointer(&data[0])),
 	}
+}
+
+// MinSize returns the minimum byte length data must have for CastSpec to be
+// memory-safe.
+func MinSize() int {
+	return int(unsafe.Sizeof(sharedRegionT{}))
 }
 
 //	func (s *SharedRegionT) UsedMemory(idx int) (uint64, error) {
@@ -183,17 +223,17 @@ func (s Spec) GetPriority() int {
 }
 
 func (s Spec) GetRecentKernel() int32 {
-	return s.sr.recentKernel
+	return atomic.LoadInt32(&s.sr.recentKernel)
 }
 
 func (s Spec) SetRecentKernel(v int32) {
-	s.sr.recentKernel = v
+	atomic.StoreInt32(&s.sr.recentKernel, v)
 }
 
 func (s Spec) GetUtilizationSwitch() int32 {
-	return s.sr.utilizationSwitch
+	return atomic.LoadInt32(&s.sr.utilizationSwitch)
 }
 
 func (s Spec) SetUtilizationSwitch(v int32) {
-	s.sr.utilizationSwitch = v
+	atomic.StoreInt32(&s.sr.utilizationSwitch, v)
 }

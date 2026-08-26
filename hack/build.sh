@@ -22,8 +22,14 @@ export SHORT_VERSION
 export COMMIT_CODE
 export VERSION="${SHORT_VERSION}-${COMMIT_CODE}"
 export LATEST_VERSION="latest"
-export GOLANG_IMAGE="golang:1.26.5-bookworm"
-export NVIDIA_IMAGE="nvidia/cuda:13.3.0-cudnn-devel-ubi8"
+# Read the digest-pinned values from version.mk so this stays the single
+# source of truth; hardcoding the tags here silently dropped the pinning.
+REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+GOLANG_IMAGE=$(sed -n 's/^GOLANG_IMAGE=//p' "${REPO_ROOT}/version.mk")
+NVIDIA_IMAGE=$(sed -n 's/^NVIDIA_IMAGE=//p' "${REPO_ROOT}/version.mk")
+[[ -z ${GOLANG_IMAGE} || -z ${NVIDIA_IMAGE} ]] && echo "failed to read image pins from version.mk" && exit 1
+export GOLANG_IMAGE
+export NVIDIA_IMAGE
 export DEST_DIR="/usr/local"
 
 IMAGE=${IMAGE-"projecthami/hami"}

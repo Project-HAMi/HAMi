@@ -8,7 +8,9 @@ metadata:
     {{- include "hami-vgpu.labels" . | nindent 4 }}
 data:
   device-config.yaml: |-
-  {{- if .Files.Glob "files/device-config.yaml" }}
+  {{- if and (index .Values "device-config") (index .Values "device-config" "content") }}
+  {{- (index .Values "device-config" "content") | nindent 4 }}
+  {{- else if .Files.Glob "files/device-config.yaml" }}
   {{- .Files.Get "files/device-config.yaml" | nindent 4}}
   {{- else }}
     nvidia:
@@ -30,223 +32,25 @@ data:
       gpuCorePolicy: {{ .Values.devices.nvidia.gpuCorePolicy }}
       libCudaLogLevel: {{ .Values.devices.nvidia.libCudaLogLevel }}
       runtimeClassName: "{{ .Values.devicePlugin.runtimeClassName }}"
-      knownMigGeometries:
+      migProfileAllowlist:
       - models: [ "A30" ]
-        allowedGeometries:
-          - 
-            - name: 1g.6gb
-              core: 25
-              memory: 6144
-              count: 4
-          - 
-            - name: 2g.12gb
-              core: 50
-              memory: 12288
-              count: 2
-          - 
-            - name: 4g.24gb
-              core: 100
-              memory: 24576
-              count: 1
+        profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
       - models: [ "A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB"]
-        allowedGeometries:
-          - 
-            - name: 1g.5gb
-              core: 14
-              memory: 5120
-              count: 7
-          - 
-            - name: 1g.5gb
-              core: 14
-              memory: 5120
-              count: 1
-            - name: 2g.10gb
-              core: 28
-              memory: 10240
-              count: 3
-          - 
-            - name: 3g.20gb
-              core: 42
-              memory: 20480
-              count: 2
-          - 
-            - name: 7g.40gb
-              core: 100
-              memory: 40960
-              count: 1
+        profiles: [ "1g.5gb", "2g.10gb", "3g.20gb", "7g.40gb" ]
       - models: [ "A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"]
-        allowedGeometries:
-          - 
-            - name: 1g.10gb
-              core: 14
-              memory: 9728
-              count: 7
-          - 
-            - name: 1g.10gb
-              core: 14
-              memory: 9728
-              count: 1
-            - name: 2g.20gb
-              core: 28
-              memory: 19968
-              count: 3
-          - 
-            - name: 3g.40gb
-              core: 42
-              memory: 40192
-              count: 2
-          - 
-            - name: 7g.80gb
-              core: 98
-              memory: 80896
-              count: 1
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.79gb" ]
       - models: [ "H100-PCIE-80GB", "H100-SXM5-80GB"]
-        allowedGeometries:
-          - 
-            - name: 1g.10gb
-              core: 14
-              memory: 10240
-              count: 7
-          - 
-            - name: 1g.10gb
-              core: 14
-              memory: 10240
-              count: 1
-            - name: 2g.20gb
-              core: 28
-              memory: 20480
-              count: 3
-          - 
-            - name: 3g.40gb
-              core: 42
-              memory: 40960
-              count: 2
-          - 
-            - name: 7g.80gb
-              core: 100
-              memory: 81920
-              count: 1
+        profiles: [ "1g.10gb", "2g.20gb", "3g.40gb", "7g.80gb" ]
       - models: [ "H100-PCIE-94GB", "H100-SXM5-94GB"]
-        allowedGeometries:
-          - 
-            - name: 1g.12gb
-              core: 14
-              memory: 12288
-              count: 7
-          - 
-            - name: 1g.12gb
-              core: 14
-              memory: 12288
-              count: 1
-            - name: 2g.24gb
-              core: 28
-              memory: 24576
-              count: 3
-          - 
-            - name: 3g.47gb
-              core: 42
-              memory: 48128
-              count: 2
-          - 
-            - name: 7g.94gb
-              core: 100
-              memory: 96256
-              count: 1
+        profiles: [ "1g.12gb", "2g.24gb", "3g.47gb", "7g.94gb" ]
       - models: [ "H20", "H100 on GH200"]
-        allowedGeometries:
-          - 
-            - name: 1g.12gb
-              core: 14
-              memory: 12288
-              count: 7
-          - 
-            - name: 1g.12gb
-              core: 14
-              memory: 12288
-              count: 1
-            - name: 2g.24gb
-              core: 28
-              memory: 24576
-              count: 3 
-          - 
-            - name: 3g.48gb
-              core: 42
-              memory: 49152
-              count: 2
-          - 
-            - name: 7g.96gb
-              core: 100
-              memory: 98304
-              count: 1
+        profiles: [ "1g.12gb", "2g.24gb", "3g.48gb", "7g.96gb" ]
       - models: [ "H200 NVL", "H200-SXM5"]
-        allowedGeometries:
-          - 
-            - name: 1g.18gb
-              core: 14
-              memory: 18432
-              count: 7
-          - 
-            - name: 1g.18gb
-              core: 14
-              memory: 18432
-              count: 1
-            - name: 2g.35gb
-              core: 28
-              memory: 35840
-              count: 3
-          - 
-            - name: 3g.71gb
-              core: 42
-              memory: 72704
-              count: 2
-          - 
-            - name: 7g.141gb
-              core: 100
-              memory: 144384
-              count: 1
+        profiles: [ "1g.18gb", "2g.35gb", "3g.71gb", "7g.141gb" ]
       - models: [ "B200" ]
-        allowedGeometries:
-          - 
-            - name: 1g.23gb
-              core: 14
-              memory: 23552
-              count: 7
-          - 
-            - name: 1g.23gb
-              core: 14
-              memory: 23552
-              count: 1
-            - name: 2g.45gb
-              core: 28
-              memory: 46080
-              count: 3
-          - 
-            - name: 3g.90gb
-              core: 42
-              memory: 92160
-              count: 2
-          - 
-            - name: 7g.180gb
-              core: 100
-              memory: 184320
-              count: 1
+        profiles: [ "1g.23gb", "2g.45gb", "3g.90gb", "7g.180gb" ]
       - models: [ "RTX PRO 6000 Blackwell Server Edition" ]
-        allowedGeometries:
-          -
-            - name: 1g.24gb
-              core: 25
-              memory: 24576
-              count: 4
-          -
-            - name: 2g.48gb
-              core: 50
-              memory: 49152
-              count: 2
-          -
-            - name: 4g.96gb
-              core: 100
-              memory: 98304
-              count: 1
+        profiles: [ "1g.24gb", "2g.48gb", "4g.96gb" ]
     cambricon:
       resourceCountName: {{ .Values.mluResourceName }}
       resourceMemoryName: {{ .Values.mluResourceMem }}
@@ -301,6 +105,8 @@ data:
       resourceCoreName: "aws.amazon.com/neuroncore"
     amd:
       resourceCountName: "amd.com/gpu"
+      resourceCoreName: "amd.com/gpucores"
+      resourceMemoryName: "amd.com/gpumem"
     vastai:
       resourceCountName: {{ .Values.vastaiResourceName }}
     biren:
@@ -391,15 +197,11 @@ data:
         runtimeClassName: "{{ .Values.devices.ascend.runtimeClassName }}"
         overwriteEnv: {{ .Values.scheduler.overwriteEnv | default "false" }}
         templates:
-          # NOTE: Names of vnpu template for 910B4-1 are fixed by Ascend runtime and must not be changed.
-          # The memory is used for scheduling so the correct values must be set.
-          # Template vir05_1c_8g actually provides 16GB memory,
-          - name: vir05_1c_8g
+          - name: vir05_1c_16g
             memory: 16384
             aiCore: 5
             aiCPU: 1
-          # Template vir10_3c_16g actually provides 32GB memory
-          - name: vir10_3c_16g
+          - name: vir10_3c_32g
             memory: 32768
             aiCore: 10
             aiCPU: 3

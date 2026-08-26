@@ -18,6 +18,7 @@ package common
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -29,9 +30,11 @@ const (
 	CardInsufficientMemory            = "CardInsufficientMemory"
 	CardInsufficientCore              = "CardInsufficientCore"
 	CardNotHealth                     = "CardNotHealth"
+	CardCordoned                      = "CardCordoned"
 	NumaNotFit                        = "NumaNotFit"
 	ExclusiveDeviceAllocateConflict   = "ExclusiveDeviceAllocateConflict"
 	CardNotFoundCustomFilterRule      = "CardNotFoundCustomFilterRule"
+	CardMigTopologyInfeasible         = "CardMigTopologyInfeasible"
 	NodeInsufficientDevice            = "NodeInsufficientDevice"
 	AllocatedCardsInsufficientRequest = "AllocatedCardsInsufficientRequest"
 	NodeUnfitPod                      = "NodeUnfitPod"
@@ -45,6 +48,7 @@ func GenReason(reasons map[string]int, cards int) string {
 	for r, cnt := range reasons {
 		reason = append(reason, fmt.Sprintf("%d/%d %s", cnt, cards, r))
 	}
+	sort.Strings(reason)
 	return strings.Join(reason, ", ")
 }
 

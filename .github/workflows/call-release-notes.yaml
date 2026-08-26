@@ -8,11 +8,15 @@ on:
         required: true
         type: string
 
-permissions: write-all
+permissions:
+  contents: read
 
 jobs:
   generate-release-notes:
     runs-on: ubuntu-latest
+    # updates the github release page
+    permissions:
+      contents: write
     steps:
     - name: Download Artifact
       uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -32,6 +36,7 @@ jobs:
       with:
         fetch-depth: 0
         ref: master
+        persist-credentials: false
 
     - name: Create release notes markdown
       run: |

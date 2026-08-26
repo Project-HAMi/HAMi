@@ -45,7 +45,7 @@ HAMi provides a Kubernetes-native layer for:
 - Increase GPU utilization in shared Kubernetes AI clusters.
 - Run multi-tenant notebook, training, and inference workloads on the same accelerator pool.
 - Build private cloud AI platforms with fair device allocation and quota control.
-- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, MetaX, Moore Threads, and other vendors.
+- Operate heterogeneous accelerator clusters across NVIDIA, Ascend, Cambricon, Hygon, Iluvatar, Kunlunxin, MetaX, Moore Threads, and other vendors.
 - Combine HAMi with Kubernetes schedulers such as kube-scheduler and Volcano for batch AI workloads.
 
 ## How It Works
@@ -161,7 +161,7 @@ The default monitor port is `31993`. You can change it with Helm values such as 
 HAMi also provides:
 
 - [HAMi-WebUI](https://github.com/Project-HAMi/HAMi-WebUI) for visual cluster and device management.
-- Grafana dashboard examples for accelerator monitoring.
+- [Grafana dashboards](dashboards/) for accelerator monitoring.
 - Benchmark material for evaluating workload behavior and scheduling effects.
 
 ![HAMi WebUI](imgs/hami-webui-overview.png)

@@ -2,6 +2,7 @@ name: Trivy Scan
 on:
   schedule:
     - cron: "0 0 * * *"
+  workflow_dispatch: {}
 permissions:
   contents: read
 jobs:
@@ -39,7 +40,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PASSWD }}
       - name: Set up Docker Buildx
         id: buildx
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4
       - name: install Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
@@ -74,7 +75,7 @@ jobs:
           trivyignores: .trivyignore
         if: always() && github.repository == 'Project-HAMi/HAMi'
       - name: Upload Trivy scan results to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4
+        uses: github/codeql-action/upload-sarif@db488ddef3bf6cb639b32c2e9a7c0a7ea8271d28 # v4
         with:
           sarif_file: "trivy-results.sarif"
         if: always() && github.repository == 'Project-HAMi/HAMi'
