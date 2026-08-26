@@ -476,6 +476,108 @@ func TestDevices_Fit(t *testing.T) {
 	})
 }
 
+// TestDevices_Fit_ResourceQuota closes the same admission-vs-schedule race
+// already guarded against in nvidia and cambricon (see
+// https://github.com/Project-HAMi/HAMi/issues/2829): fitResourceQuota only
+// enforces ResourceQuota once, at admission time, while namespace usage is
+// recorded when a pod actually schedules. Concurrent pods can pass admission
+// and then jointly exceed the quota by the time each reaches Filter. This
+// asserts Fit re-checks the namespace ResourceQuota against the resolved
+// memory/core values it is about to allocate, and denies a request that
+// would push usage over the limit even though the device itself has room.
+func TestDevices_Fit_ResourceQuota(t *testing.T) {
+	newQuotaManager := func(t *testing.T, ns string, hard corev1.ResourceList) {
+		qm := device.NewQuotaManager()
+		quota := &corev1.ResourceQuota{
+			ObjectMeta: metav1.ObjectMeta{Name: "amd-quota", Namespace: ns},
+			Spec:       corev1.ResourceQuotaSpec{Hard: hard},
+		}
+		qm.AddQuota(quota)
+		t.Cleanup(func() { qm.DelQuota(quota) })
+	}
+
+	t.Run("memory request exceeding namespace quota is denied", func(t *testing.T) {
+		dev := InitAMDGPUDevice(AMDConfig{
+			ResourceCountName:  "amd.com/gpu",
+			ResourceMemoryName: "amd.com/gpu-mem",
+			ResourceCoreName:   "amd.com/gpu-core-pct",
+		})
+		device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+
+		ns := "amd-quota-test-ns"
+		newQuotaManager(t, ns, corev1.ResourceList{
+			corev1.ResourceName("limits.amd.com/gpu-mem"): resource.MustParse("100"),
+		})
+
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Usedmem: 0, Totalmem: 4096, Totalcore: 100, Usedcores: 0,
+			Type: AMDDevice, Health: true,
+		}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 200, Coresreq: 10}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+		ok, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.ResourceQuotaNotFit))
+	})
+
+	t.Run("core request exceeding namespace quota is denied", func(t *testing.T) {
+		dev := InitAMDGPUDevice(AMDConfig{
+			ResourceCountName:  "amd.com/gpu",
+			ResourceMemoryName: "amd.com/gpu-mem",
+			ResourceCoreName:   "amd.com/gpu-core-pct",
+		})
+		device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+
+		ns := "amd-quota-test-ns-cores"
+		newQuotaManager(t, ns, corev1.ResourceList{
+			corev1.ResourceName("limits.amd.com/gpu-core-pct"): resource.MustParse("50"),
+		})
+
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Usedmem: 0, Totalmem: 4096, Totalcore: 100, Usedcores: 0,
+			Type: AMDDevice, Health: true,
+		}}
+		// Coresreq of 60% resolves to a coreReq of 60 (out of Totalcore=100),
+		// which alone exceeds the 50-core quota even though device capacity
+		// has room for it.
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 100, Coresreq: 60}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+		ok, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, false, ok)
+		assert.Assert(t, strings.Contains(reason, common.ResourceQuotaNotFit))
+	})
+
+	t.Run("request within namespace quota is admitted", func(t *testing.T) {
+		dev := InitAMDGPUDevice(AMDConfig{
+			ResourceCountName:  "amd.com/gpu",
+			ResourceMemoryName: "amd.com/gpu-mem",
+			ResourceCoreName:   "amd.com/gpu-core-pct",
+		})
+		device.DevicesMap = map[string]device.Devices{AMDDevice: dev}
+
+		ns := "amd-quota-test-ns-ok"
+		newQuotaManager(t, ns, corev1.ResourceList{
+			corev1.ResourceName("limits.amd.com/gpu-mem"): resource.MustParse("1000"),
+		})
+
+		devices := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Used: 0, Count: 1,
+			Usedmem: 0, Totalmem: 4096, Totalcore: 100, Usedcores: 0,
+			Type: AMDDevice, Health: true,
+		}}
+		req := device.ContainerDeviceRequest{Nums: 1, Type: AMDDevice, Memreq: 200, Coresreq: 10}
+		pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Namespace: ns}}
+
+		ok, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+		assert.Equal(t, true, ok)
+		assert.Equal(t, "", reason)
+	})
+}
+
 func TestCheckAMDType(t *testing.T) {
 	tests := []struct {
 		name     string

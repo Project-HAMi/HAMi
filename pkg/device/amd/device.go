@@ -276,6 +276,45 @@ func (dev *AMDDevices) AddResourceUsage(pod *corev1.Pod, n *device.DeviceUsage, 
 	return nil
 }
 
+// fitQuota resolves the pod's hypothetical total usage (this candidate device
+// plus whatever is already tentatively allocated) and checks it against the
+// namespace ResourceQuota. This closes the same admission-time gap the nvidia
+// and cambricon backends already guard against: fitResourceQuota enforces
+// ResourceQuota when the pod is admitted, but namespace usage is only
+// recorded once a pod actually schedules, so a burst of concurrent pods can
+// pass admission and then jointly exceed the quota by the time each reaches
+// Filter. Re-checking here, against the same resolved memory/core values Fit
+// is about to allocate, closes that window.
+func fitQuota(pod *corev1.Pod, tmpDevs map[string]device.ContainerDevices, allocated *device.PodDevices, ns string, devUUID string, memreq int64, coresreq int64) bool {
+	hypo := device.PodDevices{}
+	if allocated != nil {
+		for devType, podSingle := range *allocated {
+			hypo[devType] = append(device.PodSingleDevice{}, podSingle...)
+		}
+	}
+	cur := append(device.ContainerDevices{}, tmpDevs[AMDDevice]...)
+	cur = append(cur, device.ContainerDevice{
+		UUID:      devUUID,
+		Type:      AMDDevice,
+		Usedmem:   int32(memreq),
+		Usedcores: int32(coresreq),
+	})
+	hypo[AMDDevice] = append(hypo[AMDDevice], cur)
+
+	var mem, core int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypo)[AMDDevice] {
+		for _, val := range ctrDevs {
+			mem += int64(val.Usedmem)
+			core += int64(val.Usedcores)
+		}
+	}
+
+	// AMD does not scale the memory value read off the container spec (see
+	// GenerateResourceRequests), so it reports a zero MemoryFactor like the
+	// other unscaled backends and no scaling is applied here either.
+	return device.GetLocalCache().FitQuota(ns, mem, 0, core, AMDDevice)
+}
+
 func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, pod *corev1.Pod, nodeinfo *device.NodeInfo, allocated *device.PodDevices) (bool, map[string]device.ContainerDevices, string) {
 	k := request
 	originReq := k.Nums
@@ -340,6 +379,11 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 		if dev.Totalcore-dev.Usedcores < coreReq {
 			reason[common.CardInsufficientCore]++
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device total core", dev.Totalcore, "device used core", dev.Usedcores, "request cores", coreReq)
+			continue
+		}
+		if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, int64(memReq), int64(coreReq)) {
+			reason[common.ResourceQuotaNotFit]++
+			klog.V(3).InfoS(common.ResourceQuotaNotFit, "pod", pod.Name, "memreq", memReq, "coresreq", coreReq)
 			continue
 		}
 
