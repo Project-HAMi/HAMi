@@ -134,7 +134,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 		"GPU overview on a certain node",
 		[]string{"node", "device_uuid", "device_index", "device_cores", "device_memory_limit", "device_type"}, nil,
 	)
-	nodeGPUMemoryPercentage := prometheus.NewDesc(
+	nodeGPUMemoryAllocatedRatioDesc := prometheus.NewDesc(
 		"hami_node_gpu_memory_allocated_ratio",
 		"GPU memory allocated ratio on a certain GPU (0-1)",
 		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
@@ -261,8 +261,8 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 			}
 
 			if devs.Device.Totalmem > 0 {
-				if err := sendMetric(ch, nodeGPUMemoryPercentage, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
-					klog.V(4).Infof("Failed to send nodeGPUMemoryPercentage metric: %v", err)
+				if err := sendMetric(ch, nodeGPUMemoryAllocatedRatioDesc, prometheus.GaugeValue, float64(devs.Device.Usedmem)/float64(devs.Device.Totalmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
+					klog.V(4).Infof("Failed to send nodeGPUMemoryAllocatedRatioDesc metric: %v", err)
 				}
 			}
 
