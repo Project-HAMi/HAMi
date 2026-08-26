@@ -20,6 +20,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -32,6 +33,10 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 )
+
+// MemoryFactor converts the vmemory unit used in the pod spec into the MiB
+// HAMi accounts internally. One iluvatar vmemory unit is 256 MiB.
+const MemoryFactor = 256
 
 var (
 	enableIluvatar bool
@@ -149,14 +154,7 @@ func (dev *IluvatarDevices) PatchAnnotations(pod *corev1.Pod, annoinput *map[str
 }
 
 func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
@@ -164,14 +162,7 @@ func (dev *IluvatarDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 }
 
 func (dev *IluvatarDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {
-	found := false
-	for _, val := range p.Spec.Containers {
-		if (dev.GenerateResourceRequests(&val).Nums) > 0 {
-			found = true
-			break
-		}
-	}
-	if !found {
+	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
 
@@ -211,10 +202,13 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 				mem, ok = ctr.Resources.Requests[iluvatarResourceMem]
 			}
 			if ok {
-				memnums, ok := mem.AsInt64()
-				if ok {
-					memnum = int(memnums) * 256
+				memnums, parsed := mem.AsInt64()
+				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/int64(MemoryFactor) {
+					klog.ErrorS(nil, "iluvatar memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
+						"container", ctr.Name)
+					return device.ContainerDeviceRequest{}
 				}
+				memnum = int(memnums) * MemoryFactor
 			}
 			corenum := int32(0)
 			core, ok := ctr.Resources.Limits[iluvatarResourceCores]
@@ -264,11 +258,15 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
-	isMutex := util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod) == util.GPUSchedulerPolicyMutex.String()
+	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
-
+		if !dev.Health {
+			reason[common.CardNotHealth]++
+			klog.V(5).InfoS(common.CardNotHealth, "pod", klog.KObj(pod), "device", dev.ID, "health", dev.Health)
+			continue
+		}
 		_, found, numa := ilu.checkType(pod.GetAnnotations(), *dev, k)
 		if !found {
 			reason[common.CardTypeMismatch]++
@@ -364,5 +362,6 @@ func (dev *IluvatarDevices) GetResourceNames() device.ResourceNames {
 		ResourceCountName:  dev.config.ResourceCountName,
 		ResourceMemoryName: dev.config.ResourceMemoryName,
 		ResourceCoreName:   dev.config.ResourceCoreName,
+		MemoryFactor:       MemoryFactor,
 	}
 }

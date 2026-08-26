@@ -9,7 +9,7 @@ global:
   ##   - myRegistryKeySecretName
   ## @param global.imagePullSecrets Global Docker image pull secrets
   imagePullSecrets: []
-  imageTag: "v2.9.0"
+  imageTag: "v2.10.0"
   gpuHookPath: /usr/local
   labels: {}
   annotations: {}
@@ -351,6 +351,23 @@ devicePlugin:
   # TopologyManager can align CPU and GPU NUMA nodes. Opt-in because it changes
   # admission behavior when topologyManagerPolicy is single-numa-node.
   enableNumaTopology: false
+  # NUMA alignment refit (#2080): when enabled, the device plugin asks the
+  # scheduler to re-run its fit over the NUMA-restricted device set kubelet
+  # allows, keeping scheduler accounting authoritative. Requires
+  # enableNumaTopology plus the per-node enablegetpreferredallocation node
+  # configuration; pods opt in with the hami.io/numa-alignment annotation
+  # (best-effort or strict). Disabled by default: mismatches are only logged.
+  numaRefit:
+    enabled: false
+    # Scheduler base URL override. Defaults to the in-cluster scheduler
+    # service, https://<release>-scheduler.<namespace>.svc:<httpPort>.
+    schedulerEndpoint: ""
+    # The scheduler serves the admission webhook's self-signed certificate,
+    # so verification is skipped by default with the same posture as the
+    # extender configmap (tlsConfig.insecure). Set false to verify, and use
+    # caFile to point at a CA bundle mounted into the device plugin.
+    tlsInsecure: true
+    caFile: ""
   # Pre-configured device memory in MB for GPUs that don't support memory query (e.g., unified memory architecture GPUs like NVIDIA GB10/DGX Spark).
   # Set to 0 to use auto-detection (default). For unified memory GPUs, set to the total GPU memory (e.g., 131072 for 128GB).
   # Can be overridden per-node via nodeConfiguration.config.
@@ -546,3 +563,16 @@ legacyMetrics: false
 
 prometheus:
   enabled: false
+
+# Device config overrides
+# If content is set under device-config.content, it will be used as the device-config.yaml
+# payload in the hami-scheduler-device ConfigMap instead of files/device-config.yaml or the default config.
+# Example:
+# device-config:
+#   content: |
+#     nvidia:
+#       migProfileAllowlist:
+#         - models: [ "RTX 6000 Ada" ]
+#           profiles: [ "1g.6gb", "2g.12gb", "4g.24gb" ]
+device-config:
+  content: ""

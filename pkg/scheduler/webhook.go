@@ -30,8 +30,8 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/webhook/admission"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
+	"github.com/Project-HAMi/HAMi/pkg/util"
 )
 
 const template = "Processing admission hook for pod %v/%v, UID: %v"
@@ -68,9 +68,30 @@ func (h *webhook) Handle(_ context.Context, req admission.Request) admission.Res
 		klog.V(3).Infof(template+" - Pod already has different scheduler assigned", req.Namespace, req.Name, req.UID)
 		return admission.Allowed("pod already has different scheduler assigned")
 	}
+	// Reject invalid numa-alignment values at admission, so a typo surfaces
+	// to the user instead of only appearing in a device-plugin log later.
+	if _, err := util.GetNumaAlignmentModeByPod(pod); err != nil {
+		klog.Warningf(template+" - Denying admission: %v", pod.Namespace, pod.Name, pod.UID, err)
+		return admission.Denied(err.Error())
+	}
 	klog.V(5).Infof(template, pod.Namespace, pod.Name, pod.UID)
 	privilegedName, hasPrivileged := privilegedContainerName(pod)
 	hasResource := false
+
+	// 1. Process InitContainers
+	for idx := range pod.Spec.InitContainers {
+		c := &pod.Spec.InitContainers[idx]
+		for _, val := range device.GetDevices() {
+			found, err := val.MutateAdmission(c, pod)
+			if err != nil {
+				klog.Errorf("validating pod failed:%s", err.Error())
+				return admission.Errored(http.StatusInternalServerError, err)
+			}
+			hasResource = hasResource || found
+		}
+	}
+
+	// 2. Process Regular Containers (Keep your existing loop here)
 	for idx := range pod.Spec.Containers {
 		c := &pod.Spec.Containers[idx]
 		for _, val := range device.GetDevices() {
@@ -130,46 +151,54 @@ func isPrivilegedContainer(ctr *corev1.Container) bool {
 
 func fitResourceQuota(pod *corev1.Pod) bool {
 	for deviceName, dev := range device.GetDevices() {
-		// Only supports NVIDIA
-		if deviceName != nvidia.NvidiaGPUDevice {
+		resourceNames := dev.GetResourceNames()
+		if len(resourceNames.ResourceMemoryName) == 0 && len(resourceNames.ResourceCoreName) == 0 {
 			continue
 		}
-		memoryFactor := nvidia.MemoryFactor
-		resourceNames := dev.GetResourceNames()
-		resourceName := corev1.ResourceName(resourceNames.ResourceCountName)
-		memResourceName := corev1.ResourceName(resourceNames.ResourceMemoryName)
-		coreResourceName := corev1.ResourceName(resourceNames.ResourceCoreName)
-		var memoryReq int64 = 0
-		var coresReq int64 = 0
-		getRequest := func(ctr *corev1.Container, resName corev1.ResourceName) (int64, bool) {
-			v, ok := ctr.Resources.Limits[resName]
-			if !ok {
-				v, ok = ctr.Resources.Requests[resName]
+
+		// Ask the backend what the pod is requesting rather than reading the
+		// container spec here. It applies its own memory factor, defaults and
+		// template rounding, which is what the scheduler later records as used,
+		// so this keeps admission and the scheduler on the same numbers.
+		var appMemoryReq, appCoresReq int64
+		for i := range pod.Spec.Containers {
+			req := dev.GenerateResourceRequests(&pod.Spec.Containers[i])
+			if req.Nums == 0 {
+				continue
 			}
-			if ok {
-				if n, ok := v.AsInt64(); ok {
-					return n, true
-				}
+			appMemoryReq += int64(req.Memreq) * int64(req.Nums)
+			appCoresReq += int64(req.Coresreq) * int64(req.Nums)
+		}
+
+		var initPeakMemoryReq, initPeakCoresReq int64
+		var sidecarMemoryReq, sidecarCoresReq int64
+		for i := range pod.Spec.InitContainers {
+			c := &pod.Spec.InitContainers[i]
+			req := dev.GenerateResourceRequests(c)
+			if req.Nums == 0 {
+				continue
 			}
-			return 0, false
-		}
-		for _, ctr := range pod.Spec.Containers {
-			req, ok := getRequest(&ctr, resourceName)
-			if ok {
-				if memReq, ok := getRequest(&ctr, memResourceName); ok {
-					memoryReq += memReq * req
-				}
-				if coreReq, ok := getRequest(&ctr, coreResourceName); ok {
-					coresReq += coreReq * req
-				}
+			mem := int64(req.Memreq) * int64(req.Nums)
+			cores := int64(req.Coresreq) * int64(req.Nums)
+			if util.IsSidecarContainer(c) {
+				sidecarMemoryReq += mem
+				sidecarCoresReq += cores
+				initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq)
+				initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq)
+				continue
 			}
+			initPeakMemoryReq = max(initPeakMemoryReq, sidecarMemoryReq+mem)
+			initPeakCoresReq = max(initPeakCoresReq, sidecarCoresReq+cores)
 		}
-		if memoryFactor > 1 {
-			oriMemReq := memoryReq
-			memoryReq = memoryReq * int64(memoryFactor)
-			klog.V(5).Infof("Adjusting memory request for quota check: oriMemReq %d, memoryReq %d, factor %d", oriMemReq, memoryReq, memoryFactor)
+
+		memoryReq := max(initPeakMemoryReq, sidecarMemoryReq+appMemoryReq)
+		coresReq := max(initPeakCoresReq, sidecarCoresReq+appCoresReq)
+		if memoryReq == 0 && coresReq == 0 {
+			continue
 		}
-		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, memoryFactor, coresReq, deviceName) {
+
+		klog.V(5).Infof("Checking quota for device %s: memory %d, cores %d, factor %d", deviceName, memoryReq, coresReq, resourceNames.MemoryFactor)
+		if !device.GetLocalCache().FitQuota(pod.Namespace, memoryReq, resourceNames.MemoryFactor, coresReq, deviceName) {
 			klog.Infof(template+" - Denying admission", pod.Namespace, pod.Name, pod.UID)
 			return false
 		}

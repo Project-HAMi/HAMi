@@ -17,8 +17,7 @@
 package plugin
 
 import (
-	"os"
-	"path/filepath"
+	"strings"
 	"testing"
 
 	"golang.org/x/net/context"
@@ -28,166 +27,10 @@ import (
 	"tags.cncf.io/container-device-interface/specs-go"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
-	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
+	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
 )
-
-func TestGenerateMigTemplate(t *testing.T) {
-	sconfig := nvidia.NvidiaConfig{
-		MigGeometriesList: []device.AllowedMigGeometries{
-			{
-				Models: []string{"A30"},
-				Geometries: []device.Geometry{
-					{device.MigTemplate{Name: "1g.6gb", Core: 25, Memory: 6144, Count: 4}},
-					{device.MigTemplate{Name: "2g.12gb", Core: 50, Memory: 12288, Count: 2}},
-					{device.MigTemplate{Name: "4g.24gb", Core: 100, Memory: 24576, Count: 1}},
-				},
-			},
-			{
-				Models: []string{"A100-SXM4-40GB", "A100-40GB-PCIe", "A100-PCIE-40GB", "A100-SXM4-40GB"},
-				Geometries: []device.Geometry{
-					{device.MigTemplate{Name: "1g.5gb", Core: 14, Memory: 5120, Count: 7}},
-					{device.MigTemplate{Name: "1g.5gb", Core: 14, Memory: 5120, Count: 1}, device.MigTemplate{Name: "2g.10gb", Core: 28, Memory: 10240, Count: 3}},
-					{device.MigTemplate{Name: "3g.20gb", Core: 42, Memory: 20480, Count: 2}},
-					{device.MigTemplate{Name: "7g.40gb", Core: 100, Memory: 40960, Count: 1}},
-				},
-			},
-			{
-				Models: []string{"A100-SXM4-80GB", "A100-80GB-PCIe", "A100-PCIE-80GB"},
-				Geometries: []device.Geometry{
-					{device.MigTemplate{Name: "1g.10gb", Core: 14, Memory: 10240, Count: 7}},
-					{device.MigTemplate{Name: "1g.10gb", Core: 14, Memory: 10240, Count: 1}, device.MigTemplate{Name: "2g.20gb", Core: 28, Memory: 20480, Count: 3}},
-					{device.MigTemplate{Name: "3g.40gb", Core: 42, Memory: 40960, Count: 2}},
-					{device.MigTemplate{Name: "7g.80gb", Core: 100, Memory: 81920, Count: 1}},
-				},
-			},
-			{
-				Models: []string{"RTX PRO 6000 Blackwell Server Edition"},
-				Geometries: []device.Geometry{
-					{device.MigTemplate{Name: "1g.24gb", Core: 25, Memory: 24576, Count: 4}},
-					{device.MigTemplate{Name: "2g.48gb", Core: 50, Memory: 49152, Count: 2}},
-					{device.MigTemplate{Name: "4g.96gb", Core: 100, Memory: 98304, Count: 1}},
-				},
-			},
-		},
-	}
-
-	plugin := NvidiaDevicePlugin{
-		operatingMode:   "mig",
-		schedulerConfig: sconfig,
-	}
-	plugin.migCurrent = nvidia.MigPartedSpec{
-		Version:    "v1",
-		MigConfigs: make(map[string]nvidia.MigConfigSpecSlice),
-	}
-	plugin.migCurrent.MigConfigs["current"] = nvidia.MigConfigSpecSlice{
-		nvidia.MigConfigSpec{
-			Devices:    []int32{0, 1},
-			MigEnabled: true,
-			MigDevices: make(map[string]int32), // Ensure this map is initialized
-		},
-	}
-
-	testCases := []struct {
-		name          string
-		model         string
-		deviceIdx     int
-		containerDev  device.ContainerDevice
-		expectedPos   int
-		expectedReset bool
-		expectedMig   map[string]int32
-	}{
-		{
-			name:      "2g.10gb template",
-			model:     "A100-SXM4-40GB",
-			deviceIdx: 0,
-			containerDev: device.ContainerDevice{
-				Idx:     0,
-				UUID:    "aaaaabbbb[1-1]",
-				Usedmem: 8000,
-			},
-			expectedPos:   1,
-			expectedReset: true,
-			expectedMig: map[string]int32{
-				"1g.5gb":  1,
-				"2g.10gb": 3,
-			},
-		},
-		{
-			name:      "1g.5gb template",
-			model:     "A100-SXM4-40GB",
-			deviceIdx: 0,
-			containerDev: device.ContainerDevice{
-				Idx:     0,
-				UUID:    "aaaaabbbb[0-1]",
-				Usedmem: 3000,
-			},
-			expectedPos:   1,
-			expectedReset: true,
-			expectedMig: map[string]int32{
-				"1g.5gb": 7,
-			},
-		},
-		{
-			name:      "no reset needed",
-			model:     "A100-SXM4-40GB",
-			deviceIdx: 0,
-			containerDev: device.ContainerDevice{
-				Idx:     0,
-				UUID:    "aaaaabbbb[0-2]",
-				Usedmem: 3000,
-			},
-			expectedPos:   2,
-			expectedReset: false,
-			expectedMig: map[string]int32{
-				"1g.5gb": 7,
-			},
-		},
-		{
-			// The full NVML model string must match the shorter configured
-			// model via substring matching (RTX PRO 6000 Blackwell Server Edition).
-			name:      "rtx pro 6000 blackwell 1g.24gb template",
-			model:     "NVIDIA RTX PRO 6000 Blackwell Server Edition",
-			deviceIdx: 0,
-			containerDev: device.ContainerDevice{
-				Idx:     0,
-				UUID:    "ccccdddd[0-3]",
-				Usedmem: 20000,
-			},
-			expectedPos:   3,
-			expectedReset: true,
-			expectedMig: map[string]int32{
-				"1g.24gb": 4,
-			},
-		},
-	}
-
-	for _, tc := range testCases {
-		t.Run(tc.name, func(t *testing.T) {
-			pos, needsreset := plugin.GenerateMigTemplate(tc.model, tc.deviceIdx, tc.containerDev)
-
-			// Check if the position matches the expected value
-			if pos != tc.expectedPos {
-				t.Errorf("expected position %d, got %d", tc.expectedPos, pos)
-			}
-
-			// Check if the reset flag matches the expected value
-			if needsreset != tc.expectedReset {
-				t.Errorf("expected reset %v, got %v", tc.expectedReset, needsreset)
-			}
-
-			// Check if the mig devices match the expected values
-			migDevices := plugin.migCurrent.MigConfigs["current"][0].MigDevices
-			for k, v := range tc.expectedMig {
-				actual, ok := migDevices[k]
-				if !ok || actual != v {
-					t.Errorf("expected %s count %d, got %d", k, v, actual)
-				}
-			}
-		})
-	}
-}
 
 func TestGetNextDeviceRequest_DeviceInRegularContainer(t *testing.T) {
 	// Save and restore InRequestDevices
@@ -430,7 +273,6 @@ func Test_PodAllocationTrySuccess(t *testing.T) {
 }
 
 func Test_PodAllocationSuccess(t *testing.T) {
-	// Initialize fake clientset and pre-load test data
 	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -441,35 +283,18 @@ func Test_PodAllocationSuccess(t *testing.T) {
 			},
 		},
 	}
-
-	// Add the pod to the fake clientset
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
-	}
-
 	nodeName := "test-node"
-	lockName := "test-lock"
-
-	// Update pod annotations and release the lock as part of the setup for the test
-	updatePodAnnotationsAndReleaseLock(nodeName, pod, lockName, util.DeviceBindSuccess)
-
-	// Call the function under test
-	PodAllocationSuccess(nodeName, pod, lockName)
-
-	// Refresh the pod state from the fake clientset and check the DeviceBindPhase annotation
-	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
-	if err != nil {
-		t.Fatalf("Failed to get refreshed pod: %v", err)
+	if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+		t.Fatal(err)
 	}
 
-	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
-	if !ok || annos != util.DeviceBindSuccess {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindSuccess, annos)
-	}
+	PodAllocationSuccess(nodeName, pod, "test-lock")
+
+	assertDeviceBindPhase(t, pod, util.DeviceBindSuccess)
+	assertNodeLockAbsent(t, nodeName)
 }
-func Test_PodAllocationFailed(t *testing.T) {
 
+func Test_PodAllocationFailed(t *testing.T) {
 	client.KubeClient = fake.NewClientset()
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
@@ -478,30 +303,140 @@ func Test_PodAllocationFailed(t *testing.T) {
 			Annotations: map[string]string{"test-annotation-key": "test-annotation-value"},
 		},
 	}
-
-	// add pod to the fake client
-	_, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{})
-	if err != nil {
-		t.Fatalf("Failed to create test pod: %v", err)
+	nodeName := "test-node"
+	if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+		t.Fatal(err)
 	}
 
-	nodeName := "test-node"
-	lockName := "test-lock"
+	PodAllocationFailed(nodeName, pod, "test-lock")
 
-	// simulate a failed pod allocation
-	PodAllocationFailed(nodeName, pod, lockName)
+	assertDeviceBindPhase(t, pod, util.DeviceBindFailed)
+	assertNodeLockAbsent(t, nodeName)
+}
 
-	// retrieve the pod from the fake client
+func TestUpdatePodAnnotationsAndReleaseLock(t *testing.T) {
+	t.Run("releases lock when patch fails", func(t *testing.T) {
+		for _, phase := range []string{util.DeviceBindFailed, util.DeviceBindSuccess} {
+			t.Run(phase, func(t *testing.T) {
+				client.KubeClient = fake.NewClientset()
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testpod",
+						Namespace: "default",
+					},
+				}
+				nodeName := "test-node"
+				if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(pod, nodeName), metav1.CreateOptions{}); err != nil {
+					t.Fatalf("Failed to create test node: %v", err)
+				}
+
+				updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", phase)
+
+				assertNodeLockAbsent(t, nodeName)
+			})
+		}
+	})
+
+	t.Run("patches phase and releases lock when patch succeeds", func(t *testing.T) {
+		for _, phase := range []string{util.DeviceBindFailed, util.DeviceBindSuccess} {
+			t.Run(phase, func(t *testing.T) {
+				client.KubeClient = fake.NewClientset()
+				pod := &corev1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name:      "testpod",
+						Namespace: "default",
+					},
+				}
+				nodeName := "test-node"
+				if err := createPodAndLockedNode(t, pod, nodeName); err != nil {
+					t.Fatal(err)
+				}
+
+				updatePodAnnotationsAndReleaseLock(nodeName, pod, "test-lock", phase)
+
+				assertDeviceBindPhase(t, pod, phase)
+				assertNodeLockAbsent(t, nodeName)
+			})
+		}
+	})
+
+	t.Run("does not clear another pod lock when patch fails", func(t *testing.T) {
+		client.KubeClient = fake.NewClientset()
+		owner := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "owner-pod",
+				Namespace: "default",
+			},
+		}
+		caller := &corev1.Pod{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "caller-pod",
+				Namespace: "default",
+			},
+		}
+		nodeName := "test-node"
+		if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(owner, nodeName), metav1.CreateOptions{}); err != nil {
+			t.Fatalf("Failed to create test node: %v", err)
+		}
+
+		updatePodAnnotationsAndReleaseLock(nodeName, caller, "test-lock", util.DeviceBindFailed)
+
+		refreshedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+		if err != nil {
+			t.Fatalf("Failed to get refreshed node: %v", err)
+		}
+		lockStr, ok := refreshedNode.Annotations[nodelock.NodeLockKey]
+		if !ok {
+			t.Fatal("expected other pod's node lock to remain")
+		}
+		if !strings.HasSuffix(lockStr, nodelock.NodeLockSep+nodelock.GeneratePodNamespaceName(owner, nodelock.NodeLockSep)) {
+			t.Fatalf("expected lock owned by %s/%s, got %q", owner.Namespace, owner.Name, lockStr)
+		}
+	})
+}
+
+func lockedNode(pod *corev1.Pod, nodeName string) *corev1.Node {
+	return &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{
+			Name: nodeName,
+			Annotations: map[string]string{
+				nodelock.NodeLockKey: nodelock.GenerateNodeLockKeyByPod(pod),
+			},
+		},
+	}
+}
+
+func createPodAndLockedNode(t *testing.T, pod *corev1.Pod, nodeName string) error {
+	t.Helper()
+	if _, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Create(context.Background(), pod, metav1.CreateOptions{}); err != nil {
+		return err
+	}
+	if _, err := client.KubeClient.CoreV1().Nodes().Create(context.Background(), lockedNode(pod, nodeName), metav1.CreateOptions{}); err != nil {
+		return err
+	}
+	return nil
+}
+
+func assertDeviceBindPhase(t *testing.T, pod *corev1.Pod, want string) {
+	t.Helper()
 	refreshedPod, err := client.KubeClient.CoreV1().Pods(pod.Namespace).Get(context.Background(), pod.Name, metav1.GetOptions{})
 	if err != nil {
 		t.Fatalf("Failed to get refreshed pod: %v", err)
 	}
+	got, ok := refreshedPod.Annotations[util.DeviceBindPhase]
+	if !ok || got != want {
+		t.Fatalf("Expected DeviceBindPhase annotation to be %q, got %q", want, got)
+	}
+}
 
-	annos, ok := refreshedPod.Annotations[util.DeviceBindPhase]
-	if !ok {
-		t.Error("Expected DeviceBindPhase annotation to be present")
-	} else if annos != util.DeviceBindFailed {
-		t.Errorf("Expected DeviceBindPhase annotation to be '%s', got '%s'", util.DeviceBindFailed, annos)
+func assertNodeLockAbsent(t *testing.T, nodeName string) {
+	t.Helper()
+	refreshedNode, err := client.KubeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("Failed to get refreshed node: %v", err)
+	}
+	if _, ok := refreshedNode.Annotations[nodelock.NodeLockKey]; ok {
+		t.Fatal("expected node lock to be released")
 	}
 }
 
@@ -794,55 +729,5 @@ func TestCheckCDISpec(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-func TestWriteMigConfig(t *testing.T) {
-	orig := migConfigPath
-	defer func() { migConfigPath = orig }()
-
-	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
-	writeMigConfig([]byte("version: v1"))
-
-	info, err := os.Stat(migConfigPath)
-	if err != nil {
-		t.Fatalf("expected config file to exist: %v", err)
-	}
-	if perm := info.Mode().Perm(); perm != 0o600 {
-		t.Errorf("expected permissions 0600, got %o", perm)
-	}
-	data, err := os.ReadFile(migConfigPath)
-	if err != nil {
-		t.Fatalf("read failed: %v", err)
-	}
-	if string(data) != "version: v1" {
-		t.Errorf("unexpected content: %q", string(data))
-	}
-
-	// Write into a missing directory must not panic; the error is only logged.
-	migConfigPath = filepath.Join(t.TempDir(), "missing", "migconfig.yaml")
-	writeMigConfig([]byte("x"))
-	if _, err := os.Stat(migConfigPath); err == nil {
-		t.Errorf("expected write to fail for missing directory")
-	}
-}
-
-func TestWriteMigConfig_RemovesStaleFileOnFailure(t *testing.T) {
-	if os.Geteuid() == 0 {
-		t.Skip("file permissions do not block root")
-	}
-	orig := migConfigPath
-	defer func() { migConfigPath = orig }()
-
-	migConfigPath = filepath.Join(t.TempDir(), "migconfig.yaml")
-	if err := os.WriteFile(migConfigPath, []byte("stale"), 0o400); err != nil {
-		t.Fatalf("setup failed: %v", err)
-	}
-
-	// Read-only file makes the write fail; the stale file must be removed so
-	// nvidia-mig-parted cannot pick it up afterwards.
-	writeMigConfig([]byte("fresh"))
-	if _, err := os.Stat(migConfigPath); !os.IsNotExist(err) {
-		t.Errorf("expected stale config to be removed, stat err: %v", err)
 	}
 }

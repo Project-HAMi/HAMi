@@ -707,6 +707,86 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_NilRequests(t *testing.T) {
+	// Regression test: a pod that declares only limits (no requests block)
+	// must not panic when MutateAdmission writes the trimmed memory request.
+	tests := []struct {
+		name       string
+		ctr        corev1.Container
+		wantMemory string
+	}{
+		{
+			name: "memory limit set, requests block absent",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("8738"),
+					},
+				},
+			},
+			wantMemory: "8738",
+		},
+		{
+			name: "count only, no memory limit, requests block absent",
+			ctr: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A": resource.MustParse("1"),
+					},
+				},
+			},
+			wantMemory: "32768", // defaults to whole-card MemoryAllocatable
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dev := Devices{
+				config: VNPUConfig{
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					Templates: []Template{
+						{
+							Name:   "vir02",
+							Memory: int64(2184),
+							AICore: int32(2),
+						}, {
+							Name:   "vir04",
+							Memory: int64(4369),
+							AICore: int32(4),
+						}, {
+							Name:   "vir08",
+							Memory: int64(8738),
+							AICore: int32(8),
+						}, {
+							Name:   "vir16",
+							Memory: int64(17476),
+							AICore: int32(16),
+						},
+					},
+				},
+			}
+			pod := corev1.Pod{}
+			result, err := dev.MutateAdmission(&test.ctr, &pod)
+			if err != nil {
+				t.Fatalf("exec MutateAdmission method expect no error, but got %v", err)
+			}
+			if !result {
+				t.Fatalf("exec MutateAdmission method expect return is true, but got is false")
+			}
+			got, ok := test.ctr.Resources.Requests[corev1.ResourceName("huawei.com/Ascend910A-memory")]
+			if !ok {
+				t.Fatalf("expect memory request to be set, but it is absent")
+			}
+			if got.String() != test.wantMemory {
+				t.Fatalf("expect memory request %s, but got %s", test.wantMemory, got.String())
+			}
+		})
+	}
+}
+
 func Test_MutateAdmission910C(t *testing.T) {
 	tests := []struct {
 		name   string
@@ -1204,13 +1284,17 @@ func Test_GenerateResourceRequests_VNPUCoreMode(t *testing.T) {
 					ResourceName:       "huawei.com/Ascend910B3",
 					ResourceCoreName:   "huawei.com/Ascend910B3-core",
 					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					MemoryAllocatable:  32768,
+					MemoryCapacity:     32768,
+					Templates: []Template{
+						{Name: "vir08", Memory: 8738, AICore: 8},
+						{Name: "vir16", Memory: 17476, AICore: 16},
+					},
 				},
 			}
 			result := dev.GenerateResourceRequests(&test.args)
 
-			assert.Equal(t, result.Memreq, test.want.Memreq)
-			assert.Equal(t, result.Coresreq, test.want.Coresreq)
-			assert.Equal(t, result.Type, test.want.Type)
+			assert.Equal(t, result, test.want)
 		})
 	}
 }
@@ -1267,7 +1351,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(2184),
+				Memreq:           int32(1280),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -1306,7 +1390,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(17476),
+				Memreq:           int32(12800),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -1345,7 +1429,7 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 			want: device.ContainerDeviceRequest{
 				Nums:             int32(1),
 				Type:             "Ascend910A",
-				Memreq:           int32(2184),
+				Memreq:           int32(128),
 				MemPercentagereq: int32(0),
 				Coresreq:         int32(0),
 			},
@@ -1355,6 +1439,186 @@ func Test_GenerateResourceRequestsFactor(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			result := test.dev.GenerateResourceRequests(&req)
 			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_OutOfRangeValues checks that out-of-range values are rejected, not silently wrapped.
+func Test_GenerateResourceRequests_OutOfRangeValues(t *testing.T) {
+	coreModeConfig := VNPUConfig{
+		CommonWord:         "Ascend910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceCoreName:   "huawei.com/Ascend910B3-core",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  int64(65536),
+		MemoryCapacity:     int64(65536),
+	}
+
+	tests := []struct {
+		name string
+		dev  Devices
+		args corev1.Container
+		want device.ContainerDeviceRequest
+	}{
+		{
+			// 16Gi in bytes wraps to 0 when narrowed to int32; Ascend memory is counted in MB.
+			name: "memory requested in bytes exceeds int32 range on soft-partitioning path",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "memory requested in bytes exceeds int32 range on trim path",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("16Gi"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// -1m makes AsInt64 return ok=false, so it must be rejected by sign, not defaulted to 100%.
+			name: "negative fractional memory request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("-1m"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			// A plain whole -100 passes AsInt64 (ok=true), so it must be rejected by sign before the int32 narrowing.
+			name: "negative whole memory request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("-100"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized device count exceeds int32 range",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative core request",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":      resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "oversized core request exceeds int32 range",
+			dev:  Devices{config: coreModeConfig},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":      resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core": resource.MustParse("2200000000"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&test.args)
+			assert.Equal(t, result, test.want)
+		})
+	}
+}
+
+// Test_GenerateResourceRequests_MemoryFactorOverflow covers a value that fits int32 but overflows after MemoryFactor.
+func Test_GenerateResourceRequests_MemoryFactorOverflow(t *testing.T) {
+	tests := []struct {
+		name string
+		dev  Devices
+		args corev1.Container
+	}{
+		{
+			name: "scaled memory overflows int32 on soft-partitioning path",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910B3",
+					ResourceName:       "huawei.com/Ascend910B3",
+					ResourceCoreName:   "huawei.com/Ascend910B3-core",
+					ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+					MemoryAllocatable:  int64(65536),
+					MemoryCapacity:     int64(65536),
+					MemoryFactor:       int32(10),
+				},
+			},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910B3":        resource.MustParse("1"),
+						"huawei.com/Ascend910B3-core":   resource.MustParse("10"),
+						"huawei.com/Ascend910B3-memory": resource.MustParse("300000000"),
+					},
+				},
+			},
+		},
+		{
+			name: "scaled memory overflows int32 on trim path",
+			dev: Devices{
+				config: VNPUConfig{
+					CommonWord:         "Ascend910A",
+					ResourceName:       "huawei.com/Ascend910A",
+					ResourceMemoryName: "huawei.com/Ascend910A-memory",
+					MemoryAllocatable:  int64(32768),
+					MemoryCapacity:     int64(32768),
+					MemoryFactor:       int32(10),
+				},
+			},
+			args: corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"huawei.com/Ascend910A":        resource.MustParse("1"),
+						"huawei.com/Ascend910A-memory": resource.MustParse("300000000"),
+					},
+				},
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			result := test.dev.GenerateResourceRequests(&test.args)
+			assert.Equal(t, result, device.ContainerDeviceRequest{})
 		})
 	}
 }
@@ -2110,6 +2374,32 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 			wantReason: "1/1 ExclusiveDeviceAllocateConflict",
+		},
+		{
+			name: "fit fail: CardNotHealth",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  1280,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Health:    false,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           512,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+			},
+			annos:      map[string]string{},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardNotHealth",
 		},
 		{
 			name: "fit fail: partial allocation AllocatedCardsInsufficientRequest for multiple cards",

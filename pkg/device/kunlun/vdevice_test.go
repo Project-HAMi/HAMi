@@ -314,12 +314,40 @@ func Test_KunlunVDevices_LockNode(t *testing.T) {
 			hasLock: false,
 		},
 		{
-			name: "container requesting xpu locks node",
+			name: "regular container requesting xpu locks node",
 			pod: &corev1.Pod{Spec: corev1.PodSpec{Containers: []corev1.Container{{
 				Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
 					corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
 				}},
 			}}}},
+			hasLock: true,
+		},
+		{
+			name: "init-container-only requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{Name: "cpu-app"}},
+			}},
+			hasLock: true,
+		},
+		{
+			name: "init+regular both requesting xpu locks node",
+			pod: &corev1.Pod{Spec: corev1.PodSpec{
+				InitContainers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+				Containers: []corev1.Container{{
+					Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{
+						corev1.ResourceName(KunlunResourceVCount): resource.MustParse("1"),
+					}},
+				}},
+			}},
 			hasLock: true,
 		},
 	}
@@ -510,19 +538,25 @@ func Test_FitVXPU_direct(t *testing.T) {
 		},
 		{
 			name:    "idle device always fits",
-			usage:   &device.DeviceUsage{Used: 0, Usedmem: 0, Totalmem: 98304},
+			usage:   &device.DeviceUsage{Health: true, Used: 0, Usedmem: 0, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    true,
 		},
 		{
 			name:    "shared device with matching average memory",
-			usage:   &device.DeviceUsage{Used: 2, Usedmem: 49152, Totalmem: 98304},
+			usage:   &device.DeviceUsage{Health: true, Used: 2, Usedmem: 49152, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    true,
 		},
 		{
 			name:    "shared device with mismatched average memory",
 			usage:   &device.DeviceUsage{Used: 1, Usedmem: 49152, Totalmem: 98304},
+			request: device.ContainerDeviceRequest{Memreq: 24576},
+			want:    false,
+		},
+		{
+			name:    "unhealthy device is rejected",
+			usage:   &device.DeviceUsage{Health: false, Used: 0, Usedmem: 0, Totalmem: 98304},
 			request: device.ContainerDeviceRequest{Memreq: 24576},
 			want:    false,
 		},
