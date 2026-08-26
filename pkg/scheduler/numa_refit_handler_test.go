@@ -24,6 +24,7 @@ import (
 
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
@@ -478,7 +479,6 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 			{ID: "GPU-b", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
 		}},
 	})
-
 	initDevices := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 30000, Usedcores: 60}}
 	appDevices := device.ContainerDevices{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
 	reserved := device.PodSingleDevice{initDevices, appDevices}
@@ -524,4 +524,124 @@ func TestRefitNumaAllocationKeepsShrunkAccounting(t *testing.T) {
 		}
 	}
 	assert.Equal(t, total, int32(20000))
+}
+
+// initRefitFixture builds a scheduler tracking one pod whose PodDevices span an
+// init container (index 0) and two app containers (indices 1 and 2), each
+// reserving 5000 of GPU-a. With numInit=1, CollapseInitContainerUsage folds the
+// init container into the peak and sums the two app containers, so the effective
+// GPU-a usage is max(5000, 5000+5000) = 10000 - the value tracked in memory and
+// counted against the namespace gpumem quota, which is capped at gpumemLimit.
+// GPU-b (NUMA 0) is the refit target.
+func initRefitFixture(t *testing.T, gpumemLimit int64) (*Scheduler, *corev1.Pod, string) {
+	t.Helper()
+	nodes := newNodeManager()
+	nodes.addNode(refitNode, &device.NodeInfo{
+		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
+		Devices: map[string][]device.DeviceInfo{nvidia.NvidiaGPUDevice: {
+			{ID: "GPU-a", Count: 10, Devmem: 40000, Devcore: 100, Numa: 1, Type: nvidia.NvidiaGPUDevice, Health: true},
+			{ID: "GPU-b", Count: 10, Devmem: 40000, Devcore: 100, Numa: 0, Type: nvidia.NvidiaGPUDevice, Health: true},
+		}},
+	})
+
+	// One raw entry per container position: init container first, then the two
+	// app containers. The annotations keep this per-container layout; in-memory
+	// accounting keeps the collapsed aggregate.
+	raw := device.PodSingleDevice{
+		{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+		{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+		{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			UID: refitPodUID, Name: refitPodName, Namespace: "default",
+			Annotations: map[string]string{
+				device.InRequestDevices[nvidia.NvidiaGPUDevice]: device.EncodePodSingleDevice(raw),
+				device.SupportDevices[nvidia.NvidiaGPUDevice]:   device.EncodePodSingleDevice(raw),
+			},
+		},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "init-0"}},
+			Containers:     []corev1.Container{{Name: "app-0"}, {Name: "app-1"}},
+		},
+	}
+
+	collapsed := device.CollapseInitContainerUsage(pod, device.PodDevices{nvidia.NvidiaGPUDevice: raw})
+	pods := device.NewPodManager()
+	pods.AddPod(pod, refitNode, collapsed)
+
+	s := &Scheduler{nodeManager: nodes, podManager: pods, quotaManager: device.NewQuotaManager()}
+	oldQuotas := s.quotaManager.Quotas
+	s.quotaManager.Quotas = map[string]*device.DeviceQuota{}
+	t.Cleanup(func() { s.quotaManager.Quotas = oldQuotas })
+
+	resourceNames := device.GetDevices()[nvidia.NvidiaGPUDevice].GetResourceNames()
+	s.quotaManager.AddQuota(&corev1.ResourceQuota{
+		ObjectMeta: metav1.ObjectMeta{Namespace: pod.Namespace},
+		Spec: corev1.ResourceQuotaSpec{Hard: corev1.ResourceList{
+			corev1.ResourceName("limits." + resourceNames.ResourceMemoryName): *resource.NewQuantity(gpumemLimit, resource.DecimalSI),
+		}},
+	})
+	// Seed the namespace usage with the pod's current effective total (10000),
+	// as the scheduler cache does before a refit.
+	s.quotaManager.AddUsage(pod, collapsed)
+	return s, pod, resourceNames.ResourceMemoryName
+}
+
+// TestRefitNumaAllocationInitContainerRefitRejectedOverQuota is the regression
+// for the NUMA refit quota undercount. Moving the init container (index 0) off
+// GPU-a leaves the two app containers summing to 10000 on GPU-a and adds 5000 on
+// GPU-b, a positionally-correct effective total of 15000. Under a 12000 gpumem
+// quota the refit must be refused. Before the fix, the restricted fit's quota
+// gate evaluated a compacted device list that misclassified an app container as
+// the init container, undercounted to 10000, admitted the refit, and recorded
+// 15000 against the 12000 limit.
+func TestRefitNumaAllocationInitContainerRefitRejectedOverQuota(t *testing.T) {
+	s, _, memoryResource := initRefitFixture(t, 12000)
+	_, calls := stubRefitPatch(t, nil)
+
+	// refitTestRequestFor targets ContainerIndex 0 - here the init container.
+	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+
+	assert.Equal(t, response.Succeeded, false)
+	assert.Assert(t, strings.Contains(response.FailureReason, "quota"), "reason: %s", response.FailureReason)
+	// A failed quota check changes neither the annotations (no patch)...
+	assert.Equal(t, *calls, 0)
+	// ...nor the in-memory reservation...
+	assert.Equal(t, trackedUUID(t, s), "GPU-a")
+	// ...nor the recorded namespace usage, which stays at the pre-refit total.
+	dq := s.quotaManager.GetResourceQuota()["default"]
+	assert.Equal(t, (*dq)[memoryResource].Used, int64(10000))
+}
+
+// TestRefitNumaAllocationInitContainerRefitRecordsCollapsedUsage is the positive
+// counterpart: the same init-container refit fits under a 20000 quota, and the
+// rebuilt reservation records the positionally-correct 15000 total - GPU-a keeps
+// the two app containers (10000) and GPU-b carries the refitted init container
+// (5000) - proving the added quota gate matches the usage AddUsage records.
+func TestRefitNumaAllocationInitContainerRefitRecordsCollapsedUsage(t *testing.T) {
+	s, _, memoryResource := initRefitFixture(t, 20000)
+	captured, calls := stubRefitPatch(t, nil)
+
+	response := s.RefitNumaAllocation(refitTestRequestFor("GPU-b"))
+
+	assert.Equal(t, response.Succeeded, true, "refit failed: %s", response.FailureReason)
+	assert.Equal(t, *calls, 1)
+	// The moved init container records GPU-b in both annotations.
+	for _, key := range []string{device.InRequestDevices[nvidia.NvidiaGPUDevice], device.SupportDevices[nvidia.NvidiaGPUDevice]} {
+		assert.Assert(t, strings.Contains(captured[key], "GPU-b"), "annotation %s: %q", key, captured[key])
+	}
+	// Collapsed accounting: GPU-a holds the two app containers, GPU-b the init.
+	pi, _ := s.podManager.GetPod(&corev1.Pod{ObjectMeta: metav1.ObjectMeta{UID: refitPodUID}})
+	collapsed := pi.Devices[nvidia.NvidiaGPUDevice]
+	assert.Equal(t, len(collapsed), 1)
+	byUUID := map[string]device.ContainerDevice{}
+	for _, d := range collapsed[0] {
+		byUUID[d.UUID] = d
+	}
+	assert.Equal(t, byUUID["GPU-a"].Usedmem, int32(10000))
+	assert.Equal(t, byUUID["GPU-b"].Usedmem, int32(5000))
+	// Namespace usage reflects the true 15000 total, not the undercounted 10000.
+	dq := s.quotaManager.GetResourceQuota()["default"]
+	assert.Equal(t, (*dq)[memoryResource].Used, int64(15000))
 }

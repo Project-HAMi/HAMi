@@ -89,7 +89,8 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	if len(req.AllowedDeviceUUIDs) > maxAllowedDeviceUUIDs {
 		return numaRefitFailure(nil, "refit request carries %d allowed devices, limit is %d", len(req.AllowedDeviceUUIDs), maxAllowedDeviceUUIDs)
 	}
-	if _, ok := device.GetDevices()[req.DeviceType]; !ok {
+	refitDevice, ok := device.GetDevices()[req.DeviceType]
+	if !ok {
 		return numaRefitFailure(nil, "unknown device type %q", req.DeviceType)
 	}
 	// HAMi's type matching is substring based, so a refit for one type could
@@ -229,6 +230,27 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 		return failWithQuotaRestore("restricted fit selected %d container sets, want %d with %d devices", len(selected), seeded+1, len(current))
 	}
 	newDevices := selected[seeded]
+
+	// The restricted fit seeds only non-empty, non-target allocations, so its
+	// quota check cannot preserve the container indexes used to distinguish init
+	// and app usage. Validate the selected devices in the original annotation
+	// layout before changing annotations or cached accounting.
+	refitted := append(device.PodSingleDevice{}, allocatedSingle...)
+	refitted[req.ContainerIndex] = newDevices
+	hypothetical := make(device.PodDevices, len(allocated))
+	maps.Copy(hypothetical, allocated)
+	hypothetical[req.DeviceType] = refitted
+	var quotaMem, quotaCores int64
+	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypothetical)[req.DeviceType] {
+		for _, d := range ctrDevs {
+			quotaMem += int64(d.Usedmem)
+			quotaCores += int64(d.Usedcores)
+		}
+	}
+	resourceNames := refitDevice.GetResourceNames()
+	if !s.quotaManager.FitQuota(pod.Namespace, quotaMem, resourceNames.MemoryFactor, quotaCores, req.DeviceType) {
+		return failWithQuotaRestore("refit would exceed the %s resource quota in namespace %s", req.DeviceType, pod.Namespace)
+	}
 
 	// Patch both annotations by replacing only this container's entry inside
 	// the current raw values: entries Allocate already consumed stay blank,
