@@ -3201,10 +3201,12 @@ func TestFit_MemoryPercentageValidation(t *testing.T) {
 			Type:      NvidiaGPUDevice,
 		},
 	}
+	// Use an isolated namespace so this test is unaffected by any quota
+	// registered for "default" by TestFitQuota (global state, no cleanup).
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      "test-pod",
-			Namespace: "default",
+			Namespace: "pct-validation-test",
 		},
 	}
 
