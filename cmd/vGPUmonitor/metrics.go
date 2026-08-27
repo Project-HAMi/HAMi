@@ -433,12 +433,9 @@ func (cc ClusterManagerCollector) collectGPUTemperatureMetrics(ch chan<- prometh
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUTemperaturedesc,
-		prometheus.GaugeValue,
-		float64(temp),
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUTemperaturedesc, prometheus.GaugeValue, float64(temp), nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUTemperaturedesc metric: %v", err)
+	}
 
 	return nil
 }
@@ -471,12 +468,9 @@ func (cc ClusterManagerCollector) collectGPUPowerMetrics(ch chan<- prometheus.Me
 		return fmt.Errorf("node name environment variable %s is not set", util.NodeNameEnvName)
 	}
 
-	ch <- prometheus.MustNewConstMetric(
-		hostGPUPowerUsagedesc,
-		prometheus.GaugeValue,
-		float64(powerMilliwatts)/1000.0,
-		nodeName, fmt.Sprint(index), uuid, deviceName,
-	)
+	if err := sendMetric(ch, hostGPUPowerUsagedesc, prometheus.GaugeValue, float64(powerMilliwatts)/1000.0, nodeName, fmt.Sprint(index), uuid, deviceName); err != nil {
+		klog.Errorf("Failed to send hostGPUPowerUsagedesc metric: %v", err)
+	}
 
 	return nil
 }
@@ -516,12 +510,9 @@ func (cc ClusterManagerCollector) collectGPUEccErrorMetrics(ch chan<- prometheus
 			continue
 		}
 
-		ch <- prometheus.MustNewConstMetric(
-			hostGPUEccErrorsdesc,
-			prometheus.CounterValue,
-			float64(count),
-			nodeName, fmt.Sprint(index), uuid, deviceName, entry.label,
-		)
+		if err := sendMetric(ch, hostGPUEccErrorsdesc, prometheus.CounterValue, float64(count), nodeName, fmt.Sprint(index), uuid, deviceName, entry.label); err != nil {
+			klog.Errorf("Failed to send hostGPUEccErrorsdesc metric: %v", err)
+		}
 	}
 
 	return nil
