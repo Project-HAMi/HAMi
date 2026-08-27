@@ -21,6 +21,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -202,14 +204,16 @@ func TestGetPreferredAllocationRefitDisabled(t *testing.T) {
 func TestNumaRefitTLSConfigVerifiesByDefault(t *testing.T) {
 	t.Setenv(SchedulerTLSInsecureEnvName, "")
 	t.Setenv(SchedulerCAFileEnvName, "")
-	config := numaRefitTLSConfig()
+	config, err := numaRefitTLSConfig()
+	require.NoError(t, err)
 	require.False(t, config.InsecureSkipVerify)
 	require.Nil(t, config.RootCAs)
 }
 
 func TestNumaRefitTLSConfigInsecureOptOut(t *testing.T) {
 	t.Setenv(SchedulerTLSInsecureEnvName, "true")
-	config := numaRefitTLSConfig()
+	config, err := numaRefitTLSConfig()
+	require.NoError(t, err)
 	require.True(t, config.InsecureSkipVerify)
 }
 
@@ -239,4 +243,49 @@ func TestGetPreferredAllocationRefitCommittedButUnmappable(t *testing.T) {
 
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "committed")
+}
+
+func TestNumaRefitTLSConfigRejectsUnusableCA(t *testing.T) {
+	t.Setenv(SchedulerTLSInsecureEnvName, "")
+
+	missing := filepath.Join(t.TempDir(), "absent.crt")
+	t.Setenv(SchedulerCAFileEnvName, missing)
+	_, err := numaRefitTLSConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "cannot read scheduler CA bundle")
+
+	garbage := filepath.Join(t.TempDir(), "garbage.crt")
+	require.NoError(t, os.WriteFile(garbage, []byte("not a certificate"), 0o600))
+	t.Setenv(SchedulerCAFileEnvName, garbage)
+	_, err = numaRefitTLSConfig()
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "no usable certificates")
+}
+
+// A refit must not send the allowed set shrunk to MustIncludeDeviceIDs:
+// kubelet builds AvailableDeviceIDs as a superset of it.
+func TestGetPreferredAllocationRefitUsesAvailableSuperset(t *testing.T) {
+	refitted := device.ContainerDevices{{UUID: numaTestGPUB, Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}}
+	server, lastRequest := numaRefitTestServer(t, device.NumaRefitResponse{
+		Succeeded:        true,
+		ContainerDevices: device.EncodeContainerDevices(refitted),
+	})
+	t.Setenv(SchedulerEndpointEnvName, server.URL)
+	t.Setenv(util.NodeNameEnvName, "node-a")
+	setupInRequestDevices(t)
+
+	pod := numaRefitTestPod("best-effort")
+	mockAllocateGlobals(t, pod)
+
+	plugin := &NvidiaDevicePlugin{}
+	_, err := plugin.GetPreferredAllocation(context.Background(), &kubeletdevicepluginv1beta1.PreferredAllocationRequest{
+		ContainerRequests: []*kubeletdevicepluginv1beta1.ContainerPreferredAllocationRequest{{
+			AvailableDeviceIDs:   []string{numaTestGPUB + "-0", numaTestGPUC + "-0"},
+			MustIncludeDeviceIDs: []string{numaTestGPUB + "-0"},
+			AllocationSize:       1,
+		}},
+	})
+
+	require.NoError(t, err)
+	require.ElementsMatch(t, []string{numaTestGPUB, numaTestGPUC}, lastRequest.AllowedDeviceUUIDs)
 }
