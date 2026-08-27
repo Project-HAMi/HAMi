@@ -17,6 +17,7 @@ package scheduler
 
 import (
 	"fmt"
+	"runtime"
 	"sort"
 	"strings"
 	"sync"
@@ -399,6 +400,48 @@ func (s *Scheduler) recordFilteringFailures(task *corev1.Pod, failureReason map[
 	}
 }
 
+// filterWorkerCount reports how many nodes calcScoreWithOptions scores
+// concurrently. scoreNode deep-copies the whole NodeUsage once for the app
+// containers and once per non-sidecar init container, so one goroutine per
+// candidate node makes both the goroutine count and the concurrent copy
+// footprint grow with cluster size. config.FilterParallelism caps that;
+// zero or negative selects runtime.GOMAXPROCS. The result never exceeds
+// nodeCount, so clusters smaller than the cap keep the parallelism they had.
+func filterWorkerCount(nodeCount int) int {
+	workers := config.FilterParallelism
+	if workers <= 0 {
+		workers = runtime.GOMAXPROCS(0)
+	}
+	return min(workers, nodeCount)
+}
+
+// runNodeWorkers calls fn once for every node, running at most workers of them
+// at a time. Callers must make fn safe for concurrent use.
+func runNodeWorkers(nodes map[string]*NodeUsage, workers int, fn func(nodeID string, node *NodeUsage)) {
+	type nodeJob struct {
+		nodeID string
+		node   *NodeUsage
+	}
+	jobs := make(chan nodeJob)
+
+	wg := sync.WaitGroup{}
+	wg.Add(workers)
+	for range workers {
+		go func() {
+			defer wg.Done()
+			for job := range jobs {
+				fn(job.nodeID, job.node)
+			}
+		}()
+	}
+
+	for nodeID, node := range nodes {
+		jobs <- nodeJob{nodeID: nodeID, node: node}
+	}
+	close(jobs)
+	wg.Wait()
+}
+
 func (s *Scheduler) calcScore(nodes *map[string]*NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, failedNodes map[string]string) (*policy.NodeScoreList, error) {
 	return s.calcScoreWithOptions(nodes, resourceReqs, task, failedNodes, true, false)
 }
@@ -415,42 +458,35 @@ func (s *Scheduler) calcScoreWithOptions(nodes *map[string]*NodeUsage, resourceR
 		NodeList: make([]*policy.NodeScore, 0),
 	}
 
-	wg := sync.WaitGroup{}
 	fitNodesMutex := sync.Mutex{}
 	failedNodesMutex := sync.Mutex{}
 	failureReason := make(map[string][]string)
 	errCh := make(chan error, len(*nodes))
 
-	for nodeID, node := range *nodes {
-		wg.Add(1)
-		go func(nodeID string, node *NodeUsage) {
-			defer wg.Done()
+	runNodeWorkers(*nodes, filterWorkerCount(len(*nodes)), func(nodeID string, node *NodeUsage) {
+		result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, deviceScoringWeights)
 
-			result := s.scoreNode(nodeID, node, resourceReqs, task, userNodePolicy, deviceScoringWeights)
+		switch {
+		case result.err != nil:
+			failedNodesMutex.Lock()
+			failedNodes[nodeID] = result.reason
+			failedNodesMutex.Unlock()
+			errCh <- result.err
 
-			switch {
-			case result.err != nil:
-				failedNodesMutex.Lock()
-				failedNodes[nodeID] = result.reason
-				failedNodesMutex.Unlock()
-				errCh <- result.err
-
-			case result.score == nil:
-				failedNodesMutex.Lock()
-				failedNodes[nodeID] = result.reason
-				for reasonType := range common.ParseReason(result.reason) {
-					failureReason[reasonType] = append(failureReason[reasonType], nodeID)
-				}
-				failedNodesMutex.Unlock()
-
-			default:
-				fitNodesMutex.Lock()
-				res.NodeList = append(res.NodeList, result.score)
-				fitNodesMutex.Unlock()
+		case result.score == nil:
+			failedNodesMutex.Lock()
+			failedNodes[nodeID] = result.reason
+			for reasonType := range common.ParseReason(result.reason) {
+				failureReason[reasonType] = append(failureReason[reasonType], nodeID)
 			}
-		}(nodeID, node)
-	}
-	wg.Wait()
+			failedNodesMutex.Unlock()
+
+		default:
+			fitNodesMutex.Lock()
+			res.NodeList = append(res.NodeList, result.score)
+			fitNodesMutex.Unlock()
+		}
+	})
 	close(errCh)
 
 	if recordEvents && len(res.NodeList) == 0 {
