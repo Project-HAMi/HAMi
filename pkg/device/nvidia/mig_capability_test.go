@@ -108,3 +108,79 @@ func TestFitUsesEffectivePercentageMemoryForMigPlacement(t *testing.T) {
 		t.Fatal("25 percent memory request should not fit when only a 1g placement remains")
 	}
 }
+
+func TestCustomFilterPlansSlicesOfOneContainerJointly(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{{Profile: "1g.5gb", Placement: device.MigPlacement{Start: 6, Size: 1}}},
+	}
+	// The 5GB slice is queued first; placed sequentially it would take the
+	// 3g's last legal span. Planned jointly, the 3g goes first.
+	queued := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000}}
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, usage) {
+		t.Fatal("5GB + 20GB should fit next to a running 1g at slot 6 when planned together")
+	}
+	empty := &device.DeviceUsage{ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles()}
+	queued = device.ContainerDevices{{UUID: "GPU-a", Usedmem: 10000}, {UUID: "GPU-a", Usedmem: 10000}}
+	if !dev.CustomFilterRule(nil, device.ContainerDeviceRequest{Memreq: 20000}, queued, empty) {
+		t.Fatal("10GB + 10GB + 20GB should fill an empty A100")
+	}
+}
+
+func TestAddResourceUsageCommitsRecordedPlan(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{{Profile: "1g.5gb", Placement: device.MigPlacement{Start: 6, Size: 1}}},
+	}
+	tentative := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000}, {UUID: "GPU-a", Usedmem: 20000}}
+	recordMigPlans([]*device.DeviceUsage{usage}, tentative)
+	for i := range tentative {
+		if err := dev.AddResourceUsage(nil, usage, &tentative[i]); err != nil {
+			t.Fatalf("commit slice %d: %v", i, err)
+		}
+	}
+	if tentative[0].CustomInfo[MigProfileCustomInfo] != "1g.5gb" || tentative[0].CustomInfo[MigPlacementCustomInfo] != (device.MigPlacement{Start: 4, Size: 1}) {
+		t.Fatalf("first slice = %+v, want 1g.5gb at slot 4", tentative[0].CustomInfo)
+	}
+	if tentative[1].CustomInfo[MigProfileCustomInfo] != "3g.20gb" || tentative[1].CustomInfo[MigPlacementCustomInfo] != (device.MigPlacement{Start: 0, Size: 4}) {
+		t.Fatalf("second slice = %+v, want 3g.20gb at slot 0", tentative[1].CustomInfo)
+	}
+	if len(usage.MigAllocationsInUse) != 3 || usage.Used != 2 || usage.Usedmem != 5120+20480 {
+		t.Fatalf("usage after commit = %+v", usage)
+	}
+}
+
+func TestAddResourceUsageIgnoresStalePlan(t *testing.T) {
+	dev := &NvidiaGPUDevices{}
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{{Profile: "1g.5gb", Placement: device.MigPlacement{Start: 0, Size: 1}}},
+	}
+	ctr := &device.ContainerDevice{UUID: "GPU-a", Usedmem: 5000, CustomInfo: map[string]any{
+		MigProfileCustomInfo:   "1g.5gb",
+		MigPlacementCustomInfo: device.MigPlacement{Start: 0, Size: 1},
+	}}
+	if err := dev.AddResourceUsage(nil, usage, ctr); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if ctr.CustomInfo[MigPlacementCustomInfo] == (device.MigPlacement{Start: 0, Size: 1}) {
+		t.Fatal("stale placement was committed on top of a running instance")
+	}
+}
+
+func TestRecordMigPlansClearsStalePlanWhenInfeasible(t *testing.T) {
+	usage := &device.DeviceUsage{
+		ID: "GPU-a", Mode: MigMode, MigProfiles: a100MigProfiles(),
+		MigAllocationsInUse: []device.MigAllocation{
+			{Profile: "3g.20gb", Placement: device.MigPlacement{Start: 0, Size: 4}},
+			{Profile: "3g.20gb", Placement: device.MigPlacement{Start: 4, Size: 4}},
+		},
+	}
+	tentative := device.ContainerDevices{{UUID: "GPU-a", Usedmem: 5000, CustomInfo: map[string]any{MigProfileCustomInfo: "1g.5gb"}}}
+	recordMigPlans([]*device.DeviceUsage{usage}, tentative)
+	if _, ok := tentative[0].CustomInfo[MigProfileCustomInfo]; ok {
+		t.Fatal("stale plan key should have been removed")
+	}
+}
