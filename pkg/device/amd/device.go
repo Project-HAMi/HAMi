@@ -333,14 +333,21 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 
 		if k.Nums > 0 {
 			k.Nums--
+			// Keep the map keyed by the logical AMD device type, but retain the
+			// registered product type in the allocation annotation. Consumers of
+			// the annotation (for example workload GPU reporting) need the latter
+			// to identify the actual AMD model. The registered type comes from an
+			// external node annotation and can be empty; DecodeContainerDevices
+			// rejects an empty type, so fall back to the logical type to keep
+			// the allocation annotation readable.
+			allocType := dev.Type
+			if allocType == "" {
+				allocType = k.Type
+			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
-				Idx:  int(dev.Index),
-				UUID: dev.ID,
-				// Keep the map keyed by the logical AMD device type, but retain the
-				// registered product type in the allocation annotation. Consumers of
-				// the annotation (for example workload GPU reporting) need the latter
-				// to identify the actual AMD model.
-				Type:      dev.Type,
+				Idx:       int(dev.Index),
+				UUID:      dev.ID,
+				Type:      allocType,
 				Usedmem:   memReq,
 				Usedcores: coreReq,
 			})
