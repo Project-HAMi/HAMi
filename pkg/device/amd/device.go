@@ -227,6 +227,9 @@ func (dev *AMDDevices) GenerateResourceRequests(ctr *corev1.Container) device.Co
 			// allocated GPU. This also keeps memory-only AMD requests valid.
 			corePercentageNum := int32(100)
 			corePercentage, corePercentageOK := ctr.Resources.Limits[amdResourceCore]
+			if !corePercentageOK {
+				corePercentage, corePercentageOK = ctr.Resources.Requests[amdResourceCore]
+			}
 			if corePercentageOK {
 				corePercentageNums, ok := corePercentage.AsInt64()
 				if !ok || corePercentageNums < 1 || corePercentageNums > 100 {
@@ -268,6 +271,10 @@ func (amddevice *AMDDevices) Fit(devices []*device.DeviceUsage, request device.C
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
