@@ -214,3 +214,32 @@ func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
 		t.Fatalf("expected memory controller utilization metric with value %v", wantMemory)
 	}
 }
+
+func TestHostGPUMetricsNotSupportedGracefullySkipped(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+
+	mockDev := &nvmlmock.Device{
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{}, nvml.ERROR_NOT_SUPPORTED
+		},
+		GetUtilizationRatesFunc: func() (nvml.Utilization, nvml.Return) {
+			return nvml.Utilization{}, nvml.ERROR_NOT_SUPPORTED
+		},
+	}
+
+	cc := ClusterManagerCollector{}
+	ch := make(chan prometheus.Metric, 10)
+
+	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0); err != nil {
+		t.Errorf("expected collectGPUMemoryMetrics to return nil on ERROR_NOT_SUPPORTED, got: %v", err)
+	}
+
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+		t.Errorf("expected collectGPUUtilizationMetrics to return nil on ERROR_NOT_SUPPORTED, got: %v", err)
+	}
+
+	close(ch)
+	if count := len(ch); count != 0 {
+		t.Errorf("expected 0 metrics emitted for unsupported device, got: %d", count)
+	}
+}
