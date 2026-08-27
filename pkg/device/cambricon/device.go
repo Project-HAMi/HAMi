@@ -42,11 +42,15 @@ import (
 const (
 	CambriconMLUDevice     = "MLU"
 	CambriconMLUCommonWord = "MLU"
-	MluMemSplitLimit       = "CAMBRICON_SPLIT_MEMS"
-	MluMemSplitIndex       = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
-	MluMemSplitEnable      = "CAMBRICON_SPLIT_ENABLE"
-	MLUInUse               = "cambricon.com/use-mlutype"
-	MLUNoUse               = "cambricon.com/nouse-mlutype"
+	// MLUModelLabel is published by cambricon-k8s-device-plugin v2.0.20 and later
+	// when --node-label is enabled. See:
+	// https://github.com/Cambricon/cambricon-k8s-device-plugin/blob/v2.0.20/device-plugin/README.md#mlu-device-label-management
+	MLUModelLabel     = "Model"
+	MluMemSplitLimit  = "CAMBRICON_SPLIT_MEMS"
+	MluMemSplitIndex  = "CAMBRICON_SPLIT_VISIBLE_DEVICES"
+	MluMemSplitEnable = "CAMBRICON_SPLIT_ENABLE"
+	MLUInUse          = "cambricon.com/use-mlutype"
+	MLUNoUse          = "cambricon.com/nouse-mlutype"
 	// MLUUseUUID annotation specifies a comma-separated list of MLU UUIDs to use.
 	MLUUseUUID = "cambricon.com/use-gpuuuid"
 	// MLUNoUseUUID annotation specifies a comma-separated list of MLU UUIDs to exclude.
@@ -207,6 +211,10 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 		return []*device.DeviceInfo{}, fmt.Errorf("device not found %s", MLUResourceCores)
 	}
 	memoryTotal, _ := n.Status.Capacity.Name(corev1.ResourceName(MLUResourceMemory), resource.DecimalSI).AsInt64()
+	mluType := strings.TrimSpace(n.Labels[MLUModelLabel])
+	if !strings.Contains(strings.ToUpper(mluType), CambriconMLUDevice) {
+		mluType = CambriconMLUDevice
+	}
 	for int64(i)*100 < cards {
 		nodedevices = append(nodedevices, &device.DeviceInfo{
 			Index:        uint(i),
@@ -214,7 +222,7 @@ func (dev *CambriconDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 			Count:        100,
 			Devmem:       int32(memoryTotal * MemoryFactor * 100 / cards),
 			Devcore:      100,
-			Type:         CambriconMLUDevice,
+			Type:         mluType,
 			Numa:         0,
 			Health:       true,
 			DeviceVendor: CambriconMLUCommonWord,
@@ -235,7 +243,12 @@ func (dev *CambriconDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 
 func (dev *CambriconDevices) checkType(annos map[string]string, d device.DeviceUsage, n device.ContainerDeviceRequest) (bool, bool, bool) {
 	if strings.Compare(n.Type, CambriconMLUDevice) == 0 {
-		return true, true, false
+		model := strings.TrimSpace(d.Type)
+		constrained := strings.TrimSpace(annos[MLUInUse]) != "" || strings.TrimSpace(annos[MLUNoUse]) != ""
+		if constrained && (model == "" || strings.EqualFold(model, CambriconMLUDevice)) {
+			return true, false, false
+		}
+		return true, device.CheckType(annos, d.Type, MLUInUse, MLUNoUse), false
 	}
 	return false, false, false
 }

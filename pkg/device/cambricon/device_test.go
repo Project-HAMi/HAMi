@@ -76,6 +76,66 @@ func Test_GetNodeDevices(t *testing.T) {
 				},
 			},
 		},
+		{
+			name: "device plugin model label supplies the real MLU model",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+					Labels: map[string]string{
+						MLUModelLabel: "MLU370-X4",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"cambricon.com/mlu.smlu.vcore":   *resource.NewQuantity(1, resource.DecimalSI),
+						"cambricon.com/mlu.smlu.vmemory": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         "MLU370-X4",
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
+				},
+			},
+		},
+		{
+			name: "model label without MLU keeps the device schedulable",
+			args: corev1.Node{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "test",
+					Labels: map[string]string{
+						MLUModelLabel: "370-X4",
+					},
+				},
+				Status: corev1.NodeStatus{
+					Capacity: corev1.ResourceList{
+						"cambricon.com/mlu.smlu.vcore":   *resource.NewQuantity(1, resource.DecimalSI),
+						"cambricon.com/mlu.smlu.vmemory": *resource.NewQuantity(1, resource.DecimalSI),
+					},
+				},
+			},
+			want: []*device.DeviceInfo{
+				{
+					Index:        0,
+					ID:           "test-cambricon-mlu-0",
+					Count:        int32(100),
+					Devmem:       int32(25600),
+					Devcore:      int32(100),
+					Type:         CambriconMLUDevice,
+					Numa:         0,
+					Health:       true,
+					DeviceVendor: CambriconMLUCommonWord,
+				},
+			},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -194,6 +254,160 @@ func Test_checkType(t *testing.T) {
 				},
 			},
 			want1: false,
+			want2: false,
+		},
+		{
+			name: "use-mlutype allows the listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "use-mlutype rejects a non-listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype excludes the listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype ignores a non-listed model",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "empty use-mlutype does not block scheduling",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: ""},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "whitespace nouse-mlutype does not block scheduling",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "   "},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "comma-separated use-mlutype matches one entry",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU290,MLU370"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "comma-separated use-mlutype matches no entry",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU290,MLU590"},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "missing model annotations keep default behavior",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{},
+				d:     device.DeviceUsage{Type: "MLU370-X4"},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: true,
+		},
+		{
+			name: "use-mlutype rejects a device whose model is unknown",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUInUse: "MLU370"},
+				d:     device.DeviceUsage{Type: CambriconMLUDevice},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
+			want2: false,
+		},
+		{
+			name: "nouse-mlutype rejects a device whose model is unknown",
+			args: struct {
+				annos map[string]string
+				d     device.DeviceUsage
+				n     device.ContainerDeviceRequest
+			}{
+				annos: map[string]string{MLUNoUse: "MLU370"},
+				d:     device.DeviceUsage{Type: CambriconMLUDevice},
+				n:     device.ContainerDeviceRequest{Type: CambriconMLUDevice},
+			},
+			want1: true,
 			want2: false,
 		},
 	}
@@ -1396,6 +1610,118 @@ func TestDevices_Fit(t *testing.T) {
 			wantLen:    0,
 			wantDevIDs: []string{},
 			wantReason: "1/1 CardNotHealth",
+		},
+		{
+			name: "model-aware fit: use-mlutype selects the matching model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: "MLU370"},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
+		},
+		{
+			name: "model-aware fit fail: use-mlutype excludes a non-listed model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: "MLU590"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "model-aware fit fail: nouse-mlutype excludes the listed model",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUNoUse: "MLU370"},
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardTypeMismatch",
+		},
+		{
+			name: "model-aware fit: empty use-mlutype does not block scheduling",
+			devices: []*device.DeviceUsage{{
+				ID:        "dev-0",
+				Index:     0,
+				Used:      0,
+				Count:     100,
+				Usedmem:   0,
+				Totalmem:  128,
+				Totalcore: 100,
+				Usedcores: 0,
+				Numa:      0,
+				Type:      "MLU370-X4",
+				Health:    true,
+			}},
+			request: device.ContainerDeviceRequest{
+				Nums:             1,
+				Memreq:           64,
+				MemPercentagereq: 0,
+				Coresreq:         50,
+				Type:             CambriconMLUDevice,
+			},
+			annos:      map[string]string{MLUInUse: ""},
+			wantFit:    true,
+			wantLen:    1,
+			wantDevIDs: []string{"dev-0"},
+			wantReason: "",
 		},
 	}
 
