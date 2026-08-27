@@ -33,3 +33,5 @@ bash "$REPO_ROOT/hack/verify-license.sh"
 bash "$REPO_ROOT/hack/verify-import-aliases.sh"
 
 bash "$REPO_ROOT/hack/verify-rbac.sh"
+
+bash "$REPO_ROOT/hack/verify-quota.sh"

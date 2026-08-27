@@ -10,6 +10,7 @@ libvgpu.so
 vendor
 license
 vgpuvalidator
+quotacheck
 _output/
 coverage.out
 .DS_Store
