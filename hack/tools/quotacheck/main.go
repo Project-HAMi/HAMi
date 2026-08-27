@@ -20,21 +20,43 @@ limitations under the License.
 // and the admission-vs-schedule TOCTOU race is only closed if Fit() re-reads
 // namespace ResourceQuota usage via device.QuotaManager.FitQuota (directly,
 // or through a local wrapper such as the fitQuota() helper used by nvidia
-// and cambricon).
+// and cambricon) *and* lets the result reject the candidate device:
+//
+//	if !fitQuota(pod, tmpDevs, allocated, pod.Namespace, dev.ID, memreq, coresreq) {
+//		reason[common.ResourceQuotaNotFit]++
+//		continue
+//	}
+//
+// Calling FitQuota and discarding what it returns leaves the race wide open,
+// so reaching the call is necessary but not sufficient: the value has to
+// reach a branch condition or a return.
 //
 // Usage: go run ./hack/tools/quotacheck/ [-allow vendor1,vendor2,...] [path ...]
 //
 // With no path arguments, it discovers every pkg/device/<vendor>/device.go
 // file (skipping the shared pkg/device/common package) and, for each one,
-// checks that the package-level Fit() method declared there reaches a call
-// to FitQuota, following calls into other functions defined in the same
-// package. Path arguments, if given, are pkg/device/<vendor>/device.go
-// paths to check instead of the default set.
+// checks the package's Fit() method, following calls into other functions
+// defined in the same package. Path arguments, if given, are
+// pkg/device/<vendor>/device.go paths to check instead of the default set.
 //
 // -allow lists vendor directory names that are still permitted to fail the
 // check, for enabling this gate before every backend has been fixed (see
 // #2829). A vendor that fails and isn't listed, or that passes while still
 // listed (a stale entry left behind after its fix landed), fails the run.
+//
+// # Known limits
+//
+// quotacheck parses each package with go/ast alone, without type information,
+// which bounds what it can prove:
+//
+//   - Calls are resolved to same-package declarations only, so a backend that
+//     factors its re-check into a shared package would be reported as a
+//     violation.
+//   - It checks that the result reaches a branch or a return, not that the
+//     branch rejects the device, and not that the call dominates the point
+//     where the device is accepted. Reviewers still own that.
+//
+// See callName for why FitQuota is matched by name.
 package main
 
 import (
@@ -57,6 +79,20 @@ const fitMethodName = "Fit"
 // It is always called as a method, e.g. device.GetLocalCache().FitQuota(...)
 // or, through a local wrapper, plain FitQuota(...).
 const targetMethod = "FitQuota"
+
+// fitParamCount and fitResultCount are the parameter and result counts of
+// device.Devices.Fit (pkg/device/devices.go):
+//
+//	Fit(devices []*DeviceUsage, request ContainerDeviceRequest, pod *corev1.Pod,
+//		nodeInfo *NodeInfo, allocated *PodDevices) (bool, map[string]ContainerDevices, string)
+//
+// They identify the interface method among any same-named helpers in the
+// package. If the interface signature changes, quotacheck reports that
+// explicitly rather than silently finding no Fit() to check.
+const (
+	fitParamCount  = 5
+	fitResultCount = 3
+)
 
 // skipDirs are pkg/device subdirectories that do not implement a vendor
 // backend and so have no Fit() method to check.
@@ -169,50 +205,109 @@ func defaultDeviceFiles(root string) ([]string, error) {
 	return paths, nil
 }
 
-// checkDeviceFile checks the Fit() method declared in path, returning one
-// violation message if it cannot reach a call to FitQuota through the call
-// graph of its package.
+// checkDeviceFile checks the Fit() method of the package containing path,
+// returning a violation message if Fit() cannot reach a call to FitQuota
+// through its package's call graph, or reaches one whose result is discarded
+// instead of deciding whether the candidate device is accepted.
 func checkDeviceFile(path string) ([]string, error) {
 	fset := token.NewFileSet()
-	deviceFile, err := parser.ParseFile(fset, path, nil, 0)
-	if err != nil {
-		return nil, fmt.Errorf("parsing %s: %w", path, err)
-	}
-
-	fitDecl := findFitMethod(deviceFile)
-	if fitDecl == nil {
-		return []string{fmt.Sprintf("%s: no %s() method found", path, fitMethodName)}, nil
-	}
-
 	pkgFiles, err := parsePackage(fset, filepath.Dir(path))
 	if err != nil {
 		return nil, err
 	}
 
-	callGraph := buildCallGraph(pkgFiles)
-	if reachesTargetMethod(fitDecl, callGraph, map[*ast.FuncDecl]bool{}) {
-		return nil, nil
+	fit, problem := findFitMethod(pkgFiles)
+	if problem != "" {
+		return []string{fmt.Sprintf("%s: %s", path, problem)}, nil
 	}
 
-	pos := fset.Position(fitDecl.Pos())
-	return []string{fmt.Sprintf(
-		"%s:%d: %s() does not call %s() to re-check ResourceQuota before admitting the pod",
-		path, pos.Line, fitMethodName, targetMethod)}, nil
+	idx := newDeclIndex(pkgFiles)
+
+	// Collect the calls in Fit()'s own body that reach the re-check, either
+	// directly or through a local wrapper. Restricting this to Fit()'s body
+	// is what makes the result check below meaningful: the value has to be
+	// acted on where the candidate device is chosen.
+	quotaCalls := map[*ast.CallExpr]bool{}
+	inspectInvokedCalls(fit.Body, func(call *ast.CallExpr) {
+		if idx.callReachesTarget(fit, call) {
+			quotaCalls[call] = true
+		}
+	})
+
+	pos := fset.Position(fit.Pos())
+	location := fmt.Sprintf("%s:%d", pos.Filename, pos.Line)
+
+	if len(quotaCalls) == 0 {
+		return []string{fmt.Sprintf(
+			"%s: %s() does not call %s() to re-check ResourceQuota before admitting the pod",
+			location, fitMethodName, targetMethod)}, nil
+	}
+
+	if !resultGatesAdmission(fit.Body, quotaCalls) {
+		return []string{fmt.Sprintf(
+			"%s: %s() calls %s() but discards its result; the returned value must reject the "+
+				"candidate device (e.g. `if !fitQuota(...) { continue }`), otherwise the re-check has no effect",
+			location, fitMethodName, targetMethod)}, nil
+	}
+
+	return nil, nil
 }
 
-// findFitMethod returns the file's method declaration named fitMethodName,
-// or nil if none exists.
-func findFitMethod(f *ast.File) *ast.FuncDecl {
-	for _, decl := range f.Decls {
-		fn, ok := decl.(*ast.FuncDecl)
-		if !ok || fn.Recv == nil {
-			continue
-		}
-		if fn.Name.Name == fitMethodName {
-			return fn
+// findFitMethod returns the package's device.Devices Fit implementation: the
+// method named fitMethodName whose signature matches the interface. Looking
+// across every file of the package (not just device.go) keeps the check
+// working if a backend moves Fit() into another file, and matching on the
+// signature keeps an unrelated helper that happens to be named Fit from
+// shadowing the real one.
+//
+// The second result is a non-empty message when no single implementation can
+// be identified.
+func findFitMethod(files []*ast.File) (*ast.FuncDecl, string) {
+	var named, candidates []*ast.FuncDecl
+	for _, f := range files {
+		for _, decl := range f.Decls {
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok || fn.Recv == nil || fn.Name.Name != fitMethodName {
+				continue
+			}
+			named = append(named, fn)
+			if fieldCount(fn.Type.Params) == fitParamCount && fieldCount(fn.Type.Results) == fitResultCount {
+				candidates = append(candidates, fn)
+			}
 		}
 	}
-	return nil
+
+	switch {
+	case len(candidates) == 1:
+		return candidates[0], ""
+	case len(candidates) > 1:
+		return nil, fmt.Sprintf("found %d methods named %s() matching device.Devices; cannot tell which one implements the interface",
+			len(candidates), fitMethodName)
+	case len(named) > 0:
+		return nil, fmt.Sprintf("found %d method(s) named %s() but none take %d parameters and return %d values; "+
+			"if device.Devices.%s changed, update fitParamCount/fitResultCount in quotacheck",
+			len(named), fitMethodName, fitParamCount, fitResultCount, fitMethodName)
+	default:
+		return nil, fmt.Sprintf("no %s() method found", fitMethodName)
+	}
+}
+
+// fieldCount returns the number of parameters or results in a signature,
+// counting each name in a grouped field (e.g. `a, b int` is two) and an
+// unnamed field as one.
+func fieldCount(fl *ast.FieldList) int {
+	if fl == nil {
+		return 0
+	}
+	n := 0
+	for _, f := range fl.List {
+		if len(f.Names) == 0 {
+			n++
+			continue
+		}
+		n += len(f.Names)
+	}
+	return n
 }
 
 // parsePackage parses every non-test .go file in dir.
@@ -237,38 +332,247 @@ func parsePackage(fset *token.FileSet, dir string) ([]*ast.File, error) {
 	return files, nil
 }
 
-// buildCallGraph maps each function/method name declared in the package to
-// the FuncDecls of the local functions/methods it calls directly. Only
-// same-package callees can be resolved this way, which is sufficient for
-// following a local wrapper like fitQuota() back to FitQuota().
-//
-// Calls inside a function literal are only followed when that literal is
-// statically invoked (an immediately-invoked func expression); a closure
-// that is merely declared and never called cannot influence Fit()'s
-// behaviour and so must not count towards reachability.
-func buildCallGraph(files []*ast.File) map[string][]*ast.FuncDecl {
-	byName := make(map[string]*ast.FuncDecl)
+// declIndex indexes a package's declarations so a call expression can be
+// resolved back to the function or method it invokes. Package-level functions
+// and methods are kept apart, and methods are also indexed by receiver type,
+// so two same-named methods on different receivers stay distinct instead of
+// one overwriting the other.
+type declIndex struct {
+	funcs   map[string][]*ast.FuncDecl
+	methods map[string][]*ast.FuncDecl
+	byRecv  map[string][]*ast.FuncDecl
+}
+
+func newDeclIndex(files []*ast.File) *declIndex {
+	idx := &declIndex{
+		funcs:   map[string][]*ast.FuncDecl{},
+		methods: map[string][]*ast.FuncDecl{},
+		byRecv:  map[string][]*ast.FuncDecl{},
+	}
 	for _, f := range files {
 		for _, decl := range f.Decls {
-			if fn, ok := decl.(*ast.FuncDecl); ok {
-				byName[fn.Name.Name] = fn
+			fn, ok := decl.(*ast.FuncDecl)
+			if !ok {
+				continue
 			}
+			if fn.Recv == nil {
+				idx.funcs[fn.Name.Name] = append(idx.funcs[fn.Name.Name], fn)
+				continue
+			}
+			idx.methods[fn.Name.Name] = append(idx.methods[fn.Name.Name], fn)
+			key := receiverType(fn) + "." + fn.Name.Name
+			idx.byRecv[key] = append(idx.byRecv[key], fn)
+		}
+	}
+	return idx
+}
+
+// receiverType returns the bare type name a method is declared on, with any
+// pointer star and type parameters stripped, or "" if it can't be determined.
+func receiverType(fn *ast.FuncDecl) string {
+	if fn.Recv == nil || len(fn.Recv.List) == 0 {
+		return ""
+	}
+	expr := fn.Recv.List[0].Type
+	for {
+		switch t := expr.(type) {
+		case *ast.StarExpr:
+			expr = t.X
+		case *ast.IndexExpr: // generic receiver, e.g. Foo[T]
+			expr = t.X
+		case *ast.IndexListExpr:
+			expr = t.X
+		case *ast.Ident:
+			return t.Name
+		default:
+			return ""
+		}
+	}
+}
+
+// resolve returns the same-package declarations a call made from caller may
+// invoke.
+//
+// A bare call like fitQuota(...) is either a package-level function or a
+// method on the caller's own receiver, both of which resolve exactly. A
+// selector call like x.helper(...) cannot be resolved without type
+// information, so every same-named method in the package is returned. That
+// over-approximates rather than dropping the real callee, which is the safe
+// direction for a check whose job is to find backends that never reach the
+// re-check at all.
+func (idx *declIndex) resolve(caller *ast.CallExpr, from *ast.FuncDecl) []*ast.FuncDecl {
+	switch fun := caller.Fun.(type) {
+	case *ast.Ident:
+		out := idx.funcs[fun.Name]
+		if recv := receiverType(from); recv != "" {
+			out = append(out, idx.byRecv[recv+"."+fun.Name]...)
+		}
+		return out
+	case *ast.SelectorExpr:
+		return idx.methods[fun.Sel.Name]
+	default:
+		return nil
+	}
+}
+
+// callReachesTarget reports whether call is the FitQuota re-check itself, or
+// a call to a same-package function that reaches it.
+func (idx *declIndex) callReachesTarget(from *ast.FuncDecl, call *ast.CallExpr) bool {
+	if name, ok := callName(call); ok && name == targetMethod {
+		return true
+	}
+	for _, callee := range idx.resolve(call, from) {
+		if idx.reachesTargetMethod(callee, map[*ast.FuncDecl]bool{}) {
+			return true
+		}
+	}
+	return false
+}
+
+// reachesTargetMethod reports whether fn's body, or any local function it
+// calls (transitively), contains a call to targetMethod. visited breaks
+// recursive and mutually recursive call chains.
+func (idx *declIndex) reachesTargetMethod(fn *ast.FuncDecl, visited map[*ast.FuncDecl]bool) bool {
+	if fn == nil || visited[fn] {
+		return false
+	}
+	visited[fn] = true
+
+	found := false
+	inspectInvokedCalls(fn.Body, func(call *ast.CallExpr) {
+		if found {
+			return
+		}
+		if name, ok := callName(call); ok && name == targetMethod {
+			found = true
+			return
+		}
+		for _, callee := range idx.resolve(call, fn) {
+			if idx.reachesTargetMethod(callee, visited) {
+				found = true
+				return
+			}
+		}
+	})
+	return found
+}
+
+// resultGatesAdmission reports whether the value returned by one of quotaCalls
+// decides control flow in body, either directly inside a branch condition or a
+// return, or through a variable it is assigned to.
+//
+// This is what separates a re-check that works from one that runs and is
+// thrown away: `_ = fitQuota(...)`, a bare `fitQuota(...)` statement, or a
+// result passed only to a logger all leave the candidate device admitted.
+func resultGatesAdmission(body *ast.BlockStmt, quotaCalls map[*ast.CallExpr]bool) bool {
+	gating := gatingExprs(body)
+
+	for _, expr := range gating {
+		if containsCall(expr, quotaCalls) {
+			return true
 		}
 	}
 
-	graph := make(map[string][]*ast.FuncDecl)
-	for name, fn := range byName {
-		inspectInvokedCalls(fn.Body, func(call *ast.CallExpr) {
-			calleeName, ok := callName(call)
-			if !ok {
-				return
-			}
-			if callee, ok := byName[calleeName]; ok {
-				graph[name] = append(graph[name], callee)
-			}
-		})
+	bound := identsBoundTo(body, quotaCalls)
+	if len(bound) == 0 {
+		return false
 	}
-	return graph
+	for _, expr := range gating {
+		if containsIdent(expr, bound) {
+			return true
+		}
+	}
+	return false
+}
+
+// gatingExprs returns every expression in body whose value decides control
+// flow: branch and loop conditions, switch tags and case values, and returned
+// values.
+func gatingExprs(body *ast.BlockStmt) []ast.Expr {
+	var out []ast.Expr
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.IfStmt:
+			out = append(out, v.Cond)
+		case *ast.ForStmt:
+			if v.Cond != nil {
+				out = append(out, v.Cond)
+			}
+		case *ast.SwitchStmt:
+			if v.Tag != nil {
+				out = append(out, v.Tag)
+			}
+		case *ast.CaseClause:
+			out = append(out, v.List...)
+		case *ast.ReturnStmt:
+			out = append(out, v.Results...)
+		}
+		return true
+	})
+	return out
+}
+
+// identsBoundTo returns the names of variables assigned the value of one of
+// calls, so that `ok := fitQuota(...)` followed by `if !ok` counts as gating.
+// The blank identifier is deliberately excluded: `_ = fitQuota(...)` discards
+// the result.
+func identsBoundTo(body *ast.BlockStmt, calls map[*ast.CallExpr]bool) map[string]bool {
+	names := map[string]bool{}
+	record := func(lhs []ast.Expr) {
+		for _, e := range lhs {
+			if id, ok := e.(*ast.Ident); ok && id.Name != "_" {
+				names[id.Name] = true
+			}
+		}
+	}
+	ast.Inspect(body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			for _, rhs := range v.Rhs {
+				if containsCall(rhs, calls) {
+					record(v.Lhs)
+					break
+				}
+			}
+		case *ast.ValueSpec:
+			for _, val := range v.Values {
+				if containsCall(val, calls) {
+					for _, id := range v.Names {
+						if id.Name != "_" {
+							names[id.Name] = true
+						}
+					}
+					break
+				}
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// containsCall reports whether expr contains one of calls.
+func containsCall(expr ast.Expr, calls map[*ast.CallExpr]bool) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if call, ok := n.(*ast.CallExpr); ok && calls[call] {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// containsIdent reports whether expr references one of names.
+func containsIdent(expr ast.Expr, names map[string]bool) bool {
+	found := false
+	ast.Inspect(expr, func(n ast.Node) bool {
+		if id, ok := n.(*ast.Ident); ok && names[id.Name] {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
 
 // inspectInvokedCalls walks n and reports every call expression that is
@@ -325,7 +629,9 @@ func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
 // to device.QuotaManager.FitQuota rather than a same-named method on an
 // unrelated type. In the pkg/device backends FitQuota is only ever the
 // QuotaManager re-check, so the name match is sufficient in practice; the
-// TestRealBackends fixture guards the real files against drift.
+// TestRealBackends fixture guards the real files against drift, and the
+// result check in resultGatesAdmission means a no-op stub still has to be
+// wired into a rejection branch to pass.
 func callName(call *ast.CallExpr) (string, bool) {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
@@ -335,32 +641,6 @@ func callName(call *ast.CallExpr) (string, bool) {
 	default:
 		return "", false
 	}
-}
-
-// reachesTargetMethod reports whether fn's body, or any local function it
-// calls (transitively), contains a call to targetMethod.
-func reachesTargetMethod(fn *ast.FuncDecl, graph map[string][]*ast.FuncDecl, visited map[*ast.FuncDecl]bool) bool {
-	if visited[fn] {
-		return false
-	}
-	visited[fn] = true
-
-	found := false
-	inspectInvokedCalls(fn.Body, func(call *ast.CallExpr) {
-		if name, ok := callName(call); ok && name == targetMethod {
-			found = true
-		}
-	})
-	if found {
-		return true
-	}
-
-	for _, callee := range graph[fn.Name.Name] {
-		if reachesTargetMethod(callee, graph, visited) {
-			return true
-		}
-	}
-	return false
 }
 
 func findRepoRoot() (string, error) {

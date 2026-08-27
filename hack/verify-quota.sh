@@ -20,7 +20,8 @@
 #
 # It runs the quotacheck tool, which uses Go AST analysis to confirm each
 # backend's Fit() method reaches a call to the shared
-# device.QuotaManager.FitQuota re-check.
+# device.QuotaManager.FitQuota re-check, and that what the re-check returns
+# actually rejects the candidate device rather than being discarded.
 #
 # ALLOWED_VENDORS lists backends tracked by #2829 that don't call the
 # re-check yet; each gets its own fix PR, and removes itself from this list

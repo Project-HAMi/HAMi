@@ -25,11 +25,30 @@ import (
 	"testing"
 )
 
-const fitPreamble = `package fixture
+// fitSignature mirrors device.Devices.Fit so fixtures are selected by
+// findFitMethod the same way a real backend's method is.
+const fitSignature = "func (d *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerDeviceRequest, " +
+	"pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) " +
+	"(bool, map[string]device.ContainerDevices, string) {\n"
 
-type Devices struct{}
+// fitFile returns a parseable fixture file whose Fit() method has the given
+// body, followed by any extra package-level declarations.
+func fitFile(body string, decls ...string) string {
+	return "package fixture\n\ntype Devices struct{}\n\n" + fitSignature + body + "}\n" +
+		strings.Join(decls, "\n")
+}
 
-func (d *Devices) Fit() bool {
+// gatedOn wraps a quota expression in the rejection branch real backends use.
+func gatedOn(expr string) string {
+	return "\tif !" + expr + " {\n\t\treturn false, nil, \"quota\"\n\t}\n\treturn true, nil, \"\"\n"
+}
+
+// wrapper is a local fitQuota() helper that reaches the re-check, like the one
+// nvidia and cambricon use.
+const wrapper = `
+func fitQuota(ns string, memreq, coresreq int64) bool {
+	return device.GetLocalCache().FitQuota(ns, memreq, 1, coresreq, "dev")
+}
 `
 
 func writeFile(t *testing.T, dir, name, content string) string {
@@ -41,54 +60,46 @@ func writeFile(t *testing.T, dir, name, content string) string {
 	return path
 }
 
-func TestCheckDeviceFile_DirectCall(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
-}
-`)
-
+// checkFixture writes content as device.go in a fresh temp dir and checks it.
+func checkFixture(t *testing.T, content string) []string {
+	t.Helper()
+	path := writeFile(t, t.TempDir(), "device.go", content)
 	violations, err := checkDeviceFile(path)
 	if err != nil {
 		t.Fatalf("checkDeviceFile: %v", err)
 	}
-	if len(violations) != 0 {
-		t.Errorf("expected no violations for a direct FitQuota call, got %v", violations)
+	return violations
+}
+
+// assertViolation fails unless there is exactly one violation containing want.
+func assertViolation(t *testing.T, violations []string, want string) {
+	t.Helper()
+	if len(violations) != 1 {
+		t.Fatalf("expected exactly one violation, got %v", violations)
+	}
+	if !strings.Contains(violations[0], want) {
+		t.Errorf("violation = %q, want it to mention %q", violations[0], want)
+	}
+}
+
+func TestCheckDeviceFile_DirectCall(t *testing.T) {
+	got := checkFixture(t, fitFile(gatedOn(`device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")`)))
+	if len(got) != 0 {
+		t.Errorf("expected no violations for a gated direct FitQuota call, got %v", got)
 	}
 }
 
 func TestCheckDeviceFile_LocalWrapper(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return fitQuota("ns", 0, 0)
-}
-
-func fitQuota(ns string, memreq, coresreq int64) bool {
-	return device.GetLocalCache().FitQuota(ns, memreq, 1, coresreq, "dev")
-}
-`)
-
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 0 {
-		t.Errorf("expected no violations when Fit() reaches FitQuota via a local wrapper, got %v", violations)
+	got := checkFixture(t, fitFile(gatedOn(`fitQuota("ns", 0, 0)`), wrapper))
+	if len(got) != 0 {
+		t.Errorf("expected no violations when Fit() reaches FitQuota via a local wrapper, got %v", got)
 	}
 }
 
 func TestCheckDeviceFile_WrapperInOtherFile(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return fitQuota("ns", 0, 0)
-}
-`)
-	writeFile(t, dir, "quota.go", `package fixture
-
-func fitQuota(ns string, memreq, coresreq int64) bool {
-	return device.GetLocalCache().FitQuota(ns, memreq, 1, coresreq, "dev")
-}
-`)
+	path := writeFile(t, dir, "device.go", fitFile(gatedOn(`fitQuota("ns", 0, 0)`)))
+	writeFile(t, dir, "quota.go", "package fixture\n"+wrapper)
 
 	violations, err := checkDeviceFile(path)
 	if err != nil {
@@ -99,150 +110,165 @@ func fitQuota(ns string, memreq, coresreq int64) bool {
 	}
 }
 
-func TestCheckDeviceFile_MissingCheck(t *testing.T) {
+// TestCheckDeviceFile_FitInOtherFile guards against the checker only looking
+// at device.go: a backend that moves Fit() into another file of the same
+// package is still compliant and must not be reported as missing Fit().
+func TestCheckDeviceFile_FitInOtherFile(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return true
-}
-`)
-
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 1 {
-		t.Fatalf("expected exactly one violation, got %v", violations)
-	}
-}
-
-func TestCheckDeviceFile_UnrelatedCallsDoNotCount(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return otherHelper()
-}
-
-func otherHelper() bool {
-	return true
-}
-`)
-
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 1 {
-		t.Fatalf("expected exactly one violation, got %v", violations)
-	}
-}
-
-func TestCheckDeviceFile_UninvokedClosureDoesNotCount(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	check := func() bool {
-		return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
-	}
-	_ = check
-	return true
-}
-`)
-
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 1 {
-		t.Fatalf("expected a violation: an uninvoked closure calling FitQuota must not satisfy the check, got %v", violations)
-	}
-}
-
-func TestCheckDeviceFile_InvokedClosureCounts(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	return func() bool {
-		return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
-	}()
-}
-`)
+	path := writeFile(t, dir, "device.go", "package fixture\n\ntype Devices struct{}\n"+wrapper)
+	writeFile(t, dir, "fit.go", "package fixture\n\n"+fitSignature+gatedOn(`fitQuota("ns", 0, 0)`)+"}\n")
 
 	violations, err := checkDeviceFile(path)
 	if err != nil {
 		t.Fatalf("checkDeviceFile: %v", err)
 	}
 	if len(violations) != 0 {
-		t.Errorf("expected no violations when Fit() invokes a closure that calls FitQuota, got %v", violations)
+		t.Errorf("expected no violations when Fit() is declared in another file of the package, got %v", violations)
 	}
 }
 
-func TestCheckDeviceFile_AsyncCallDoesNotCount(t *testing.T) {
+func TestCheckDeviceFile_MissingCheck(t *testing.T) {
+	got := checkFixture(t, fitFile("\treturn true, nil, \"\"\n"))
+	assertViolation(t, got, "does not call")
+}
+
+func TestCheckDeviceFile_UnrelatedCallsDoNotCount(t *testing.T) {
+	got := checkFixture(t, fitFile(gatedOn("otherHelper()"), "\nfunc otherHelper() bool {\n\treturn true\n}\n"))
+	assertViolation(t, got, "does not call")
+}
+
+// TestCheckDeviceFile_DiscardedResult is the case a pure reachability check
+// misses: FitQuota runs, but nothing acts on what it returns, so the candidate
+// device is admitted regardless and the race stays open.
+func TestCheckDeviceFile_DiscardedResult(t *testing.T) {
 	cases := map[string]string{
-		"go statement calling FitQuota directly": fitPreamble + `
-	go device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
-	return true
-}
-`,
-		"go statement launching a closure that calls FitQuota": fitPreamble + `
-	go func() {
-		device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
-	}()
-	return true
-}
-`,
+		"assigned to the blank identifier": "\t_ = fitQuota(\"ns\", 0, 0)\n\treturn true, nil, \"\"\n",
+		"called as a bare statement":       "\tfitQuota(\"ns\", 0, 0)\n\treturn true, nil, \"\"\n",
+		"passed only to a logger":          "\tklog.V(3).InfoS(\"quota\", \"fits\", fitQuota(\"ns\", 0, 0))\n\treturn true, nil, \"\"\n",
 	}
 
-	for name, content := range cases {
+	for name, body := range cases {
 		t.Run(name, func(t *testing.T) {
-			dir := t.TempDir()
-			path := writeFile(t, dir, "device.go", content)
+			assertViolation(t, checkFixture(t, fitFile(body, wrapper)), "discards its result")
+		})
+	}
+}
 
-			violations, err := checkDeviceFile(path)
-			if err != nil {
-				t.Fatalf("checkDeviceFile: %v", err)
-			}
-			if len(violations) != 1 {
-				t.Fatalf("expected a violation: an asynchronous FitQuota call runs after Fit() returns and must not satisfy the check, got %v", violations)
+func TestCheckDeviceFile_ResultCheckedViaVariable(t *testing.T) {
+	cases := map[string]string{
+		"assigned then branched on": "\tok := fitQuota(\"ns\", 0, 0)\n\tif !ok {\n\t\treturn false, nil, \"quota\"\n\t}\n\treturn true, nil, \"\"\n",
+		"bound in the if init":      "\tif ok := fitQuota(\"ns\", 0, 0); !ok {\n\t\treturn false, nil, \"quota\"\n\t}\n\treturn true, nil, \"\"\n",
+		"returned directly":         "\treturn fitQuota(\"ns\", 0, 0), nil, \"\"\n",
+		"declared with var":         "\tvar ok = fitQuota(\"ns\", 0, 0)\n\tif !ok {\n\t\treturn false, nil, \"quota\"\n\t}\n\treturn true, nil, \"\"\n",
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			if got := checkFixture(t, fitFile(body, wrapper)); len(got) != 0 {
+				t.Errorf("expected no violations when the result gates admission, got %v", got)
 			}
 		})
 	}
 }
 
-func TestCheckDeviceFile_AsyncCallArgsStillInspected(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", fitPreamble+`
-	go log("checked", fitQuota("ns", 0, 0))
+func TestCheckDeviceFile_UninvokedClosureDoesNotCount(t *testing.T) {
+	body := "\tcheck := func() bool {\n\t\treturn device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n\t}\n\t_ = check\n\treturn true, nil, \"\"\n"
+	assertViolation(t, checkFixture(t, fitFile(body)), "does not call")
+}
+
+func TestCheckDeviceFile_InvokedClosureCounts(t *testing.T) {
+	body := gatedOn("func() bool {\n\t\treturn device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n\t}()")
+	if got := checkFixture(t, fitFile(body)); len(got) != 0 {
+		t.Errorf("expected no violations when Fit() invokes a closure that calls FitQuota, got %v", got)
+	}
+}
+
+func TestCheckDeviceFile_AsyncCallDoesNotCount(t *testing.T) {
+	cases := map[string]string{
+		"go statement calling FitQuota directly": "\tgo device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n\treturn true, nil, \"\"\n",
+		"go statement launching a closure":       "\tgo func() {\n\t\tdevice.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n\t}()\n\treturn true, nil, \"\"\n",
+	}
+
+	for name, body := range cases {
+		t.Run(name, func(t *testing.T) {
+			assertViolation(t, checkFixture(t, fitFile(body)), "does not call")
+		})
+	}
+}
+
+// TestCheckDeviceFile_AsyncCallArgsAreSeen documents the two rules meeting:
+// a `go` statement's arguments are evaluated synchronously, so the call is
+// found, but handing its result to a logger still doesn't gate admission.
+func TestCheckDeviceFile_AsyncCallArgsAreSeen(t *testing.T) {
+	body := "\tgo record(\"checked\", fitQuota(\"ns\", 0, 0))\n\treturn true, nil, \"\"\n"
+	decls := wrapper + "\nfunc record(msg string, ok bool) {}\n"
+	assertViolation(t, checkFixture(t, fitFile(body, decls)), "discards its result")
+}
+
+// TestCheckDeviceFile_ShadowingFitIgnored guards findFitMethod's signature
+// match: an unrelated method named Fit must not stand in for the interface
+// implementation, or a backend could pass the gate on a helper's check while
+// its real Fit() admits pods unguarded.
+func TestCheckDeviceFile_ShadowingFitIgnored(t *testing.T) {
+	shadow := "\ntype cache struct{}\n\nfunc (c *cache) Fit() bool {\n\treturn device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n}\n"
+	// The shadowing helper is declared first, so a first-match lookup would
+	// pick it and wrongly report the package as compliant.
+	content := "package fixture\n\ntype Devices struct{}\n" + shadow + "\n" + fitSignature + "\treturn true, nil, \"\"\n}\n"
+	assertViolation(t, checkFixture(t, content), "does not call")
+}
+
+func TestCheckDeviceFile_FitSignatureChanged(t *testing.T) {
+	content := "package fixture\n\ntype Devices struct{}\n\nfunc (d *Devices) Fit() bool {\n\treturn true\n}\n"
+	assertViolation(t, checkFixture(t, content), "update fitParamCount")
+}
+
+// TestCheckDeviceFile_SameNamedMethodsOnDifferentReceivers guards call-graph
+// resolution: indexing helpers by name alone lets one receiver's method
+// overwrite another's, which can drop the real wrapper and report a compliant
+// backend as broken.
+func TestCheckDeviceFile_SameNamedMethodsOnDifferentReceivers(t *testing.T) {
+	decls := `
+type other struct{}
+
+func (o *other) check() bool {
 	return true
 }
 
-func fitQuota(ns string, memreq, coresreq int64) bool {
-	return device.GetLocalCache().FitQuota(ns, memreq, 1, coresreq, "dev")
+func (d *Devices) check() bool {
+	return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
+}
+`
+	if got := checkFixture(t, fitFile(gatedOn("d.check()"), decls)); len(got) != 0 {
+		t.Errorf("expected no violations when the real wrapper shares its name with another receiver's method, got %v", got)
+	}
 }
 
-func log(msg string, ok bool) {}
-`)
+// TestCheckDeviceFile_RecursiveHelperTerminates guards the visited set against
+// a mutually recursive call chain hanging the check.
+func TestCheckDeviceFile_RecursiveHelperTerminates(t *testing.T) {
+	decls := `
+func ping() bool {
+	return pong()
+}
 
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 0 {
-		t.Errorf("expected no violations: a `go` statement's arguments are evaluated synchronously, so fitQuota() in an argument counts, got %v", violations)
-	}
+func pong() bool {
+	return ping()
+}
+`
+	assertViolation(t, checkFixture(t, fitFile(gatedOn("ping()"), decls)), "does not call")
 }
 
 func TestCheckDeviceFile_NoFitMethod(t *testing.T) {
-	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", `package fixture
-
-func NotFit() bool {
-	return true
+	content := "package fixture\n\nfunc NotFit() bool {\n\treturn true\n}\n"
+	assertViolation(t, checkFixture(t, content), "no Fit() method found")
 }
-`)
 
-	violations, err := checkDeviceFile(path)
-	if err != nil {
-		t.Fatalf("checkDeviceFile: %v", err)
-	}
-	if len(violations) != 1 {
-		t.Fatalf("expected exactly one violation for a missing Fit() method, got %v", violations)
+func TestCheckDeviceFile_UnparseableFileErrors(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "device.go", "package fixture\n\nfunc broken( {\n")
+
+	if _, err := checkDeviceFile(path); err == nil {
+		t.Fatal("expected an error for an unparseable file, got nil")
 	}
 }
 
@@ -291,9 +317,13 @@ func mustMkdirAll(t *testing.T, dir string) {
 
 // TestRealBackends runs quotacheck against the actual pkg/device backends in
 // this repository. nvidia and cambricon already re-check ResourceQuota in
-// Fit() (see #2536) and must pass; the remaining backends are tracked by
-// #2829 as still missing the check and must be flagged, mirroring this
-// issue's acceptance criteria.
+// Fit() (see #2536) and must pass; the backends tracked by #2829 as still
+// missing the check must be flagged, mirroring this issue's acceptance
+// criteria.
+//
+// It iterates the backends quotacheck discovers rather than a fixed list, so
+// a newly added backend fails here until it is classified, instead of being
+// silently unverified while hack/verify-quota.sh fails in CI.
 func TestRealBackends(t *testing.T) {
 	root, err := findRepoRoot()
 	if err != nil {
@@ -304,6 +334,7 @@ func TestRealBackends(t *testing.T) {
 		"cambricon": true,
 		"nvidia":    true,
 	}
+	// Keep in sync with ALLOWED_VENDORS in hack/verify-quota.sh.
 	nonCompliant := map[string]bool{
 		"amd":       true,
 		"ascend":    true,
@@ -318,25 +349,43 @@ func TestRealBackends(t *testing.T) {
 		"vastai":    true,
 	}
 
-	for vendor := range compliant {
-		path := filepath.Join(root, "pkg", "device", vendor, "device.go")
+	paths, err := defaultDeviceFiles(root)
+	if err != nil {
+		t.Fatalf("defaultDeviceFiles: %v", err)
+	}
+	if len(paths) == 0 {
+		t.Fatal("no device backends discovered under pkg/device")
+	}
+
+	seen := map[string]bool{}
+	for _, path := range paths {
+		vendor := filepath.Base(filepath.Dir(path))
+		seen[vendor] = true
+
 		violations, err := checkDeviceFile(path)
 		if err != nil {
 			t.Fatalf("checkDeviceFile(%s): %v", vendor, err)
 		}
-		if len(violations) != 0 {
-			t.Errorf("%s: expected no violations, got %v", vendor, violations)
+
+		switch {
+		case compliant[vendor]:
+			if len(violations) != 0 {
+				t.Errorf("%s: expected no violations, got %v", vendor, violations)
+			}
+		case nonCompliant[vendor]:
+			if len(violations) == 0 {
+				t.Errorf("%s: now re-checks ResourceQuota; move it to the compliant set here and drop it from ALLOWED_VENDORS in hack/verify-quota.sh", vendor)
+			}
+		default:
+			t.Errorf("%s: backend is classified in neither the compliant nor the non-compliant set; add it here, and to ALLOWED_VENDORS in hack/verify-quota.sh if its Fit() does not re-check ResourceQuota yet", vendor)
 		}
 	}
 
-	for vendor := range nonCompliant {
-		path := filepath.Join(root, "pkg", "device", vendor, "device.go")
-		violations, err := checkDeviceFile(path)
-		if err != nil {
-			t.Fatalf("checkDeviceFile(%s): %v", vendor, err)
-		}
-		if len(violations) == 0 {
-			t.Errorf("%s: expected a violation for a missing ResourceQuota re-check, got none", vendor)
+	for _, set := range []map[string]bool{compliant, nonCompliant} {
+		for vendor := range set {
+			if !seen[vendor] {
+				t.Errorf("%s: listed here but no longer discovered under pkg/device; remove its stale entry", vendor)
+			}
 		}
 	}
 }
@@ -359,11 +408,12 @@ func newRunFixture(t *testing.T, compliant bool) string {
 	t.Helper()
 	vendorDir := filepath.Join(t.TempDir(), "vendora")
 	mustMkdirAll(t, vendorDir)
-	body := "\treturn true\n}\n"
+
+	body := "\treturn true, nil, \"\"\n"
 	if compliant {
-		body = "\treturn device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n}\n"
+		body = gatedOn(`device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")`)
 	}
-	return writeFile(t, vendorDir, "device.go", fitPreamble+body)
+	return writeFile(t, vendorDir, "device.go", fitFile(body))
 }
 
 func TestRun_UnlistedCompliant(t *testing.T) {
