@@ -159,6 +159,10 @@ These are the primary metrics if `--legacy-metrics=false`:
 - `hami_resource_quota_used`
 - `hami_resource_quota_limit`
 
+**Scheduler state**
+- `hami_scheduler_is_leader`
+- `hami_scheduler_cache_synced`
+
 **Build metadata**
 - `hami_build_info`
 
@@ -778,6 +782,8 @@ If the user asks in English, answer in English.
 | `hami_vgpu_memory_module_bytes` | Memory module size from vGPU monitor | runtime/container |
 | `hami_vgpu_memory_buffer_bytes` | Memory buffer size from vGPU monitor | runtime/container |
 | `hami_mig_device_info` / `MigInfo` | MIG runtime identity per container from vGPU monitor | runtime/container |
+| `hami_scheduler_is_leader` | 1 when this scheduler instance is the active leader, 0 otherwise | scheduler |
+| `hami_scheduler_cache_synced` | 1 when the internal node/device cache is fully synced, 0 otherwise | scheduler |
 | `hami_build_info` | HAMi version/build metadata | cluster |
 
 ---

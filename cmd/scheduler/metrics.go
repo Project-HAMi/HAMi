@@ -31,6 +31,7 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	versionmetrics "github.com/Project-HAMi/HAMi/pkg/metrics"
 	schedulerpkg "github.com/Project-HAMi/HAMi/pkg/scheduler"
+	"github.com/Project-HAMi/HAMi/pkg/util/leaderelection"
 )
 
 type ClusterManager struct {
@@ -42,6 +43,13 @@ type schedulerMetricsProvider interface {
 	InspectAllNodesUsage() *map[string]*schedulerpkg.NodeUsage
 	GetQuotaManager() *device.QuotaManager
 	GetPodManager() *device.PodManager
+	// GetLeaderManager returns the leader election manager so the collector
+	// can emit hami_scheduler_is_leader without importing the scheduler package
+	// directly in metrics.go.
+	GetLeaderManager() leaderelection.LeaderManager
+	// IsSynced reports whether the scheduler's internal cache has completed at
+	// least one successful sync and is ready to serve scheduling requests.
+	IsSynced() bool
 }
 
 // ClusterManagerCollector implements the Collector interface.
@@ -98,6 +106,7 @@ func (cc ClusterManagerCollector) Collect(ch chan<- prometheus.Metric) {
 	cc.collectNodeMetrics(ch, nu, legacy)
 	cc.collectQuotaMetrics(ch, legacy)
 	cc.collectContainerMetrics(ch, nu, legacy)
+	cc.collectSchedulerStateMetrics(ch)
 }
 
 // collectNodeMetrics emits node-level GPU metrics (memory/core limits and
@@ -393,6 +402,38 @@ func (cc ClusterManagerCollector) collectContainerMetrics(ch chan<- prometheus.M
 				}
 			}
 		}
+	}
+}
+
+// collectSchedulerStateMetrics emits hami_scheduler_is_leader and
+// hami_scheduler_cache_synced as gauges (0 or 1) every scrape. These allow
+// operators to alert on leader-loss or cache-desync without log-scraping.
+func (cc ClusterManagerCollector) collectSchedulerStateMetrics(ch chan<- prometheus.Metric) {
+	isLeaderDesc := prometheus.NewDesc(
+		"hami_scheduler_is_leader",
+		"1 if this scheduler instance is the current leader, 0 otherwise.",
+		nil, nil,
+	)
+	cacheSyncedDesc := prometheus.NewDesc(
+		"hami_scheduler_cache_synced",
+		"1 if the scheduler's internal node/device cache is fully synced, 0 otherwise.",
+		nil, nil,
+	)
+
+	isLeaderVal := 0.0
+	if cc.metricsProvider.GetLeaderManager().IsLeader() {
+		isLeaderVal = 1.0
+	}
+	isSyncedVal := 0.0
+	if cc.metricsProvider.IsSynced() {
+		isSyncedVal = 1.0
+	}
+
+	if err := sendMetric(ch, isLeaderDesc, prometheus.GaugeValue, isLeaderVal); err != nil {
+		klog.V(4).Infof("Failed to send hami_scheduler_is_leader metric: %v", err)
+	}
+	if err := sendMetric(ch, cacheSyncedDesc, prometheus.GaugeValue, isSyncedVal); err != nil {
+		klog.V(4).Infof("Failed to send hami_scheduler_cache_synced metric: %v", err)
 	}
 }
 
