@@ -26,7 +26,7 @@
 # re-check yet; each gets its own fix PR, and removes itself from this list
 # when it lands. quotacheck fails if a listed vendor starts passing (a
 # stale entry) or an unlisted vendor fails (a new or regressed backend).
-ALLOWED_VENDORS="ascend,awsneuron,biren,enflame,hygon,iluvatar,kunlun,metax,mthreads,vastai"
+ALLOWED_VENDORS="amd,ascend,awsneuron,biren,enflame,hygon,iluvatar,kunlun,metax,mthreads,vastai"
 
 set -o errexit
 set -o nounset

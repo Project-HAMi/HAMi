@@ -19,8 +19,8 @@ limitations under the License.
 // implemented separately by every vendor backend under pkg/device/<vendor>/,
 // and the admission-vs-schedule TOCTOU race is only closed if Fit() re-reads
 // namespace ResourceQuota usage via device.QuotaManager.FitQuota (directly,
-// or through a local wrapper such as the fitQuota() helper used by nvidia,
-// cambricon, and amd).
+// or through a local wrapper such as the fitQuota() helper used by nvidia
+// and cambricon).
 //
 // Usage: go run ./hack/tools/quotacheck/ [-allow vendor1,vendor2,...] [path ...]
 //

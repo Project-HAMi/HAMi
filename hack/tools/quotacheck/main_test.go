@@ -290,10 +290,10 @@ func mustMkdirAll(t *testing.T, dir string) {
 }
 
 // TestRealBackends runs quotacheck against the actual pkg/device backends in
-// this repository. nvidia, cambricon, and amd already re-check ResourceQuota
-// in Fit() (see #2536 and the amd fix that closes #2829's amd leg) and must
-// pass; the remaining backends are tracked by #2829 as still missing the
-// check and must be flagged, mirroring this issue's acceptance criteria.
+// this repository. nvidia and cambricon already re-check ResourceQuota in
+// Fit() (see #2536) and must pass; the remaining backends are tracked by
+// #2829 as still missing the check and must be flagged, mirroring this
+// issue's acceptance criteria.
 func TestRealBackends(t *testing.T) {
 	root, err := findRepoRoot()
 	if err != nil {
@@ -301,11 +301,11 @@ func TestRealBackends(t *testing.T) {
 	}
 
 	compliant := map[string]bool{
-		"amd":       true,
 		"cambricon": true,
 		"nvidia":    true,
 	}
 	nonCompliant := map[string]bool{
+		"amd":       true,
 		"ascend":    true,
 		"awsneuron": true,
 		"biren":     true,
