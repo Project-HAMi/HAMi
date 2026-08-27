@@ -582,7 +582,10 @@ func collectDRSProfiles(devices []*device.DeviceUsage) []drsProfileCandidate {
 			if size <= 0 || memGB <= 0 {
 				continue
 			}
-			corePercent := int(math.Ceil(float64(size) * 100 / float64(maxSlice)))
+			// Round down so the costs of a fully sliced device never sum past
+			// its 100 core budget; ceil left 6x1g at 102 and blocked the last
+			// advertised slice.
+			corePercent := size * 100 / maxSlice
 			seen[profileName] = drsProfileCandidate{
 				Name:        profileName,
 				ID:          profileID,
