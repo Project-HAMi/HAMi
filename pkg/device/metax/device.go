@@ -19,6 +19,7 @@ package metax
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"slices"
 	"strings"
 
@@ -140,6 +141,10 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "metax device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found metax devices")
 			return device.ContainerDeviceRequest{
 				Nums:             int32(n),
@@ -151,18 +156,6 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 		}
 	}
 	return device.ContainerDeviceRequest{}
-}
-
-func (dev *MetaxDevices) customFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, device *device.DeviceUsage) bool {
-	for _, ctrs := range (*allocated)[device.Type] {
-		for _, ctrdev := range ctrs {
-			if strings.Compare(ctrdev.UUID, device.ID) != 0 {
-				klog.InfoS("Metax needs all devices on a device", "used", ctrdev.UUID, "allocating", device.ID)
-				return false
-			}
-		}
-	}
-	return true
 }
 
 func parseMetaxAnnos(annos string, index int) float32 {
@@ -228,6 +221,10 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -269,11 +266,6 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
 		}
-		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Coresreq = 100
-			//return false, tmpDevs
-		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq
 		}
@@ -301,12 +293,6 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
-			continue
-		}
-
-		if !mat.customFilterRule(allocated, request, tmpDevs[k.Type], dev) {
-			reason[common.CardNotFoundCustomFilterRule]++
-			klog.V(5).InfoS(common.CardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
 		}
 

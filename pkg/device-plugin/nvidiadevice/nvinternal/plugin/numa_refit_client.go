@@ -67,30 +67,37 @@ const (
 // numaRefitTLSConfig verifies the scheduler certificate by default, against
 // SchedulerCAFileEnvName when provided; SchedulerTLSInsecureEnvName is an
 // explicit operator opt-out for the self-signed webhook certificate.
-func numaRefitTLSConfig() *tls.Config {
+func numaRefitTLSConfig() (*tls.Config, error) {
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caFile := os.Getenv(SchedulerCAFileEnvName); caFile != "" {
 		pem, err := os.ReadFile(caFile)
 		if err != nil {
-			klog.ErrorS(err, "cannot read scheduler CA bundle", "path", caFile)
-		} else if pool := x509.NewCertPool(); pool.AppendCertsFromPEM(pem) {
-			config.RootCAs = pool
-		} else {
-			klog.ErrorS(nil, "scheduler CA bundle contains no usable certificates", "path", caFile)
+			return nil, fmt.Errorf("cannot read scheduler CA bundle %q: %w", caFile, err)
 		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("scheduler CA bundle %q contains no usable certificates", caFile)
+		}
+		config.RootCAs = pool
 	}
 	if insecure, err := strconv.ParseBool(os.Getenv(SchedulerTLSInsecureEnvName)); err == nil {
 		config.InsecureSkipVerify = insecure
 	}
-	return config
+	return config, nil
 }
 
-// numaRefitHTTPClient reaches the scheduler service.
-var numaRefitHTTPClient = &http.Client{
-	Timeout: numaRefitTimeout,
-	Transport: &http.Transport{
-		TLSClientConfig: numaRefitTLSConfig(),
-	},
+// numaRefitHTTPClient reaches the scheduler service. It is built per refit so
+// a rotated CA bundle is picked up without restarting the device plugin; the
+// refit is a rare path, taken only when an allocation mismatches.
+func numaRefitHTTPClient() (*http.Client, error) {
+	tlsConfig, err := numaRefitTLSConfig()
+	if err != nil {
+		return nil, err
+	}
+	return &http.Client{
+		Timeout:   numaRefitTimeout,
+		Transport: &http.Transport{TLSClientConfig: tlsConfig},
+	}, nil
 }
 
 // tryNumaRefit asks the scheduler to move this container's pending
@@ -110,13 +117,13 @@ func (plugin *NvidiaDevicePlugin) tryNumaRefit(ctx context.Context, pod *corev1.
 		return nil, nil
 	}
 
-	// When kubelet pins replicas via MustIncludeDeviceIDs, only their
-	// physical devices can satisfy the allocation, so restrict the refit to
-	// them; otherwise any available physical device is eligible.
+	// Kubelet builds AvailableDeviceIDs as a superset of MustIncludeDeviceIDs
+	// (available.Union(allocated) with mustInclude = allocated), so the
+	// available set is the candidate pool. Restricting it to MustInclude
+	// would shrink the pool below the requested device count; the pinned
+	// replicas are honored by selectPreferredDeviceIDsFromAnnotatedDevices,
+	// which seeds them first.
 	allowedUUIDs := allowedPhysicalDeviceIDs(req.AvailableDeviceIDs)
-	if len(req.MustIncludeDeviceIDs) > 0 {
-		allowedUUIDs = allowedPhysicalDeviceIDs(req.MustIncludeDeviceIDs)
-	}
 	newDevices, err := plugin.requestNumaRefit(ctx, pod, containerIndex, allowedUUIDs)
 	if err == nil {
 		replicas, selectErr := plugin.selectPreferredDeviceIDsFromAnnotatedDevices(req.AvailableDeviceIDs, req.MustIncludeDeviceIDs, newDevices, int(req.AllocationSize))
@@ -162,7 +169,11 @@ func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *cor
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
-	httpResp, err := numaRefitHTTPClient.Do(httpReq)
+	httpClient, err := numaRefitHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	httpResp, err := httpClient.Do(httpReq)
 	if err != nil {
 		return nil, err
 	}

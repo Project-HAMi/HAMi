@@ -146,8 +146,8 @@ func (dev *EnflameDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod)
 	if hasMem && memReq <= 0 {
 		return false, fmt.Errorf("%s must be greater than 0", EnflameResourceNameGCUMemory)
 	}
-	if hasCore && (coreReq <= 0 || coreReq > 100) {
-		return false, fmt.Errorf("%s must be in range (0,100]", EnflameResourceNameGCUCore)
+	if hasCore && (coreReq < 0 || coreReq > 100) {
+		return false, fmt.Errorf("%s must be in range [0,100]", EnflameResourceNameGCUCore)
 	}
 	if hasMem {
 		memQty := ctr.Resources.Limits[corev1.ResourceName(EnflameResourceNameGCUMemory)]
@@ -350,8 +350,8 @@ func (dev *EnflameDevices) GenerateResourceRequests(ctr *corev1.Container) devic
 		klog.ErrorS(nil, "gcu memory request is too large", "container", ctr.Name, "request", memReq)
 		return device.ContainerDeviceRequest{}
 	}
-	if hasCore && coreReq > math.MaxInt32 {
-		klog.ErrorS(nil, "gcu core request is too large", "container", ctr.Name, "request", coreReq)
+	if hasCore && (coreReq < 0 || coreReq > 100) {
+		klog.ErrorS(nil, "gcu core request is out of range (must be 0-100)", "container", ctr.Name, "request", coreReq)
 		return device.ContainerDeviceRequest{}
 	}
 	klog.Info("Found enflame memory/core based request")
@@ -385,6 +385,10 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	klog.InfoS("Allocating device for container request", "pod", klog.KObj(pod), "card request", k)
 	tmpDevs := make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	profile, profileMatch := enf.selectProfileByRequest(devices, k)
 	if !profileMatch {
@@ -582,7 +586,10 @@ func collectDRSProfiles(devices []*device.DeviceUsage) []drsProfileCandidate {
 			if size <= 0 || memGB <= 0 {
 				continue
 			}
-			corePercent := int(math.Ceil(float64(size) * 100 / float64(maxSlice)))
+			// Round down so the costs of a fully sliced device never sum past
+			// its 100 core budget; ceil left 6x1g at 102 and blocked the last
+			// advertised slice.
+			corePercent := size * 100 / maxSlice
 			seen[profileName] = drsProfileCandidate{
 				Name:        profileName,
 				ID:          profileID,
@@ -749,10 +756,18 @@ func getContainerResourceRequest(ctr *corev1.Container, resourceName corev1.Reso
 		return 0, false
 	}
 	if qty, ok := ctr.Resources.Limits[resourceName]; ok {
-		return qty.Value(), true
+		val, valid := qty.AsInt64()
+		if !valid {
+			return -1, true
+		}
+		return val, true
 	}
 	if qty, ok := ctr.Resources.Requests[resourceName]; ok {
-		return qty.Value(), true
+		val, valid := qty.AsInt64()
+		if !valid {
+			return -1, true
+		}
+		return val, true
 	}
 	return 0, false
 }
