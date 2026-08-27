@@ -18,7 +18,7 @@ set -o nounset
 set -o pipefail
 
 REPO_ROOT=$(dirname "${BASH_SOURCE[0]}")/..
-GOLANGCI_LINT_VER="v2.12.2"
+GOLANGCI_LINT_VER="v2.13.1"
 
 cd "${REPO_ROOT}"
 source "hack/util.sh"
@@ -29,8 +29,8 @@ if util::cmd_exist golangci-lint; then
 else
   echo "Installing golangci-lint ${GOLANGCI_LINT_VER}"
   # https://golangci-lint.run/usage/install/#other-ci
-  GOLANGCI_INSTALL_REF="6b2ddf9224768e2097b028b7ac7f6efb97a5f9f6"
-  GOLANGCI_INSTALL_SHA256="d32d3534af96cfd59546a084d22b213e8a47541cada5013aa8a84c4fa2589905"
+  GOLANGCI_INSTALL_REF="6d2288e072e6f9c9bca28180cae9ce58a049c912"
+  GOLANGCI_INSTALL_SHA256="1022ddb4d87ed252350ed03fc9677e250a4ae95cc6bcd4658c2a20a8a23d390f"
   GOLANGCI_INSTALL_SCRIPT=$(mktemp)
   trap 'rm -f "${GOLANGCI_INSTALL_SCRIPT}"' EXIT
   curl -sSfL "https://raw.githubusercontent.com/golangci/golangci-lint/${GOLANGCI_INSTALL_REF}/install.sh" -o "${GOLANGCI_INSTALL_SCRIPT}"
