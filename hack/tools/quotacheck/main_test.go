@@ -31,10 +31,14 @@ const fitSignature = "func (d *Devices) Fit(devices []*device.DeviceUsage, reque
 	"pod *corev1.Pod, nodeInfo *device.NodeInfo, allocated *device.PodDevices) " +
 	"(bool, map[string]device.ContainerDevices, string) {\n"
 
+// fixtureHeader opens a fixture file, importing the device package the same
+// way a real backend does so the re-check resolves.
+const fixtureHeader = "package fixture\n\nimport \"github.com/Project-HAMi/HAMi/pkg/device\"\n\n"
+
 // fitFile returns a parseable fixture file whose Fit() method has the given
 // body, followed by any extra package-level declarations.
 func fitFile(body string, decls ...string) string {
-	return "package fixture\n\ntype Devices struct{}\n\n" + fitSignature + body + "}\n" +
+	return fixtureHeader + "type Devices struct{}\n\n" + fitSignature + body + "}\n" +
 		strings.Join(decls, "\n")
 }
 
@@ -99,7 +103,7 @@ func TestCheckDeviceFile_LocalWrapper(t *testing.T) {
 func TestCheckDeviceFile_WrapperInOtherFile(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "device.go", fitFile(gatedOn(`fitQuota("ns", 0, 0)`)))
-	writeFile(t, dir, "quota.go", "package fixture\n"+wrapper)
+	writeFile(t, dir, "quota.go", fixtureHeader+wrapper)
 
 	violations, err := checkDeviceFile(path)
 	if err != nil {
@@ -115,7 +119,7 @@ func TestCheckDeviceFile_WrapperInOtherFile(t *testing.T) {
 // package is still compliant and must not be reported as missing Fit().
 func TestCheckDeviceFile_FitInOtherFile(t *testing.T) {
 	dir := t.TempDir()
-	path := writeFile(t, dir, "device.go", "package fixture\n\ntype Devices struct{}\n"+wrapper)
+	path := writeFile(t, dir, "device.go", fixtureHeader+"type Devices struct{}\n"+wrapper)
 	writeFile(t, dir, "fit.go", "package fixture\n\n"+fitSignature+gatedOn(`fitQuota("ns", 0, 0)`)+"}\n")
 
 	violations, err := checkDeviceFile(path)
@@ -205,6 +209,71 @@ func TestCheckDeviceFile_AsyncCallArgsAreSeen(t *testing.T) {
 	assertViolation(t, checkFixture(t, fitFile(body, decls)), "discards its result")
 }
 
+// TestCheckDeviceFile_UnrelatedFitQuotaIgnored guards the receiver
+// resolution: a same-named method on an unrelated type must not satisfy the
+// gate, or a backend could pass by calling a local no-op stub named FitQuota
+// while never reaching device.QuotaManager's re-check.
+func TestCheckDeviceFile_UnrelatedFitQuotaIgnored(t *testing.T) {
+	decls := `
+type quotaStub struct{}
+
+func (q *quotaStub) FitQuota(ns string, mem, factor, core int64, devType string) bool {
+	return true
+}
+
+func (d *Devices) stub() *quotaStub {
+	return &quotaStub{}
+}
+`
+	got := checkFixture(t, fitFile(gatedOn(`d.stub().FitQuota("ns", 0, 1, 0, "dev")`), decls))
+	assertViolation(t, got, "does not call")
+}
+
+func TestCheckDeviceFile_AliasedDeviceImport(t *testing.T) {
+	content := "package fixture\n\nimport dev \"github.com/Project-HAMi/HAMi/pkg/device\"\n\ntype Devices struct{}\n\n" +
+		fitSignature + gatedOn(`dev.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")`) + "}\n"
+
+	if got := checkFixture(t, content); len(got) != 0 {
+		t.Errorf("expected no violations when the device package is imported under an alias, got %v", got)
+	}
+}
+
+// TestCheckDeviceFile_CacheHeldInVariable covers the re-check being called on
+// a local bound to the device package's cache rather than inline.
+func TestCheckDeviceFile_CacheHeldInVariable(t *testing.T) {
+	body := "\tcache := device.GetLocalCache()\n" +
+		"\tif !cache.FitQuota(\"ns\", 0, 1, 0, \"dev\") {\n\t\treturn false, nil, \"quota\"\n\t}\n\treturn true, nil, \"\"\n"
+
+	if got := checkFixture(t, fitFile(body)); len(got) != 0 {
+		t.Errorf("expected no violations when the cache is held in a local variable, got %v", got)
+	}
+}
+
+// TestCheckDeviceFile_DeferredCallDoesNotCount covers the same reasoning as
+// the `go` cases: a deferred re-check runs after Fit() has chosen a device.
+func TestCheckDeviceFile_DeferredCallDoesNotCount(t *testing.T) {
+	body := "\tdefer device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n\treturn true, nil, \"\"\n"
+	assertViolation(t, checkFixture(t, fitFile(body)), "does not call")
+}
+
+// TestCheckDeviceFile_GoStatementFunctionValueIsInspected covers the half of
+// a `go` statement that is synchronous: in `go checkedRunner()()` the outer
+// invocation is asynchronous, but checkedRunner() is evaluated at the `go`
+// statement, so the re-check it reaches must still be seen. It is reported
+// for discarding the result, not for never calling FitQuota.
+func TestCheckDeviceFile_GoStatementFunctionValueIsInspected(t *testing.T) {
+	decls := wrapper + `
+func checkedRunner() func() {
+	fits := fitQuota("ns", 0, 0)
+	return func() {
+		_ = fits
+	}
+}
+`
+	body := "\tgo checkedRunner()()\n\treturn true, nil, \"\"\n"
+	assertViolation(t, checkFixture(t, fitFile(body, decls)), "discards its result")
+}
+
 // TestCheckDeviceFile_ShadowingFitIgnored guards findFitMethod's signature
 // match: an unrelated method named Fit must not stand in for the interface
 // implementation, or a backend could pass the gate on a helper's check while
@@ -213,7 +282,7 @@ func TestCheckDeviceFile_ShadowingFitIgnored(t *testing.T) {
 	shadow := "\ntype cache struct{}\n\nfunc (c *cache) Fit() bool {\n\treturn device.GetLocalCache().FitQuota(\"ns\", 0, 1, 0, \"dev\")\n}\n"
 	// The shadowing helper is declared first, so a first-match lookup would
 	// pick it and wrongly report the package as compliant.
-	content := "package fixture\n\ntype Devices struct{}\n" + shadow + "\n" + fitSignature + "\treturn true, nil, \"\"\n}\n"
+	content := fixtureHeader + "type Devices struct{}\n" + shadow + "\n" + fitSignature + "\treturn true, nil, \"\"\n}\n"
 	assertViolation(t, checkFixture(t, content), "does not call")
 }
 

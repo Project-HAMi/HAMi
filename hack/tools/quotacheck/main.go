@@ -56,7 +56,8 @@ limitations under the License.
 //     branch rejects the device, and not that the call dominates the point
 //     where the device is accepted. Reviewers still own that.
 //
-// See callName for why FitQuota is matched by name.
+// See isTargetCall for how a FitQuota call is told apart from an unrelated
+// method that happens to share the name.
 package main
 
 import (
@@ -76,9 +77,15 @@ import (
 const fitMethodName = "Fit"
 
 // targetMethod is the shared re-check helper backends must reach from Fit().
-// It is always called as a method, e.g. device.GetLocalCache().FitQuota(...)
-// or, through a local wrapper, plain FitQuota(...).
+// It is always called as a method on the cache the device package owns, e.g.
+// device.GetLocalCache().FitQuota(...).
 const targetMethod = "FitQuota"
+
+// devicePkgPath is the package that owns QuotaManager.FitQuota. A FitQuota
+// call only counts when its receiver chain roots in this package's import,
+// so an unrelated method that happens to be named FitQuota cannot satisfy
+// the check.
+const devicePkgPath = "github.com/Project-HAMi/HAMi/pkg/device"
 
 // fitParamCount and fitResultCount are the parameter and result counts of
 // device.Devices.Fit (pkg/device/devices.go):
@@ -239,8 +246,10 @@ func checkDeviceFile(path string) ([]string, error) {
 
 	if len(quotaCalls) == 0 {
 		return []string{fmt.Sprintf(
-			"%s: %s() does not call %s() to re-check ResourceQuota before admitting the pod",
-			location, fitMethodName, targetMethod)}, nil
+			"%s: %s() does not call %s() to re-check ResourceQuota before admitting the pod; "+
+				"the re-check is recognised as a call on the cache the device package owns "+
+				"(e.g. device.GetLocalCache().%s(...)), directly or through a local helper",
+			location, fitMethodName, targetMethod, targetMethod)}, nil
 	}
 
 	if !resultGatesAdmission(fit.Body, quotaCalls) {
@@ -341,20 +350,33 @@ type declIndex struct {
 	funcs   map[string][]*ast.FuncDecl
 	methods map[string][]*ast.FuncDecl
 	byRecv  map[string][]*ast.FuncDecl
+
+	// devicePkg is the identifier the device package is imported under in
+	// the file each declaration lives in, so an aliased import still
+	// resolves. It is empty for a file that doesn't import it at all.
+	devicePkg map[*ast.FuncDecl]string
+
+	// deviceVars caches, per function, the local variables assigned from an
+	// expression rooted in the device package.
+	deviceVars map[*ast.FuncDecl]map[string]bool
 }
 
 func newDeclIndex(files []*ast.File) *declIndex {
 	idx := &declIndex{
-		funcs:   map[string][]*ast.FuncDecl{},
-		methods: map[string][]*ast.FuncDecl{},
-		byRecv:  map[string][]*ast.FuncDecl{},
+		funcs:      map[string][]*ast.FuncDecl{},
+		methods:    map[string][]*ast.FuncDecl{},
+		byRecv:     map[string][]*ast.FuncDecl{},
+		devicePkg:  map[*ast.FuncDecl]string{},
+		deviceVars: map[*ast.FuncDecl]map[string]bool{},
 	}
 	for _, f := range files {
+		devicePkg := devicePkgIdent(f)
 		for _, decl := range f.Decls {
 			fn, ok := decl.(*ast.FuncDecl)
 			if !ok {
 				continue
 			}
+			idx.devicePkg[fn] = devicePkg
 			if fn.Recv == nil {
 				idx.funcs[fn.Name.Name] = append(idx.funcs[fn.Name.Name], fn)
 				continue
@@ -365,6 +387,122 @@ func newDeclIndex(files []*ast.File) *declIndex {
 		}
 	}
 	return idx
+}
+
+// devicePkgIdent returns the identifier devicePkgPath is imported under in f
+// (its alias, or the package name), or "" if f does not import it.
+func devicePkgIdent(f *ast.File) string {
+	for _, imp := range f.Imports {
+		if strings.Trim(imp.Path.Value, `"`) != devicePkgPath {
+			continue
+		}
+		if imp.Name != nil {
+			return imp.Name.Name
+		}
+		// Unaliased: the package declares itself as `package device`.
+		return "device"
+	}
+	return ""
+}
+
+// isTargetCall reports whether call is the QuotaManager re-check.
+//
+// Matching on the method name alone would let any same-named method satisfy
+// the gate — a local no-op stub named FitQuota, or an unrelated type's method
+// — which is exactly the regression this tool exists to catch. Without type
+// information the receiver cannot be resolved to device.QuotaManager, so
+// instead the receiver chain has to root in the device package's import:
+//
+//	device.GetLocalCache().FitQuota(...)   // root ident is the device import
+//	cache := device.GetLocalCache()        // ...or a local bound to it
+//	cache.FitQuota(...)
+//
+// A backend that reaches the re-check some other way is reported as a
+// violation rather than silently passing, which is the safe direction: the
+// failure is loud and the message says which shape is recognised.
+func (idx *declIndex) isTargetCall(from *ast.FuncDecl, call *ast.CallExpr) bool {
+	sel, ok := call.Fun.(*ast.SelectorExpr)
+	if !ok || sel.Sel.Name != targetMethod {
+		return false
+	}
+
+	devicePkg := idx.devicePkg[from]
+	if devicePkg == "" {
+		return false
+	}
+
+	root := rootIdent(sel.X)
+	if root == "" {
+		return false
+	}
+	return root == devicePkg || idx.deviceRootedVars(from)[root]
+}
+
+// deviceRootedVars returns the local variables in fn assigned from an
+// expression rooted in the device package, so the receiver can be held in a
+// variable instead of being called inline.
+func (idx *declIndex) deviceRootedVars(fn *ast.FuncDecl) map[string]bool {
+	if cached, ok := idx.deviceVars[fn]; ok {
+		return cached
+	}
+
+	devicePkg := idx.devicePkg[fn]
+	names := map[string]bool{}
+	idx.deviceVars[fn] = names
+	if devicePkg == "" {
+		return names
+	}
+
+	record := func(lhs []ast.Expr, rhs []ast.Expr) {
+		for i, r := range rhs {
+			if rootIdent(r) != devicePkg || i >= len(lhs) {
+				continue
+			}
+			if id, ok := lhs[i].(*ast.Ident); ok && id.Name != "_" {
+				names[id.Name] = true
+			}
+		}
+	}
+	ast.Inspect(fn.Body, func(n ast.Node) bool {
+		switch v := n.(type) {
+		case *ast.AssignStmt:
+			record(v.Lhs, v.Rhs)
+		case *ast.ValueSpec:
+			lhs := make([]ast.Expr, len(v.Names))
+			for i, name := range v.Names {
+				lhs[i] = name
+			}
+			record(lhs, v.Values)
+		}
+		return true
+	})
+	return names
+}
+
+// rootIdent returns the identifier an expression chain starts from, e.g.
+// "device" for device.GetLocalCache().FitQuota, or "" if it doesn't start
+// from a plain identifier.
+func rootIdent(expr ast.Expr) string {
+	for {
+		switch e := expr.(type) {
+		case *ast.Ident:
+			return e.Name
+		case *ast.SelectorExpr:
+			expr = e.X
+		case *ast.CallExpr:
+			expr = e.Fun
+		case *ast.ParenExpr:
+			expr = e.X
+		case *ast.StarExpr:
+			expr = e.X
+		case *ast.IndexExpr:
+			expr = e.X
+		case *ast.IndexListExpr:
+			expr = e.X
+		default:
+			return ""
+		}
+	}
 }
 
 // receiverType returns the bare type name a method is declared on, with any
@@ -418,7 +556,7 @@ func (idx *declIndex) resolve(caller *ast.CallExpr, from *ast.FuncDecl) []*ast.F
 // callReachesTarget reports whether call is the FitQuota re-check itself, or
 // a call to a same-package function that reaches it.
 func (idx *declIndex) callReachesTarget(from *ast.FuncDecl, call *ast.CallExpr) bool {
-	if name, ok := callName(call); ok && name == targetMethod {
+	if idx.isTargetCall(from, call) {
 		return true
 	}
 	for _, callee := range idx.resolve(call, from) {
@@ -443,7 +581,7 @@ func (idx *declIndex) reachesTargetMethod(fn *ast.FuncDecl, visited map[*ast.Fun
 		if found {
 			return
 		}
-		if name, ok := callName(call); ok && name == targetMethod {
+		if idx.isTargetCall(fn, call) {
 			found = true
 			return
 		}
@@ -592,14 +730,14 @@ func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
 			// immediately-invoked one is walked, via the CallExpr case.
 			return false
 		case *ast.GoStmt:
-			// `go f(...)` runs asynchronously: Fit() may admit the pod
-			// before it executes, so its callee (and any closure body it
-			// launches) cannot satisfy the re-check. The call arguments are
-			// still evaluated synchronously at the `go` statement, so keep
-			// inspecting those for nested calls.
-			for _, arg := range v.Call.Args {
-				inspectInvokedCalls(arg, visit)
-			}
+			inspectDeferredCall(v.Call, visit)
+			return false
+		case *ast.DeferStmt:
+			// A deferred call runs after Fit()'s body has finished choosing
+			// a device, so like `go` it cannot reject the candidate. Its
+			// function value and arguments are evaluated at the `defer`
+			// statement, so those are still walked.
+			inspectDeferredCall(v.Call, visit)
 			return false
 		case *ast.CallExpr:
 			visit(v)
@@ -619,27 +757,19 @@ func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
 	})
 }
 
-// callName returns the name a call expression invokes: the identifier for a
-// bare call like fitQuota(...), or the method name for a selector call like
-// x.FitQuota(...). The second result is false for any other callee shape
-// (e.g. a call through a function value).
+// inspectDeferredCall walks the parts of a `go` or `defer` call that Go
+// evaluates synchronously at the statement: the function value and the
+// arguments. The call itself is deliberately not reported, since it runs
+// after Fit() has already chosen a device.
 //
-// This is a name-only match: quotacheck parses each package without type
-// information, so it cannot prove that an x.FitQuota(...) selector resolves
-// to device.QuotaManager.FitQuota rather than a same-named method on an
-// unrelated type. In the pkg/device backends FitQuota is only ever the
-// QuotaManager re-check, so the name match is sufficient in practice; the
-// TestRealBackends fixture guards the real files against drift, and the
-// result check in resultGatesAdmission means a no-op stub still has to be
-// wired into a rejection branch to pass.
-func callName(call *ast.CallExpr) (string, bool) {
-	switch fun := call.Fun.(type) {
-	case *ast.Ident:
-		return fun.Name, true
-	case *ast.SelectorExpr:
-		return fun.Sel.Name, true
-	default:
-		return "", false
+// Walking the function value matters for shapes like `go checkedRunner()()`,
+// where the outer invocation is asynchronous but checkedRunner() is not. For
+// `go cache.FitQuota(...)` it walks only the receiver chain, so the
+// asynchronous FitQuota still does not count.
+func inspectDeferredCall(call *ast.CallExpr, visit func(*ast.CallExpr)) {
+	inspectInvokedCalls(call.Fun, visit)
+	for _, arg := range call.Args {
+		inspectInvokedCalls(arg, visit)
 	}
 }
 

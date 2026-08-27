@@ -27,6 +27,11 @@
 # re-check yet; each gets its own fix PR, and removes itself from this list
 # when it lands. quotacheck fails if a listed vendor starts passing (a
 # stale entry) or an unlisted vendor fails (a new or regressed backend).
+#
+# 11 of the 13 backends under pkg/device are listed. The two that are not,
+# nvidia and cambricon, already re-check (#2536). Keep this list in sync with
+# the nonCompliant set in hack/tools/quotacheck/main_test.go, which asserts
+# the same split against the real backends.
 ALLOWED_VENDORS="amd,ascend,awsneuron,biren,enflame,hygon,iluvatar,kunlun,metax,mthreads,vastai"
 
 set -o errexit
