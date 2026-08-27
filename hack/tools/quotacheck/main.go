@@ -241,6 +241,11 @@ func parsePackage(fset *token.FileSet, dir string) ([]*ast.File, error) {
 // the FuncDecls of the local functions/methods it calls directly. Only
 // same-package callees can be resolved this way, which is sufficient for
 // following a local wrapper like fitQuota() back to FitQuota().
+//
+// Calls inside a function literal are only followed when that literal is
+// statically invoked (an immediately-invoked func expression); a closure
+// that is merely declared and never called cannot influence Fit()'s
+// behaviour and so must not count towards reachability.
 func buildCallGraph(files []*ast.File) map[string][]*ast.FuncDecl {
 	byName := make(map[string]*ast.FuncDecl)
 	for _, f := range files {
@@ -253,26 +258,62 @@ func buildCallGraph(files []*ast.File) map[string][]*ast.FuncDecl {
 
 	graph := make(map[string][]*ast.FuncDecl)
 	for name, fn := range byName {
-		ast.Inspect(fn, func(n ast.Node) bool {
-			call, ok := n.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
+		inspectInvokedCalls(fn.Body, func(call *ast.CallExpr) {
 			calleeName, ok := callName(call)
 			if !ok {
-				return true
+				return
 			}
 			if callee, ok := byName[calleeName]; ok {
 				graph[name] = append(graph[name], callee)
 			}
-			return true
 		})
 	}
 	return graph
 }
 
-// callName returns the identifier or method name a call expression invokes,
-// e.g. "fitQuota" for fitQuota(...) and "FitQuota" for x.FitQuota(...).
+// inspectInvokedCalls walks n and reports every call expression that is
+// reachable when the enclosing function runs. It descends into a function
+// literal only when that literal is the callee of an enclosing call
+// expression (an IIFE), so calls inside an uninvoked closure are skipped.
+func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
+	if n == nil {
+		return
+	}
+	ast.Inspect(n, func(node ast.Node) bool {
+		switch v := node.(type) {
+		case *ast.FuncLit:
+			// Do not descend into a closure body here; only an
+			// immediately-invoked one is walked, via the CallExpr case.
+			return false
+		case *ast.CallExpr:
+			visit(v)
+			if lit, ok := v.Fun.(*ast.FuncLit); ok {
+				inspectInvokedCalls(lit.Body, visit)
+			} else {
+				// Walk the callee expression (e.g. the receiver chain
+				// of a.b().c()) and the arguments for nested calls.
+				inspectInvokedCalls(v.Fun, visit)
+			}
+			for _, arg := range v.Args {
+				inspectInvokedCalls(arg, visit)
+			}
+			return false
+		}
+		return true
+	})
+}
+
+// callName returns the name a call expression invokes: the identifier for a
+// bare call like fitQuota(...), or the method name for a selector call like
+// x.FitQuota(...). The second result is false for any other callee shape
+// (e.g. a call through a function value).
+//
+// This is a name-only match: quotacheck parses each package without type
+// information, so it cannot prove that an x.FitQuota(...) selector resolves
+// to device.QuotaManager.FitQuota rather than a same-named method on an
+// unrelated type. In the pkg/device backends FitQuota is only ever the
+// QuotaManager re-check, so the name match is sufficient in practice; the
+// TestRealBackends fixture guards the real files against drift.
 func callName(call *ast.CallExpr) (string, bool) {
 	switch fun := call.Fun.(type) {
 	case *ast.Ident:
@@ -293,19 +334,10 @@ func reachesTargetMethod(fn *ast.FuncDecl, graph map[string][]*ast.FuncDecl, vis
 	visited[fn] = true
 
 	found := false
-	ast.Inspect(fn, func(n ast.Node) bool {
-		if found {
-			return false
-		}
-		call, ok := n.(*ast.CallExpr)
-		if !ok {
-			return true
-		}
+	inspectInvokedCalls(fn.Body, func(call *ast.CallExpr) {
 		if name, ok := callName(call); ok && name == targetMethod {
 			found = true
-			return false
 		}
-		return true
 	})
 	if found {
 		return true

@@ -135,6 +135,44 @@ func otherHelper() bool {
 	}
 }
 
+func TestCheckDeviceFile_UninvokedClosureDoesNotCount(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "device.go", fitPreamble+`
+	check := func() bool {
+		return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
+	}
+	_ = check
+	return true
+}
+`)
+
+	violations, err := checkDeviceFile(path)
+	if err != nil {
+		t.Fatalf("checkDeviceFile: %v", err)
+	}
+	if len(violations) != 1 {
+		t.Fatalf("expected a violation: an uninvoked closure calling FitQuota must not satisfy the check, got %v", violations)
+	}
+}
+
+func TestCheckDeviceFile_InvokedClosureCounts(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "device.go", fitPreamble+`
+	return func() bool {
+		return device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
+	}()
+}
+`)
+
+	violations, err := checkDeviceFile(path)
+	if err != nil {
+		t.Fatalf("checkDeviceFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Errorf("expected no violations when Fit() invokes a closure that calls FitQuota, got %v", violations)
+	}
+}
+
 func TestCheckDeviceFile_NoFitMethod(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "device.go", `package fixture
