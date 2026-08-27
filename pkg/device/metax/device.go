@@ -158,18 +158,6 @@ func (dev *MetaxDevices) GenerateResourceRequests(ctr *corev1.Container) device.
 	return device.ContainerDeviceRequest{}
 }
 
-func (dev *MetaxDevices) customFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, device *device.DeviceUsage) bool {
-	for _, ctrs := range (*allocated)[device.Type] {
-		for _, ctrdev := range ctrs {
-			if strings.Compare(ctrdev.UUID, device.ID) != 0 {
-				klog.InfoS("Metax needs all devices on a device", "used", ctrdev.UUID, "allocating", device.ID)
-				return false
-			}
-		}
-	}
-	return true
-}
-
 func parseMetaxAnnos(annos string, index int) float32 {
 	scoreMap := map[int]int{}
 	err := json.Unmarshal([]byte(annos), &scoreMap)
@@ -306,12 +294,6 @@ func (mat *MetaxDevices) Fit(devices []*device.DeviceUsage, request device.Conta
 		if dev.Totalcore != 0 && dev.Usedcores == dev.Totalcore && k.Coresreq == 0 {
 			reason[common.CardComputeUnitsExhausted]++
 			klog.V(5).InfoS(common.CardComputeUnitsExhausted, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
-			continue
-		}
-
-		if !mat.customFilterRule(allocated, request, tmpDevs[k.Type], dev) {
-			reason[common.CardNotFoundCustomFilterRule]++
-			klog.V(5).InfoS(common.CardNotFoundCustomFilterRule, "pod", klog.KObj(pod), "device", dev.ID, "device index", i)
 			continue
 		}
 
