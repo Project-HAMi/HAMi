@@ -187,6 +187,79 @@ func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	}
 }
 
+func Test_MutateAdmission_CoresValidation(t *testing.T) {
+	gpuDevices := &NvidiaGPUDevices{
+		config: NvidiaConfig{
+			ResourceCountName:            "nvidia.com/gpu",
+			ResourceMemoryName:           "nvidia.com/gpumem",
+			ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+			ResourceCoreName:             "nvidia.com/gpucores",
+			DefaultGPUNum:                int32(1),
+		},
+	}
+	tests := []struct {
+		name    string
+		cores   int64
+		wantErr bool
+	}{
+		{
+			name:    "cores of 0 is accepted",
+			cores:   0,
+			wantErr: false,
+		},
+		{
+			name:    "cores of 50 is accepted",
+			cores:   50,
+			wantErr: false,
+		},
+		{
+			name:    "cores of 100 is accepted",
+			cores:   100,
+			wantErr: false,
+		},
+		{
+			name:    "cores of 101 is rejected",
+			cores:   101,
+			wantErr: true,
+		},
+		{
+			name:    "cores of 150 is rejected",
+			cores:   150,
+			wantErr: true,
+		},
+		{
+			name:    "cores of 200 is rejected",
+			cores:   200,
+			wantErr: true,
+		},
+		{
+			name:    "negative cores is rejected",
+			cores:   -1,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Name: "test",
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(test.cores, resource.DecimalSI),
+					},
+				},
+			}
+			_, err := gpuDevices.MutateAdmission(ctr, &corev1.Pod{})
+			if test.wantErr && err == nil {
+				t.Fatalf("expected MutateAdmission to reject cores %d, but got no error", test.cores)
+			}
+			if !test.wantErr && err != nil {
+				t.Fatalf("expected MutateAdmission to accept cores %d, but got error: %v", test.cores, err)
+			}
+		})
+	}
+}
+
 func TestMutateAdmissionDefaultsExclusiveCore(t *testing.T) {
 	ptr := func(v int64) *int64 { return &v }
 	clone := func(in corev1.ResourceList) corev1.ResourceList {
@@ -983,7 +1056,7 @@ func TestDevices_Fit(t *testing.T) {
 			wantReason: "1/1 CardTimeSlicingExhausted",
 		},
 		{
-			name: "fit success: but core limit can't exceed 100",
+			name: "fit fail: core limit out of range",
 			devices: []*device.DeviceUsage{{
 				ID:        "dev-0",
 				Index:     0,
@@ -1005,10 +1078,10 @@ func TestDevices_Fit(t *testing.T) {
 				Type:             NvidiaGPUDevice,
 			},
 			annos:      map[string]string{},
-			wantFit:    true,
-			wantLen:    1,
-			wantDevIDs: []string{"dev-0"},
-			wantReason: "",
+			wantFit:    false,
+			wantLen:    0,
+			wantDevIDs: []string{},
+			wantReason: "1/1 CardInsufficientCore",
 		},
 		{
 			name: "fit fail:  card exclusively",
@@ -1844,7 +1917,25 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 		},
 		{
-			name: "gpu count + explicit cores",
+			name: "gpu count + explicit cores 0",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(0, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         0,
+			},
+		},
+		{
+			name: "gpu count + explicit cores 50",
 			ctr: &corev1.Container{
 				Resources: corev1.ResourceRequirements{
 					Limits: corev1.ResourceList{
@@ -1860,6 +1951,84 @@ func TestGenerateResourceRequests(t *testing.T) {
 				MemPercentagereq: 100,
 				Coresreq:         50,
 			},
+		},
+		{
+			name: "gpu count + explicit cores 100",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(100, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "gpu count + explicit cores 101 — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(101, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + explicit cores 150 — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(150, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + explicit cores 200 — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(200, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + explicit cores negative -1 — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(-1, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count + explicit cores negative -50 — rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      *resource.NewQuantity(1, resource.BinarySI),
+						"nvidia.com/gpucores": *resource.NewQuantity(-50, resource.DecimalSI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
 		},
 		{
 			name: "no gpu resource — returns empty request",
@@ -1996,6 +2165,42 @@ func TestGenerateResourceRequests(t *testing.T) {
 				Coresreq:         0,
 			},
 		},
+		{
+			name: "gpu count zero is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative gpu count is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(-1, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count above int32 max is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(
+							2147483648,
+							resource.BinarySI,
+						),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 
 	for _, tt := range tests {
@@ -2028,7 +2233,13 @@ func TestGenerateResourceRequests_MemoryFactor(t *testing.T) {
 
 	ctr.Resources.Limits["nvidia.com/gpumem"] = resource.MustParse("1Gi")
 	result = dev.GenerateResourceRequests(ctr)
-	assert.DeepEqual(t, result, device.ContainerDeviceRequest{})
+	assert.DeepEqual(t, result, device.ContainerDeviceRequest{
+		Nums:             1,
+		Type:             NvidiaGPUDevice,
+		Memreq:           math.MaxInt32,
+		MemPercentagereq: 101,
+		Coresreq:         0,
+	})
 }
 
 func TestGenerateResourceRequests_DefaultMemory(t *testing.T) {
@@ -3113,6 +3324,183 @@ func TestNodeDeleted_ReuseAfterDeletion(t *testing.T) {
 	healthy, needUpdate := dev.CheckHealth("NVIDIA", node)
 	assert.Equal(t, healthy, true, "re-created node should be healthy")
 	assert.Equal(t, needUpdate, true, "re-created node must trigger an update (stale bookkeeping was cleared)")
+}
+
+func TestFit_CoresValidation(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "GPU-1",
+			Index:     0,
+			Count:     10,
+			Totalmem:  8000,
+			Totalcore: 100,
+			Used:      0,
+			Usedmem:   0,
+			Usedcores: 0,
+			Health:    true,
+			Type:      NvidiaGPUDevice,
+		},
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "test-pod",
+			Namespace: "default",
+		},
+	}
+
+	tests := []struct {
+		name     string
+		coresreq int32
+		wantOk   bool
+	}{
+		{
+			name:     "cores 0 is accepted",
+			coresreq: 0,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 50 is accepted",
+			coresreq: 50,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 100 is accepted",
+			coresreq: 100,
+			wantOk:   true,
+		},
+		{
+			name:     "cores 101 is rejected",
+			coresreq: 101,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 150 is rejected and not converted to 100",
+			coresreq: 150,
+			wantOk:   false,
+		},
+		{
+			name:     "cores 200 is rejected",
+			coresreq: 200,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -1 is rejected",
+			coresreq: -1,
+			wantOk:   false,
+		},
+		{
+			name:     "negative cores -50 is rejected",
+			coresreq: -50,
+			wantOk:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := device.ContainerDeviceRequest{
+				Nums:     1,
+				Type:     NvidiaGPUDevice,
+				Memreq:   1000,
+				Coresreq: tt.coresreq,
+			}
+			ok, _, _ := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+			assert.Equal(t, ok, tt.wantOk)
+		})
+	}
+}
+
+func TestMutateAdmission_CoresValidation_InvalidCores(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+
+	tests := []struct {
+		name      string
+		cores     string
+		wantValid bool
+	}{
+		{name: "0 cores accepted", cores: "0", wantValid: true},
+		{name: "50 cores accepted", cores: "50", wantValid: true},
+		{name: "100 cores accepted", cores: "100", wantValid: true},
+		{name: "-1 cores rejected", cores: "-1", wantValid: false},
+		{name: "101 cores rejected", cores: "101", wantValid: false},
+		{name: "50m cores rejected", cores: "50m", wantValid: false},
+		{name: "99.1 cores rejected", cores: "99.1", wantValid: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      resource.MustParse("1"),
+						"nvidia.com/gpucores": resource.MustParse(tt.cores),
+					},
+				},
+			}
+			_, err := dev.MutateAdmission(ctr, &corev1.Pod{})
+			if tt.wantValid {
+				assert.NilError(t, err)
+			} else {
+				assert.ErrorContains(t, err, "must be an integer between 0 and 100")
+			}
+		})
+	}
+}
+
+func Test_GenerateResourceRequests_CoresValidation(t *testing.T) {
+	dev := InitNvidiaDevice(NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	})
+
+	tests := []struct {
+		name    string
+		cores   string
+		wantOk  bool
+		wantVal int32
+	}{
+		{name: "0 cores", cores: "0", wantOk: true, wantVal: 0},
+		{name: "50 cores", cores: "50", wantOk: true, wantVal: 50},
+		{name: "100 cores", cores: "100", wantOk: true, wantVal: 100},
+		{name: "101 cores", cores: "101", wantOk: false},
+		{name: "150 cores", cores: "150", wantOk: false},
+		{name: "200 cores", cores: "200", wantOk: false},
+		{name: "-1 cores", cores: "-1", wantOk: false},
+		{name: "fractional 50m", cores: "50m", wantOk: false},
+		{name: "fractional 99.1", cores: "99.1", wantOk: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctr := &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu":      resource.MustParse("1"),
+						"nvidia.com/gpucores": resource.MustParse(tt.cores),
+					},
+				},
+			}
+			req := dev.GenerateResourceRequests(ctr)
+			if tt.wantOk {
+				assert.Equal(t, req.Nums, int32(1))
+				assert.Equal(t, req.Coresreq, tt.wantVal)
+			} else {
+				assert.Equal(t, req.Nums, int32(0))
+			}
+		})
+	}
 }
 
 // migTopologyDevice builds the NVIDIA backend used by the MIG topology tests.

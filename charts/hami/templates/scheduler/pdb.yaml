@@ -1,0 +1,26 @@
+{{- if and .Values.scheduler.leaderElect (gt (int .Values.scheduler.replicas) 1) }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+    {{- with .Values.global.labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+  {{- if .Values.global.annotations }}
+  annotations: {{ toYaml .Values.global.annotations | nindent 4}}
+  {{- end }}
+spec:
+  {{- if hasKey .Values.scheduler.podDisruptionBudget "maxUnavailable" }}
+  maxUnavailable: {{ .Values.scheduler.podDisruptionBudget.maxUnavailable }}
+  {{- else }}
+  minAvailable: {{ .Values.scheduler.podDisruptionBudget.minAvailable }}
+  {{- end }}
+  selector:
+    matchLabels:
+      app.kubernetes.io/component: hami-scheduler
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+{{- end }}

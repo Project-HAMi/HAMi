@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"maps"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -48,13 +49,24 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 	if err != nil {
 		return err
 	}
+	// The refit holds the allocation lock that Filter also takes, so this
+	// call must not block scheduling on an unreachable API server. The
+	// device plugin gives up after numaRefitTimeout anyway.
+	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
+	defer cancel()
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
-		Patch(context.Background(), pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
+		Patch(ctx, pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
 	return err
 }
 
 // maxAllowedDeviceUUIDs bounds the allowed set a refit request may carry.
 const maxAllowedDeviceUUIDs = 512
+
+// refitPatchTimeout bounds the annotation patch. It is deliberately no longer
+// than the device plugin's own refit budget: a patch that has not landed by
+// then cannot be used, and waiting longer would hold the allocation lock
+// against every concurrent Filter call.
+const refitPatchTimeout = 2 * time.Second
 
 // RefitNumaAllocation moves one container's device reservation onto a device
 // from the caller-supplied allowed set, re-running the pod's normal
@@ -245,7 +257,14 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	maps.Copy(patchedAnnotations, pod.Annotations)
 	maps.Copy(patchedAnnotations, annotations)
 	if rawDevices, decodeErr := device.DecodePodDevices(device.SupportDevices, patchedAnnotations); decodeErr == nil {
+		// Mirror whichever accounting shape the pod already has: once the
+		// init-container usage has been released, collapsing again would
+		// re-inflate the reservation back to the init peak, the same hazard
+		// PodManager.AddPod guards against on a re-add.
 		effective := device.CollapseInitContainerUsage(pod, rawDevices)
+		if pi.InitContainerResourceReleased {
+			effective = device.SteadyStateDeviceUsage(pod, rawDevices)
+		}
 		if _, ok := s.podManager.ReplacePodDevices(key, effective); ok {
 			s.quotaManager.AddUsage(pod, effective)
 		} else {

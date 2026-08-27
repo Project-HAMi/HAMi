@@ -338,6 +338,10 @@ func (cc ClusterManagerCollector) collectGPUUtilizationMetrics(ch chan<- prometh
 	}
 
 	utilRates, nvret := hdev.GetUtilizationRates()
+	if nvret == nvml.ERROR_NOT_SUPPORTED {
+		klog.V(3).Infof("GPU utilization metrics not supported for device %d, skipping", index)
+		return nil
+	}
 	if nvret != nvml.SUCCESS {
 		return fmt.Errorf("nvml GetUtilizationRates err: %s", nvml.ErrorString(nvret))
 	}
