@@ -167,7 +167,7 @@ This document provides detailed descriptions of all configurable values paramete
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
 | `devicePlugin.deviceSplitCount` | Integer type, default value: 10. Maximum number of tasks assigned to a single GPU device | `10` |
-| `devicePlugin.deviceMemoryScaling` | Device memory scaling ratio | `1` |
+| `devicePlugin.deviceMemoryScaling` | Device memory scaling ratio. Values above `1` oversubscribe schedulable memory but do not increase physical VRAM; see [NVIDIA GPU memory oversubscription](../../docs/nvidia-memory-oversubscription.md). | `1` |
 | `devicePlugin.deviceCoreScaling` | Device core scaling ratio | `1` |
 | `devicePlugin.runtimeClassName` | Runtime class name | `""` |
 | `devicePlugin.createRuntimeClass` | Whether to create runtime class | `false` |
