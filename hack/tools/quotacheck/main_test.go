@@ -173,6 +173,61 @@ func TestCheckDeviceFile_InvokedClosureCounts(t *testing.T) {
 	}
 }
 
+func TestCheckDeviceFile_AsyncCallDoesNotCount(t *testing.T) {
+	cases := map[string]string{
+		"go statement calling FitQuota directly": fitPreamble + `
+	go device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
+	return true
+}
+`,
+		"go statement launching a closure that calls FitQuota": fitPreamble + `
+	go func() {
+		device.GetLocalCache().FitQuota("ns", 0, 1, 0, "dev")
+	}()
+	return true
+}
+`,
+	}
+
+	for name, content := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := writeFile(t, dir, "device.go", content)
+
+			violations, err := checkDeviceFile(path)
+			if err != nil {
+				t.Fatalf("checkDeviceFile: %v", err)
+			}
+			if len(violations) != 1 {
+				t.Fatalf("expected a violation: an asynchronous FitQuota call runs after Fit() returns and must not satisfy the check, got %v", violations)
+			}
+		})
+	}
+}
+
+func TestCheckDeviceFile_AsyncCallArgsStillInspected(t *testing.T) {
+	dir := t.TempDir()
+	path := writeFile(t, dir, "device.go", fitPreamble+`
+	go log("checked", fitQuota("ns", 0, 0))
+	return true
+}
+
+func fitQuota(ns string, memreq, coresreq int64) bool {
+	return device.GetLocalCache().FitQuota(ns, memreq, 1, coresreq, "dev")
+}
+
+func log(msg string, ok bool) {}
+`)
+
+	violations, err := checkDeviceFile(path)
+	if err != nil {
+		t.Fatalf("checkDeviceFile: %v", err)
+	}
+	if len(violations) != 0 {
+		t.Errorf("expected no violations: a `go` statement's arguments are evaluated synchronously, so fitQuota() in an argument counts, got %v", violations)
+	}
+}
+
 func TestCheckDeviceFile_NoFitMethod(t *testing.T) {
 	dir := t.TempDir()
 	path := writeFile(t, dir, "device.go", `package fixture

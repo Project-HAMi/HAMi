@@ -272,9 +272,11 @@ func buildCallGraph(files []*ast.File) map[string][]*ast.FuncDecl {
 }
 
 // inspectInvokedCalls walks n and reports every call expression that is
-// reachable when the enclosing function runs. It descends into a function
-// literal only when that literal is the callee of an enclosing call
-// expression (an IIFE), so calls inside an uninvoked closure are skipped.
+// reachable, and runs synchronously, when the enclosing function runs. It
+// descends into a function literal only when that literal is the callee of an
+// enclosing call expression (an IIFE), so calls inside an uninvoked closure
+// are skipped; and it does not treat the callee of a `go` statement as
+// synchronous, since Fit() can return before that goroutine runs.
 func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
 	if n == nil {
 		return
@@ -284,6 +286,16 @@ func inspectInvokedCalls(n ast.Node, visit func(*ast.CallExpr)) {
 		case *ast.FuncLit:
 			// Do not descend into a closure body here; only an
 			// immediately-invoked one is walked, via the CallExpr case.
+			return false
+		case *ast.GoStmt:
+			// `go f(...)` runs asynchronously: Fit() may admit the pod
+			// before it executes, so its callee (and any closure body it
+			// launches) cannot satisfy the re-check. The call arguments are
+			// still evaluated synchronously at the `go` statement, so keep
+			// inspecting those for nested calls.
+			for _, arg := range v.Call.Args {
+				inspectInvokedCalls(arg, visit)
+			}
 			return false
 		case *ast.CallExpr:
 			visit(v)
