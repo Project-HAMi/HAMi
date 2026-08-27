@@ -1101,7 +1101,11 @@ func (s *Scheduler) Filter(args extenderv1.ExtenderArgs) (*extenderv1.ExtenderFi
 
 	if !hasHAMiResource {
 		klog.V(1).InfoS("Pod does not request any resources", "pod", args.Pod.Name)
+		// Simulation callers such as the cluster autoscaler send Nodes
+		// instead of NodeNames; echo both back so a pod without HAMi
+		// resources keeps every candidate node on either protocol shape.
 		return &extenderv1.ExtenderFilterResult{
+			Nodes:       args.Nodes,
 			NodeNames:   args.NodeNames,
 			FailedNodes: nil,
 			Error:       "",
