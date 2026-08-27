@@ -598,7 +598,7 @@ func (plugin *NvidiaDevicePlugin) Register(kubeletSocket string) error {
 // GetDevicePluginOptions returns the values of the optional settings for this plugin
 func (plugin *NvidiaDevicePlugin) GetDevicePluginOptions(context.Context, *kubeletdevicepluginv1beta1.Empty) (*kubeletdevicepluginv1beta1.DevicePluginOptions, error) {
 	options := &kubeletdevicepluginv1beta1.DevicePluginOptions{
-		GetPreferredAllocationAvailable: true,
+		GetPreferredAllocationAvailable: enableGetPreferredAllocation,
 	}
 	return options, nil
 }

@@ -262,12 +262,33 @@ func TestSelectPreferredDeviceIDsFromAnnotatedDevicesErrorsWhenAnnotatedUUIDMiss
 	require.Contains(t, err.Error(), "GPU-03f69c50-207a-2038-9b45-23cac89cb67c")
 }
 
-func TestGetDevicePluginOptionsEnablesPreferredAllocation(t *testing.T) {
-	plugin := &NvidiaDevicePlugin{}
+// TestGetDevicePluginOptionsHonorsEnableGetPreferredAllocation is a regression
+// test for issue #2844: GetDevicePluginOptions must reflect the configured
+// enableGetPreferredAllocation value, not unconditionally report true.
+func TestGetDevicePluginOptionsHonorsEnableGetPreferredAllocation(t *testing.T) {
+	tests := []struct {
+		name    string
+		enabled bool
+	}{
+		{name: "enabled=true reports true", enabled: true},
+		{name: "enabled=false reports false", enabled: false},
+	}
 
-	options, err := plugin.GetDevicePluginOptions(context.Background(), &kubeletdevicepluginv1beta1.Empty{})
-	require.NoError(t, err)
-	require.True(t, options.GetPreferredAllocationAvailable)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			// Save and restore the package-level variable used by both
+			// Register() and GetDevicePluginOptions().
+			original := enableGetPreferredAllocation
+			enableGetPreferredAllocation = tc.enabled
+			defer func() { enableGetPreferredAllocation = original }()
+
+			plugin := &NvidiaDevicePlugin{}
+			options, err := plugin.GetDevicePluginOptions(context.Background(), &kubeletdevicepluginv1beta1.Empty{})
+			require.NoError(t, err)
+			require.Equal(t, tc.enabled, options.GetPreferredAllocationAvailable,
+				"GetDevicePluginOptions must reflect enableGetPreferredAllocation=%v", tc.enabled)
+		})
+	}
 }
 
 func TestGetPreferredAllocationAlignsWithAnnotatedDevices(t *testing.T) {
