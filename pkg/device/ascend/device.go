@@ -174,6 +174,9 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 			}
 		}
 	}
+	// count, not reqNum: the 910C SuperPod rewrite to 2 is HAMi's module
+	// packaging rule, not a multi device request, and #2005 added 910C vNPU
+	// templates so a single device fractional request stays schedulable.
 	if count.Value() > 1 && !isHAMiCore {
 		if trimMem != dev.config.MemoryAllocatable {
 			return true, errors.New("vNPU not supported for multiple devices")
@@ -464,6 +467,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		klog.V(4).Infof("all devices have NetworkID. device CommonWord %s", npu.CommonWord())
 		needTopology = true
 	}
+	// Full module pair allocation only applies to SuperPod deployments, the
+	// same gate MutateAdmission uses. Split mode carves vNPUs out of single
+	// devices and must not be forced onto whole physical cards.
+	pair910C := k.Type == Ascend910CType && originReq > 1 && npu.config.SuperPod
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -547,7 +554,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 		}
 		if k.Nums > 0 {
 			klog.V(5).InfoS("find fit device", "pod", klog.KObj(pod), "device", dev.ID)
-			if !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
+			if !needTopology && !pair910C {
 				k.Nums--
 			}
 			tmpDevs[k.Type] = append(tmpDevs[k.Type], device.ContainerDevice{
@@ -559,13 +566,13 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 				CustomInfo: dev.CustomInfo,
 			})
 		}
-		if k.Nums == 0 && !needTopology && (k.Type != Ascend910CType || originReq <= 1) {
+		if k.Nums == 0 && !needTopology && !pair910C {
 			klog.V(4).InfoS("device allocate success", "pod", klog.KObj(pod), "allocate device", tmpDevs)
 			return true, tmpDevs, ""
 		}
 	}
 
-	if k.Type == Ascend910CType && originReq > 1 {
+	if pair910C {
 		// Ascend 910C requires full module-pair allocation (2 NPUs per physical card).
 		combination := npu.computeBestCombination910C(nodeInfo, int(originReq), tmpDevs[k.Type])
 		if len(combination) != int(originReq) {
