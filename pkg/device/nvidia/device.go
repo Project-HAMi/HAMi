@@ -524,15 +524,16 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 				factor := max(int64(dev.config.MemoryFactor), 1)
 				if !parsed || memnums < 0 || memnums > int64(math.MaxInt32)/factor {
 					klog.ErrorS(nil, "nvidia memory request is not a plain integer within the int32 range; rejecting to avoid silent under-allocation",
-						"container", ctr.Name)
-					return device.ContainerDeviceRequest{}
+						"container", ctr.Name, "requested", mem.String())
+					memnum = math.MaxInt32
+				} else {
+					if factor > 1 {
+						rawMemnums := memnums
+						memnums = memnums * factor
+						klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, factor)
+					}
+					memnum = int(memnums)
 				}
-				if factor > 1 {
-					rawMemnums := memnums
-					memnums = memnums * factor
-					klog.V(4).Infof("Update memory request. before %d, after %d, factor %d", rawMemnums, memnums, factor)
-				}
-				memnum = int(memnums)
 			}
 			mempnum := int32(101)
 			mem, ok = ctr.Resources.Limits[resourceMemPercentage]

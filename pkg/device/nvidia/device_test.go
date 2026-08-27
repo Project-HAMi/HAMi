@@ -19,6 +19,7 @@ package nvidia
 import (
 	"context"
 	"errors"
+	"math"
 	"strings"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 	"github.com/Project-HAMi/HAMi/pkg/util"
 	"github.com/Project-HAMi/HAMi/pkg/util/client"
 	"github.com/Project-HAMi/HAMi/pkg/util/nodelock"
@@ -754,7 +756,7 @@ func TestDevices_Fit(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
 		ResourceMemoryName:           "nvidia.com/gpumem",
-		ResourceCoreName:             "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 	}
 	dev := InitNvidiaDevice(config)
@@ -1227,7 +1229,7 @@ func TestFit_DeviceCordon(t *testing.T) {
 	config := NvidiaConfig{
 		ResourceCountName:            "nvidia.com/gpu",
 		ResourceMemoryName:           "nvidia.com/gpumem",
-		ResourceCoreName:             "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
 		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
 	}
 	dev := InitNvidiaDevice(config)
@@ -1968,7 +1970,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           math.MaxInt32,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
 		},
 		{
 			name: "decimal-form memory request is rejected, not treated as zero",
@@ -1980,7 +1988,13 @@ func TestGenerateResourceRequests(t *testing.T) {
 					},
 				},
 			},
-			want: device.ContainerDeviceRequest{},
+			want: device.ContainerDeviceRequest{
+				Nums:             1,
+				Type:             NvidiaGPUDevice,
+				Memreq:           math.MaxInt32,
+				MemPercentagereq: 101,
+				Coresreq:         0,
+			},
 		},
 	}
 
@@ -2753,15 +2767,21 @@ func TestFit_MigPercentageRequestRejectsUndersizedTemplate(t *testing.T) {
 	}
 	nv := InitNvidiaDevice(config)
 
-	// The only MIG template offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
+	// The only MIG profile offers 1024MiB slots, but the pod requests 4096MiB (50% of 8192MiB) via MemPercentagereq.
 	devices := []*device.DeviceUsage{
 		{
 			ID: "dev-0", Index: 0, Used: 0, Count: 1,
 			Totalmem: 8192, Totalcore: 100, Type: NvidiaGPUDevice, Health: true,
 			Mode: MigMode,
-			MigTemplate: []device.Geometry{
+			MigProfiles: []device.MigProfile{
 				{
-					{Name: "1g.5gb", Memory: 1024, Core: 14, Count: 1},
+					Name:       "1g.5gb",
+					MemoryMB:   1024,
+					Core:       14,
+					SliceCount: 1,
+					Placements: []device.MigPlacement{
+						{Start: 0, Size: 1},
+					},
 				},
 			},
 		},
@@ -3292,4 +3312,43 @@ func TestDistinctCardCandidates(t *testing.T) {
 			}
 		})
 	}
+}
+
+func Test_Fit_InvalidMemoryRejected(t *testing.T) {
+	config := NvidiaConfig{
+		ResourceCountName:            "nvidia.com/gpu",
+		ResourceMemoryName:           "nvidia.com/gpumem",
+		ResourceCoreName:             "nvidia.com/gpucores",
+		ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+	}
+	dev := InitNvidiaDevice(config)
+
+	devices := []*device.DeviceUsage{
+		{
+			ID:        "gpu-0",
+			Type:      NvidiaGPUDevice,
+			Totalmem:  16384,
+			Totalcore: 100,
+			Count:     100,
+			Health:    true,
+		},
+	}
+
+	pod := &corev1.Pod{}
+
+	// Invalid request with Memreq: math.MaxInt32 (generated from invalid memory quantity)
+	req := dev.GenerateResourceRequests(&corev1.Container{
+		Resources: corev1.ResourceRequirements{
+			Limits: corev1.ResourceList{
+				"nvidia.com/gpu":    *resource.NewQuantity(1, resource.BinarySI),
+				"nvidia.com/gpumem": resource.MustParse("16Gi"), // overflows int32
+			},
+		},
+	})
+	assert.Equal(t, int32(1), req.Nums)
+	assert.Equal(t, int32(math.MaxInt32), req.Memreq)
+
+	fit, _, reason := dev.Fit(devices, req, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Equal(t, strings.Contains(reason, common.CardInsufficientMemory), true)
 }

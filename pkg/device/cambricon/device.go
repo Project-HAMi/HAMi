@@ -99,26 +99,34 @@ func (dev *CambriconDevices) CommonWord() string {
 
 func (dev *CambriconDevices) setNodeLock(node *corev1.Node) error {
 	ctx := context.Background()
-	patchedAnnotation, err := json.Marshal(
-		map[string]any{
-			"metadata": map[string]map[string]string{"annotations": {
-				DsmluLockTime: time.Now().Format(time.RFC3339),
-			}}})
-	if err != nil {
-		klog.ErrorS(err, "Failed to marshal node annotation", "node", node.Name)
-		return fmt.Errorf("marshal node annotation: %w", err)
-	}
+	nodeName := node.Name
+	patchData := fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`,
+		DsmluLockTime, time.Now().Format(time.RFC3339), node.ResourceVersion)
 
-	_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
+	_, err := client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	for i := 0; i < retry && err != nil; i++ {
-		klog.ErrorS(err, "Failed to patch node annotation", "node", node.Name, "retry", i)
+		klog.ErrorS(err, "Failed to patch node annotation", "node", nodeName, "retry", i)
 		time.Sleep(time.Duration(rand.Intn(i+1)) * 10 * time.Millisecond)
-		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, node.Name, types.MergePatchType, patchedAnnotation, metav1.PatchOptions{})
+
+		current, getErr := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if getErr != nil {
+			return fmt.Errorf("failed to get node on lock retry: %w", getErr)
+		}
+		if current.Annotations != nil {
+			if val, ok := current.Annotations[DsmluLockTime]; ok && val != "" {
+				if lockTime, parseErr := time.Parse(time.RFC3339, val); parseErr == nil && time.Since(lockTime) <= time.Minute*2 {
+					return fmt.Errorf("node %s has been locked within 2 minutes", nodeName)
+				}
+			}
+		}
+		patchData = fmt.Sprintf(`{"metadata":{"annotations":{"%s":"%s"},"resourceVersion":"%s"}}`,
+			DsmluLockTime, time.Now().Format(time.RFC3339), current.ResourceVersion)
+		_, err = client.GetClient().CoreV1().Nodes().Patch(ctx, nodeName, types.MergePatchType, []byte(patchData), metav1.PatchOptions{})
 	}
 	if err != nil {
 		return fmt.Errorf("setNodeLock exceeds retry count %d", retry)
 	}
-	klog.InfoS("Node lock set", "node", node.Name)
+	klog.InfoS("Node lock set", "node", nodeName)
 	return nil
 }
 
@@ -126,23 +134,43 @@ func (dev *CambriconDevices) LockNode(n *corev1.Node, p *corev1.Pod) error {
 	if !device.PodRequiresDevice(dev, p) {
 		return nil
 	}
-	if _, ok := n.Annotations[DsmluLockTime]; !ok {
-		return dev.setNodeLock(n)
+	ctx := context.Background()
+	nodeName := n.Name
+
+	current, err := client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+	if err != nil {
+		return fmt.Errorf("failed to get node for lock: %w", err)
 	}
-	lockTime, err := time.Parse(time.RFC3339, n.Annotations[DsmluLockTime])
+	if current.Annotations == nil {
+		current.Annotations = make(map[string]string)
+	}
+	lockVal, ok := current.Annotations[DsmluLockTime]
+	if !ok || lockVal == "" {
+		return dev.setNodeLock(current)
+	}
+	lockTime, err := time.Parse(time.RFC3339, lockVal)
 	if err != nil {
 		return err
 	}
 	if time.Since(lockTime) > time.Minute*2 {
-		klog.InfoS("Node lock expired", "node", n.Name, "lockTime", lockTime)
-		err = dev.ReleaseNodeLock(n, p)
+		klog.InfoS("Node lock expired", "node", nodeName, "lockTime", lockTime)
+		err = dev.ReleaseNodeLock(current, p)
 		if err != nil {
-			klog.ErrorS(err, "Failed to release node lock", "node", n.Name)
+			klog.ErrorS(err, "Failed to release node lock", "node", nodeName)
 			return err
 		}
-		return dev.setNodeLock(n)
+		current, err = client.GetClient().CoreV1().Nodes().Get(ctx, nodeName, metav1.GetOptions{})
+		if err != nil {
+			return fmt.Errorf("failed to re-get node after releasing expired lock: %w", err)
+		}
+		if current.Annotations != nil {
+			if val, ok := current.Annotations[DsmluLockTime]; ok && val != "" {
+				return fmt.Errorf("node %s has been locked within 2 minutes", nodeName)
+			}
+		}
+		return dev.setNodeLock(current)
 	}
-	return fmt.Errorf("node %s has been locked within 2 minutes", n.Name)
+	return fmt.Errorf("node %s has been locked within 2 minutes", nodeName)
 }
 
 func (dev *CambriconDevices) ReleaseNodeLock(n *corev1.Node, p *corev1.Pod) error {

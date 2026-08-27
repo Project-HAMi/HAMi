@@ -531,9 +531,10 @@ func setupTest(t *testing.T) (*corev1.Node, *corev1.Pod, func(), *fake.Clientset
 
 func Test_LockNode(t *testing.T) {
 	tests := []struct {
-		name        string
-		annotations map[string]string
-		wantErr     bool
+		name              string
+		annotations       map[string]string
+		callerAnnotations map[string]string
+		wantErr           bool
 	}{
 		{
 			name:        "node is not locked",
@@ -546,6 +547,14 @@ func Test_LockNode(t *testing.T) {
 				DsmluLockTime: time.Now().Add(-time.Minute).Format(time.RFC3339),
 			},
 			wantErr: true,
+		},
+		{
+			name: "stale caller node — lock on server but caller has no annotations",
+			annotations: map[string]string{
+				DsmluLockTime: time.Now().Add(-time.Minute).Format(time.RFC3339),
+			},
+			callerAnnotations: map[string]string{},
+			wantErr:           true,
 		},
 		{
 			name: "lock time expired (more than 2 minutes)",
@@ -569,8 +578,17 @@ func Test_LockNode(t *testing.T) {
 			client.KubeClient = clientset
 			defer teardown()
 
-			// Set up the node with the specified annotations.
+			// Set up the node on the server with the specified annotations.
 			node.Annotations = tt.annotations
+			_, err := clientset.CoreV1().Nodes().Update(context.TODO(), node, metav1.UpdateOptions{})
+			if err != nil {
+				t.Fatalf("failed to update node annotations in fake client: %v", err)
+			}
+
+			callerNode := node.DeepCopy()
+			if tt.callerAnnotations != nil {
+				callerNode.Annotations = tt.callerAnnotations
+			}
 
 			dev := InitMLUDevice(CambriconConfig{
 				ResourceCountName:  MLUResourceCount,
@@ -578,7 +596,7 @@ func Test_LockNode(t *testing.T) {
 				ResourceCoreName:   MLUResourceCores,
 			})
 
-			err := dev.LockNode(node, pod)
+			err = dev.LockNode(callerNode, pod)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("LockNode() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -592,6 +610,39 @@ func Test_LockNode(t *testing.T) {
 			}
 		})
 	}
+
+	t.Run("patch conflict where concurrent caller acquires lock during retry", func(t *testing.T) {
+		node, pod, teardown, clientset := setupTest(t)
+		client.KubeClient = clientset
+		defer teardown()
+
+		dev := InitMLUDevice(CambriconConfig{
+			ResourceCountName:  MLUResourceCount,
+			ResourceMemoryName: MLUResourceMemory,
+			ResourceCoreName:   MLUResourceCores,
+		})
+
+		getAttempts := 0
+		clientset.PrependReactor("patch", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			return true, nil, apierrors.NewConflict(corev1.Resource("nodes"), node.Name, fmt.Errorf("simulated conflict"))
+		})
+		clientset.PrependReactor("get", "nodes", func(action k8stesting.Action) (bool, runtime.Object, error) {
+			getAttempts++
+			if getAttempts > 1 {
+				// On retry after patch failure, node has been locked by concurrent caller
+				n := node.DeepCopy()
+				n.Annotations = map[string]string{
+					DsmluLockTime: time.Now().Format(time.RFC3339),
+				}
+				return true, n, nil
+			}
+			return false, nil, nil
+		})
+
+		err := dev.LockNode(node, pod)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "has been locked within 2 minutes")
+	})
 }
 
 func Test_ReleaseNodeLock(t *testing.T) {
