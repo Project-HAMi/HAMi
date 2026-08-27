@@ -398,6 +398,39 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "device count zero is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative device count is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "device count above int32 max is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"iluvatar.ai/MR-V100-vgpu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

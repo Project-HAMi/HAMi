@@ -304,6 +304,56 @@ func Test_GenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "zero count must not silently bypass quota",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("0"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative count must be rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("-1"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "max int32 count is accepted",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("2147483647"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{
+				Nums:             2147483647,
+				Type:             MetaxGPUDevice,
+				Memreq:           0,
+				MemPercentagereq: 100,
+				Coresreq:         100,
+			},
+		},
+		{
+			name: "count above max int32 is rejected",
+			args: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"metax-tech.com/gpu": resource.MustParse("2147483648"),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

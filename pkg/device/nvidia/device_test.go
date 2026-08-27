@@ -1982,6 +1982,42 @@ func TestGenerateResourceRequests(t *testing.T) {
 			},
 			want: device.ContainerDeviceRequest{},
 		},
+		{
+			name: "gpu count zero is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(0, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "negative gpu count is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(-1, resource.BinarySI),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
+		{
+			name: "gpu count above int32 max is rejected",
+			ctr: &corev1.Container{
+				Resources: corev1.ResourceRequirements{
+					Limits: corev1.ResourceList{
+						"nvidia.com/gpu": *resource.NewQuantity(
+							2147483648,
+							resource.BinarySI,
+						),
+					},
+				},
+			},
+			want: device.ContainerDeviceRequest{},
+		},
 	}
 
 	for _, tt := range tests {
