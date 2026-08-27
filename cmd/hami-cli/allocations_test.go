@@ -228,10 +228,9 @@ func TestCollectAllocationRows_KunlunIrregularSuffix(t *testing.T) {
 }
 
 func TestRunAllocations_NamespaceAndNodeFilters(t *testing.T) {
-	client := fake.NewSimpleClientset(
-		new(nvidiaPod("team-a", "job-1", "node-a")),
-		new(cambriconPod("team-b", "job-2", "node-b")),
-	)
+	nvPod := nvidiaPod("team-a", "job-1", "node-a")
+	cbPod := cambriconPod("team-b", "job-2", "node-b")
+	client := fake.NewSimpleClientset(&nvPod, &cbPod)
 
 	namespaceFilter = "team-a"
 	nodeFilter = ""
