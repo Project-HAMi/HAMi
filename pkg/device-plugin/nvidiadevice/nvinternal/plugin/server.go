@@ -863,7 +863,7 @@ func (plugin *NvidiaDevicePlugin) Allocate(ctx context.Context, reqs *kubeletdev
 		// error out if more than one resource is being allocated.
 
 		if strings.Contains(req.DevicesIds[0], "MIG") {
-			if plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
+			if failRequestsGreaterThanOne := plugin.config.Sharing.TimeSlicing.FailRequestsGreaterThanOne; failRequestsGreaterThanOne != nil && *failRequestsGreaterThanOne && rm.AnnotatedIDs(req.DevicesIds).AnyHasAnnotations() {
 				if len(req.DevicesIds) > 1 {
 					PodAllocationFailed(nodename, current, NodeLockNvidia)
 					return nil, fmt.Errorf("request for '%v: %v' too large: maximum request size for shared resources is 1", plugin.rm.Resource(), len(req.DevicesIds))
