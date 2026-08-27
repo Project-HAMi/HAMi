@@ -164,12 +164,17 @@ spec:
               subPath: device-config.yaml
             - name: cdi-root
               mountPath: /var/run/cdi
+            {{- if eq .Values.devicePlugin.nvidiaDriverRoot "auto" }}
+            - name: nvidia-validations
+              mountPath: /run/nvidia/validations
+              readOnly: true
+            {{- end }}
             {{- if and .Values.devicePlugin.numaRefit .Values.devicePlugin.numaRefit.enabled .Values.devicePlugin.numaRefit.caSecret }}
             - name: numa-refit-ca
               mountPath: /etc/hami/numa-refit-ca
               readOnly: true
             {{- end }}
-            {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+            {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
             # We always mount the driver root at /driver-root in the container.
             # This is required for CDI detection to work correctly.
             - name: driver-root
@@ -250,13 +255,13 @@ spec:
         - name: lib
           hostPath:
             path: {{ .Values.devicePlugin.libPath }}
-        {{- if .Values.devicePlugin.gpuOperatorToolkitReady.enabled }}
+        {{- if or .Values.devicePlugin.gpuOperatorToolkitReady.enabled (eq .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: nvidia-validations
           hostPath:
-            path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath }}
+            path: {{ .Values.devicePlugin.gpuOperatorToolkitReady.hostPath | default "/run/nvidia/validations" }}
             type: DirectoryOrCreate
         {{- end }}
-        {{- if typeIs "string" .Values.devicePlugin.nvidiaDriverRoot }}
+        {{- if and (typeIs "string" .Values.devicePlugin.nvidiaDriverRoot) (ne .Values.devicePlugin.nvidiaDriverRoot "auto") }}
         - name: driver-root
           hostPath:
             path: {{ .Values.devicePlugin.nvidiaDriverRoot }}
