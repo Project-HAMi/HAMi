@@ -410,7 +410,7 @@ devicePlugin:
   # Root of the NVIDIA driver on the host. Set to "auto" to read the driver
   # and device roots from GPU Operator's driver-ready contract. If the
   # contract is absent, both roots default to / for a host-installed driver.
-  nvidiaDriverRoot: auto
+  nvidiaDriverRoot: "auto"
   gdrcopyEnabled: null
   gdsEnabled: null
   mofedEnabled: null
