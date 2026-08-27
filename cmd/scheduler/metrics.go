@@ -117,7 +117,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 	nodevGPUMemoryAllocatedDesc := prometheus.NewDesc(
 		"hami_gpu_memory_allocated_bytes",
 		"Device memory allocated for a certain GPU",
-		[]string{"node", "device_uuid", "device_index", "device_cores", "device_type"}, nil,
+		[]string{"node", "device_uuid", "device_index", "device_type"}, nil,
 	)
 	nodevGPUSharedNumDesc := prometheus.NewDesc(
 		"hami_gpu_shared_count",
@@ -247,7 +247,7 @@ func (cc ClusterManagerCollector) collectNodeMetrics(ch chan<- prometheus.Metric
 			if err := sendMetric(ch, nodevGPUCoreLimitDesc, prometheus.GaugeValue, coreLimit, nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUCoreLimitDesc metric: %v", err)
 			}
-			if err := sendMetric(ch, nodevGPUMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), fmt.Sprint(devs.Device.Totalcore), devs.Device.Type); err != nil {
+			if err := sendMetric(ch, nodevGPUMemoryAllocatedDesc, prometheus.GaugeValue, mibToBytes(devs.Device.Usedmem), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
 				klog.V(4).Infof("Failed to send nodevGPUMemoryAllocatedDesc metric: %v", err)
 			}
 			if err := sendMetric(ch, nodevGPUSharedNumDesc, prometheus.GaugeValue, float64(devs.Device.Used), nodeID, devs.Device.ID, fmt.Sprint(devs.Device.Index), devs.Device.Type); err != nil {
