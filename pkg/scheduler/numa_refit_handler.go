@@ -40,7 +40,7 @@ import (
 // newer update to the same annotations (for example Allocate consuming a
 // to-allocate entry). Conflicts fail the refit; there is no retry with
 // cached values. Also a test seam.
-var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) error {
+var patchPodAnnotations = func(ctx context.Context, pod *corev1.Pod, annotations map[string]string) error {
 	metadata := map[string]any{"annotations": annotations}
 	if pod.ResourceVersion != "" {
 		metadata["resourceVersion"] = pod.ResourceVersion
@@ -49,11 +49,6 @@ var patchPodAnnotations = func(pod *corev1.Pod, annotations map[string]string) e
 	if err != nil {
 		return err
 	}
-	// The refit holds the allocation lock that Filter also takes, so this
-	// call must not block scheduling on an unreachable API server. The
-	// device plugin gives up after numaRefitTimeout anyway.
-	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
-	defer cancel()
 	_, err = client.GetClient().CoreV1().Pods(pod.Namespace).
 		Patch(ctx, pod.Name, k8stypes.MergePatchType, payload, metav1.PatchOptions{})
 	return err
@@ -65,8 +60,9 @@ const maxAllowedDeviceUUIDs = 512
 // refitPatchTimeout bounds the annotation patch. It is deliberately no longer
 // than the device plugin's own refit budget: a patch that has not landed by
 // then cannot be used, and waiting longer would hold the allocation lock
-// against every concurrent Filter call.
-const refitPatchTimeout = 2 * time.Second
+// against every concurrent Filter call. It is a variable so the timeout path
+// can be tested without making unit tests wait for the production duration.
+var refitPatchTimeout = 2 * time.Second
 
 // RefitNumaAllocation moves one container's device reservation onto a device
 // from the caller-supplied allowed set, re-running the pod's normal
@@ -246,7 +242,12 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 		device.InRequestDevices[req.DeviceType]: pendingValue,
 		device.SupportDevices[req.DeviceType]:   allocatedValue,
 	}
-	if err := patchPodAnnotations(pod, annotations); err != nil {
+	// The refit holds the allocation lock that Filter also takes, so this
+	// call must not block scheduling on an unreachable API server. The
+	// device plugin gives up after numaRefitTimeout anyway.
+	ctx, cancel := context.WithTimeout(context.Background(), refitPatchTimeout)
+	defer cancel()
+	if err := patchPodAnnotations(ctx, pod, annotations); err != nil {
 		return failWithQuotaRestore("cannot patch pod annotations: %v", err)
 	}
 
