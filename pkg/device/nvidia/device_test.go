@@ -127,6 +127,65 @@ func Test_MutateAdmission(t *testing.T) {
 	}
 }
 
+func hasInjectedNVDnone(env []corev1.EnvVar) bool {
+	for _, e := range env {
+		if e.Name == "NVIDIA_VISIBLE_DEVICES" && e.Value == "none" {
+			return true
+		}
+	}
+	return false
+}
+
+func Test_MutateAdmission_OverwriteEnvOptOut(t *testing.T) {
+	mkDev := func(overwriteEnv bool) *NvidiaGPUDevices {
+		return &NvidiaGPUDevices{
+			config: NvidiaConfig{
+				ResourceCountName:            "nvidia.com/gpu",
+				ResourceMemoryName:           "nvidia.com/gpumem",
+				ResourceMemoryPercentageName: "nvidia.com/gpumem-percentage",
+				ResourceCoreName:             "nvidia.com/gpucores",
+				DefaultGPUNum:                int32(1),
+				OverwriteEnv:                 overwriteEnv,
+			},
+		}
+	}
+	mkPod := func(ann map[string]string) *corev1.Pod {
+		return &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: ann}}
+	}
+	nonGPUCtr := func() corev1.Container {
+		return corev1.Container{
+			Name:      "main",
+			Resources: corev1.ResourceRequirements{Limits: corev1.ResourceList{}},
+		}
+	}
+
+	type tc struct {
+		name        string
+		configOn    bool
+		annotations map[string]string
+		wantInject  bool
+	}
+	cases := []tc{
+		{name: "unset config true injects none", configOn: true, wantInject: true},
+		{name: "unset config false skips", configOn: false, wantInject: false},
+		{name: "pod false skips despite config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false"}, wantInject: false},
+		{name: "pod true injects despite config false", configOn: false, annotations: map[string]string{"hami.io/overwrite-env": "true"}, wantInject: true},
+		{name: "container false overrides pod true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "true", "hami.io/overwrite-env-containers": `{"main":"false"}`}, wantInject: false},
+		{name: "container true reverse-overrides pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"true"}`}, wantInject: true},
+		{name: "invalid pod value falls back to config true", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "yes"}, wantInject: true},
+		{name: "invalid container value falls back to pod false", configOn: true, annotations: map[string]string{"hami.io/overwrite-env": "false", "hami.io/overwrite-env-containers": `{"main":"maybe"}`}, wantInject: false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			dev := mkDev(c.configOn)
+			ctr := nonGPUCtr()
+			_, err := dev.MutateAdmission(&ctr, mkPod(c.annotations))
+			assert.NilError(t, err)
+			assert.Equal(t, hasInjectedNVDnone(ctr.Env), c.wantInject)
+		})
+	}
+}
+
 func Test_MutateAdmission_MemoryPercentageValidation(t *testing.T) {
 	gpuDevices := &NvidiaGPUDevices{
 		config: NvidiaConfig{
