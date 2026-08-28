@@ -367,11 +367,30 @@ func (dev *NvidiaGPUDevices) MutateAdmission(ctr *corev1.Container, p *corev1.Po
 		}
 	}
 
-	if !hasResource && dev.config.OverwriteEnv {
-		ctr.Env = append(ctr.Env, corev1.EnvVar{
-			Name:  "NVIDIA_VISIBLE_DEVICES",
-			Value: "none",
-		})
+	if !hasResource {
+		// opt-out: On forces NVIDIA_VISIBLE_DEVICES=none, Off skips, Unset falls
+		// back to dev.config.OverwriteEnv.
+		//
+		// PREREQUISITE: GetDevices() contains at most one Nvidia entry; otherwise
+		// MutateAdmission runs multiple times per container and duplicate
+		// NVIDIA_VISIBLE_DEVICES=none entries would accumulate (functionally
+		// harmless via kubelet last-wins, but noisy). If multi-config Nvidia
+		// support is added, add a lastEnvValueEquals guard like Ascend.
+		inject := false
+		switch util.OverwriteEnvDecision(p, ctr) {
+		case util.OverwriteEnvOn:
+			inject = true
+		case util.OverwriteEnvOff:
+			inject = false
+		default:
+			inject = dev.config.OverwriteEnv
+		}
+		if inject {
+			ctr.Env = append(ctr.Env, corev1.EnvVar{
+				Name:  "NVIDIA_VISIBLE_DEVICES",
+				Value: "none",
+			})
+		}
 	}
 	return hasResource, nil
 }
