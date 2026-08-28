@@ -35,6 +35,7 @@ package plugin
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"reflect"
@@ -43,6 +44,7 @@ import (
 	v1 "github.com/NVIDIA/k8s-device-plugin/api/config/v1"
 	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/cdi"
+	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/hostpid"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/imex"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
@@ -169,7 +171,7 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 
 	for i := range testCases {
-		tc := testCases[i]
+		tc := &testCases[i]
 		t.Run(tc.description, func(t *testing.T) {
 			deviceListStrategies, _ := v1.NewDeviceListStrategies(tc.deviceListStrategies)
 			plugin := NvidiaDevicePlugin{
@@ -723,7 +725,23 @@ func TestAlignContainerDevicesWithAllocatedIDsRejectsLengthMismatch(t *testing.T
 	require.Contains(t, err.Error(), "device number not matched")
 }
 
-func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
+func TestAllocateUsesSelectedUUIDsAndHostPIDBroker(t *testing.T) {
+	t.Setenv(hostpid.EnvironmentVariable, "1")
+	prepareCalls := 0
+	previousPrepareHostPIDLockParent := prepareHostPIDLockParentForAllocation
+	prepareHostPIDLockParentForAllocation = func() error {
+		prepareCalls++
+		return nil
+	}
+	defer func() {
+		prepareHostPIDLockParentForAllocation =
+			previousPrepareHostPIDLockParent
+	}()
+	previousEnableGetPreferredAllocation := enableGetPreferredAllocation
+	enableGetPreferredAllocation = true
+	defer func() {
+		enableGetPreferredAllocation = previousEnableGetPreferredAllocation
+	}()
 	deviceListStrategies, _ := v1.NewDeviceListStrategies([]string{"envvar"})
 	deviceIDStrategy := v1.DeviceIDStrategyUUID
 	memScale := 1.0
@@ -791,9 +809,62 @@ func TestAllocateUsesKubeletSelectedUUIDsForVGPUResponse(t *testing.T) {
 
 	response, err := plugin.Allocate(context.Background(), request)
 	require.NoError(t, err)
+	require.Equal(t, 1, prepareCalls)
 	require.Equal(t, "GPU-03f69c50-207a-2038-9b45-23cac89cb67a", response.ContainerResponses[0].Envs[deviceListEnvVar])
 	require.Equal(t, "3000m", response.ContainerResponses[0].Envs["CUDA_DEVICE_MEMORY_LIMIT_0"])
 	require.Equal(t, "50", response.ContainerResponses[0].Envs["CUDA_DEVICE_SM_LIMIT"])
+	require.Equal(t, "1", response.ContainerResponses[0].Envs[hostpid.EnvironmentVariable])
+	brokerMountCount := 0
+	brokerMountIndex := -1
+	fallbackParentMountCount := 0
+	fallbackParentMountIndex := -1
+	for mountIndex, mount := range response.ContainerResponses[0].Mounts {
+		if mount.ContainerPath == hostpid.ContainerDirectory {
+			require.Equal(t, hostpid.ServerDirectory, mount.HostPath)
+			require.True(t, mount.ReadOnly)
+			brokerMountIndex = mountIndex
+			brokerMountCount++
+		}
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackParentMountIndex = mountIndex
+			fallbackParentMountCount++
+		}
+	}
+	require.Equal(t, 1, brokerMountCount)
+	require.Equal(t, 1, fallbackParentMountCount)
+	require.Less(t, fallbackParentMountIndex, brokerMountIndex)
+
+	t.Setenv(hostpid.EnvironmentVariable, "")
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
+	disabledResponse, err := plugin.Allocate(context.Background(), request)
+	require.NoError(t, err)
+	require.Equal(t, 2, prepareCalls)
+	require.NotContains(t, disabledResponse.ContainerResponses[0].Envs,
+		hostpid.EnvironmentVariable)
+	fallbackMountCount := 0
+	for _, mount := range disabledResponse.ContainerResponses[0].Mounts {
+		require.NotEqual(t, hostpid.ContainerDirectory, mount.ContainerPath)
+		if mount.ContainerPath == hostPIDLockParentDirectory {
+			require.Equal(t, hostPIDLockParentDirectory, mount.HostPath)
+			require.False(t, mount.ReadOnly)
+			fallbackMountCount++
+		}
+	}
+	require.Equal(t, 1, fallbackMountCount)
+
+	prepareHostPIDLockParentForAllocation = func() error {
+		return errors.New("parent preparation fixture")
+	}
+	pod.Annotations["hami.io/vgpu-devices-to-allocate"] =
+		"GPU-annotated-a,NVIDIA,3000,50:;"
+	client.KubeClient = fake.NewSimpleClientset(pod)
+	failedResponse, err := plugin.Allocate(context.Background(), request)
+	require.Nil(t, failedResponse)
+	require.ErrorContains(t, err, "failed to prepare host PID lock parent")
 }
 
 func TestAllocatePreservesContainerOrderWhenOneContainerFallsBack(t *testing.T) {
