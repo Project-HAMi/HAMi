@@ -207,7 +207,12 @@ type ResourceNames struct {
 }
 
 type ContainerDevice struct {
-	// TODO current Idx cannot use, because EncodeContainerDevices method not encode this filed.
+	// Idx is the device's index at scheduling time. It is NOT part of the pod
+	// annotation wire format written by EncodeContainerDevices, so it does not
+	// survive a decode: DecodeContainerDevices always sets it to
+	// UnsetContainerDeviceIdx. Only read Idx on a ContainerDevice you built or
+	// received directly from scheduling (e.g. in PatchAnnotations/ScoreNode);
+	// never on one obtained via DecodeContainerDevices/DecodePodDevices.
 	Idx       int
 	UUID      string
 	Type      string
@@ -241,6 +246,13 @@ const (
 
 	// OnePodMultiContainerSplitSymbol this is when one pod having multi container and more than one container use device, use ; symbol to join device info.
 	OnePodMultiContainerSplitSymbol = ";"
+
+	// UnsetContainerDeviceIdx is the Idx value DecodeContainerDevices assigns to
+	// every decoded ContainerDevice, since Idx is not part of the wire format.
+	// It is deliberately an invalid device index (real indices are >= 0) rather
+	// than 0, so code that mistakenly reads Idx off a decoded ContainerDevice
+	// fails obviously instead of silently behaving as if device 0 was meant.
+	UnsetContainerDeviceIdx = -1
 )
 
 var (
@@ -532,6 +544,10 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			return nil, fmt.Errorf("core field must not be negative: %d", devcores)
 		}
 		tmpdev := ContainerDevice{
+			// Idx is not part of the wire format (see the ContainerDevice.Idx
+			// doc comment): use the sentinel rather than the zero value, which
+			// would be indistinguishable from a real device index 0.
+			Idx:       UnsetContainerDeviceIdx,
 			UUID:      tmpstr[0],
 			Type:      tmpstr[1],
 			Usedmem:   int32(devmem),

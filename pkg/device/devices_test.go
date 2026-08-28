@@ -46,6 +46,23 @@ func TestEmptyContainerDevicesCoding(t *testing.T) {
 	assert.DeepEqual(t, cd1, cd2)
 }
 
+// TestDecodeContainerDevices_IdxNotPreservedAcrossRoundTrip locks in that Idx
+// does not survive EncodeContainerDevices/DecodeContainerDevices: it always
+// comes back as UnsetContainerDeviceIdx, even when the original device had a
+// real, nonzero Idx. This guards against code coming to rely on Idx being
+// meaningful after a decode (see the ContainerDevice.Idx doc comment).
+func TestDecodeContainerDevices_IdxNotPreservedAcrossRoundTrip(t *testing.T) {
+	original := ContainerDevices{
+		{Idx: 3, UUID: "GPU-1", Type: "NVIDIA", Usedmem: 1000, Usedcores: 10},
+	}
+	encoded := EncodeContainerDevices(original)
+	decoded, err := DecodeContainerDevices(encoded)
+	assert.NilError(t, err)
+	assert.Equal(t, len(decoded), 1)
+	assert.Equal(t, decoded[0].Idx, UnsetContainerDeviceIdx,
+		"decoded Idx must be the sentinel, not the original device's real index (%d) or the zero value", original[0].Idx)
+}
+
 func TestDecodeContainerDevices(t *testing.T) {
 	tests := []struct {
 		name        string
@@ -70,6 +87,7 @@ func TestDecodeContainerDevices(t *testing.T) {
 			input: "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76,NVIDIA,500,3:",
 			want: ContainerDevices{
 				{
+					Idx:       UnsetContainerDeviceIdx,
 					UUID:      "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
 					Type:      "NVIDIA",
 					Usedmem:   500,
@@ -83,6 +101,7 @@ func TestDecodeContainerDevices(t *testing.T) {
 			input: "GPU-zero,NVIDIA,0,0:",
 			want: ContainerDevices{
 				{
+					Idx:       UnsetContainerDeviceIdx,
 					UUID:      "GPU-zero",
 					Type:      "NVIDIA",
 					Usedmem:   0,
@@ -96,12 +115,14 @@ func TestDecodeContainerDevices(t *testing.T) {
 			input: "GPU-1,NVIDIA,1000,10:GPU-2,Cambricon,2000,20:",
 			want: ContainerDevices{
 				{
+					Idx:       UnsetContainerDeviceIdx,
 					UUID:      "GPU-1",
 					Type:      "NVIDIA",
 					Usedmem:   1000,
 					Usedcores: 10,
 				},
 				{
+					Idx:       UnsetContainerDeviceIdx,
 					UUID:      "GPU-2",
 					Type:      "Cambricon",
 					Usedmem:   2000,
@@ -115,6 +136,7 @@ func TestDecodeContainerDevices(t *testing.T) {
 			input: "GPU-1,NVIDIA,1000,10,extra1,extra2:",
 			want: ContainerDevices{
 				{
+					Idx:       UnsetContainerDeviceIdx,
 					UUID:      "GPU-1",
 					Type:      "NVIDIA",
 					Usedmem:   1000,
@@ -348,7 +370,7 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{UnsetContainerDeviceIdx, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -370,10 +392,10 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{UnsetContainerDeviceIdx, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{UnsetContainerDeviceIdx, "UUID1", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -393,8 +415,8 @@ func TestPodDevicesCoding(t *testing.T) {
 			want: PodDevices{
 				"NVIDIA": PodSingleDevice{
 					ContainerDevices{
-						ContainerDevice{0, "UUID1", "Type1", 1000, 30, 0, nil},
-						ContainerDevice{0, "UUID2", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{UnsetContainerDeviceIdx, "UUID1", "Type1", 1000, 30, 0, nil},
+						ContainerDevice{UnsetContainerDeviceIdx, "UUID2", "Type1", 1000, 30, 0, nil},
 					},
 					ContainerDevices{},
 				},
@@ -453,6 +475,7 @@ func Test_DecodePodDevices(t *testing.T) {
 				"NVIDIA": {
 					{
 						{
+							Idx:       UnsetContainerDeviceIdx,
 							UUID:      "GPU-8dcd427f-483b-b48f-d7e5-75fb19a52b76",
 							Type:      "NVIDIA",
 							Usedmem:   500,
@@ -461,6 +484,7 @@ func Test_DecodePodDevices(t *testing.T) {
 					},
 					{
 						{
+							Idx:       UnsetContainerDeviceIdx,
 							UUID:      "GPU-ebe7c3f7-303d-558d-435e-99a160631fe4",
 							Type:      "NVIDIA",
 							Usedmem:   500,

@@ -74,7 +74,12 @@ func TestNumaRefitResponseCarriesEncodedContainerDevices(t *testing.T) {
 
 	roundTripped, err := DecodeContainerDevices(decoded.ContainerDevices)
 	assert.NilError(t, err)
-	assert.DeepEqual(t, roundTripped, devices)
+	// Idx is not part of the wire format, so it comes back as the sentinel
+	// UnsetContainerDeviceIdx rather than whatever devices set it to (here, 0).
+	want := ContainerDevices{
+		{Idx: UnsetContainerDeviceIdx, UUID: "GPU-aaaa", Type: "NVIDIA", Usedmem: 20000, Usedcores: 30},
+	}
+	assert.DeepEqual(t, roundTripped, want)
 }
 
 func TestNumaRefitResponseFailureOmitsDevices(t *testing.T) {
