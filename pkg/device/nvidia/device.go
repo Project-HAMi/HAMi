@@ -587,29 +587,29 @@ func (dev *NvidiaGPUDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 }
 
 func (dev *NvidiaGPUDevices) CustomFilterRule(allocated *device.PodDevices, request device.ContainerDeviceRequest, toAllocate device.ContainerDevices, devusage *device.DeviceUsage) bool {
-	if devusage.Mode != MigMode {
-		return true
-	}
-	occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
-	// Plan every slice of this container on this card together; reject only when no layout exists.
-	memories := queuedMigMemories(toAllocate, devusage.ID)
-	memories = append(memories, request.Memreq)
-	if _, _, ok := planMigAllocations(devusage.MigProfiles, occupied, memories); ok {
-		return true
-	}
-	// Fall back to the sequential path, which may upgrade a request to a larger profile.
-	for _, existing := range toAllocate {
-		if existing.UUID != devusage.ID {
-			continue
+	if devusage.Mode == MigMode {
+		occupied := occupiedMigPlacements(devusage.MigAllocationsInUse)
+		// Plan every slice of this container on this card together; reject only when no layout exists.
+		memories := queuedMigMemories(toAllocate, devusage.ID)
+		memories = append(memories, request.Memreq)
+		if _, _, ok := planMigAllocations(devusage.MigProfiles, occupied, memories); ok {
+			return true
 		}
-		_, placement, ok := selectMigCandidate(devusage.MigProfiles, occupied, existing.Usedmem)
-		if !ok {
-			return false
+		// Fall back to the sequential path, which may upgrade a request to a larger profile.
+		for _, existing := range toAllocate {
+			if existing.UUID != devusage.ID {
+				continue
+			}
+			_, placement, ok := selectMigCandidate(devusage.MigProfiles, occupied, existing.Usedmem)
+			if !ok {
+				return false
+			}
+			occupied = append(occupied, placement)
 		}
-		occupied = append(occupied, placement)
+		_, _, ok := selectMigCandidate(devusage.MigProfiles, occupied, request.Memreq)
+		return ok
 	}
-	_, _, ok := selectMigCandidate(devusage.MigProfiles, occupied, request.Memreq)
-	return ok
+	return true
 }
 
 // queuedMigMemories returns the memory requests already queued for this container on the given card.
