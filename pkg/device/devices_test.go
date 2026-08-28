@@ -1305,6 +1305,7 @@ func TestGetDevicesUUIDList(t *testing.T) {
 		})
 	}
 }
+
 // TestEncodeDecodeContainerDevicesSlots covers the optional slots field: it is
 // only written when it exceeds 1, so single-slot entries keep the 4-field form.
 func TestEncodeDecodeContainerDevicesSlots(t *testing.T) {

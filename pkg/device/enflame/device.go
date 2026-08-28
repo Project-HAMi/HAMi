@@ -405,6 +405,10 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 	}
 	profileMemoryMiB := int32(profile.MemoryGB * 1024)
 	profileCorePercent := int32(profile.CorePercent)
+	// profile.Size is already range checked above, so this is the single
+	// bounded conversion reused by the slice guard and the allocation.
+	profileSlices := int32(profile.Size)
+
 	for i, v := range slices.Backward(devices) {
 		dev := v
 		klog.V(4).InfoS("scoring pod", "pod", klog.KObj(pod), "device", dev.ID, "Memreq", k.Memreq, "MemPercentagereq", k.MemPercentagereq, "Coresreq", k.Coresreq, "Nums", k.Nums, "device index", i)
@@ -425,14 +429,16 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 			continue
 		}
 
-		if dev.Count <= dev.Used {
-			reason[common.CardTimeSlicingExhausted]++
-			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used)
-			continue
-		}
 		if isMutex && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+			continue
+		}
+		// The whole profile has to fit: a 3 slice profile needs 3 free slices,
+		// not just one.
+		if dev.Count-dev.Used < profileSlices {
+			reason[common.CardTimeSlicingExhausted]++
+			klog.V(5).InfoS(common.CardTimeSlicingExhausted, "pod", klog.KObj(pod), "device", dev.ID, "count", dev.Count, "used", dev.Used, "request slices", profileSlices)
 			continue
 		}
 		if dev.Totalmem-dev.Usedmem < profileMemoryMiB {
@@ -456,7 +462,7 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 				Usedcores: profileCorePercent,
 				// A DRS profile consumes profile.Size slices; recording it here keeps
 				// the count across the annotation round trip that drops CustomInfo.
-				Slots: int32(profile.Size),
+				Slots: profileSlices,
 				CustomInfo: map[string]any{
 					"profileName": profile.Name,
 					"profileID":   profile.ID,

@@ -17,6 +17,7 @@ limitations under the License.
 package enflame
 
 import (
+	"strings"
 	"testing"
 
 	"gotest.tools/v3/assert"
@@ -24,6 +25,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/common"
 )
 
 // drsCard returns a DRS card with 6 slices and a 3-profile menu. Totalmem and
@@ -79,6 +81,31 @@ func TestDRSSlice_SlotCountSurvivesReconstruction(t *testing.T) {
 	assert.NilError(t, err)
 	assert.Equal(t, len(decoded), 1)
 	assert.Equal(t, max(decoded[0].Slots, 1), liveCard.Used)
+}
+
+// TestDRSSlice_PartialCapacityRejectsFullProfile checks that a profile only
+// fits when every slice it needs is free, not just one.
+func TestDRSSlice_PartialCapacityRejectsFullProfile(t *testing.T) {
+	InitEnflameDevice(EnflameConfig{ResourceNameDRSGCU: "enflame.com/drs-gcu"})
+	enf := &EnflameDevices{}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{}}}
+
+	// Totalcore 0 skips the core guard, so slices are the binding constraint.
+	card := drsCard(400000, 0)
+	card.Used = 4
+
+	// 2 of 6 slices are free, so the 3 slice "3g.20gb" profile must not fit.
+	threeSlices := device.ContainerDeviceRequest{Nums: 1, Type: EnflameVGCUDevice, Memreq: 3}
+	fit, _, reason := enf.Fit([]*device.DeviceUsage{card}, threeSlices, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, false)
+	assert.Assert(t, strings.Contains(reason, common.CardTimeSlicingExhausted))
+
+	// The 1 slice "1g.6gb" profile still fits in the remaining capacity.
+	oneSlice := device.ContainerDeviceRequest{Nums: 1, Type: EnflameVGCUDevice, Memreq: 1}
+	fit, result, reason := enf.Fit([]*device.DeviceUsage{card}, oneSlice, pod, &device.NodeInfo{}, &device.PodDevices{})
+	assert.Equal(t, fit, true)
+	assert.Equal(t, reason, "")
+	assert.Equal(t, result[EnflameVGCUDevice][0].Slots, int32(1))
 }
 
 // TestDRSSlice_ReconstructionRejectsSliceOversubscription checks that a card
