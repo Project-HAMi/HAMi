@@ -454,6 +454,9 @@ func (enf *EnflameDevices) Fit(devices []*device.DeviceUsage, request device.Con
 				Type:      k.Type,
 				Usedmem:   profileMemoryMiB,
 				Usedcores: profileCorePercent,
+				// A DRS profile consumes profile.Size slices; recording it here keeps
+				// the count across the annotation round trip that drops CustomInfo.
+				Slots: int32(profile.Size),
 				CustomInfo: map[string]any{
 					"profileName": profile.Name,
 					"profileID":   profile.ID,

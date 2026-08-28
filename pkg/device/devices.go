@@ -451,6 +451,12 @@ func UnMarshalNodeDevices(str string) ([]*DeviceInfo, error) {
 func EncodeContainerDevices(cd ContainerDevices) string {
 	var builder strings.Builder
 	for _, val := range cd {
+		// Slots is appended as an optional 5th field only when it exceeds 1, so
+		// single-slot allocations keep the historical 4-field encoding.
+		if val.Slots > 1 {
+			fmt.Fprintf(&builder, "%s,%s,%d,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, val.Slots, OneContainerMultiDeviceSplitSymbol)
+			continue
+		}
 		fmt.Fprintf(&builder, "%s,%s,%d,%d%s", val.UUID, val.Type, val.Usedmem, val.Usedcores, OneContainerMultiDeviceSplitSymbol)
 	}
 	tmp := builder.String()
@@ -536,6 +542,18 @@ func DecodeContainerDevices(str string) (ContainerDevices, error) {
 			Type:      tmpstr[1],
 			Usedmem:   int32(devmem),
 			Usedcores: int32(devcores),
+		}
+		// The 5th field is optional and only written for multi-slot entries,
+		// so annotations produced by older versions stay readable.
+		if len(tmpstr) >= 5 {
+			devslots, err := strconv.ParseInt(tmpstr[4], 10, 32)
+			if err != nil {
+				return nil, fmt.Errorf("invalid slots field: %w", err)
+			}
+			if devslots < 0 {
+				return nil, fmt.Errorf("slots field must not be negative: %d", devslots)
+			}
+			tmpdev.Slots = int32(devslots)
 		}
 		contdev = append(contdev, tmpdev)
 	}
