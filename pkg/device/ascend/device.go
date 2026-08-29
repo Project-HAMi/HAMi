@@ -116,10 +116,14 @@ func InitDevices(vnpus VNPUs) []*Devices {
 
 func (npu *Devices) hamiCoreBudget() int32 {
 	scale := npu.coreScaling
-	if scale <= 0 {
+	if scale <= 0 || math.IsNaN(scale) || math.IsInf(scale, 0) {
 		scale = 1
 	}
-	return int32(math.Round(100 * scale))
+	budget := math.Round(100 * scale)
+	if budget < 1 || budget > float64(math.MaxInt32) {
+		return 100
+	}
+	return int32(budget)
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -546,10 +550,17 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientCore, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total core", effectiveTotalCore, "device used core", dev.Usedcores, "request cores", k.Coresreq)
 			continue
 		}
-		// Coresreq=100 indicates it want this card exclusively
+		// Coresreq=100 indicates it want this card exclusively.
 		if k.Coresreq == 100 && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
+			continue
+		}
+		// A single occupant that already reserved 100% owns the card exclusively,
+		// even when deviceCoreScaling raises the Fit budget above 100.
+		if dev.Used == 1 && dev.Usedcores == 100 {
+			reason[common.ExclusiveDeviceAllocateConflict]++
+			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used, "usedcores", dev.Usedcores)
 			continue
 		}
 		// You can't allocate core=0 job to an already full GPU

@@ -2970,4 +2970,25 @@ func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
 			t.Fatalf("unexpected result %#v", result)
 		}
 	})
+	t.Run("R=1.5 exclusive 100 then 50 rejected", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1.5, Configs: cfg})[0]
+		exclusive := []*device.DeviceUsage{{
+			ID: "dev-0", Index: 0, Type: "Ascend910B3",
+			Used: 1, Count: 4,
+			Usedmem: 1024, Totalmem: 65536,
+			Usedcores: 100, Totalcore: 20,
+			Health: true,
+		}}
+		share := device.ContainerDeviceRequest{
+			Nums: 1, Type: "Ascend910B3",
+			Memreq: 1024, MemPercentagereq: 0, Coresreq: 50,
+		}
+		fit, _, reason := dev.Fit(exclusive, share, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected exclusive occupant to block 50, got fit reason=%s", reason)
+		}
+		if reason != "1/1 ExclusiveDeviceAllocateConflict" {
+			t.Fatalf("expected ExclusiveDeviceAllocateConflict, got %s", reason)
+		}
+	})
 }
