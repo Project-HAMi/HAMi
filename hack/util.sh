@@ -16,7 +16,7 @@ set -o errexit  # Exit immediately if a command exits with a non-zero status
 set -o nounset  # Exit if an unset variable is referenced
 set -o pipefail # Exit if any command in a pipeline fails
 
-MIN_Go_VERSION=1.21.0
+MIN_Go_VERSION=1.27.0
 
 # Check if a command exists.
 function util::cmd_exist {

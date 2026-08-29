@@ -195,6 +195,10 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 	}
 	if ok {
 		if n, ok := v.AsInt64(); ok {
+			if n <= 0 || n > math.MaxInt32 {
+				klog.ErrorS(nil, "iluvatar device count request is out of range", "container", ctr.Name, "request", n)
+				return device.ContainerDeviceRequest{}
+			}
 			klog.Info("Found iluvatar devices")
 			memnum := 0
 			mem, ok := ctr.Resources.Limits[iluvatarResourceMem]
@@ -217,9 +221,11 @@ func (dev *IluvatarDevices) GenerateResourceRequests(ctr *corev1.Container) devi
 			}
 			if ok {
 				corenums, ok := core.AsInt64()
-				if ok {
-					corenum = int32(corenums)
+				if !ok || corenums < 0 || corenums > 100 {
+					klog.ErrorS(nil, "iluvatar core request is out of range (must be 0-100)", "container", ctr.Name, "request", core.String())
+					return device.ContainerDeviceRequest{}
 				}
+				corenum = int32(corenums)
 			}
 
 			mempnum := 0
@@ -258,6 +264,10 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 	var tmpDevs map[string]device.ContainerDevices
 	tmpDevs = make(map[string]device.ContainerDevices)
 	reason := make(map[string]int)
+	if k.Coresreq > 100 || k.Coresreq < 0 {
+		klog.ErrorS(nil, "core limit out of range (must be 0-100)", "pod", klog.KObj(pod), "coresreq", k.Coresreq)
+		return false, tmpDevs, "core limit out of range"
+	}
 	isMutex := util.PolicyContains(util.GetGPUSchedulerPolicyByPod(device.GPUSchedulerPolicy, pod), util.GPUSchedulerPolicyMutex)
 	for i, v := range slices.Backward(devices) {
 		dev := v
@@ -298,11 +308,6 @@ func (ilu *IluvatarDevices) Fit(devices []*device.DeviceUsage, request device.Co
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue
-		}
-		if k.Coresreq > 100 {
-			klog.ErrorS(nil, "core limit can't exceed 100", "pod", klog.KObj(pod), "device", dev.ID)
-			k.Coresreq = 100
-			//return false, tmpDevs
 		}
 		if k.Memreq > 0 {
 			memreq = k.Memreq

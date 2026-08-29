@@ -164,8 +164,10 @@ func (dev *AWSNeuronDevices) GetNodeDevices(n corev1.Node) ([]*device.DeviceInfo
 	if dev.coresPerAWSNeuron == 0 {
 		dev.coresPerAWSNeuron = uint(coresTotal) / uint(counts)
 	}
+	// The mask must stay within the addressable cores addCoreUsage can track,
+	// even when the hardware exposes more cores per device (inf1 has four).
 	dev.coremask = 0
-	for i < int(dev.coresPerAWSNeuron) {
+	for i < int(dev.coresPerDevice()) {
 		dev.coremask *= 2
 		dev.coremask++
 		i++
@@ -303,7 +305,7 @@ func (dev *AWSNeuronDevices) GenerateResourceRequests(ctr *corev1.Container) dev
 			Type:             AWSNeuronDevice,
 			Memreq:           0,
 			MemPercentagereq: 0,
-			Coresreq:         int32(dev.coresPerAWSNeuron),
+			Coresreq:         int32(dev.coresPerDevice()),
 		}
 	} else {
 		core, ok := resourceQuantity(ctr, awsResourceCores)

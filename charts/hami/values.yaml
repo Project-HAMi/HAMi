@@ -83,6 +83,11 @@ scheduler:
   leaderElect: true
   # when leaderElect is true, replicas is available, otherwise replicas is 1.
   replicas: 1
+  # podDisruptionBudget only renders when leaderElect is true and replicas > 1;
+  # with a single replica it would block all voluntary node drains.
+  podDisruptionBudget:
+    minAvailable: 1
+    # maxUnavailable: 1
   kubeScheduler:
     # @param enabled indicate whether to run kube-scheduler container in the scheduler pod, it's true by default.
     enabled: true
@@ -430,6 +435,10 @@ devicePlugin:
 
   podAnnotations: {}
   hostPID: true
+  # Let HAMi core ask the device plugin for its host PID.
+  # This requires hostPID to be true.
+  hostPIDBroker:
+    enabled: false
   hostNetwork: false
   securityContext:
     privileged: true

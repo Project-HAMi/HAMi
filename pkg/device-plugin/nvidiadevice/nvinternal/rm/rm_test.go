@@ -41,6 +41,7 @@ import (
 )
 
 func TestValidateRequest(t *testing.T) {
+	failRequestsGreaterThanOne := true
 	testCases := []struct {
 		description       string
 		devices           Devices
@@ -110,7 +111,7 @@ func TestValidateRequest(t *testing.T) {
 			description: "timeslicing with two devices -- failRequestsGreaterThanOne",
 			sharing: spec.Sharing{
 				TimeSlicing: spec.ReplicatedResources{
-					FailRequestsGreaterThanOne: true,
+					FailRequestsGreaterThanOne: &failRequestsGreaterThanOne,
 					Resources: []spec.ReplicatedResource{
 						{
 							Name:     "nvidia.com/gpu",
@@ -173,7 +174,7 @@ func TestValidateRequest(t *testing.T) {
 			description: "MPS with two devices -- failRequestsGreaterThanOne",
 			sharing: spec.Sharing{
 				MPS: &spec.ReplicatedResources{
-					FailRequestsGreaterThanOne: true,
+					FailRequestsGreaterThanOne: &failRequestsGreaterThanOne,
 					Resources: []spec.ReplicatedResource{
 						{
 							Name:     "nvidia.com/gpu",

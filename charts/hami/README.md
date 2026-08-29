@@ -77,6 +77,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `scheduler.livenessProbe` | Whether to enable liveness probe | `false` |
 | `scheduler.leaderElect` | Whether to enable leader election | `true` |
 | `scheduler.replicas` | Number of replicas | `1` |
+| `scheduler.podDisruptionBudget.minAvailable` | Minimum number of available scheduler pods during voluntary disruptions (only rendered when `scheduler.leaderElect` is `true` and `scheduler.replicas` is greater than `1`) | `1` |
+| `scheduler.podDisruptionBudget.maxUnavailable` | Maximum number of unavailable scheduler pods during voluntary disruptions; takes precedence over `minAvailable` when set | unset |
 
 ### Kube Scheduler Configuration
 
@@ -192,6 +194,8 @@ This document provides detailed descriptions of all configurable values paramete
 |-----------|-------------|---------------|
 | `devicePlugin.pluginPath` | Plugin path | `/var/lib/kubelet/device-plugins` |
 | `devicePlugin.libPath` | Library path | `/usr/local/vgpu` |
+| `devicePlugin.hostPID` | Use the host PID namespace for the device plugin | `true` |
+| `devicePlugin.hostPIDBroker.enabled` | Let HAMi core ask the device plugin for its host PID. This requires `devicePlugin.hostPID`. See [Host PID broker](../../docs/develop/hostpid-broker.md) | `false` |
 | `devicePlugin.nvidiaNodeSelector` | NVIDIA node selector | `{"gpu": "on"}` |
 | `devicePlugin.updateStrategy.type` | Update strategy type | `RollingUpdate` |
 | `devicePlugin.updateStrategy.rollingUpdate.maxUnavailable` | Maximum unavailable count | `1` |
