@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -64,10 +65,19 @@ const (
 	numaRefitTimeout = 2 * time.Second
 )
 
-// numaRefitTLSConfig verifies the scheduler certificate by default, against
-// SchedulerCAFileEnvName when provided; SchedulerTLSInsecureEnvName is an
-// explicit operator opt-out for the self-signed webhook certificate.
-func numaRefitTLSConfig() (*tls.Config, error) {
+var (
+	// serviceAccountTokenFile is the default projected/bound ServiceAccount
+	// token every pod gets mounted, used to authenticate the refit call
+	// against the scheduler's TokenReview check. See issue #2878.
+	serviceAccountTokenFile = "/var/run/secrets/kubernetes.io/serviceaccount/token"
+)
+
+// numaRefitTLSConfig returns a tls.Config for reaching the scheduler. When
+// authenticated is true (a bearer token is being transmitted), TLS certificate
+// verification is strictly enforced and HAMI_SCHEDULER_TLS_INSECURE cannot
+// disable it. When unauthenticated, HAMI_SCHEDULER_TLS_INSECURE may skip
+// verification for clusters using the self-signed webhook certificate.
+func numaRefitTLSConfig(authenticated bool) (*tls.Config, error) {
 	config := &tls.Config{MinVersion: tls.VersionTLS12}
 	if caFile := os.Getenv(SchedulerCAFileEnvName); caFile != "" {
 		pem, err := os.ReadFile(caFile)
@@ -80,23 +90,33 @@ func numaRefitTLSConfig() (*tls.Config, error) {
 		}
 		config.RootCAs = pool
 	}
-	if insecure, err := strconv.ParseBool(os.Getenv(SchedulerTLSInsecureEnvName)); err == nil {
-		config.InsecureSkipVerify = insecure
+	if insecure, err := strconv.ParseBool(os.Getenv(SchedulerTLSInsecureEnvName)); err == nil && insecure {
+		if authenticated {
+			return nil, errors.New("insecure TLS verification is not permitted for authenticated refit requests")
+		}
+		config.InsecureSkipVerify = true
 	}
 	return config, nil
 }
 
 // numaRefitHTTPClient reaches the scheduler service. It is built per refit so
 // a rotated CA bundle is picked up without restarting the device plugin; the
-// refit is a rare path, taken only when an allocation mismatches.
-func numaRefitHTTPClient() (*http.Client, error) {
-	tlsConfig, err := numaRefitTLSConfig()
+// refit is a rare path, taken only when an allocation mismatches. It rejects
+// redirects to prevent token leakage across endpoints.
+func numaRefitHTTPClient(authenticated bool) (*http.Client, error) {
+	tlsConfig, err := numaRefitTLSConfig(authenticated)
 	if err != nil {
 		return nil, err
 	}
 	return &http.Client{
-		Timeout:   numaRefitTimeout,
-		Transport: &http.Transport{TLSClientConfig: tlsConfig},
+		Timeout: numaRefitTimeout,
+		Transport: &http.Transport{
+			TLSClientConfig: tlsConfig,
+		},
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			req.Header.Del("Authorization")
+			return errors.New("redirects are not permitted for refit requests")
+		},
 	}, nil
 }
 
@@ -146,6 +166,30 @@ func (plugin *NvidiaDevicePlugin) tryNumaRefit(ctx context.Context, pod *corev1.
 
 // requestNumaRefit performs one refit round trip against the scheduler.
 func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *corev1.Pod, containerIndex int, allowedUUIDs []string) (device.ContainerDevices, error) {
+	rawEndpoint := os.Getenv(SchedulerEndpointEnvName)
+	if rawEndpoint == "" {
+		return nil, errors.New("scheduler endpoint is not configured")
+	}
+	rawURL := strings.TrimSuffix(rawEndpoint, "/") + numaRefitPath
+	parsedURL, err := url.Parse(rawURL)
+	if err != nil {
+		return nil, fmt.Errorf("invalid scheduler endpoint URL: %w", err)
+	}
+
+	var token string
+	if tokenBytes, tokenErr := os.ReadFile(serviceAccountTokenFile); tokenErr != nil {
+		// Older scheduler versions accept unauthenticated refits, so degrade
+		// to that behavior rather than failing the allocation outright.
+		klog.InfoS("cannot read service account token; sending refit without caller authentication", "err", tokenErr)
+	} else {
+		token = strings.TrimSpace(string(tokenBytes))
+	}
+
+	authenticated := token != ""
+	if authenticated && parsedURL.Scheme != "https" {
+		return nil, fmt.Errorf("authenticated refit requires HTTPS, endpoint scheme is %q", parsedURL.Scheme)
+	}
+
 	payload, err := json.Marshal(device.NumaRefitRequest{
 		PodUID:             string(pod.UID),
 		PodNamespace:       pod.Namespace,
@@ -162,14 +206,16 @@ func (plugin *NvidiaDevicePlugin) requestNumaRefit(ctx context.Context, pod *cor
 
 	ctx, cancel := context.WithTimeout(ctx, numaRefitTimeout)
 	defer cancel()
-	url := strings.TrimSuffix(os.Getenv(SchedulerEndpointEnvName), "/") + numaRefitPath
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, rawURL, bytes.NewReader(payload))
 	if err != nil {
 		return nil, err
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
+	if authenticated {
+		httpReq.Header.Set("Authorization", "Bearer "+token)
+	}
 
-	httpClient, err := numaRefitHTTPClient()
+	httpClient, err := numaRefitHTTPClient(authenticated)
 	if err != nil {
 		return nil, err
 	}

@@ -269,7 +269,7 @@ scheduler:
     tolerations: []
     runAsUser: 2000
   service:
-    type: NodePort  # Default type is NodePort, can be changed to ClusterIP
+    type: ClusterIP  # Default type is ClusterIP, can be changed to NodePort
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
@@ -277,6 +277,11 @@ scheduler:
     httpTargetPort: 443
     labels: {}
     annotations: {}
+  networkPolicy:
+    # Restrict ingress on the scheduler's HTTP port (filter/bind/refit/webhook)
+    # to the device-plugin's pods and to the kube-system namespace, where
+    # kube-scheduler and kube-apiserver normally run. See issue #2878.
+    enabled: true
 
 devicePlugin:
   enabled: true

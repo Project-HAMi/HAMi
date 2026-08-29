@@ -135,7 +135,7 @@ This document provides detailed descriptions of all configurable values paramete
 
 | Parameter | Description | Default Value |
 |-----------|-------------|---------------|
-| `scheduler.service.type` | Service type | `NodePort` |
+| `scheduler.service.type` | Service type | `ClusterIP` |
 | `scheduler.service.httpPort` | HTTP port | `443` |
 | `scheduler.service.schedulerPort` | Scheduler NodePort | `31998` |
 | `scheduler.service.monitorPort` | Monitor port | `31993` |

@@ -79,7 +79,14 @@ const refitPatchTimeout = 2 * time.Second
 // and hami.io/vgpu-devices-allocated together in one merge patch, and only
 // then moves the in-memory reservation. Failures are reported in-band and
 // leave both annotations and accounting untouched.
-func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.NumaRefitResponse {
+//
+// token is the bearer token the caller presented (from the request's
+// Authorization header, see routes.NumaRefit); it must belong to the
+// device-plugin pod running on req.NodeName, see issue #2878.
+func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest, token string) device.NumaRefitResponse {
+	if err := s.authenticateRefitCaller(context.Background(), token, req.NodeName); err != nil {
+		return numaRefitFailure(nil, "refit request failed caller authentication: %v", err)
+	}
 	if req.PodUID == "" || req.PodNamespace == "" || req.PodName == "" || req.NodeName == "" {
 		return numaRefitFailure(nil, "incomplete refit request: pod UID, namespace, name, and node are required")
 	}

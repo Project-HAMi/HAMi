@@ -79,6 +79,8 @@ func init() {
 	rootCmd.Flags().DurationVar(&config.NodeLockTimeout, "node-lock-timeout", time.Minute*5, "timeout for node locks")
 	rootCmd.Flags().DurationVar(&config.NodeLockRetryTimeout, "node-lock-retry-timeout", 28*time.Second, "timeout for retrying LockNode when contended by another PodGroup member (0 disables retry). Align the Extender's httpTimeout in KubeSchedulerConfiguration with this value.")
 	rootCmd.Flags().BoolVar(&config.ForceOverwriteDefaultScheduler, "force-overwrite-default-scheduler", true, "Overwrite schedulerName in Pod Spec when set to the const DefaultSchedulerName in https://k8s.io/api/core/v1 package")
+	rootCmd.Flags().StringVar(&config.DevicePluginNamespace, "device-plugin-namespace", "", "namespace of the device-plugin ServiceAccount allowed to call the /refit endpoint")
+	rootCmd.Flags().StringVar(&config.DevicePluginServiceAccount, "device-plugin-service-account", "", "name of the device-plugin ServiceAccount allowed to call the /refit endpoint")
 
 	rootCmd.Flags().BoolVar(&config.LeaderElect, "leader-elect", false, "The pod of hami-scheduler enable leader select")
 	rootCmd.Flags().StringVar(&config.LeaderElectResourceName, "leader-elect-resource-name", "", "The name of resource object that is used for leader election")

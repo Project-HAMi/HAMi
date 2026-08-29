@@ -1,0 +1,40 @@
+{{- if .Values.scheduler.networkPolicy.enabled }}
+# Restricts who can reach the scheduler extender's HTTP port (serving
+# /filter, /bind, /refit and the admission /webhook) to the device-plugin's
+# pods and to the kube-system namespace, where kube-scheduler and
+# kube-apiserver normally run. This is defense in depth on top of the /refit
+# caller authentication (see issue #2878); it does not replace it.
+#
+# The metrics port is left open to any source, matching the chart's
+# pre-existing behavior, since it carries no privileged action.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "hami-vgpu.scheduler" . }}
+  namespace: {{ include "hami-vgpu.namespace" . }}
+  labels:
+    app.kubernetes.io/component: hami-scheduler
+    {{- include "hami-vgpu.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      app.kubernetes.io/component: hami-scheduler
+      {{- include "hami-vgpu.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+  ingress:
+    - from:
+        - podSelector:
+            matchLabels:
+              app.kubernetes.io/component: hami-device-plugin
+              {{- include "hami-vgpu.selectorLabels" . | nindent 14 }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+      ports:
+        - protocol: TCP
+          port: {{ if .Values.scheduler.admissionWebhook.enabled }}443{{ else }}80{{ end }}
+    - ports:
+        - protocol: TCP
+          port: {{ last (splitList ":" .Values.scheduler.metricsBindAddress) | int }}
+{{- end }}

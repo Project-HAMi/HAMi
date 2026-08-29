@@ -116,6 +116,8 @@ spec:
             - --leader-elect={{ .Values.scheduler.leaderElect }}
             - --leader-elect-resource-name={{ .Values.schedulerName }}
             - --leader-elect-resource-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-namespace={{ include "hami-vgpu.namespace" . }}
+            - --device-plugin-service-account={{ include "hami-vgpu.device-plugin" . }}
             {{- if .Values.devices.ascend.enabled }}
             - --enable-ascend=true
             {{- end }}

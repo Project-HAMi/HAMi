@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 
 	"github.com/julienschmidt/httprouter"
 	"k8s.io/klog/v2"
@@ -186,6 +187,17 @@ func ReadyzRoute(s *scheduler.Scheduler) httprouter.Handle {
 	}
 }
 
+// bearerToken extracts the token from a "Authorization: Bearer <token>"
+// header, or "" if the header is absent or malformed.
+func bearerToken(r *http.Request) string {
+	const prefix = "Bearer "
+	auth := r.Header.Get("Authorization")
+	if !strings.HasPrefix(auth, prefix) {
+		return ""
+	}
+	return strings.TrimPrefix(auth, prefix)
+}
+
 // NumaRefit handles device-plugin requests to move a pending allocation onto
 // kubelet's NUMA-restricted device set. See issue #2080.
 func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
@@ -209,7 +221,7 @@ func NumaRefit(s *scheduler.Scheduler) httprouter.Handle {
 			klog.ErrorS(err, "Cache not synced, cannot refit")
 			response = device.NumaRefitResponse{FailureReason: err.Error()}
 		} else {
-			response = s.RefitNumaAllocation(request)
+			response = s.RefitNumaAllocation(request, bearerToken(r))
 		}
 
 		resultBody, err := json.Marshal(response)
