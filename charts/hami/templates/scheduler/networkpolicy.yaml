@@ -1,9 +1,18 @@
 {{- if .Values.scheduler.networkPolicy.enabled }}
 # Restricts who can reach the scheduler extender's HTTP port (serving
-# /filter, /bind, /refit and the admission /webhook) to the device-plugin's
-# pods and to the kube-system namespace, where kube-scheduler and
-# kube-apiserver normally run. This is defense in depth on top of the /refit
-# caller authentication (see issue #2878); it does not replace it.
+# /filter, /bind, /refit and the admission /webhook -- they all share this
+# one port; NetworkPolicy has no per-path awareness to split them) to the
+# device-plugin's pods and to the kube-system namespace, where kube-scheduler
+# and kube-apiserver normally run. This is defense in depth on top of the
+# /refit caller authentication (see issue #2878); it does not replace it,
+# and /refit's own TokenReview check is unaffected if this policy is off.
+#
+# Off by default (see scheduler.networkPolicy.enabled in values.yaml): if
+# kube-apiserver runs hostNetwork (the common kubeadm/on-prem default) and
+# your CNI doesn't match hostNetwork traffic against namespaceSelector, this
+# can silently block /webhook, and admissionWebhook.failurePolicy: Ignore
+# then lets pods admit without HAMi's mutation -- no scheduler-name rewrite,
+# no GPU resource injected, no error surfaced.
 #
 # The metrics port is left open to any source, matching the chart's
 # pre-existing behavior, since it carries no privileged action.
@@ -33,7 +42,7 @@ spec:
               kubernetes.io/metadata.name: kube-system
       ports:
         - protocol: TCP
-          port: {{ if .Values.scheduler.admissionWebhook.enabled }}443{{ else }}80{{ end }}
+          port: {{ .Values.scheduler.service.httpTargetPort | default 443 }}
     - ports:
         - protocol: TCP
           port: {{ last (splitList ":" .Values.scheduler.metricsBindAddress) | int }}

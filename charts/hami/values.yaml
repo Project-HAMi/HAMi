@@ -278,10 +278,25 @@ scheduler:
     labels: {}
     annotations: {}
   networkPolicy:
-    # Restrict ingress on the scheduler's HTTP port (filter/bind/refit/webhook)
+    # Restrict ingress on the scheduler's HTTP port (filter/bind/refit/webhook
+    # all share this one port -- NetworkPolicy can't separate them by path)
     # to the device-plugin's pods and to the kube-system namespace, where
     # kube-scheduler and kube-apiserver normally run. See issue #2878.
-    enabled: true
+    #
+    # Off by default: /refit's own caller authentication (TokenReview) does
+    # not depend on this and is unaffected either way -- this is only an
+    # extra layer on top. Enable it only after confirming your CNI actually
+    # matches kube-apiserver traffic against namespaceSelector/podSelector.
+    # When kube-apiserver runs as a hostNetwork pod (the kubeadm/most on-prem
+    # default), Kubernetes documents NetworkPolicy behavior for hostNetwork
+    # pods as undefined, and it is known not to match on at least Calico
+    # (projectcalico/calico#1987) and Cilium (which requires its separate
+    # Host Firewall feature for host-network traffic). If this policy blocks
+    # kube-apiserver's calls to /webhook, admissionWebhook.failurePolicy:
+    # Ignore lets pod admission continue with HAMi's mutation silently
+    # skipped -- pods can then be scheduled by the default scheduler with no
+    # GPU device allocated and no error surfaced.
+    enabled: false
 
 devicePlugin:
   enabled: true
