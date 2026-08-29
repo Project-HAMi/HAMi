@@ -181,11 +181,13 @@ func (dev *Devices) MutateAdmission(ctr *corev1.Container, p *corev1.Pod) (bool,
 	}
 	// Requests may be nil when the pod declares only limits; writing to a
 	// nil map panics.
-	if ctr.Resources.Requests == nil {
-		ctr.Resources.Requests = corev1.ResourceList{}
+	if dev.config.ResourceMemoryName != "" {
+		if ctr.Resources.Requests == nil {
+			ctr.Resources.Requests = corev1.ResourceList{}
+		}
+		ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
+		ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 	}
-	ctr.Resources.Limits[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
-	ctr.Resources.Requests[corev1.ResourceName(dev.config.ResourceMemoryName)] = resource.MustParse(fmt.Sprint(trimMem))
 
 	// Set runtime class name if it is not set by user and the runtime class name is configured
 	if p.Spec.RuntimeClassName == nil && dev.config.RuntimeClassName != "" {
