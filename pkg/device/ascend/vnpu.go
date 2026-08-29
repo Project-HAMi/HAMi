@@ -43,6 +43,10 @@ type VNPUConfig struct {
 // VNPUs holds the global Ascend VNPU configuration, including a flag to enable
 // hami-vnpu-core soft-partitioning for all nodes and the per-chip config list.
 type VNPUs struct {
-	HamiVnpuCore bool         `yaml:"hamiVnpuCore"`
-	Configs      []VNPUConfig `yaml:"configs"`
+	HamiVnpuCore bool `yaml:"hamiVnpuCore"`
+	// DeviceCoreScaling is the hami-core compute oversell ratio.
+	// Fit uses effectiveTotalCore = 100 * DeviceCoreScaling (default 1 → 100).
+	// 1.5 → 150; 2.0 → 200. Zero or negative is treated as 1.
+	DeviceCoreScaling float64      `yaml:"deviceCoreScaling"`
+	Configs           []VNPUConfig `yaml:"configs"`
 }

@@ -239,6 +239,8 @@ This document provides detailed descriptions of all configurable values paramete
 | `devices.ascend.extraArgs` | Extra arguments | `[]` |
 | `devices.ascend.nodeSelector` | Node selector | `{"ascend": "on"}` |
 | `devices.ascend.tolerations` | Tolerations | `[]` |
+| `devices.ascend.hamiVnpuCore` | Enable hami-vnpu-core soft-partitioning on all nodes | `false` |
+| `devices.ascend.deviceCoreScaling` | hami-core compute oversell ratio; Fit budget is `100 * deviceCoreScaling` | `1` |
 | `devices.ascend.customresources` | Custom resources | `["huawei.com/Ascend910A", "huawei.com/Ascend910A-memory", ...]` |
 
 ### Iluvatar

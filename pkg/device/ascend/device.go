@@ -55,6 +55,7 @@ type Devices struct {
 	noUseUUIDAnno    string
 	handshakeAnno    string
 	hamiVnpuCore     bool
+	coreScaling      float64
 }
 
 type RuntimeInfo struct {
@@ -83,6 +84,10 @@ func InitDevices(vnpus VNPUs) []*Devices {
 	if !enableAscend {
 		return devs
 	}
+	coreScaling := vnpus.DeviceCoreScaling
+	if coreScaling <= 0 {
+		coreScaling = 1
+	}
 	for _, vnpu := range vnpus.Configs {
 		commonWord := vnpu.CommonWord
 		dev := &Devices{
@@ -92,6 +97,7 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			noUseUUIDAnno:    fmt.Sprintf("hami.io/no-use-%s-uuid", commonWord),
 			handshakeAnno:    fmt.Sprintf("hami.io/node-handshake-%s", commonWord),
 			hamiVnpuCore:     vnpus.HamiVnpuCore,
+			coreScaling:      coreScaling,
 		}
 		sort.Slice(dev.config.Templates, func(i, j int) bool {
 			return dev.config.Templates[i].Memory < dev.config.Templates[j].Memory
@@ -103,9 +109,17 @@ func InitDevices(vnpus VNPUs) []*Devices {
 			util.HandshakeAnnos[commonWord] = dev.handshakeAnno
 		}
 		devs = append(devs, dev)
-		klog.Infof("load ascend vnpu config %s: %v", commonWord, dev.config)
+		klog.Infof("load ascend vnpu config %s coreScaling=%.2f: %v", commonWord, coreScaling, dev.config)
 	}
 	return devs
+}
+
+func (npu *Devices) hamiCoreBudget() int32 {
+	scale := npu.coreScaling
+	if scale <= 0 {
+		scale = 1
+	}
+	return int32(math.Round(100 * scale))
 }
 
 func ParseConfig(fs *flag.FlagSet) {
@@ -521,10 +535,10 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			klog.V(5).InfoS(common.CardInsufficientMemory, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "device total memory", dev.Totalmem, "device used memory", dev.Usedmem, "request memory", memreq)
 			continue
 		}
-		// Set dev.Totalcore to 100 if vnpuMode is hami-core
+		// hami-core uses a 100-point percentage scale, optionally oversold by coreScaling.
 		effectiveTotalCore := dev.Totalcore
 		if isHAMiCore {
-			effectiveTotalCore = 100
+			effectiveTotalCore = npu.hamiCoreBudget()
 		}
 
 		if effectiveTotalCore-dev.Usedcores < k.Coresreq {
@@ -533,7 +547,7 @@ func (npu *Devices) Fit(devices []*device.DeviceUsage, request device.ContainerD
 			continue
 		}
 		// Coresreq=100 indicates it want this card exclusively
-		if effectiveTotalCore == 100 && k.Coresreq == 100 && dev.Used > 0 {
+		if k.Coresreq == 100 && dev.Used > 0 {
 			reason[common.ExclusiveDeviceAllocateConflict]++
 			klog.V(5).InfoS(common.ExclusiveDeviceAllocateConflict, "pod", klog.KObj(pod), "device", dev.ID, "device index", i, "used", dev.Used)
 			continue

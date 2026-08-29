@@ -2918,3 +2918,56 @@ func TestFit_CoresValidation(t *testing.T) {
 		assert.Equal(t, reason, "core limit out of range")
 	})
 }
+
+func TestDevices_Fit_HamiCoreOversell(t *testing.T) {
+	enableAscend = true
+	cfg := []VNPUConfig{{
+		CommonWord:         "Ascend910B3",
+		ChipName:           "910B3",
+		ResourceName:       "huawei.com/Ascend910B3",
+		ResourceMemoryName: "huawei.com/Ascend910B3-memory",
+		MemoryAllocatable:  65536,
+		Templates:          []Template{{Name: "vir05", Memory: 16384}},
+	}}
+	card := []*device.DeviceUsage{{
+		ID: "dev-0", Index: 0, Type: "Ascend910B3",
+		Used: 3, Count: 4,
+		Usedmem: 3072, Totalmem: 65536,
+		Usedcores: 90, Totalcore: 20,
+		Health: true,
+	}}
+	req := device.ContainerDeviceRequest{
+		Nums: 1, Type: "Ascend910B3",
+		Memreq: 1024, MemPercentagereq: 0, Coresreq: 20,
+	}
+	pod := &corev1.Pod{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+		VNPUModeAnnotation: VNPUModeHamiCore,
+	}}}
+	nodeInfo := &device.NodeInfo{
+		ID: "node1",
+		Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Annotations: map[string]string{
+			VNPUNodeSelectorAnnotation: "true",
+		}}},
+	}
+
+	t.Run("R=1 3x30+20 rejected", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1, Configs: cfg})[0]
+		fit, _, reason := dev.Fit(card, req, pod, nodeInfo, &device.PodDevices{})
+		if fit {
+			t.Fatalf("expected reject at 110>100, got fit reason=%s", reason)
+		}
+		if reason != "1/1 CardInsufficientCore" {
+			t.Fatalf("expected CardInsufficientCore, got %s", reason)
+		}
+	})
+	t.Run("R=1.5 3x30+20 admitted", func(t *testing.T) {
+		dev := InitDevices(VNPUs{HamiVnpuCore: true, DeviceCoreScaling: 1.5, Configs: cfg})[0]
+		fit, result, reason := dev.Fit(card, req, pod, nodeInfo, &device.PodDevices{})
+		if !fit {
+			t.Fatalf("expected admit at 110<=150, got reason=%s", reason)
+		}
+		if len(result["Ascend910B3"]) != 1 || result["Ascend910B3"][0].UUID != "dev-0" {
+			t.Fatalf("unexpected result %#v", result)
+		}
+	})
+}
