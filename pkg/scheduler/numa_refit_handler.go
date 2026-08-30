@@ -241,7 +241,7 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	maps.Copy(hypothetical, allocated)
 	hypothetical[req.DeviceType] = refitted
 	var quotaMem, quotaCores int64
-	for _, ctrDevs := range device.CollapseInitContainerUsage(pod, hypothetical)[req.DeviceType] {
+	for _, ctrDevs := range effectivePodDeviceUsage(pod, hypothetical, pi.InitContainerResourceReleased)[req.DeviceType] {
 		for _, d := range ctrDevs {
 			quotaMem += int64(d.Usedmem)
 			quotaCores += int64(d.Usedcores)
@@ -283,10 +283,7 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 		// init-container usage has been released, collapsing again would
 		// re-inflate the reservation back to the init peak, the same hazard
 		// PodManager.AddPod guards against on a re-add.
-		effective := device.CollapseInitContainerUsage(pod, rawDevices)
-		if pi.InitContainerResourceReleased {
-			effective = device.SteadyStateDeviceUsage(pod, rawDevices)
-		}
+		effective := effectivePodDeviceUsage(pod, rawDevices, pi.InitContainerResourceReleased)
 		if _, ok := s.podManager.ReplacePodDevices(key, effective); ok {
 			s.quotaManager.AddUsage(pod, effective)
 		} else {
@@ -303,6 +300,16 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	klog.InfoS(message, "pod", klog.KObj(pod), "node", req.NodeName)
 	s.recordNumaRefitResultEvent(pod, message, nil)
 	return device.NumaRefitResponse{Succeeded: true, ContainerDevices: device.EncodeContainerDevices(newDevices)}
+}
+
+// effectivePodDeviceUsage mirrors the accounting shape stored by PodManager.
+// Non-sidecar init-container usage is part of the phase peak until the
+// informer records its release, and excluded from steady-state usage after it.
+func effectivePodDeviceUsage(pod *corev1.Pod, raw device.PodDevices, initReleased bool) device.PodDevices {
+	if initReleased {
+		return device.SteadyStateDeviceUsage(pod, raw)
+	}
+	return device.CollapseInitContainerUsage(pod, raw)
 }
 
 // replaceContainerDeviceEntry swaps one container's entry inside an encoded
