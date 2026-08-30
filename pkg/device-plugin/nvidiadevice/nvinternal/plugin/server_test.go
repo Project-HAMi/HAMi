@@ -207,6 +207,48 @@ func TestCDIAllocateResponse(t *testing.T) {
 	}
 }
 
+// TestNewNvidiaDevicePluginPropagatesImexChannels guards the wiring from options
+// into the plugin: WithImexChannels stores the channels on options, and the
+// plugin the constructor builds must carry them, otherwise updateResponseForCDI,
+// updateResponseForImexChannelsEnvVar, updateResponseForDeviceMounts, and
+// apiDeviceSpecs all see an empty list and IMEX channels are never exposed to the
+// container.
+func TestNewNvidiaDevicePluginPropagatesImexChannels(t *testing.T) {
+	channels := imex.Channels{{ID: "0"}, {ID: "1"}}
+	o := &options{
+		imexChannels: channels,
+		config: &nvidia.DeviceConfig{
+			Config: &v1.Config{
+				Flags: v1.Flags{
+					CommandLineFlags: v1.CommandLineFlags{
+						Plugin: &v1.PluginCommandLineFlags{
+							CDIAnnotationPrefix: ptr("cdi.k8s.io/"),
+						},
+					},
+				},
+			},
+		},
+	}
+	resourceManager := &rm.ResourceManagerMock{
+		ResourceFunc: func() v1.ResourceName { return "nvidia.com/gpu" },
+	}
+	deviceListStrategies, err := v1.NewDeviceListStrategies([]string{"envvar"})
+	require.NoError(t, err)
+
+	plugin := o.newNvidiaDevicePlugin(
+		context.Background(),
+		o.config,
+		resourceManager,
+		deviceListStrategies,
+		nvidia.NvidiaConfig{},
+		"hami-core",
+		nil,
+	)
+
+	require.Equal(t, channels, plugin.imexChannels,
+		"newNvidiaDevicePlugin must copy imexChannels from options into the plugin")
+}
+
 func TestSelectPreferredDeviceIDsFromAnnotatedDevices(t *testing.T) {
 	plugin := &NvidiaDevicePlugin{}
 	// Use real NVIDIA GPU UUID format: GPU-xxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx

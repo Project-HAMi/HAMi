@@ -177,8 +177,6 @@ func getPluginSocketPath(resource spec.ResourceName) string {
 
 // NewNvidiaDevicePlugin returns an initialized NvidiaDevicePlugin
 func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.DeviceConfig, resourceManager rm.ResourceManager, sConfig *config.Config, mode string) (Interface, error) {
-	_, name := resourceManager.Resource().Split()
-
 	deviceListStrategies, _ := spec.NewDeviceListStrategies(*nvconfig.Flags.Plugin.DeviceListStrategy)
 
 	klog.Infoln("reading config=", nvconfig, "resourceName", nvconfig.ResourceName, "configfile=", *ConfigFile, "sconfig=", sConfig)
@@ -197,6 +195,24 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 			return nil, fmt.Errorf("init MIG instance manager: %w", err)
 		}
 	}
+	return o.newNvidiaDevicePlugin(ctx, nvconfig, resourceManager, deviceListStrategies, sConfig.NvidiaConfig, mode, migMgr), nil
+}
+
+// newNvidiaDevicePlugin assembles an NvidiaDevicePlugin from the options and the
+// values devicePluginForResource resolves at startup. Keeping the assembly in its
+// own method lets the wiring from options into the plugin (for example the IMEX
+// channels) be unit tested without initializing devices, MIG, or NVML.
+func (o *options) newNvidiaDevicePlugin(
+	ctx context.Context,
+	nvconfig *nvidia.DeviceConfig,
+	resourceManager rm.ResourceManager,
+	deviceListStrategies spec.DeviceListStrategies,
+	schedulerConfig nvidia.NvidiaConfig,
+	mode string,
+	migMgr *MigInstanceManager,
+) *NvidiaDevicePlugin {
+	_, name := resourceManager.Resource().Split()
+
 	return &NvidiaDevicePlugin{
 		ctx:                        ctx,
 		rm:                         resourceManager,
@@ -211,9 +227,10 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		socket:                     kubeletdevicepluginv1beta1.DevicePluginPath + "nvidia-" + name + ".sock",
 		cdiHandler:                 o.cdiHandler,
 		cdiAnnotationPrefix:        *o.config.Flags.Plugin.CDIAnnotationPrefix,
-		schedulerConfig:            sConfig.NvidiaConfig,
+		schedulerConfig:            schedulerConfig,
 		operatingMode:              mode,
 		migMgr:                     migMgr,
+		imexChannels:               o.imexChannels,
 		deviceCache:                "",
 
 		// These will be reinitialized every
@@ -221,7 +238,7 @@ func (o *options) devicePluginForResource(ctx context.Context, nvconfig *nvidia.
 		server: nil,
 		health: nil,
 		stop:   nil,
-	}, nil
+	}
 }
 
 func (plugin *NvidiaDevicePlugin) initialize() {
