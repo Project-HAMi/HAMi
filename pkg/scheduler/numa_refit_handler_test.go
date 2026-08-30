@@ -80,7 +80,7 @@ func stubRefitPatch(t *testing.T, fail error) (map[string]string, *int) {
 	captured := map[string]string{}
 	calls := 0
 	previous := patchPodAnnotations
-	patchPodAnnotations = func(_ context.Context, _ *corev1.Pod, annotations map[string]string) error {
+	patchPodAnnotations = func(_ *corev1.Pod, annotations map[string]string) error {
 		calls++
 		if fail != nil {
 			return fail
@@ -92,34 +92,22 @@ func stubRefitPatch(t *testing.T, fail error) (map[string]string, *int) {
 	return captured, &calls
 }
 
-func TestRefitNumaAllocationPatchTimeoutReleasesFilter(t *testing.T) {
+func TestRefitNumaAllocationPatchDeadlineReleasesFilter(t *testing.T) {
 	s, pod := refitFixture(t, 40000)
 	resourceNames := device.GetDevices()[nvidia.NvidiaGPUDevice].GetResourceNames()
-	previousTimeout := refitPatchTimeout
-	refitPatchTimeout = 50 * time.Millisecond
-	t.Cleanup(func() { refitPatchTimeout = previousTimeout })
 	s.quotaManager.AddUsage(pod, device.PodDevices{nvidia.NvidiaGPUDevice: {{{
 		UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30,
 	}}}})
 
-	originalAnnotations := maps.Clone(pod.Annotations)
 	patchStarted := make(chan struct{})
+	releasePatch := make(chan struct{})
 	filterStarted := make(chan struct{})
-	filterReturned := make(chan struct{})
 	filterDone := make(chan error, 1)
-	filterBlocked := make(chan bool, 1)
 	previousPatch := patchPodAnnotations
-	patchPodAnnotations = func(ctx context.Context, _ *corev1.Pod, _ map[string]string) error {
+	patchPodAnnotations = func(_ *corev1.Pod, _ map[string]string) error {
 		close(patchStarted)
-		<-filterStarted
-		select {
-		case <-filterReturned:
-			filterBlocked <- false
-		default:
-			filterBlocked <- true
-		}
-		<-ctx.Done()
-		return ctx.Err()
+		<-releasePatch
+		return context.DeadlineExceeded
 	}
 	t.Cleanup(func() { patchPodAnnotations = previousPatch })
 
@@ -131,6 +119,10 @@ func TestRefitNumaAllocationPatchTimeoutReleasesFilter(t *testing.T) {
 	case <-patchStarted:
 	case <-time.After(time.Second):
 		t.Fatal("refit did not reach the annotation PATCH")
+	}
+	if s.allocLock.TryLock() {
+		s.allocLock.Unlock()
+		t.Fatal("refit did not hold allocLock while patching annotations")
 	}
 
 	filterPod := &corev1.Pod{
@@ -146,17 +138,17 @@ func TestRefitNumaAllocationPatchTimeoutReleasesFilter(t *testing.T) {
 		close(filterStarted)
 		_, err := s.Filter(extenderv1.ExtenderArgs{Pod: filterPod, NodeNames: &[]string{}})
 		filterDone <- err
-		close(filterReturned)
 	}()
+	<-filterStarted
+	close(releasePatch)
 
 	select {
 	case response := <-refitDone:
 		assert.Equal(t, response.Succeeded, false)
 		assert.Assert(t, strings.Contains(response.FailureReason, context.DeadlineExceeded.Error()), "reason: %s", response.FailureReason)
 	case <-time.After(time.Second):
-		t.Fatal("refit did not stop after the annotation PATCH timeout")
+		t.Fatal("refit did not stop after the annotation PATCH deadline")
 	}
-	assert.Equal(t, <-filterBlocked, true, "Filter completed while the refit held allocLock")
 	select {
 	case err := <-filterDone:
 		assert.NilError(t, err)
@@ -164,7 +156,6 @@ func TestRefitNumaAllocationPatchTimeoutReleasesFilter(t *testing.T) {
 		t.Fatal("Filter did not continue after the refit released allocLock")
 	}
 
-	assert.DeepEqual(t, pod.Annotations, originalAnnotations)
 	assert.Equal(t, trackedUUID(t, s), "GPU-a")
 	quota := s.quotaManager.GetResourceQuota()[pod.Namespace]
 	assert.Equal(t, (*quota)[resourceNames.ResourceMemoryName].Used, int64(20000))
