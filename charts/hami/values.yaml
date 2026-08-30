@@ -273,7 +273,7 @@ scheduler:
     httpPort: 443   # HTTP port
     schedulerPort: 31998  # NodePort for HTTP
     monitorPort: 31993    # Monitoring port
-    monitorTargetPort: 9395
+    monitorTargetPort: metrics  # Name of the container port, so it follows scheduler.metricsBindAddress
     httpTargetPort: 443
     labels: {}
     annotations: {}
