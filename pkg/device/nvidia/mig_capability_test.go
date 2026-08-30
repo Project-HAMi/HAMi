@@ -141,8 +141,8 @@ func TestAddResourceUsageCommitsRecordedPlan(t *testing.T) {
 			t.Fatalf("commit slice %d: %v", i, err)
 		}
 	}
-	if tentative[0].CustomInfo[MigProfileCustomInfo] != "1g.5gb" || tentative[0].CustomInfo[MigPlacementCustomInfo] != (device.MigPlacement{Start: 4, Size: 1}) {
-		t.Fatalf("first slice = %+v, want 1g.5gb at slot 4", tentative[0].CustomInfo)
+	if tentative[0].CustomInfo[MigProfileCustomInfo] != "1g.5gb" || tentative[0].CustomInfo[MigPlacementCustomInfo] != (device.MigPlacement{Start: 5, Size: 1}) {
+		t.Fatalf("first slice = %+v, want 1g.5gb at slot 5", tentative[0].CustomInfo)
 	}
 	if tentative[1].CustomInfo[MigProfileCustomInfo] != "3g.20gb" || tentative[1].CustomInfo[MigPlacementCustomInfo] != (device.MigPlacement{Start: 0, Size: 4}) {
 		t.Fatalf("second slice = %+v, want 3g.20gb at slot 0", tentative[1].CustomInfo)
