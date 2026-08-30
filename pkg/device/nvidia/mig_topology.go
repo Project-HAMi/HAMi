@@ -22,6 +22,8 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/device"
 )
 
+const migSearchBudget = 4096
+
 // migRegion is a half-open range [start, end) of memory slices.
 type migRegion struct {
 	start uint32
@@ -85,13 +87,34 @@ func migReservedRegion(profiles []device.MigProfile, regions []migRegion) int {
 // migLayout is the placement geometry of one card, derived once per request
 // from the profile table the device plugin reports.
 type migLayout struct {
-	regions  []migRegion
-	reserved int
+	sliceCount int
+	regions    []migRegion
+	reserved   int
 }
 
 func newMigLayout(profiles []device.MigProfile) migLayout {
-	regions := migRegions(profiles, migSliceCount(profiles))
-	return migLayout{regions: regions, reserved: migReservedRegion(profiles, regions)}
+	sliceCount := migSliceCount(profiles)
+	regions := migRegions(profiles, sliceCount)
+	return migLayout{sliceCount: sliceCount, regions: regions, reserved: migReservedRegion(profiles, regions)}
+}
+
+// freeSliceCount counts the slices of the card that no occupied placement covers.
+func (l migLayout) freeSliceCount(occupied []device.MigPlacement) int {
+	used := make([]bool, l.sliceCount)
+	for _, p := range occupied {
+		for slice := p.Start; slice < p.Start+p.Size; slice++ {
+			if int(slice) < l.sliceCount {
+				used[slice] = true
+			}
+		}
+	}
+	free := 0
+	for _, taken := range used {
+		if !taken {
+			free++
+		}
+	}
+	return free
 }
 
 // migPlacementScore ranks one candidate placement; fields are compared in order.
@@ -166,26 +189,53 @@ func (l migLayout) rank(occupied []device.MigPlacement, profile device.MigProfil
 	return ranked
 }
 
-// place assigns every requested profile, pickiest first, without revisiting a
-// choice. result[i] belongs to requested[i]. It fails as soon as one profile
-// has no free placement, leaving the card untouched.
+// place assigns every requested profile without overlap. result[i] belongs to
+// requested[i]. The ranked greedy path is tried first: pickiest request first,
+// best-scored placement first. Only when that path fails, although the free
+// slices could hold the request, does it backtrack over the same ranked
+// candidates within migSearchBudget, so a valid layout is never rejected just
+// because the greedy choice filled the wrong half first. When the greedy path
+// succeeds the result is exactly the greedy result.
 func (l migLayout) place(occupied []device.MigPlacement, requested []device.MigProfile) ([]device.MigPlacement, bool) {
+	needed := 0
+	for _, profile := range requested {
+		needed += int(migProfileFootprint(profile))
+	}
+	if needed > l.freeSliceCount(occupied) {
+		return nil, false
+	}
 	used := make([]device.MigPlacement, 0, len(occupied)+len(requested))
 	used = append(used, occupied...)
 	result := make([]device.MigPlacement, len(requested))
 	placed := make([]bool, len(requested))
-	for range requested {
+	budget := migSearchBudget
+	var search func(remaining int) bool
+	search = func(remaining int) bool {
+		if remaining == 0 {
+			return true
+		}
 		idx := nextMigRequest(used, requested, placed)
 		if idx < 0 {
-			return nil, false
+			return false
 		}
-		ranked := l.rank(used, requested[idx])
-		if len(ranked) == 0 {
-			return nil, false
-		}
-		result[idx] = ranked[0]
-		used = append(used, ranked[0])
 		placed[idx] = true
+		for _, candidate := range l.rank(used, requested[idx]) {
+			if budget == 0 {
+				break
+			}
+			budget--
+			used = append(used, candidate)
+			result[idx] = candidate
+			if search(remaining - 1) {
+				return true
+			}
+			used = used[:len(used)-1]
+		}
+		placed[idx] = false
+		return false
+	}
+	if !search(len(requested)) {
+		return nil, false
 	}
 	return result, true
 }

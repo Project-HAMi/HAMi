@@ -367,6 +367,46 @@ func TestPlaceMigProfilesHandles4gWhenRequestedTogether(t *testing.T) {
 	}
 }
 
+func TestPlaceMigProfilesBacktracksWhenGreedyFails(t *testing.T) {
+	t.Run("review counterexample", func(t *testing.T) {
+		// a:[0,1),[4,5) and b:[0,1),[1,2). The greedy path takes a at 0 and strands the
+		// second b; the only valid layout is a at 4 with both b placements.
+		profiles := []device.MigProfile{
+			{Name: "a", Placements: []device.MigPlacement{{Start: 0, Size: 1}, {Start: 4, Size: 1}}},
+			{Name: "b", Placements: []device.MigPlacement{{Start: 0, Size: 1}, {Start: 1, Size: 1}}},
+		}
+		got, ok := placeMigProfiles(profiles, nil, []string{"a", "b", "b"})
+		if !ok {
+			t.Fatal("a + b + b has a valid layout and must be placed")
+		}
+		want := []device.MigPlacement{{Start: 4, Size: 1}, {Start: 0, Size: 1}, {Start: 1, Size: 1}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("placements = %+v, want %+v", got, want)
+		}
+	})
+	t.Run("H100 double-memory 1g with four 1g", func(t *testing.T) {
+		// The greedy path packs both 1g.20gb into the lower half and leaves only three 1g
+		// slots. The search moves the second 1g.20gb to [6,8), the only way to use slice 7.
+		got, ok := placeMigProfiles(h100TopologyProfiles(), nil, []string{"1g.20gb", "1g.20gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb"})
+		if !ok {
+			t.Fatal("2 x 1g.20gb + 4 x 1g.10gb fills an H100 and must be placed")
+		}
+		want := []device.MigPlacement{{Start: 0, Size: 2}, {Start: 6, Size: 2}, {Start: 2, Size: 1}, {Start: 3, Size: 1}, {Start: 5, Size: 1}, {Start: 4, Size: 1}}
+		if !reflect.DeepEqual(got, want) {
+			t.Fatalf("placements = %+v, want %+v", got, want)
+		}
+	})
+}
+
+func TestPlaceMigProfilesGivesUpWithinBudget(t *testing.T) {
+	// Eight 1g add up to eight slices, but slice 7 is unreachable by a 1g, so no layout
+	// exists. The search must report that within its budget instead of running unbounded.
+	requested := []string{"1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb", "1g.5gb"}
+	if _, ok := placeMigProfiles(a100TopologyProfiles(), nil, requested); ok {
+		t.Fatal("eight 1g must not fit an A100")
+	}
+}
+
 func TestSelectMigPlacementFallsBackToFirstFit(t *testing.T) {
 	// Without independent halves the score reduces to the lowest free start.
 	got := sequentialPlacements(t, straddlingProfiles(), nil, []string{"1g", "1g", "1g"})
