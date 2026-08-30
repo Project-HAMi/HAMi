@@ -29,6 +29,7 @@ import (
 	"k8s.io/client-go/kubernetes/fake"
 	k8stesting "k8s.io/client-go/testing"
 
+	"github.com/Project-HAMi/HAMi/pkg/device"
 	"github.com/Project-HAMi/HAMi/pkg/device-plugin/nvidiadevice/nvinternal/rm"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 	"github.com/Project-HAMi/HAMi/pkg/util"
@@ -143,6 +144,73 @@ func TestGetAPIDevicesShutsDownAfterNVMLInit(t *testing.T) {
 	devices := plugin.getAPIDevices()
 	if devices == nil || len(*devices) != 0 {
 		t.Fatalf("getAPIDevices() = %v, want non-nil empty slice", devices)
+	}
+}
+
+func TestGetAPIDevicesReturnsStableOrder(t *testing.T) {
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	originalGetHandleByUUID := nvml.DeviceGetHandleByUUID
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+		nvml.DeviceGetHandleByUUID = originalGetHandleByUUID
+	}()
+
+	nvmlDevices := map[string]nvml.Device{
+		"GPU-0": &nvmlmock.Device{
+			GetIndexFunc:      func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+			GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) { return nvml.Memory{Total: 8 * 1024 * 1024 * 1024}, nvml.SUCCESS },
+			GetNameFunc:       func() (string, nvml.Return) { return "A100", nvml.SUCCESS },
+			GetPciInfoFunc:    func() (nvml.PciInfo, nvml.Return) { return nvml.PciInfo{}, nvml.ERROR_NOT_SUPPORTED },
+		},
+		"GPU-1": &nvmlmock.Device{
+			GetIndexFunc:      func() (int, nvml.Return) { return 1, nvml.SUCCESS },
+			GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) { return nvml.Memory{Total: 8 * 1024 * 1024 * 1024}, nvml.SUCCESS },
+			GetNameFunc:       func() (string, nvml.Return) { return "A100", nvml.SUCCESS },
+			GetPciInfoFunc:    func() (nvml.PciInfo, nvml.Return) { return nvml.PciInfo{}, nvml.ERROR_NOT_SUPPORTED },
+		},
+	}
+	nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+		dev, ok := nvmlDevices[uuid]
+		if !ok {
+			return nil, nvml.ERROR_NOT_FOUND
+		}
+		return dev, nvml.SUCCESS
+	}
+
+	rmDevices := make(rm.Devices, len(nvmlDevices))
+	for uuid := range nvmlDevices {
+		dev := &rm.Device{}
+		dev.ID = uuid
+		dev.Health = "Healthy"
+		rmDevices[uuid] = dev
+	}
+	splitCount := uint(1)
+	memoryScaling := 1.0
+	coreScaling := 1.0
+	plugin := &NvidiaDevicePlugin{
+		rm: &rm.ResourceManagerMock{DevicesFunc: func() rm.Devices { return rmDevices }},
+		schedulerConfig: nvidia.NvidiaConfig{NodeDefaultConfig: nvidia.NodeDefaultConfig{
+			DeviceSplitCount:    &splitCount,
+			DeviceMemoryScaling: &memoryScaling,
+			DeviceCoreScaling:   &coreScaling,
+		}},
+	}
+
+	first := plugin.getAPIDevices()
+	second := plugin.getAPIDevices()
+	for i, dev := range *first {
+		if dev.Index != uint(i) {
+			t.Fatalf("getAPIDevices()[%d].Index = %d, want %d", i, dev.Index, i)
+		}
+	}
+	firstEncoded := device.MarshalNodeDevices(*first)
+	secondEncoded := device.MarshalNodeDevices(*second)
+	if firstEncoded != secondEncoded {
+		t.Fatalf("encoded device output changed across scans:\nfirst:  %s\nsecond: %s", firstEncoded, secondEncoded)
 	}
 }
 

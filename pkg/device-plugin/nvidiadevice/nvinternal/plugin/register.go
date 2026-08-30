@@ -37,6 +37,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -206,6 +207,9 @@ func (plugin *NvidiaDevicePlugin) getAPIDevices() *[]*device.DeviceInfo {
 		res = append(res, info)
 		klog.V(3).Infof("Registered device id=%v, memory=%vMB, type=%v, numa=%v, health=%v", idx, registeredmem, Model, numa, health)
 	}
+	sort.Slice(res, func(i, j int) bool {
+		return res[i].Index < res[j].Index
+	})
 	return &res
 }
 
