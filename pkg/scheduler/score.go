@@ -40,11 +40,16 @@ func viewStatus(usage NodeUsage) {
 	}
 }
 
+// deviceTypeMatches preserves HAMi's case-insensitive substring matching for
+// mapping a registered request type to the corresponding node devices.
+func deviceTypeMatches(availableType, requestedType string) bool {
+	return strings.Contains(strings.ToLower(availableType), strings.ToLower(requestedType))
+}
+
 func getNodeResources(list NodeUsage, t string) []*device.DeviceUsage {
 	l := []*device.DeviceUsage{}
-	targetType := strings.ToLower(t)
 	for _, val := range list.Devices.DeviceLists {
-		if strings.Contains(strings.ToLower(val.Device.Type), targetType) {
+		if deviceTypeMatches(val.Device.Type, t) {
 			l = append(l, val.Device)
 		}
 	}

@@ -186,7 +186,7 @@ func (s *Scheduler) RefitNumaAllocation(req device.NumaRefitRequest) device.Numa
 	// each allowed candidate so adding the moved container produces the same
 	// effective usage as normal scheduling (for example max(init, app), not
 	// init+app, for a non-sidecar init container).
-	preparePhaseAwareRefitUsage(nodeUsage, pod, pi.Devices, allocated, req.DeviceType, req.ContainerIndex, current[0], allowed, pi.InitContainerResourceReleased)
+	preparePhaseAwareRefitUsage(nodeUsage, pod, pi.Devices, allocated, req.DeviceType, req.ContainerIndex, current[0].Usedmem, current[0].Usedcores, allowed, pi.InitContainerResourceReleased)
 
 	weights, err := util.GetDeviceScoringWeightsByPod(pod)
 	if err != nil {
@@ -338,7 +338,7 @@ func aggregateDeviceUsage(single device.PodSingleDevice) map[string]device.Conta
 // effectiveUsageOnCandidate evaluates only one physical device. Init/app
 // collapsing is independent per UUID, so filtering the raw rows first avoids
 // copying and collapsing the pod's complete allocation for every candidate.
-func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDevice, deviceType string, containerIndex int, moved device.ContainerDevice, candidateID string, initReleased bool) device.ContainerDevice {
+func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDevice, deviceType string, containerIndex int, movedMemory, movedCores int32, candidateID string, initReleased bool) device.ContainerDevice {
 	candidateRows := make(device.PodSingleDevice, len(withoutMoved))
 	for index, containerDevices := range withoutMoved {
 		for _, d := range containerDevices {
@@ -347,18 +347,26 @@ func effectiveUsageOnCandidate(pod *corev1.Pod, withoutMoved device.PodSingleDev
 			}
 		}
 	}
-	moved.UUID = candidateID
-	candidateRows[containerIndex] = append(candidateRows[containerIndex], moved)
+	// Annotation rows are raw container/device allocations and do not encode
+	// collapsed Slots. This row therefore represents exactly the one slot that
+	// NVIDIA Fit/AddResourceUsage will add after the preload is installed.
+	candidateRows[containerIndex] = append(candidateRows[containerIndex], device.ContainerDevice{
+		UUID:      candidateID,
+		Type:      deviceType,
+		Usedmem:   movedMemory,
+		Usedcores: movedCores,
+	})
 	effective := effectivePodDeviceUsage(pod, device.PodDevices{deviceType: candidateRows}, initReleased)
 	return aggregateDeviceUsage(effective[deviceType])[candidateID]
 }
 
 // preparePhaseAwareRefitUsage replaces this pod's cached contribution with a
-// candidate-specific preload. Nvidia.Fit then adds the moved container's raw
-// request, and the resulting per-device usage equals the pod's effective
-// init/app usage on that candidate. Computing the full hypothetical through
-// the shared collapse helpers also preserves native-sidecar ordering.
-func preparePhaseAwareRefitUsage(node *NodeUsage, pod *corev1.Pod, cached, raw device.PodDevices, deviceType string, containerIndex int, moved device.ContainerDevice, allowed map[string]struct{}, initReleased bool) {
+// candidate-specific preload. The production refit currently accepts NVIDIA
+// only; Nvidia.Fit adds one raw slot plus the requested memory and cores. The
+// resulting per-device usage equals the pod's effective init/app usage on that
+// candidate. Computing the full hypothetical through the shared collapse
+// helpers also preserves native-sidecar ordering.
+func preparePhaseAwareRefitUsage(node *NodeUsage, pod *corev1.Pod, cached, raw device.PodDevices, deviceType string, containerIndex int, movedMemory, movedCores int32, allowed map[string]struct{}, initReleased bool) {
 	for _, containerDevices := range cached[deviceType] {
 		releaseContainerUsage(node, containerDevices)
 	}
@@ -369,16 +377,18 @@ func preparePhaseAwareRefitUsage(node *NodeUsage, pod *corev1.Pod, cached, raw d
 
 	for _, deviceList := range node.Devices.DeviceLists {
 		candidate := deviceList.Device
+		if !deviceTypeMatches(candidate.Type, deviceType) {
+			continue
+		}
 		preload, exists := withoutUsage[candidate.ID]
 		_, candidateAllowed := allowed[candidate.ID]
-		candidateTypeMatches := strings.Contains(strings.ToLower(candidate.Type), strings.ToLower(deviceType))
-		if candidateAllowed && candidateTypeMatches {
-			withUsage := effectiveUsageOnCandidate(pod, withoutMoved[deviceType], deviceType, containerIndex, moved, candidate.ID, initReleased)
+		if candidateAllowed {
+			withUsage := effectiveUsageOnCandidate(pod, withoutMoved[deviceType], deviceType, containerIndex, movedMemory, movedCores, candidate.ID, initReleased)
 			preload = device.ContainerDevice{
 				UUID:      candidate.ID,
 				Type:      deviceType,
-				Usedmem:   max(withUsage.Usedmem-moved.Usedmem, 0),
-				Usedcores: max(withUsage.Usedcores-moved.Usedcores, 0),
+				Usedmem:   max(withUsage.Usedmem-movedMemory, 0),
+				Usedcores: max(withUsage.Usedcores-movedCores, 0),
 				Slots:     max(withUsage.Slots-1, 0),
 			}
 			exists = preload.Usedmem > 0 || preload.Usedcores > 0 || preload.Slots > 0

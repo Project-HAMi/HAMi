@@ -28,6 +28,7 @@ import (
 	k8stypes "k8s.io/apimachinery/pkg/types"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
+	"github.com/Project-HAMi/HAMi/pkg/device/enflame"
 	"github.com/Project-HAMi/HAMi/pkg/device/nvidia"
 )
 
@@ -69,8 +70,11 @@ func refitFixture(t *testing.T, gpuBDevmem int32) (*Scheduler, *corev1.Pod) {
 	return s, pod
 }
 
-func phaseAwareRefitFixture(t *testing.T, initContainers []corev1.Container, reserved device.PodSingleDevice, gpuBDevmem, externalGPUBMemory int32) (*Scheduler, *corev1.Pod) {
+func phaseAwareRefitFixture(t *testing.T, initContainers, containers []corev1.Container, reserved device.PodSingleDevice, gpuBDevmem, externalGPUBMemory int32) (*Scheduler, *corev1.Pod) {
 	t.Helper()
+	if len(containers) == 0 {
+		containers = []corev1.Container{{Name: "main"}}
+	}
 	nodes := newNodeManager()
 	nodes.addNode(refitNode, &device.NodeInfo{
 		ID: refitNode, Node: &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: refitNode}},
@@ -90,7 +94,7 @@ func phaseAwareRefitFixture(t *testing.T, initContainers []corev1.Container, res
 		},
 		Spec: corev1.PodSpec{
 			InitContainers: initContainers,
-			Containers:     []corev1.Container{{Name: "main"}},
+			Containers:     containers,
 		},
 	}
 	raw := device.PodDevices{nvidia.NvidiaGPUDevice: reserved}
@@ -207,6 +211,7 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 	tests := []struct {
 		name              string
 		initContainers    []corev1.Container
+		containers        []corev1.Container
 		reserved          device.PodSingleDevice
 		gpuBMemory        int32
 		externalGPUMemory int32
@@ -261,6 +266,22 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 			wantSlots:      2,
 		},
 		{
+			name:           "sidecar and two apps preserve three concurrent slots",
+			initContainers: []corev1.Container{{Name: "sidecar", RestartPolicy: &always}},
+			containers:     []corev1.Container{{Name: "main"}, {Name: "worker"}},
+			reserved: device.PodSingleDevice{
+				{{UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 5000, Usedcores: 10}},
+				{{UUID: "GPU-b", Type: nvidia.NvidiaGPUDevice, Usedmem: 10000, Usedcores: 20}},
+				{{UUID: "GPU-a", Type: nvidia.NvidiaGPUDevice, Usedmem: 20000, Usedcores: 30}},
+			},
+			gpuBMemory:     40000,
+			containerIndex: 2,
+			containerName:  "worker",
+			wantSucceeded:  true,
+			wantMemory:     35000,
+			wantSlots:      3,
+		},
+		{
 			name:           "sidecar and app remain concurrent",
 			initContainers: []corev1.Container{{Name: "sidecar", RestartPolicy: &always}},
 			reserved: device.PodSingleDevice{
@@ -274,7 +295,7 @@ func TestRefitNumaAllocationUsesPhaseAwareCapacity(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			s, _ := phaseAwareRefitFixture(t, test.initContainers, test.reserved, test.gpuBMemory, test.externalGPUMemory)
+			s, _ := phaseAwareRefitFixture(t, test.initContainers, test.containers, test.reserved, test.gpuBMemory, test.externalGPUMemory)
 			captured, calls := stubRefitPatch(t, nil)
 
 			request := refitTestRequestFor("GPU-b")
@@ -372,6 +393,11 @@ func TestRefitNumaAllocationValidation(t *testing.T) {
 			name:       "unknown device type",
 			mutate:     func(r *device.NumaRefitRequest) { r.DeviceType = "NoSuchVendor" },
 			wantReason: "unknown device type",
+		},
+		{
+			name:       "registered non-NVIDIA device type",
+			mutate:     func(r *device.NumaRefitRequest) { r.DeviceType = enflame.EnflameVGCUDevice },
+			wantReason: "not supported by the NUMA refit yet",
 		},
 		{
 			name:       "empty allowed set",
