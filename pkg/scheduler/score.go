@@ -223,7 +223,23 @@ func applyPeakUsage(node *NodeUsage, appNodeCopy *NodeUsage, peakUsage map[strin
 	}
 }
 
-func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
+// fitInDevices stores allocations under the request type (for example,
+// "NVIDIA"), while nodes may register a model-specific device type. Include
+// both sets of keys so empty container slots are added to every allocation row.
+func allocationTypeKeys(resourceReqs device.PodDeviceRequests, baseTypes map[string]struct{}) map[string]struct{} {
+	allocTypes := make(map[string]struct{}, len(baseTypes))
+	for typ := range baseTypes {
+		allocTypes[typ] = struct{}{}
+	}
+	for _, ctrReqs := range resourceReqs {
+		for _, req := range ctrReqs {
+			allocTypes[req.Type] = struct{}{}
+		}
+	}
+	return allocTypes
+}
+
+func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, peakUsage map[string]peakUsageSnapshot, weights util.DeviceScoringWeights) (device.PodDevices, bool, string) {
 	initAllocs := make(device.PodDevices)
 
 	for i, req := range resourceReqs {
@@ -231,7 +247,7 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 			break
 		}
 		if len(req) == 0 {
-			for typ := range baseTypes {
+			for typ := range allocTypes {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
 			}
 			continue
@@ -244,7 +260,7 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 			return nil, false, reason
 		}
 		updatePeakUsage(peakUsage, nodeCopy)
-		for typ := range baseTypes {
+		for typ := range allocTypes {
 			if len(initAllocs[typ]) == i {
 				initAllocs[typ] = append(initAllocs[typ], device.ContainerDevices{})
 			}
@@ -253,7 +269,7 @@ func allocateInitContainers(node *NodeUsage, nodeID string, resourceReqs device.
 	return initAllocs, true, ""
 }
 
-func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, baseTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
+func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, resourceReqs device.PodDeviceRequests, task *corev1.Pod, nodeInfo *device.NodeInfo, allocTypes map[string]struct{}, numInitContainers int, nodeID string, weights util.DeviceScoringWeights) (string, bool) {
 	appIndex := 0
 	for ctrid, n := range resourceReqs {
 		if ctrid < numInitContainers {
@@ -264,7 +280,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			sums += int(k.Nums)
 		}
 		if sums == 0 {
-			for typ := range baseTypes {
+			for typ := range allocTypes {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
 			appIndex++
@@ -275,7 +291,7 @@ func allocateAppContainers(score *policy.NodeScore, appNodeCopy *NodeUsage, reso
 			klog.V(4).InfoS(common.NodeUnfitPod, "pod", klog.KObj(task), "node", nodeID, "reason", reason)
 			return reason, false
 		}
-		for typ := range baseTypes {
+		for typ := range allocTypes {
 			if len(score.Devices[typ]) == appIndex {
 				score.Devices[typ] = append(score.Devices[typ], device.ContainerDevices{})
 			}
@@ -305,12 +321,13 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	}
 
 	baseTypes := nodeDeviceBaseTypes(node.Devices)
+	allocTypes := allocationTypeKeys(resourceReqs, baseTypes)
 	peakUsage := snapshotPeakUsage(node.Devices)
 	numInitContainers := len(task.Spec.InitContainers)
 
 	var initAllocs device.PodDevices
 	if numInitContainers > 0 {
-		allocs, fit, reason := allocateInitContainers(node, nodeID, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, peakUsage, weights)
+		allocs, fit, reason := allocateInitContainers(node, nodeID, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, peakUsage, weights)
 		if !fit {
 			return nodeScoreResult{reason: reason}
 		}
@@ -327,7 +344,7 @@ func (s *Scheduler) scoreNode(nodeID string, node *NodeUsage, resourceReqs devic
 	score.ComputeDefaultScore(appNodeCopy.Devices)
 	snapshot := score.SnapshotDevice(appNodeCopy.Devices)
 
-	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, baseTypes, numInitContainers, nodeID, weights); !fit {
+	if reason, fit := allocateAppContainers(&score, appNodeCopy, resourceReqs, task, nodeInfo, allocTypes, numInitContainers, nodeID, weights); !fit {
 		return nodeScoreResult{reason: reason}
 	}
 

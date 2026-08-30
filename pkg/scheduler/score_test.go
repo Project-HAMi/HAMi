@@ -3288,6 +3288,68 @@ func Test_calcScore(t *testing.T) {
 	}
 }
 
+func TestScoreNodePreservesSlotsForModelSpecificDeviceType(t *testing.T) {
+	nodeObject := &corev1.Node{ObjectMeta: metav1.ObjectMeta{Name: "node1"}}
+	node := &NodeUsage{
+		Node:     nodeObject,
+		NodeInfo: &device.NodeInfo{ID: nodeObject.Name, Node: nodeObject},
+		Devices: policy.DeviceUsageList{
+			Policy: util.NodeSchedulerPolicyBinpack.String(),
+			DeviceLists: []*policy.DeviceListsScore{
+				{Device: &device.DeviceUsage{
+					ID: "uuid1", Index: 0, Type: "NVIDIA-Tesla T4", Health: true,
+					Count: 10, Totalcore: 100, Totalmem: 8000,
+				}},
+			},
+		},
+	}
+	gpuRequest := func() device.ContainerDeviceRequests {
+		return device.ContainerDeviceRequests{
+			nvidia.NvidiaGPUDevice: {
+				Nums: 1, Type: nvidia.NvidiaGPUDevice, Memreq: 1000, Coresreq: 30,
+			},
+		}
+	}
+	requests := device.PodDeviceRequests{
+		{},           // init without a GPU
+		gpuRequest(), // first app container
+		{},           // app container without a GPU
+		gpuRequest(), // third app container
+	}
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{Name: "model-specific-slots", Namespace: "default"},
+		Spec: corev1.PodSpec{
+			InitContainers: []corev1.Container{{Name: "setup"}},
+			Containers: []corev1.Container{
+				{Name: "worker-a"},
+				{Name: "helper-without-gpu"},
+				{Name: "worker-b"},
+			},
+		},
+	}
+
+	result := (&Scheduler{}).scoreNode(
+		nodeObject.Name,
+		node,
+		requests,
+		pod,
+		util.NodeSchedulerPolicyBinpack.String(),
+		util.DefaultDeviceScoringWeights(),
+	)
+
+	assert.NilError(t, result.err)
+	assert.Equal(t, result.reason, "")
+	assert.Assert(t, result.score != nil)
+	allocated := result.score.Devices[nvidia.NvidiaGPUDevice]
+	assert.DeepEqual(t, allocated, device.PodSingleDevice{
+		{},
+		{{Idx: 0, UUID: "uuid1", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000, Usedcores: 30}},
+		{},
+		{{Idx: 0, UUID: "uuid1", Type: nvidia.NvidiaGPUDevice, Usedmem: 1000, Usedcores: 30}},
+	})
+	assert.Equal(t, device.EncodePodSingleDevice(allocated), ";uuid1,NVIDIA,1000,30:;;uuid1,NVIDIA,1000,30:;")
+}
+
 func Test_fitInCertainDevice(t *testing.T) {
 	tests := []struct {
 		name string
