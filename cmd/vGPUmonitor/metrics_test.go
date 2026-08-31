@@ -91,54 +91,68 @@ func TestHostGPUMetricsDescriptorsIncludeNodeLabel(t *testing.T) {
 	}
 }
 
-func TestHostGPUMetricsMissingNodeName(t *testing.T) {
+// testGPUIdentity builds a gpuDeviceIdentity for tests that call one of the
+// per-metric collectors directly, bypassing resolveGPUDeviceIdentity (whose
+// own behavior - including the missing-node-name and NVML GetUUID/GetName
+// failure paths - is covered separately by TestResolveGPUDeviceIdentity*
+// below, now that identity resolution is centralized there instead of being
+// repeated in every collector).
+func testGPUIdentity(node, uuid, name string) gpuDeviceIdentity {
+	return gpuDeviceIdentity{nodeName: node, uuid: uuid, deviceName: name}
+}
+
+func TestResolveGPUDeviceIdentityMissingNodeName(t *testing.T) {
 	t.Setenv(util.NodeNameEnvName, "")
 
 	cc := ClusterManagerCollector{}
-
-	err := cc.collectGPUUtilizationMetrics(nil, nil, 0)
-	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
-		t.Errorf("expected missing node name error from collectGPUUtilizationMetrics, got: %v", err)
-	}
-
 	mockDev := &nvmlmock.Device{
-		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
-			return nvml.Memory{Used: 100}, nvml.SUCCESS
-		},
 		GetUUIDFunc: func() (string, nvml.Return) {
 			return "GPU-1234", nvml.SUCCESS
 		},
 		GetNameFunc: func() (string, nvml.Return) {
 			return "Tesla T4", nvml.SUCCESS
 		},
-		GetTemperatureFunc: func(nvml.TemperatureSensors) (uint32, nvml.Return) {
-			return 45, nvml.SUCCESS
-		},
-		GetPowerUsageFunc: func() (uint32, nvml.Return) {
-			return 150000, nvml.SUCCESS
-		},
-		GetTotalEccErrorsFunc: func(nvml.MemoryErrorType, nvml.EccCounterType) (uint64, nvml.Return) {
-			return 5, nvml.SUCCESS
-		},
-	}
-	err = cc.collectGPUMemoryMetrics(nil, mockDev, 0)
-	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
-		t.Errorf("expected missing node name error from collectGPUMemoryMetrics, got: %v", err)
 	}
 
-	err = cc.collectGPUTemperatureMetrics(nil, mockDev, 0)
-	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
-		t.Errorf("expected missing node name error from collectGPUTemperatureMetrics, got: %v", err)
+	if _, err := cc.resolveGPUDeviceIdentity(mockDev); err == nil || !strings.Contains(err.Error(), "node name environment variable") {
+		t.Errorf("expected missing node name error from resolveGPUDeviceIdentity, got: %v", err)
+	}
+}
+
+func TestResolveGPUDeviceIdentityNVMLErrors(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	cc := ClusterManagerCollector{}
+
+	uuidErrDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "", nvml.ERROR_UNKNOWN },
+	}
+	if _, err := cc.resolveGPUDeviceIdentity(uuidErrDev); err == nil || !strings.Contains(err.Error(), "GetUUID") {
+		t.Errorf("expected a GetUUID error from resolveGPUDeviceIdentity, got: %v", err)
 	}
 
-	err = cc.collectGPUPowerMetrics(nil, mockDev, 0)
-	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
-		t.Errorf("expected missing node name error from collectGPUPowerMetrics, got: %v", err)
+	nameErrDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "", nvml.ERROR_UNKNOWN },
+	}
+	if _, err := cc.resolveGPUDeviceIdentity(nameErrDev); err == nil || !strings.Contains(err.Error(), "GetName") {
+		t.Errorf("expected a GetName error from resolveGPUDeviceIdentity, got: %v", err)
+	}
+}
+
+func TestResolveGPUDeviceIdentitySuccess(t *testing.T) {
+	t.Setenv(util.NodeNameEnvName, "test-node")
+	cc := ClusterManagerCollector{}
+	mockDev := &nvmlmock.Device{
+		GetUUIDFunc: func() (string, nvml.Return) { return "GPU-1234", nvml.SUCCESS },
+		GetNameFunc: func() (string, nvml.Return) { return "Tesla T4", nvml.SUCCESS },
 	}
 
-	err = cc.collectGPUEccErrorMetrics(nil, mockDev, 0)
-	if err == nil || !strings.Contains(err.Error(), "node name environment variable") {
-		t.Errorf("expected missing node name error from collectGPUEccErrorMetrics, got: %v", err)
+	identity, err := cc.resolveGPUDeviceIdentity(mockDev)
+	if err != nil {
+		t.Fatalf("resolveGPUDeviceIdentity failed: %v", err)
+	}
+	if identity.nodeName != "test-node" || identity.uuid != "GPU-1234" || identity.deviceName != "NVIDIA-Tesla T4" {
+		t.Errorf("unexpected identity: %+v", identity)
 	}
 }
 
@@ -173,26 +187,27 @@ func TestHostGPUMetricsCollectionSuccess(t *testing.T) {
 	cc := ClusterManagerCollector{
 		ClusterManager: &ClusterManager{LegacyMetrics: true},
 	}
+	identity := testGPUIdentity("test-node", "GPU-12345678-1234-1234-1234-123456789012", "NVIDIA-Tesla T4")
 
 	ch := make(chan prometheus.Metric, 10)
 
-	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUMemoryMetrics failed: %v", err)
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUUtilizationMetrics failed: %v", err)
 	}
 
-	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUTemperatureMetrics failed: %v", err)
 	}
 
-	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUPowerMetrics failed: %v", err)
 	}
 
-	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUEccErrorMetrics failed: %v", err)
 	}
 
@@ -238,7 +253,8 @@ func TestCollectMemoryControllerUtilizationValue(t *testing.T) {
 	ch := make(chan prometheus.Metric, 10)
 	c := &ClusterManager{Zone: "test-zone", LegacyMetrics: false}
 	cc := ClusterManagerCollector{ClusterManager: c}
-	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+	identity := testGPUIdentity("test-node", "GPU-abc123", "NVIDIA-A100")
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("collectGPUUtilizationMetrics: %v", err)
 	}
 	close(ch)
@@ -274,12 +290,13 @@ func TestHostGPUMetricsNotSupportedGracefullySkipped(t *testing.T) {
 
 	cc := ClusterManagerCollector{}
 	ch := make(chan prometheus.Metric, 10)
+	identity := testGPUIdentity("test-node", "GPU-1234", "NVIDIA-Tesla T4")
 
-	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUMemoryMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Errorf("expected collectGPUMemoryMetrics to return nil on ERROR_NOT_SUPPORTED, got: %v", err)
 	}
 
-	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUUtilizationMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Errorf("expected collectGPUUtilizationMetrics to return nil on ERROR_NOT_SUPPORTED, got: %v", err)
 	}
 
@@ -308,14 +325,15 @@ func TestHostGPUMetricsUnsupported(t *testing.T) {
 
 	cc := ClusterManagerCollector{}
 	ch := make(chan prometheus.Metric, 10)
+	identity := testGPUIdentity("test-node", "GPU-1234", "NVIDIA-Tesla T4")
 
-	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUTemperatureMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("expected nil error for unsupported temperature, got: %v", err)
 	}
-	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUPowerMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("expected nil error for unsupported power, got: %v", err)
 	}
-	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("expected nil error for unsupported ECC, got: %v", err)
 	}
 
@@ -343,16 +361,21 @@ func TestHostGPUMetricsError(t *testing.T) {
 	}
 
 	cc := ClusterManagerCollector{}
+	identity := testGPUIdentity("test-node", "GPU-1234", "NVIDIA-Tesla T4")
 
-	if err := cc.collectGPUTemperatureMetrics(nil, mockDev, 0); err == nil {
+	if err := cc.collectGPUTemperatureMetrics(nil, mockDev, 0, identity); err == nil {
 		t.Fatalf("expected error for temperature, got nil")
 	}
-	if err := cc.collectGPUPowerMetrics(nil, mockDev, 0); err == nil {
+	if err := cc.collectGPUPowerMetrics(nil, mockDev, 0, identity); err == nil {
 		t.Fatalf("expected error for power, got nil")
 	}
 
+	// A failing temperature/power collector above must not prevent ECC from
+	// still being collected independently - see the review discussion on
+	// PR #2732 (collectGPUDeviceMetrics used to return on the first error,
+	// which skipped every collector after it for that device).
 	ch := make(chan prometheus.Metric, 10)
-	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0); err != nil {
+	if err := cc.collectGPUEccErrorMetrics(ch, mockDev, 0, identity); err != nil {
 		t.Fatalf("expected nil error for ECC even when unknown error occurs (it continues), got: %v", err)
 	}
 	close(ch)
