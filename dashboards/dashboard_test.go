@@ -86,3 +86,40 @@ func TestNodeGPUMemoryAllocatedRatioPanelUsesFractionScale(t *testing.T) {
 		}
 	}
 }
+
+func TestPhysicalGPUAllocatedVsHostUsedPanelComparesDeviceMemory(t *testing.T) {
+	data, err := os.ReadFile("hami-vgpu-dashboard.json")
+	if err != nil {
+		t.Fatalf("read dashboard: %v", err)
+	}
+
+	var d dashboard
+	if err := json.Unmarshal(data, &d); err != nil {
+		t.Fatalf("parse dashboard: %v", err)
+	}
+
+	const title = "GPU memory: allocated vs host used"
+	var got *panel
+	for i := range d.Panels {
+		if d.Panels[i].Title == title {
+			got = &d.Panels[i]
+			break
+		}
+	}
+	if got == nil {
+		t.Fatalf("panel %q not found", title)
+	}
+
+	if got.FieldConfig.Defaults.Unit != "bytes" {
+		t.Errorf("unit = %q, want bytes", got.FieldConfig.Defaults.Unit)
+	}
+	if len(got.Targets) != 2 {
+		t.Fatalf("panel %q target count = %d, want 2", title, len(got.Targets))
+	}
+	if got.Targets[0].Expr != `hami_gpu_memory_allocated_bytes{node=~"$node"}` {
+		t.Errorf("allocated expr = %q", got.Targets[0].Expr)
+	}
+	if got.Targets[1].Expr != `hami_host_gpu_memory_used_bytes and on (device_uuid) hami_gpu_memory_limit_bytes{node=~"$node"}` {
+		t.Errorf("host used expr = %q", got.Targets[1].Expr)
+	}
+}
