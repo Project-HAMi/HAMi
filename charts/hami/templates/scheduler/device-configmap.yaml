@@ -113,6 +113,7 @@ data:
       resourceCountName: {{ .Values.birenResourceName }}
     vnpus:
       hamiVnpuCore: {{ .Values.devices.ascend.hamiVnpuCore | default false }}
+      deviceCoreScaling: {{ .Values.devices.ascend.deviceCoreScaling | default 1 }}
       configs:
       - chipName: 910A
         commonWord: Ascend910A
