@@ -17,7 +17,6 @@ limitations under the License.
 package routes
 
 import (
-	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"strings"
@@ -65,13 +64,10 @@ func TestNumaRefitRoute_CacheNotSynced(t *testing.T) {
 		t.Fatalf("failed to marshal request: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately so WaitForCacheSync fails fast instead of polling forever
-
-	req := httptest.NewRequest("POST", "/refit", strings.NewReader(string(body))).WithContext(ctx)
+	req := httptest.NewRequest("POST", "/refit", strings.NewReader(string(body)))
 	w := httptest.NewRecorder()
 
-	handler := NumaRefit(&scheduler.Scheduler{}) // zero value: synced defaults to false
+	handler := NumaRefit(newTestScheduler(t, false))
 	handler(w, req, nil)
 
 	if w.Code != 200 {
@@ -81,7 +77,30 @@ func TestNumaRefitRoute_CacheNotSynced(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if response.Succeeded || !strings.Contains(response.FailureReason, "context cancelled") {
+	if response.Succeeded || !strings.Contains(response.FailureReason, "scheduler cache is not synced") {
 		t.Errorf("expected cache-not-synced failure, got %+v", response)
+	}
+}
+
+func TestNumaRefitRoute_NotLeaderFailsFast(t *testing.T) {
+	body, err := json.Marshal(device.NumaRefitRequest{PodUID: "uid"})
+	if err != nil {
+		t.Fatalf("failed to marshal request: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/refit", strings.NewReader(string(body)))
+	w := httptest.NewRecorder()
+	handler := NumaRefit(newTestScheduler(t, true))
+	handler(w, req, nil)
+
+	if w.Code != 200 {
+		t.Fatalf("expected HTTP 200 with in-band error, got %d", w.Code)
+	}
+	var response device.NumaRefitResponse
+	if err := json.Unmarshal(w.Body.Bytes(), &response); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if response.Succeeded || !strings.Contains(response.FailureReason, "scheduler is not leader") {
+		t.Errorf("expected not-leader failure, got %+v", response)
 	}
 }

@@ -18,7 +18,6 @@ package routes
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -34,6 +33,16 @@ import (
 	"github.com/Project-HAMi/HAMi/pkg/scheduler"
 	"github.com/Project-HAMi/HAMi/pkg/scheduler/config"
 )
+
+func newTestScheduler(t *testing.T, leaderElect bool) *scheduler.Scheduler {
+	t.Helper()
+	previous := config.LeaderElect
+	config.LeaderElect = leaderElect
+	s := scheduler.NewScheduler()
+	config.LeaderElect = previous
+	t.Cleanup(s.Stop)
+	return s
+}
 
 func TestMaxRequestSize(t *testing.T) {
 	hugePayload := strings.Repeat(" ", maxRequestSize+100)
@@ -254,13 +263,10 @@ func TestPredicateRoute_CacheNotSynced(t *testing.T) {
 		t.Fatalf("failed to marshal args: %v", err)
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // cancel immediately so WaitForCacheSync fails fast instead of polling forever
-
-	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body)).WithContext(ctx)
+	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body))
 	w := httptest.NewRecorder()
 
-	s := &scheduler.Scheduler{} // zero value: synced defaults to false
+	s := newTestScheduler(t, false)
 	handler := PredicateRoute(s)
 	handler(w, req, nil)
 
@@ -272,8 +278,32 @@ func TestPredicateRoute_CacheNotSynced(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
 		t.Fatalf("failed to unmarshal response: %v", err)
 	}
-	if !strings.Contains(result.Error, "context cancelled") {
-		t.Errorf("expected 'context cancelled' error, got %q", result.Error)
+	if !strings.Contains(result.Error, "scheduler cache is not synced") {
+		t.Errorf("expected cache-not-synced error, got %q", result.Error)
+	}
+}
+
+func TestPredicateRoute_NotLeaderFailsFast(t *testing.T) {
+	args := extenderv1.ExtenderArgs{Pod: &corev1.Pod{}}
+	body, err := json.Marshal(args)
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+
+	req := httptest.NewRequest("POST", "/predicate", bytes.NewReader(body))
+	w := httptest.NewRecorder()
+	handler := PredicateRoute(newTestScheduler(t, true))
+	handler(w, req, nil)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected HTTP 200 with in-band error, got %d", w.Code)
+	}
+	var result extenderv1.ExtenderFilterResult
+	if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+		t.Fatalf("failed to unmarshal response: %v", err)
+	}
+	if !strings.Contains(result.Error, "scheduler is not leader") {
+		t.Errorf("expected not-leader error, got %q", result.Error)
 	}
 }
 
@@ -295,6 +325,46 @@ func TestBind_DecodeError(t *testing.T) {
 	}
 	if result.Error == "" {
 		t.Error("expected a decode error to be reported in the bind result")
+	}
+}
+
+func TestBindRouteRejectsUnavailableScheduler(t *testing.T) {
+	body, err := json.Marshal(extenderv1.ExtenderBindingArgs{
+		PodName:      "pod",
+		PodNamespace: "default",
+		Node:         "node",
+	})
+	if err != nil {
+		t.Fatalf("failed to marshal args: %v", err)
+	}
+
+	tests := []struct {
+		name        string
+		leaderElect bool
+		wantError   string
+	}{
+		{name: "not leader", leaderElect: true, wantError: "scheduler is not leader"},
+		{name: "cache not synced", leaderElect: false, wantError: "scheduler cache is not synced"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req := httptest.NewRequest("POST", "/bind", bytes.NewReader(body))
+			w := httptest.NewRecorder()
+			handler := Bind(newTestScheduler(t, tt.leaderElect))
+			handler(w, req, nil)
+
+			if w.Code != http.StatusOK {
+				t.Fatalf("expected HTTP 200 with in-band error, got %d", w.Code)
+			}
+			var result extenderv1.ExtenderBindingResult
+			if err := json.Unmarshal(w.Body.Bytes(), &result); err != nil {
+				t.Fatalf("failed to unmarshal response: %v", err)
+			}
+			if !strings.Contains(result.Error, tt.wantError) {
+				t.Errorf("expected %q, got %q", tt.wantError, result.Error)
+			}
+		})
 	}
 }
 
