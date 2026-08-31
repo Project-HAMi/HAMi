@@ -18,6 +18,7 @@ package nvidia
 
 import (
 	"reflect"
+	"slices"
 	"testing"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -622,5 +623,189 @@ func TestPlaceMigProfilesUsesReportedGeometry(t *testing.T) {
 	pair, ok := placeMigProfiles(allowed, nil, []string{"2g.12gb", "2g.12gb"})
 	if !ok || !reflect.DeepEqual(pair, []device.MigPlacement{{Start: 2, Size: 2}, {Start: 0, Size: 2}}) {
 		t.Fatalf("two 2g on an A30 = %+v, %v; want slots 2 then 0", pair, ok)
+	}
+}
+
+// migDistinctPlacements returns every distinct placement in the table, in table order.
+func migDistinctPlacements(profiles []device.MigProfile) []device.MigPlacement {
+	seen := map[device.MigPlacement]bool{}
+	var out []device.MigPlacement
+	for _, profile := range profiles {
+		for _, p := range profile.Placements {
+			if p.Size == 0 || seen[p] {
+				continue
+			}
+			seen[p] = true
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// realizableMigOccupancies enumerates every set of non-overlapping placements
+// the table allows, which is every state a card can be in.
+func realizableMigOccupancies(profiles []device.MigProfile) [][]device.MigPlacement {
+	placements := migDistinctPlacements(profiles)
+	var out [][]device.MigPlacement
+	var walk func(i int, chosen []device.MigPlacement)
+	walk = func(i int, chosen []device.MigPlacement) {
+		if i == len(placements) {
+			out = append(out, append([]device.MigPlacement(nil), chosen...))
+			return
+		}
+		walk(i+1, chosen)
+		if !migPlacementConflicts(placements[i], chosen) {
+			walk(i+1, append(chosen, placements[i]))
+		}
+	}
+	walk(0, nil)
+	return out
+}
+
+// migRequestMultisets enumerates every request whose footprints fit in
+// maxSlices, as name lists in table order.
+func migRequestMultisets(profiles []device.MigProfile, maxSlices int) [][]string {
+	var out [][]string
+	var walk func(i int, remaining int, names []string)
+	walk = func(i int, remaining int, names []string) {
+		if i == len(profiles) {
+			out = append(out, append([]string(nil), names...))
+			return
+		}
+		footprint := int(migProfileFootprint(profiles[i]))
+		for count := 0; count*footprint <= remaining; count++ {
+			next := names
+			for range count {
+				next = append(next, profiles[i].Name)
+			}
+			walk(i+1, remaining-count*footprint, next)
+		}
+	}
+	walk(0, maxSlices, nil)
+	return out
+}
+
+func migPlacementMask(p device.MigPlacement) int {
+	return ((1 << p.Size) - 1) << p.Start
+}
+
+// migLayoutExists decides, independently of the scoring heuristics, whether
+// some non-overlapping assignment of the requested profiles exists.
+func migLayoutExists(profiles []device.MigProfile, occupied []device.MigPlacement, requested []string) bool {
+	resolved, ok := resolveMigRequests(profiles, requested)
+	if !ok {
+		return false
+	}
+	start := 0
+	for _, p := range occupied {
+		start |= migPlacementMask(p)
+	}
+	memo := map[[2]int]bool{}
+	var solve func(mask int, i int) bool
+	solve = func(mask int, i int) bool {
+		if i == len(resolved) {
+			return true
+		}
+		key := [2]int{mask, i}
+		if found, seen := memo[key]; seen {
+			return found
+		}
+		found := false
+		for _, p := range resolved[i].Placements {
+			if p.Size == 0 {
+				continue
+			}
+			if m := migPlacementMask(p); mask&m == 0 && solve(mask|m, i+1) {
+				found = true
+				break
+			}
+		}
+		memo[key] = found
+		return found
+	}
+	return solve(start, 0)
+}
+
+func assertValidMigLayout(t *testing.T, requested []device.MigProfile, occupied, got []device.MigPlacement) {
+	t.Helper()
+	if len(got) != len(requested) {
+		t.Fatalf("got %d placements for %d requests", len(got), len(requested))
+	}
+	used := append([]device.MigPlacement(nil), occupied...)
+	for i, p := range got {
+		if !slices.Contains(requested[i].Placements, p) {
+			t.Fatalf("result[%d] = %+v is not a placement of %s", i, p, requested[i].Name)
+		}
+		if migPlacementConflicts(p, used) {
+			t.Fatalf("result[%d] = %+v overlaps occupied=%+v", i, p, used)
+		}
+		used = append(used, p)
+	}
+}
+
+// TestPlaceMigProfilesMatchesExhaustiveSearch checks, for every state a card
+// can be in and every request that fits its free slices, that place succeeds
+// exactly when a layout exists and that what it returns is legal.
+func TestPlaceMigProfilesMatchesExhaustiveSearch(t *testing.T) {
+	tables := []struct {
+		name     string
+		profiles []device.MigProfile
+	}{
+		{name: "A100 allowlist", profiles: a100TopologyProfiles()},
+		{name: "A100 allowlist without slot 7", profiles: a100NoSlotSevenProfiles()},
+		{name: "A30", profiles: a30TopologyProfiles()},
+		{name: "H100 full table", profiles: h100TopologyProfiles()},
+	}
+	for _, table := range tables {
+		t.Run(table.name, func(t *testing.T) {
+			layout := newMigLayout(table.profiles)
+			cases := 0
+			for _, occupied := range realizableMigOccupancies(table.profiles) {
+				for _, requested := range migRequestMultisets(table.profiles, layout.freeSliceCount(occupied)) {
+					if len(requested) == 0 {
+						continue
+					}
+					cases++
+					got, ok := placeMigProfiles(table.profiles, occupied, requested)
+					if want := migLayoutExists(table.profiles, occupied, requested); ok != want {
+						t.Fatalf("occupied=%+v requested=%v: placed=%v, layout exists=%v", occupied, requested, ok, want)
+					}
+					if ok {
+						resolved, _ := resolveMigRequests(table.profiles, requested)
+						assertValidMigLayout(t, resolved, occupied, got)
+					}
+				}
+			}
+			t.Logf("%d occupancy/request combinations", cases)
+		})
+	}
+}
+
+// BenchmarkPlaceMigProfilesWorstFit is the largest search a feasible request
+// causes on the supported tables: the 1g.20gb must take slot 6, which is ranked
+// last, so its three lower placements are each tried and rejected first.
+func BenchmarkPlaceMigProfilesWorstFit(b *testing.B) {
+	profiles := h100TopologyProfiles()
+	requested := []string{"1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.10gb", "1g.20gb"}
+	b.ReportAllocs()
+	for range b.N {
+		if _, ok := placeMigProfiles(profiles, nil, requested); !ok {
+			b.Fatal("six 1g.10gb and a 1g.20gb should fit an empty H100")
+		}
+	}
+}
+
+// BenchmarkPlaceMigProfilesWorstRejection is the largest search a rejection
+// causes on the supported tables: three 2g.10gb and two 1g.5gb fit the slice
+// count, but the 2g placements cover slots 0-5 and only slot 6 is left for
+// the 1g pair.
+func BenchmarkPlaceMigProfilesWorstRejection(b *testing.B) {
+	profiles := a100TopologyProfiles()
+	requested := []string{"1g.5gb", "1g.5gb", "2g.10gb", "2g.10gb", "2g.10gb"}
+	b.ReportAllocs()
+	for range b.N {
+		if _, ok := placeMigProfiles(profiles, nil, requested); ok {
+			b.Fatal("two 1g.5gb and three 2g.10gb must not fit an A100")
+		}
 	}
 }
