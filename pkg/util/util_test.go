@@ -24,6 +24,7 @@ import (
 	"gotest.tools/v3/assert"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sruntime "k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -1130,4 +1131,32 @@ func TestGetNode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPatchNodeStatusCapacity(t *testing.T) {
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+	nodeName := "capacity-node"
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	assert.NilError(t, err)
+
+	resList := corev1.ResourceList{
+		corev1.ResourceName("nvidia.com/gpumem"):   *resource.NewQuantity(65536, resource.DecimalSI),
+		corev1.ResourceName("nvidia.com/gpucores"): *resource.NewQuantity(200, resource.DecimalSI),
+	}
+
+	err = PatchNodeStatusCapacity(node, resList)
+	assert.NilError(t, err)
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	assert.NilError(t, err)
+
+	gpuMem := updatedNode.Status.Capacity["nvidia.com/gpumem"]
+	assert.Equal(t, gpuMem.Value(), int64(65536))
+	gpuCores := updatedNode.Status.Capacity["nvidia.com/gpucores"]
+	assert.Equal(t, gpuCores.Value(), int64(200))
 }

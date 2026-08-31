@@ -42,6 +42,8 @@ import (
 	"time"
 
 	"github.com/NVIDIA/go-nvml/pkg/nvml"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/resource"
 	"k8s.io/klog/v2"
 
 	"github.com/Project-HAMi/HAMi/pkg/device"
@@ -275,6 +277,38 @@ func (plugin *NvidiaDevicePlugin) RegisterInAnnotation() (bool, error) {
 		klog.Errorln("get node error", err.Error())
 		return false, err
 	}
+	if plugin.schedulerConfig.ReportNodeCapacity != nil && *plugin.schedulerConfig.ReportNodeCapacity {
+		var totalMemory int64
+		var totalCores int64
+		for _, dev := range *devices {
+			if dev.Health {
+				totalMemory += int64(dev.Devmem)
+				totalCores += int64(dev.Devcore)
+			}
+		}
+		memName := plugin.schedulerConfig.ResourceMemoryName
+		if memName == "" {
+			memName = "nvidia.com/gpumem"
+		}
+		coreName := plugin.schedulerConfig.ResourceCoreName
+		if coreName == "" {
+			coreName = "nvidia.com/gpucores"
+		}
+		resList := corev1.ResourceList{}
+		if totalMemory > 0 {
+			resList[corev1.ResourceName(memName)] = *resource.NewQuantity(totalMemory, resource.DecimalSI)
+		}
+		if totalCores > 0 {
+			resList[corev1.ResourceName(coreName)] = *resource.NewQuantity(totalCores, resource.DecimalSI)
+		}
+		if len(resList) > 0 {
+			klog.Infof("Updating node status capacity with memory/core resources: %v", resList)
+			if patchErr := util.PatchNodeStatusCapacity(node, resList); patchErr != nil {
+				klog.Errorf("failed to patch node status capacity: %v", patchErr)
+			}
+		}
+	}
+
 	encodeddevices := device.MarshalNodeDevices(*devices)
 	if encodeddevices == plugin.deviceCache {
 		klog.V(3).Info("Device info unchanged, skipping annotation update")

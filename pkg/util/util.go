@@ -167,6 +167,44 @@ func PatchNodeAnnotations(node *corev1.Node, annotations map[string]string) erro
 	return err
 }
 
+func PatchNodeStatusCapacity(node *corev1.Node, resources corev1.ResourceList) error {
+	if len(resources) == 0 {
+		return nil
+	}
+	c := client.GetClient()
+	if c == nil {
+		return fmt.Errorf("kubernetes client is not initialized")
+	}
+
+	type patchStatusDetails struct {
+		Capacity    corev1.ResourceList `json:"capacity,omitempty"`
+		Allocatable corev1.ResourceList `json:"allocatable,omitempty"`
+	}
+	type patchStatusNode struct {
+		Status patchStatusDetails `json:"status"`
+	}
+
+	p := patchStatusNode{
+		Status: patchStatusDetails{
+			Capacity:    resources,
+			Allocatable: resources,
+		},
+	}
+
+	bytes, err := json.Marshal(p)
+	if err != nil {
+		return err
+	}
+	_, err = c.CoreV1().Nodes().
+		Patch(context.Background(), node.Name, k8stypes.MergePatchType, bytes, metav1.PatchOptions{}, "status")
+	if err != nil {
+		klog.Infoln("resources=", resources)
+		klog.Infof("patch node status capacity %v failed, %v", node.Name, err)
+	}
+	return err
+}
+
+
 func AllNonSidecarInitContainersSucceeded(pod *corev1.Pod) bool {
 	if len(pod.Spec.InitContainers) == 0 {
 		return false

@@ -88,6 +88,7 @@ spec:
             - --config-file=/device-config.yaml
             - --mig-strategy={{ .Values.devicePlugin.migStrategy }}
             - --disable-core-limit={{ .Values.devicePlugin.disablecorelimit }}
+            - --report-node-capacity={{ .Values.devicePlugin.reportNodeCapacity | default false }}
             {{- range .Values.devicePlugin.extraArgs }}
             - {{ . }}
             {{- end }}

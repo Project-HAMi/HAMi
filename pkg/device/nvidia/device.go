@@ -125,6 +125,9 @@ type NodeDefaultConfig struct {
 	// replica so kubelet's TopologyManager can align CPU and GPU NUMA nodes.
 	// Defaults to false to preserve existing admission behavior.
 	EnableNUMATopology *bool `yaml:"enableNumaTopology" json:"enablenumatopology"`
+	// ReportNodeCapacity reports GPU memory and core resources to Node capacity and allocatable.
+	// Defaults to false.
+	ReportNodeCapacity *bool `yaml:"reportNodeCapacity" json:"reportnodecapacity"`
 }
 
 type FilterDevice struct {
@@ -149,8 +152,9 @@ type DevicePluginConfigs struct {
 type DeviceConfig struct {
 	*spec.Config
 
-	ResourceName *string
-	DebugMode    *bool
+	ResourceName       *string
+	DebugMode          *bool
+	ReportNodeCapacity *bool
 }
 
 type NvidiaGPUDevices struct {

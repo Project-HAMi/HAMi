@@ -17,6 +17,7 @@ limitations under the License.
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -495,4 +496,94 @@ func timeAfter(d time.Duration) <-chan struct{} {
 		close(ch)
 	}()
 	return ch
+}
+
+func TestRegisterInAnnotationReportNodeCapacity(t *testing.T) {
+	fakeClient := fake.NewClientset()
+	client.KubeClient = fakeClient
+
+	nodeName := "node-test-capacity"
+	util.NodeName = nodeName
+
+	node := &corev1.Node{
+		ObjectMeta: metav1.ObjectMeta{Name: nodeName},
+	}
+	_, err := fakeClient.CoreV1().Nodes().Create(context.Background(), node, metav1.CreateOptions{})
+	if err != nil {
+		t.Fatalf("failed to create fake node: %v", err)
+	}
+
+	mockRM := &rm.ResourceManagerMock{
+		DevicesFunc: func() rm.Devices {
+			return rm.Devices{
+				"GPU-1111": &rm.Device{Device: kubeletdevicepluginv1beta1.Device{ID: "GPU-1111", Health: "Healthy"}},
+			}
+		},
+	}
+
+	originalInit := nvmlInit
+	originalShutdown := nvml.Shutdown
+	nvmlInit = func() nvml.Return { return nvml.SUCCESS }
+	nvml.Shutdown = func() nvml.Return { return nvml.SUCCESS }
+	defer func() {
+		nvmlInit = originalInit
+		nvml.Shutdown = originalShutdown
+	}()
+
+	mockDev := &nvmlmock.Device{
+		GetIndexFunc: func() (int, nvml.Return) { return 0, nvml.SUCCESS },
+		GetMemoryInfoFunc: func() (nvml.Memory, nvml.Return) {
+			return nvml.Memory{Total: 32768 * 1024 * 1024}, nvml.SUCCESS
+		},
+		GetNameFunc: func() (string, nvml.Return) { return "NVIDIA A100", nvml.SUCCESS },
+		GetPciInfoFunc: func() (nvml.PciInfo, nvml.Return) {
+			return nvml.PciInfo{BusId: [32]int8{'0', '0', '0', '0', ':', '0', '0', ':', '0', '0', '.', '0'}}, nvml.SUCCESS
+		},
+	}
+
+	originalGetHandle := nvml.DeviceGetHandleByUUID
+	nvml.DeviceGetHandleByUUID = func(uuid string) (nvml.Device, nvml.Return) {
+		return mockDev, nvml.SUCCESS
+	}
+	defer func() { nvml.DeviceGetHandleByUUID = originalGetHandle }()
+
+	splitCount := uint(2)
+	coreScaling := 1.0
+	memScaling := 1.0
+	reportCap := true
+	plugin := &NvidiaDevicePlugin{
+		rm: mockRM,
+		schedulerConfig: nvidia.NvidiaConfig{
+			ResourceMemoryName: "nvidia.com/gpumem",
+			ResourceCoreName:   "nvidia.com/gpucores",
+			NodeDefaultConfig: nvidia.NodeDefaultConfig{
+				DeviceSplitCount:    &splitCount,
+				DeviceCoreScaling:  &coreScaling,
+				DeviceMemoryScaling: &memScaling,
+				ReportNodeCapacity: &reportCap,
+			},
+		},
+	}
+
+	changed, err := plugin.RegisterInAnnotation()
+	if err != nil {
+		t.Fatalf("RegisterInAnnotation() error = %v", err)
+	}
+	if !changed {
+		t.Fatalf("RegisterInAnnotation() changed = false, want true")
+	}
+
+	updatedNode, err := fakeClient.CoreV1().Nodes().Get(context.Background(), nodeName, metav1.GetOptions{})
+	if err != nil {
+		t.Fatalf("failed to get updated node: %v", err)
+	}
+
+	gpuMem := updatedNode.Status.Capacity["nvidia.com/gpumem"]
+	if gpuMem.Value() != 32768 {
+		t.Errorf("nvidia.com/gpumem capacity = %v, want 32768", gpuMem.Value())
+	}
+	gpuCores := updatedNode.Status.Capacity["nvidia.com/gpucores"]
+	if gpuCores.Value() != 100 {
+		t.Errorf("nvidia.com/gpucores capacity = %v, want 100", gpuCores.Value())
+	}
 }
